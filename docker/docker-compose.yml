@@ -1,0 +1,32 @@
+version: '3.8'
+
+services:
+  aletheia-mysql:
+    image: mysql:8.0
+    container_name: aletheia-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: aletheia_root
+      MYSQL_DATABASE: aletheia_test_data
+      MYSQL_USER: aletheia_user
+      MYSQL_PASSWORD: aletheia_password
+    ports:
+      - "3306:3306"
+    volumes:
+      - aletheia_mysql_data:/var/lib/mysql
+    command: --default-authentication-plugin=mysql_native_password
+
+  aletheia-postgis:
+    image: postgis/postgis:15-3.3
+    container_name: aletheia-postgis
+    environment:
+      POSTGRES_USER: aletheia_pg_user
+      POSTGRES_PASSWORD: aletheia_pg_password
+      POSTGRES_DB: aletheia_ontology
+    ports:
+      - "5432:5432"
+    volumes:
+      - aletheia_pg_data:/var/lib/postgresql/data
+
+volumes:
+  aletheia_mysql_data:
+  aletheia_pg_data:
