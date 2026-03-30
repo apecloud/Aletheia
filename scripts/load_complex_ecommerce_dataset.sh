@@ -56,10 +56,42 @@ python agents/data_scraper_agent.py \
     --table "order_details" \
     --type "csv"
 
-echo "================================================="
-echo "Done! The complex dataset has been loaded."
-echo "You can now run:"
-echo "1. ./scripts/run_metadata_scraper.sh"
-echo "2. ./scripts/run_data_profiler.sh"
-echo "3. ./scripts/run_design_modeling.sh"
-echo "to see the Agent framework reverse engineer this schema!"
+if [[ "$1" == "all" || "$1" == "--all" || "$1" == "phase-all" ]]; then
+    echo "================================================="
+    echo "Starting Pipeline: Running subsequent phases..."
+    echo "================================================="
+    
+    echo ">>> Phase 1: Knowledge Extraction"
+    ./scripts/run_metadata_scraper.sh
+    ./scripts/run_data_profiler.sh
+    ./scripts/run_business_context.sh
+
+    echo ">>> Phase 2: Design & Modeling"
+    ./scripts/run_design_modeling.sh
+    ./scripts/run_action_synthesizer.sh
+
+    echo ">>> Phase 3: Graph Ingestion"
+    ./scripts/run_graph_ingestion.sh all
+
+    echo ">>> Phase 4: Semantic Validation"
+    ./scripts/run_semantic_consistency.sh
+
+    echo ">>> Phase 5: Deep Ontology Reasoning"
+    ./scripts/run_ontology_reasoning.sh
+    
+    echo "================================================="
+    echo "Pipeline completed successfully!"
+    echo "Check 'run_reasoning_result.md' for the Deep Reasoning Output."
+    echo "================================================="
+else
+    echo "================================================="
+    echo "Done! The complex dataset has been loaded."
+    echo "You can now run the pipeline in order:"
+    echo "1. Phase 1: Knowledge Extraction (Metadata, Profiler, Context)"
+    echo "2. Phase 2: Design & Modeling"
+    echo "3. Phase 3: Graph Ingestion (run_graph_ingestion.sh)"
+    echo "4. Phase 4: Semantic Validation (run_semantic_consistency.sh)"
+    echo "5. Phase 5: Deep Ontology Reasoning (run_ontology_reasoning.sh)"
+    echo ""
+    echo "Or pass 'all' to this script to run the complete pipeline automatically."
+fi

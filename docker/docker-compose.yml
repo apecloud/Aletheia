@@ -27,6 +27,59 @@ services:
     volumes:
       - aletheia_pg_data:/var/lib/postgresql/data
 
+
+
+
+
+  metad0:
+    image: vesoft/nebula-metad:v3.6.0
+    container_name: aletheia-metad0
+    ports:
+      - "9559:9559"
+    command:
+      - --data_path=/data/meta
+      - --meta_server_addrs=metad0:9559
+      - --port=9559
+      - --local_ip=metad0
+      - --ws_ip=metad0
+      - --ws_http_port=19559
+    volumes:
+      - aletheia_nebula_meta:/data/meta
+
+  storaged0:
+    image: vesoft/nebula-storaged:v3.6.0
+    container_name: aletheia-storaged0
+    ports:
+      - "9779:9779"
+    command:
+      - --meta_server_addrs=metad0:9559
+      - --local_ip=storaged0
+      - --ws_ip=storaged0
+      - --port=9779
+      - --ws_http_port=19779
+      - --data_path=/data/storage
+    depends_on:
+      - metad0
+    volumes:
+      - aletheia_nebula_storage:/data/storage
+
+  graphd:
+    image: vesoft/nebula-graphd:v3.6.0
+    container_name: aletheia-graphd
+    ports:
+      - "9669:9669"
+    command:
+      - --meta_server_addrs=metad0:9559
+      - --port=9669
+      - --ws_ip=graphd
+      - --ws_http_port=19669
+      - --local_ip=graphd
+    depends_on:
+      - storaged0
+      - metad0
+
 volumes:
   aletheia_mysql_data:
   aletheia_pg_data:
+  aletheia_nebula_meta:
+  aletheia_nebula_storage:
