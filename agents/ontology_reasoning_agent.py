@@ -1,3 +1,4 @@
+import os
 import argparse
 import logging
 from sqlalchemy import create_engine, text
@@ -18,12 +19,21 @@ class DeepReasoningResult(BaseModel):
     insight_synthesis: str = Field(description="A profound, analytical conclusion derived from the *actual data retrieved* combined with the ontology.")
     strategic_recommendation: str = Field(description="A highly actionable business recommendation based on the uncovered latent truths.")
 
+
+class GraphQueryCase(BaseModel):
+    title: str = Field(description="A descriptive title for this reasoning case.")
+    description: str = Field(description="The business objective and context of what we want to find out.")
+    graph_queries: List[str] = Field(description="A list of 1 to 3 valid nGQL/Cypher queries to extract the necessary subgraph from Nebula Graph.")
+
+class ReasoningCasePlan(BaseModel):
+    cases: List[GraphQueryCase] = Field(description="Exactly 3 distinct reasoning cases utilizing the available graph schema.")
+
 class OntologyReasoningAgent:
-    def __init__(self, target_db_url: str, nebula_ip: str, nebula_port: int, nebula_user: str, nebula_pass: str, model_name: str):
+    def __init__(self, target_db_url: str, nebula_ip: str, nebula_port: int, nebula_user: str, nebula_pass: str, graph_space: str, model_name: str):
         self.target_engine = create_engine(target_db_url)
         
         self.graph_client = NebulaGraphClient(
-            ip=nebula_ip, port=nebula_port, user=nebula_user, password=nebula_pass
+            ip=nebula_ip, port=nebula_port, user=nebula_user, password=nebula_pass, space=graph_space
         )
         
         if "gemini" in model_name.lower():
@@ -131,52 +141,56 @@ class OntologyReasoningAgent:
         logger.info("Extracting Schema and Data Profiler Meta-Graph for Reasoning Context...")
         schema_context = self.fetch_graph_ontology_schema()
         
-        # --- Dynamically fetch REAL IDs from the Graph ---
-        logger.info("Fetching real entity IDs from the graph to build accurate reasoning cases...")
-        
-        # We run a quick MATCH to get a real Customer who has actually PLACED orders
-        real_customer_id = self.get_real_entity_id("MATCH (c:`Customer`)-[:`PLACED_ORDER`]->(o:`Order`) RETURN id(c) LIMIT 1")
-        
-        # We run a quick MATCH to get a real Order that actually CONTAINS order_details
-        real_order_id = self.get_real_entity_id("MATCH (o:`Order`)-[:`CONSISTS_OF`]->(p:`Product`) RETURN id(o) LIMIT 1")
-
-        if not real_customer_id:
-            logger.warning("Could not dynamically fetch real Customer ID from the graph. Using fallback 'ALFKI'.")
-            real_customer_id = 'ALFKI'
-            
-        if not real_order_id:
-            logger.warning("Could not dynamically fetch real Order ID from the graph. Using fallback '10248'.")
-            real_order_id = '10248'
-
-        logger.info(f"Targeting Real Order ID for reasoning: {real_order_id}")
-        logger.info(f"Targeting Real Customer ID for reasoning: {real_customer_id}")
-
-        reasoning_cases = [
-            {
-                "title": f"Case 1: True Order Margin & Fulfillment Complexity (Order-centric - ID: {real_order_id})",
-                "description": f"We are analyzing a specific REAL Order '{real_order_id}'. We need to calculate its true margin, understand the customer profile, and assess the logistical complexity based on the categories of products ordered.",
-                "graph_queries": [
-                    f"MATCH (c:`Customer`)-[:`PLACED_ORDER`]->(o:`Order`)<-[:`PROCESSED_ORDER`]-(e:`Employee`) WHERE id(o) == '{real_order_id}' RETURN id(c) AS customer_id, id(e) AS employee_id",
-                    f"MATCH (o:`Order`)-[e:`CONSISTS_OF`]->(p:`Product`) WHERE id(o) == '{real_order_id}' RETURN id(p) AS product_id, e.unitprice AS unit_price, e.quantity AS qty, e.discount AS discount, p.`Product`.categoryid AS category_id"
-                ]
-            },
-            {
-                "title": f"Case 2: Customer Buyer Persona & Network Value (Customer-centric - ID: {real_customer_id})",
-                "description": f"We are evaluating a specific REAL Customer '{real_customer_id}'. We want to classify their 'Buyer Persona' (e.g., Premium vs Discount) and calculate their Network Lifetime Value (LTV) by looking at their entire order history and product preferences.",
-                "graph_queries": [
-                    f"MATCH (c:`Customer`)-[:`PLACED_ORDER`]->(o:`Order`)-[e:`CONSISTS_OF`]->(p:`Product`) WHERE id(c) == '{real_customer_id}' RETURN id(o) AS order_id, id(p) AS product_id, e.unitprice AS unit_price, e.quantity AS qty, e.discount AS discount"
-                ]
-            },
-            {
-                "title": "Case 3: Supply Chain Risk Identification (Product-centric)",
-                "description": "We need to identify potential supply chain vulnerabilities. A product is 'High Risk' if it has been ordered in massive quantities across many distinct orders.",
-                "graph_queries": [
-                    "MATCH (o:`Order`)-[e:`CONSISTS_OF`]->(p:`Product`) RETURN id(p) AS product_id, sum(e.quantity) AS total_qty, count(o) AS order_count ORDER BY total_qty DESC LIMIT 5"
-                ]
-            }
-        ]
-
         client = instructor.from_litellm(completion)
+
+        logger.info("Dynamically generating reasoning cases based on Ontology Metadata...")
+        
+        # Fetch available Tags (Nodes) and Edges (Relationships) directly from Metadata to form the dynamic prompt
+        with self.target_engine.connect() as conn:
+            objects = conn.execute(text("SELECT name, graph_label FROM aletheia_business_objects WHERE graph_label IS NOT NULL")).fetchall()
+            links = conn.execute(text("SELECT graph_edge_name FROM aletheia_business_links WHERE graph_edge_name IS NOT NULL")).fetchall()
+        
+        graph_entities = "Available Nodes (TAGS):\n" + "\n".join([f"- {o[1]} (Business Object: {o[0]})" for o in objects])
+        graph_relations = "Available Edges (RELATIONSHIPS):\n" + "\n".join([f"- {l[0]}" for l in links])
+        
+        prompt_cases = f"""
+You are an expert Graph Data Architect working with Nebula Graph database.
+Based on the extracted Semantic Meta-Graph and available Graph Schema below, generate exactly 3 distinct, high-value business reasoning test cases.
+
+=== SEMANTIC META-GRAPH ===
+{schema_context}
+
+=== GRAPH SCHEMA MAPPINGS ===
+{graph_entities}
+{graph_relations}
+
+Requirements:
+1. Each case should aim to solve a real business problem (e.g., risk detection, fraud, customer lifetime value, logistics, supply chain).
+2. The `graph_queries` MUST be valid Nebula Graph nGQL/openCypher MATCH queries using the EXACT node TAGS and EDGE names listed above.
+3. Instead of hardcoding specific IDs like 'ALFKI', use general MATCH aggregations, LIMITs, or graph traversals (e.g., MATCH (a)-[r]->(b) RETURN a, count(r) ORDER BY count(r) DESC LIMIT 5).
+4. DO NOT make up tags or edges that are not explicitly provided in the mapping above.
+5. All graph schema names MUST be enclosed in backticks in the query, e.g., (c:`Customer`)-[e:`PLACED_ORDER`]->(o:`Order`).
+6. IMPORTANT SYNTAX: In Nebula Graph, use double equals `==` for equality comparison in the WHERE clause, NOT single `=`.
+7. IMPORTANT SYNTAX: ALL node/edge properties were ingested as STRING types. So numbers and booleans MUST be compared as strings (e.g., `WHERE t.isFraud == "True"`, NOT `WHERE t.isFraud = 1`).
+"""
+        try:
+            plan = client.chat.completions.create(
+                model=self.model_name,
+                messages=[{"role": "user", "content": prompt_cases}],
+                response_model=ReasoningCasePlan,
+            )
+            reasoning_cases = []
+            for c in plan.cases:
+                reasoning_cases.append({
+                    "title": c.title,
+                    "description": c.description,
+                    "graph_queries": c.graph_queries
+                })
+            logger.info("✅ Successfully generated dynamic reasoning cases from Metadata.")
+        except Exception as e:
+            logger.error(f"Failed to dynamically generate cases: {e}")
+            logger.warning("Falling back to empty cases or exiting...")
+            return
 
         logger.info("Starting Ontology Reasoning on LIVE Graph Data...\n")
 
@@ -250,11 +264,12 @@ Finally, provide a strategic recommendation.
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--target", default="postgresql+psycopg2://aletheia_pg_user:aletheia_pg_password@127.0.0.1:5432/aletheia_ontology")
+    parser.add_argument("--target", default=os.environ.get("ALETHEIA_PG_URL", f"postgresql+psycopg2://aletheia_pg_user:aletheia_pg_password@127.0.0.1:5432/{os.environ.get('ALETHEIA_PG_DB', 'aletheia_ontology')}"))
     parser.add_argument("--nebula-ip", default="127.0.0.1")
     parser.add_argument("--nebula-port", type=int, default=9669)
     parser.add_argument("--nebula-user", default="root")
     parser.add_argument("--nebula-pass", default="nebula")
+    parser.add_argument("--graph-space", default=os.environ.get("ALETHEIA_GRAPH_SPACE", "aletheia"))
     parser.add_argument("--model", default="gemini/gemini-3.1-pro-preview", help="Model name for litellm")
     args = parser.parse_args()
     
@@ -264,6 +279,7 @@ if __name__ == "__main__":
         nebula_port=args.nebula_port, 
         nebula_user=args.nebula_user, 
         nebula_pass=args.nebula_pass, 
+        graph_space=args.graph_space,
         model_name=args.model
     )
     agent.run()

@@ -1,8 +1,9 @@
+import os
 import argparse
 import sys
 from sqlalchemy import create_engine, text
 
-DB_URL = 'postgresql+psycopg2://aletheia_pg_user:aletheia_pg_password@127.0.0.1:5432/aletheia_ontology'
+DB_URL = os.environ.get('ALETHEIA_PG_URL', f'postgresql+psycopg2://aletheia_pg_user:aletheia_pg_password@127.0.0.1:5432/{os.environ.get("ALETHEIA_PG_DB", "aletheia_ontology")}')
 
 def get_engine():
     return create_engine(DB_URL)

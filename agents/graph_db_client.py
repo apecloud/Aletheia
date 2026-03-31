@@ -1,3 +1,4 @@
+import os
 import time
 import logging
 from abc import ABC, abstractmethod
@@ -46,12 +47,12 @@ class NebulaGraphClient(BaseGraphClient):
     Encapsulates connection, space selection, and safe batch ingestion
     to prevent timeouts and utf-8 decoding issues.
     """
-    def __init__(self, ip: str, port: int, user: str, password: str, space: str = "aletheia"):
+    def __init__(self, ip: str, port: int, user: str, password: str, space: str = None):
         self.ip = ip
         self.port = port
         self.user = user
         self.password = password
-        self.space = space
+        self.space = space or os.environ.get("ALETHEIA_GRAPH_SPACE", "aletheia")
         self.pool = None
         self.session = None
 

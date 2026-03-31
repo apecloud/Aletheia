@@ -3,3 +3,4 @@ __pycache__/
 
 # Ignore runtime output files
 run_reasoning_result.md
+datasets/

@@ -1,3 +1,4 @@
+import os
 import argparse
 import logging
 import time
@@ -23,7 +24,7 @@ class EdgeExtractionQuery(BaseModel):
     ngql_schema: str = Field(description="Nebula Graph nGQL CREATE EDGE command. E.g., CREATE EDGE PLACED_ORDER ()")
 
 class GraphIngestionAgent:
-    def __init__(self, source_db_url: str, target_db_url: str, nebula_ip: str, nebula_port: int, nebula_user: str, nebula_pass: str, model_name: str):
+    def __init__(self, source_db_url: str, target_db_url: str, nebula_ip: str, nebula_port: int, nebula_user: str, nebula_pass: str, graph_space: str, model_name: str):
         self.source_engine = create_engine(source_db_url)
         self.target_engine = create_engine(target_db_url)
         
@@ -31,7 +32,8 @@ class GraphIngestionAgent:
             ip=nebula_ip, 
             port=nebula_port, 
             user=nebula_user, 
-            password=nebula_pass
+            password=nebula_pass,
+            space=graph_space
         )
         self.graph_client.connect()
         
@@ -56,64 +58,98 @@ class GraphIngestionAgent:
                 context += ", ".join([f"{c[0]} ({c[1]})" for c in cols]) + "\n\n"
         return context
 
+    def ensure_metadata_columns(self):
+        with self.target_engine.begin() as conn:
+            conn.execute(text("ALTER TABLE aletheia_business_objects ADD COLUMN IF NOT EXISTS graph_label VARCHAR(255)"))
+            conn.execute(text("ALTER TABLE aletheia_business_objects ADD COLUMN IF NOT EXISTS extraction_sql TEXT"))
+            conn.execute(text("ALTER TABLE aletheia_business_objects ADD COLUMN IF NOT EXISTS ngql_schema TEXT"))
+            conn.execute(text("ALTER TABLE aletheia_business_links ADD COLUMN IF NOT EXISTS graph_edge_name VARCHAR(255)"))
+            conn.execute(text("ALTER TABLE aletheia_business_links ADD COLUMN IF NOT EXISTS extraction_sql TEXT"))
+            conn.execute(text("ALTER TABLE aletheia_business_links ADD COLUMN IF NOT EXISTS ngql_schema TEXT"))
+
     def run_phase_1(self, client, ontology_context):
         logger.info("Phase 1: Nebula Graph Schema & Node Ingestion")
         with self.target_engine.connect() as conn:
-            objects = conn.execute(text("SELECT id, name, description FROM aletheia_business_objects")).fetchall()
+            objects = conn.execute(text("SELECT id, name, description, graph_label, extraction_sql, ngql_schema FROM aletheia_business_objects")).mappings().all()
             
         for obj in objects:
-            prompt = f"""
-You are the Graph Data Integration Engine (Nebula Graph). You need to define and ingest the Business Object "{obj[1]}".
-Description: {obj[2]}
+            if obj['graph_label'] and obj['extraction_sql'] and obj['ngql_schema']:
+                logger.info(f"Reusing existing metadata mapping for Node: {obj['name']} -> {obj['graph_label']}")
+                extraction = NodeExtractionQuery(
+                    sql_query=obj['extraction_sql'],
+                    node_label=obj['graph_label'],
+                    ngql_schema=obj['ngql_schema']
+                )
+            else:
+                prompt = f"""
+You are the Graph Data Integration Engine (Nebula Graph). You need to define and ingest the Business Object "{obj['name']}".
+Description: {obj['description']}
 {ontology_context}
 
 Write a safe MySQL query to extract ALL instances, and the matching Nebula Graph CREATE TAG command.
 Rules:
 1. SQL MUST SELECT a primary identifier aliased as `id`.
-2. nGQL MUST define the tag properties. Use basic types (string). ALL properties MUST be of type string. Enclose the TAG name in backticks. E.g., CREATE TAG `{obj[1].replace(' ', '')}` (companyname string, address string)
+2. nGQL MUST define the tag properties. Use basic types (string). ALL properties MUST be of type string. Enclose the TAG name in backticks. E.g., CREATE TAG `{obj['name'].replace(' ', '')}` (companyname string, address string)
 """
+                try:
+                    extraction = client.chat.completions.create(
+                        model=self.model_name,
+                        messages=[{"role": "user", "content": prompt}],
+                        response_model=NodeExtractionQuery,
+                    )
+                    
+                    with self.target_engine.begin() as save_conn:
+                        save_conn.execute(
+                            text("UPDATE aletheia_business_objects SET graph_label = :gl, extraction_sql = :es, ngql_schema = :ns WHERE id = :id"),
+                            {"gl": extraction.node_label, "es": extraction.sql_query, "ns": extraction.ngql_schema, "id": obj['id']}
+                        )
+                except Exception as e:
+                    logger.error(f"❌ Failed to extract node mapping for {obj['name']}: {e}")
+                    continue
+
             try:
-                extraction = client.chat.completions.create(
-                    model=self.model_name,
-                    messages=[{"role": "user", "content": prompt}],
-                    response_model=NodeExtractionQuery,
-                )
-                
                 logger.info(f"Creating TAG Schema: {extraction.node_label}")
                 try:
                     self.graph_client.execute_query(extraction.ngql_schema)
-                    time.sleep(15) # Wait for schema sync
+                    time.sleep(5)
                 except Exception as e:
                     logger.warning(f"Schema issue or already exists: {e}")
-                    time.sleep(15)
+                    time.sleep(2)
                 
                 with self.source_engine.connect() as source_conn:
-                    logger.debug(f"Executing SQL Extraction for {obj[1]}: {extraction.sql_query}")
-                    # fetchall as list of dicts for the graph client
+                    logger.debug(f"Executing SQL Extraction for {obj['name']}: {extraction.sql_query[:100]}...")
                     rows_result = source_conn.execute(text(extraction.sql_query)).mappings().all()
                     rows = [dict(r) for r in rows_result]
                 
                 logger.info(f"Upserting {len(rows)} vertices for '{extraction.node_label}' into Nebula...")
                 self.graph_client.insert_vertices(extraction.node_label, rows)
                         
-                logger.info(f"✅ Successfully processed batch for {obj[1]}")
+                logger.info(f"✅ Successfully processed batch for {obj['name']}")
                 
             except Exception as e:
-                logger.error(f"❌ Failed to process object {obj[1]}: {e}")
+                logger.error(f"❌ Failed to process object {obj['name']}: {e}")
 
     def run_phase_2(self, client, ontology_context):
         logger.info("Phase 2: Nebula Graph Schema & Edge Ingestion")
         with self.target_engine.connect() as conn:
-            # Join aletheia_business_links with aletheia_business_objects to get the names
             links = conn.execute(text("""
-                SELECT l.id, l.description, s.name AS source_name, t.name AS target_name 
+                SELECT l.id, l.description, s.name AS source_name, t.name AS target_name, 
+                       l.graph_edge_name, l.extraction_sql, l.ngql_schema
                 FROM aletheia_business_links l
                 JOIN aletheia_business_objects s ON l.source_object_id = s.id
                 JOIN aletheia_business_objects t ON l.target_object_id = t.id
             """)).mappings().all()
             
         for link in links:
-            prompt = f"""
+            if link['graph_edge_name'] and link['extraction_sql'] and link['ngql_schema']:
+                logger.info(f"Reusing existing metadata mapping for Edge: {link['source_name']} -> {link['target_name']} ({link['graph_edge_name']})")
+                extraction = EdgeExtractionQuery(
+                    sql_query=link['extraction_sql'],
+                    relationship_type=link['graph_edge_name'],
+                    ngql_schema=link['ngql_schema']
+                )
+            else:
+                prompt = f"""
 You are the Graph Data Integration Engine (Nebula Graph). You need to define and ingest a Relationship (Edge) between two Business Objects.
 Source Object: "{link['source_name']}"
 Target Object: "{link['target_name']}"
@@ -128,23 +164,33 @@ Rules:
 3. Example nGQL: CREATE EDGE `PLACED_ORDER` (order_time string)
 4. Do NOT include `source_id` or `target_id` in the nGQL properties definition. Nebula inherently stores src and dst for edges.
 """
+                try:
+                    extraction = client.chat.completions.create(
+                        model=self.model_name,
+                        messages=[{"role": "user", "content": prompt}],
+                        response_model=EdgeExtractionQuery,
+                    )
+                    
+                    with self.target_engine.begin() as save_conn:
+                        save_conn.execute(
+                            text("UPDATE aletheia_business_links SET graph_edge_name = :gen, extraction_sql = :es, ngql_schema = :ns WHERE id = :id"),
+                            {"gen": extraction.relationship_type, "es": extraction.sql_query, "ns": extraction.ngql_schema, "id": link['id']}
+                        )
+                except Exception as e:
+                    logger.error(f"❌ Failed to extract edge mapping for link ID {link['id']}: {e}")
+                    continue
+
             try:
-                extraction = client.chat.completions.create(
-                    model=self.model_name,
-                    messages=[{"role": "user", "content": prompt}],
-                    response_model=EdgeExtractionQuery,
-                )
-                
                 logger.info(f"Creating EDGE Schema: {extraction.relationship_type}")
                 try:
                     self.graph_client.execute_query(extraction.ngql_schema)
-                    time.sleep(15) # Wait for schema sync
+                    time.sleep(5)
                 except Exception as e:
                     logger.warning(f"Edge Schema issue or already exists: {e}")
-                    time.sleep(15)
+                    time.sleep(2)
                 
                 with self.source_engine.connect() as source_conn:
-                    logger.debug(f"Executing SQL Edge Extraction for {extraction.relationship_type}: {extraction.sql_query}")
+                    logger.debug(f"Executing SQL Edge Extraction for {extraction.relationship_type}: {extraction.sql_query[:100]}...")
                     rows_result = source_conn.execute(text(extraction.sql_query)).mappings().all()
                     rows = [dict(r) for r in rows_result]
                 
@@ -158,6 +204,7 @@ Rules:
 
     def run(self, phase: str = "all"):
         logger.info("Gathering ontology context from PostGIS...")
+        self.ensure_metadata_columns()
         ontology_context = self.fetch_ontology_context()
         client = instructor.from_litellm(completion)
         
@@ -171,12 +218,13 @@ Rules:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--source", default="mysql+pymysql://aletheia_user:aletheia_password@127.0.0.1:3306/aletheia_test_data")
-    parser.add_argument("--target", default="postgresql+psycopg2://aletheia_pg_user:aletheia_pg_password@127.0.0.1:5432/aletheia_ontology")
+    parser.add_argument("--source", default=os.environ.get("ALETHEIA_MYSQL_URL", f"mysql+pymysql://aletheia_user:aletheia_password@127.0.0.1:3306/{os.environ.get('ALETHEIA_MYSQL_DB', 'aletheia_test_data')}"))
+    parser.add_argument("--target", default=os.environ.get("ALETHEIA_PG_URL", f"postgresql+psycopg2://aletheia_pg_user:aletheia_pg_password@127.0.0.1:5432/{os.environ.get('ALETHEIA_PG_DB', 'aletheia_ontology')}"))
     parser.add_argument("--nebula-ip", default="127.0.0.1")
     parser.add_argument("--nebula-port", type=int, default=9669)
     parser.add_argument("--nebula-user", default="root")
     parser.add_argument("--nebula-pass", default="nebula")
+    parser.add_argument("--graph-space", default=os.environ.get("ALETHEIA_GRAPH_SPACE", "aletheia"))
     parser.add_argument("--model", default="gemini/gemini-3.1-pro-preview", help="Model name for litellm")
     parser.add_argument("--phase", default="all", choices=["1", "2", "all"], help="Which phase to run (1 for nodes, 2 for edges, all for both)")
     args = parser.parse_args()
@@ -184,6 +232,6 @@ if __name__ == "__main__":
     agent = GraphIngestionAgent(
         source_db_url=args.source, target_db_url=args.target, 
         nebula_ip=args.nebula_ip, nebula_port=args.nebula_port, nebula_user=args.nebula_user, nebula_pass=args.nebula_pass,
-        model_name=args.model
+        graph_space=args.graph_space, model_name=args.model
     )
     agent.run(phase=args.phase)

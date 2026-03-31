@@ -61,7 +61,7 @@ if __name__ == "__main__":
     parser.add_argument("--split", default="train", help="Dataset split (default: train)")
     parser.add_argument("--rows", type=int, default=10000, help="Max rows to import (default: 10000)")
     parser.add_argument("--token", default=None, help="Hugging Face access token (optional, but needed for some datasets or gated access)")
-    parser.add_argument("--db", default="mysql+pymysql://aletheia_user:aletheia_password@127.0.0.1:3306/aletheia_test_data", 
+    parser.add_argument("--db", default=os.environ.get("ALETHEIA_MYSQL_URL", f"mysql+pymysql://aletheia_user:aletheia_password@127.0.0.1:3306/{os.environ.get('ALETHEIA_MYSQL_DB', 'aletheia_test_data')}"), 
                         help="MySQL connection string")
     
     args = parser.parse_args()

@@ -50,6 +50,21 @@ Aletheia operates through a decentralized group of specialized agents, each focu
 
 The Aletheia project is implemented as a pipeline of Python-based LLM Agents (powered by `litellm` and `instructor`), prioritizing the **Gemini 3.1 Pro Preview** model.
 
+## 🌈 Multi-Tenant & Multi-Database Architecture
+
+Aletheia natively supports fully isolated, dynamic multi-tenant environments. You can target different Source Databases, Metadata Databases (PostGIS), and Graph Spaces (Nebula Graph) simultaneously by simply injecting environment variables before running the agents:
+
+```bash
+# Example: Running the pipeline for Tenant B
+export ALETHEIA_MYSQL_DB="tenant_b_raw_data"
+export ALETHEIA_PG_DB="tenant_b_ontology"
+export ALETHEIA_GRAPH_SPACE="tenant_b_graph_space"
+
+./scripts/load_complex_ecommerce_dataset.sh all
+```
+
+The agents and graph clients will dynamically pick up the credentials, create the isolated schemas/spaces, and ensure absolute data segmentation.
+
 ### 1. Prerequisites
 * Python 3.11+
 * **MySQL**: Source database for legacy/raw data (`aletheia_test_data` at `127.0.0.1:3306`).
@@ -80,6 +95,8 @@ Load a complex, normalized E-commerce dataset (TPC-H style/Northwind) into the r
 ```bash
 ./scripts/load_complex_ecommerce_dataset.sh
 ```
+
+*(Note: The `Data Scraper Agent` now natively supports ingesting raw `CSV`, `JSON`, and `JSONL` formats from both remote URLs and local file paths, automatically flattening nested JSON structures to align with SQL columns).*
 
 #### Phase 1: Knowledge Extraction
 Extract the physical schema and align it with external business context.

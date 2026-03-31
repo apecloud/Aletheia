@@ -165,8 +165,8 @@ class DataProfilerAgent:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Data Profiler Agent (LiteLLM Semantic Analysis)")
-    parser.add_argument("--source", default="mysql+pymysql://aletheia_user:aletheia_password@127.0.0.1:3306/aletheia_test_data", help="Source DB")
-    parser.add_argument("--target", default="postgresql+psycopg2://aletheia_pg_user:aletheia_pg_password@127.0.0.1:5432/aletheia_ontology", help="PostGIS Metadata DB")
+    parser.add_argument("--source", default=os.environ.get("ALETHEIA_MYSQL_URL", f"mysql+pymysql://aletheia_user:aletheia_password@127.0.0.1:3306/{os.environ.get('ALETHEIA_MYSQL_DB', 'aletheia_test_data')}"), help="Source DB")
+    parser.add_argument("--target", default=os.environ.get("ALETHEIA_PG_URL", f"postgresql+psycopg2://aletheia_pg_user:aletheia_pg_password@127.0.0.1:5432/{os.environ.get('ALETHEIA_PG_DB', 'aletheia_ontology')}"), help="PostGIS Metadata DB")
     parser.add_argument("--model", required=True, help="LiteLLM model name (e.g., gpt-4o, gemini/gemini-1.5-pro, anthropic/claude-3-sonnet-20240229, ollama/llama3)")
     
     args = parser.parse_args()

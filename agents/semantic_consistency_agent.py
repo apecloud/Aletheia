@@ -1,3 +1,4 @@
+import os
 import argparse
 import logging
 from sqlalchemy import create_engine, text
@@ -103,7 +104,7 @@ Provide a structured report of any issues found and actionable fixes.
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--target", default="postgresql+psycopg2://aletheia_pg_user:aletheia_pg_password@127.0.0.1:5432/aletheia_ontology")
+    parser.add_argument("--target", default=os.environ.get("ALETHEIA_PG_URL", f"postgresql+psycopg2://aletheia_pg_user:aletheia_pg_password@127.0.0.1:5432/{os.environ.get('ALETHEIA_PG_DB', 'aletheia_ontology')}"))
     parser.add_argument("--model", default="gemini/gemini-3.1-pro-preview", help="Model name for litellm")
     args = parser.parse_args()
     

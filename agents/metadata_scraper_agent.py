@@ -1,3 +1,4 @@
+import os
 import argparse
 import logging
 from sqlalchemy import create_engine, inspect, Column, Integer, String, Boolean, ForeignKey, DateTime, text
@@ -112,9 +113,9 @@ class MetadataScraperAgent:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Metadata Scraper Agent")
-    parser.add_argument("--source", default="mysql+pymysql://aletheia_user:aletheia_password@127.0.0.1:3306/aletheia_test_data", 
+    parser.add_argument("--source", default=os.environ.get("ALETHEIA_MYSQL_URL", f"mysql+pymysql://aletheia_user:aletheia_password@127.0.0.1:3306/{os.environ.get('ALETHEIA_MYSQL_DB', 'aletheia_test_data')}"), 
                         help="Source legacy DB connection string (MySQL)")
-    parser.add_argument("--target", default="postgresql+psycopg2://aletheia_pg_user:aletheia_pg_password@127.0.0.1:5432/aletheia_ontology", 
+    parser.add_argument("--target", default=os.environ.get("ALETHEIA_PG_URL", f"postgresql+psycopg2://aletheia_pg_user:aletheia_pg_password@127.0.0.1:5432/{os.environ.get('ALETHEIA_PG_DB', 'aletheia_ontology')}"), 
                         help="Target PostGIS DB connection string to store ontology metadata")
     
     args = parser.parse_args()

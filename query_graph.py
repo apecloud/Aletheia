@@ -1,6 +1,7 @@
+import os
 from agents.graph_db_client import NebulaGraphClient
 
-client = NebulaGraphClient(ip="127.0.0.1", port=9669, user="root", password="nebula", space="aletheia")
+client = NebulaGraphClient(ip="127.0.0.1", port=9669, user="root", password="nebula", space=os.environ.get("ALETHEIA_GRAPH_SPACE", "aletheia"))
 client.connect()
 
 try:
