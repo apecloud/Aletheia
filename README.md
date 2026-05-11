@@ -163,6 +163,17 @@ You can also use the unified query tool to explore the AI-generated Semantic Map
 .venv/bin/python query_metadata.py --all
 ```
 
+### 5. Review Workbench
+The Review Workbench is a local, browser-based front end for the artifact review gate. It keeps the P1 scope focused on human review rather than a marketing page: artifact list, evidence detail, approve/reject/needs-changes/comment/edit actions, audit history, and approved-only publishing status.
+
+```bash
+.venv/bin/python review_workbench.py --host 127.0.0.1 --port 8765
+```
+
+Open <http://127.0.0.1:8765>. The workbench uses `ALETHEIA_PG_URL` or `ALETHEIA_PG_DB` the same way the existing CLI tools do. Review actions record audit events in `aletheia_artifact_reviews`; only `approved` artifacts are eligible for default graph ingestion.
+
+For a brand-new metadata database, run the artifact pipeline or start once with `--ensure-schema` before opening the page.
+
 ---
 
 ## 🤝 Contributing

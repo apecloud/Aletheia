@@ -1,0 +1,306 @@
+const state = {
+  artifacts: [],
+  selectedKey: null,
+  selectedArtifact: null,
+};
+
+const els = {
+  list: document.querySelector("#artifact-list"),
+  stats: document.querySelector("#stats"),
+  search: document.querySelector("#search"),
+  typeFilter: document.querySelector("#type-filter"),
+  statusFilter: document.querySelector("#status-filter"),
+  refresh: document.querySelector("#refresh"),
+  empty: document.querySelector("#empty-state"),
+  grid: document.querySelector("#detail-grid"),
+  artifactType: document.querySelector("#artifact-type"),
+  artifactTitle: document.querySelector("#artifact-title"),
+  artifactKey: document.querySelector("#artifact-key"),
+  statusPill: document.querySelector("#status-pill"),
+  versionPill: document.querySelector("#version-pill"),
+  confidence: document.querySelector("#confidence"),
+  description: document.querySelector("#description"),
+  sourceAgent: document.querySelector("#source-agent"),
+  projectId: document.querySelector("#project-id"),
+  updatedAt: document.querySelector("#updated-at"),
+  payload: document.querySelector("#payload"),
+  copyPayload: document.querySelector("#copy-payload"),
+  reason: document.querySelector("#reason"),
+  approve: document.querySelector("#approve"),
+  needsChanges: document.querySelector("#needs-changes"),
+  reject: document.querySelector("#reject"),
+  comment: document.querySelector("#comment"),
+  editName: document.querySelector("#edit-name"),
+  editDescription: document.querySelector("#edit-description"),
+  editPayload: document.querySelector("#edit-payload"),
+  saveEdit: document.querySelector("#save-edit"),
+  evidenceCount: document.querySelector("#evidence-count"),
+  evidenceList: document.querySelector("#evidence-list"),
+  reviewCount: document.querySelector("#review-count"),
+  reviewList: document.querySelector("#review-list"),
+  toast: document.querySelector("#toast"),
+};
+
+function debounce(fn, delay = 250) {
+  let timer;
+  return (...args) => {
+    clearTimeout(timer);
+    timer = setTimeout(() => fn(...args), delay);
+  };
+}
+
+function json(value) {
+  return JSON.stringify(value ?? {}, null, 2);
+}
+
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+}
+
+function showToast(message) {
+  els.toast.textContent = message;
+  els.toast.classList.add("visible");
+  window.setTimeout(() => els.toast.classList.remove("visible"), 3000);
+}
+
+function statusClass(status) {
+  return `status-${String(status || "unknown").replaceAll("_", "_")}`;
+}
+
+function statusLabel(status) {
+  if (status === "approved") return "approved · canonical";
+  if (status === "rejected") return "rejected · excluded";
+  if (status === "needs_changes") return "needs changes · blocked";
+  if (status === "draft") return "draft · not canonical";
+  if (status === "proposed") return "proposed · review";
+  return `${status || "unknown"} · not canonical`;
+}
+
+async function fetchJson(url, options) {
+  const response = await fetch(url, options);
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(data.error || `${response.status} ${response.statusText}`);
+  }
+  return data;
+}
+
+function filterParams() {
+  const params = new URLSearchParams();
+  if (els.search.value.trim()) params.set("search", els.search.value.trim());
+  if (els.typeFilter.value) params.set("artifact_type", els.typeFilter.value);
+  if (els.statusFilter.value) params.set("status", els.statusFilter.value);
+  return params.toString();
+}
+
+async function loadArtifacts() {
+  const query = filterParams();
+  const data = await fetchJson(`/api/artifacts${query ? `?${query}` : ""}`);
+  state.artifacts = data.artifacts || [];
+  renderFilterOptions(data.stats || []);
+  renderStats(data.stats || []);
+  renderList();
+  if (!state.selectedKey && state.artifacts.length > 0) {
+    await selectArtifact(state.artifacts[0].canonical_key);
+  }
+}
+
+function renderFilterOptions(stats) {
+  const selectedType = els.typeFilter.value;
+  const selectedStatus = els.statusFilter.value;
+  const types = [...new Set(stats.map((item) => item.artifact_type))].sort();
+  const statuses = [...new Set(stats.map((item) => item.status))].sort();
+  els.typeFilter.innerHTML =
+    '<option value="">All types</option>' +
+    types.map((type) => `<option value="${escapeHtml(type)}">${escapeHtml(type)}</option>`).join("");
+  els.statusFilter.innerHTML =
+    '<option value="">All statuses</option>' +
+    statuses.map((status) => `<option value="${escapeHtml(status)}">${escapeHtml(status)}</option>`).join("");
+  els.typeFilter.value = selectedType;
+  els.statusFilter.value = selectedStatus;
+}
+
+function renderStats(stats) {
+  const total = stats.reduce((sum, item) => sum + Number(item.count || 0), 0);
+  const approved = stats
+    .filter((item) => item.status === "approved")
+    .reduce((sum, item) => sum + Number(item.count || 0), 0);
+  els.stats.innerHTML = [
+    `<span class="stat-chip">total ${total}</span>`,
+    `<span class="stat-chip status-approved">approved ${approved}</span>`,
+    ...stats.map(
+      (item) =>
+        `<span class="stat-chip">${escapeHtml(item.artifact_type)}:${escapeHtml(item.status)} ${item.count}</span>`,
+    ),
+  ].join("");
+}
+
+function renderList() {
+  if (state.artifacts.length === 0) {
+    els.list.innerHTML = '<div class="empty-state">No artifacts match the current filters.</div>';
+    return;
+  }
+  els.list.innerHTML = state.artifacts
+    .map(
+      (artifact) => `
+        <button class="artifact-item ${artifact.canonical_key === state.selectedKey ? "active" : ""}"
+          type="button"
+          data-key="${escapeHtml(artifact.canonical_key)}">
+          <span class="artifact-item-title">
+            <strong>${escapeHtml(artifact.name)}</strong>
+            <span class="status-pill ${statusClass(artifact.status)}">${escapeHtml(artifact.status)}</span>
+          </span>
+          <span class="key-text">${escapeHtml(artifact.canonical_key)}</span>
+          <span class="artifact-item-meta">
+            <span>${escapeHtml(artifact.artifact_type)}</span>
+            <span>v${escapeHtml(artifact.version)}</span>
+          </span>
+        </button>
+      `,
+    )
+    .join("");
+  els.list.querySelectorAll(".artifact-item").forEach((item) => {
+    item.addEventListener("click", () => selectArtifact(item.dataset.key));
+  });
+}
+
+async function selectArtifact(canonicalKey) {
+  state.selectedKey = canonicalKey;
+  renderList();
+  const artifact = await fetchJson(`/api/artifacts/${encodeURIComponent(canonicalKey)}`);
+  state.selectedArtifact = artifact;
+  renderArtifact(artifact);
+}
+
+function renderArtifact(artifact) {
+  els.empty.classList.add("hidden");
+  els.grid.classList.remove("hidden");
+  els.artifactType.textContent = artifact.artifact_type;
+  els.artifactTitle.textContent = artifact.name;
+  els.artifactKey.textContent = artifact.canonical_key;
+  els.statusPill.textContent = statusLabel(artifact.status);
+  els.statusPill.className = `status-pill ${statusClass(artifact.status)}`;
+  els.versionPill.textContent = `v${artifact.version}`;
+  els.confidence.textContent = `confidence ${Number(artifact.confidence ?? 0).toFixed(2)}`;
+  els.description.textContent = artifact.description || "No description.";
+  els.sourceAgent.textContent = artifact.source_agent || "-";
+  els.projectId.textContent = artifact.project_id || "-";
+  els.updatedAt.textContent = artifact.updated_at || "-";
+  els.payload.textContent = json(artifact.payload);
+  els.editName.value = artifact.name || "";
+  els.editDescription.value = artifact.description || "";
+  els.editPayload.value = json(artifact.payload);
+  renderEvidence(artifact.evidence || []);
+  renderReviews(artifact.reviews || []);
+}
+
+function renderEvidence(evidence) {
+  els.evidenceCount.textContent = `${evidence.length} item${evidence.length === 1 ? "" : "s"}`;
+  if (evidence.length === 0) {
+    els.evidenceList.innerHTML = '<p class="muted">No evidence recorded.</p>';
+    return;
+  }
+  els.evidenceList.innerHTML = evidence
+    .map(
+      (item) => `
+        <section class="evidence-item">
+          <div class="row-between">
+            <strong>${escapeHtml(item.evidence_type)}</strong>
+            <span class="metric">${Number(item.confidence ?? 0).toFixed(2)}</span>
+          </div>
+          <span class="source-ref">${escapeHtml(item.source_ref)}</span>
+          <p class="muted">${escapeHtml(item.summary || "No summary.")}</p>
+        </section>
+      `,
+    )
+    .join("");
+}
+
+function renderReviews(reviews) {
+  els.reviewCount.textContent = `${reviews.length} event${reviews.length === 1 ? "" : "s"}`;
+  if (reviews.length === 0) {
+    els.reviewList.innerHTML = '<p class="muted">No review events recorded.</p>';
+    return;
+  }
+  els.reviewList.innerHTML = reviews
+    .map(
+      (item) => `
+        <section class="review-item">
+          <div class="row-between">
+            <strong>${escapeHtml(item.decision)}</strong>
+            <span class="muted">${escapeHtml(item.created_at || "")}</span>
+          </div>
+          <span>${escapeHtml(item.reviewer)} · ${escapeHtml(item.before_status)} → ${escapeHtml(item.after_status)} · v${escapeHtml(item.before_version)} → v${escapeHtml(item.after_version)}</span>
+          <p class="muted">${escapeHtml(item.reason || "No reason.")}</p>
+        </section>
+      `,
+    )
+    .join("");
+}
+
+async function runAction(action) {
+  if (!state.selectedKey) return;
+  const reason = els.reason.value.trim();
+  if (["reject", "needs-changes", "comment"].includes(action) && !reason) {
+    showToast("Reason is required for this action.");
+    return;
+  }
+  const artifact = await fetchJson(`/api/artifacts/${encodeURIComponent(state.selectedKey)}/${action}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ reviewer: "Itachi", reason }),
+  });
+  els.reason.value = "";
+  state.selectedArtifact = artifact;
+  renderArtifact(artifact);
+  await loadArtifacts();
+  showToast(`${action} recorded for ${artifact.canonical_key}`);
+}
+
+async function saveEdit() {
+  if (!state.selectedKey) return;
+  let payload;
+  try {
+    payload = JSON.parse(els.editPayload.value || "{}");
+  } catch (error) {
+    showToast(`Payload JSON is invalid: ${error.message}`);
+    return;
+  }
+  const reason = els.reason.value.trim() || "Workbench edit";
+  const artifact = await fetchJson(`/api/artifacts/${encodeURIComponent(state.selectedKey)}/edit`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      reviewer: "Itachi",
+      reason,
+      name: els.editName.value,
+      description: els.editDescription.value,
+      payload,
+    }),
+  });
+  state.selectedArtifact = artifact;
+  renderArtifact(artifact);
+  await loadArtifacts();
+  showToast(`Edit recorded for ${artifact.canonical_key}`);
+}
+
+els.refresh.addEventListener("click", () => loadArtifacts().catch((error) => showToast(error.message)));
+els.search.addEventListener("input", debounce(() => loadArtifacts().catch((error) => showToast(error.message))));
+els.typeFilter.addEventListener("change", () => loadArtifacts().catch((error) => showToast(error.message)));
+els.statusFilter.addEventListener("change", () => loadArtifacts().catch((error) => showToast(error.message)));
+els.approve.addEventListener("click", () => runAction("approve").catch((error) => showToast(error.message)));
+els.needsChanges.addEventListener("click", () => runAction("needs-changes").catch((error) => showToast(error.message)));
+els.reject.addEventListener("click", () => runAction("reject").catch((error) => showToast(error.message)));
+els.comment.addEventListener("click", () => runAction("comment").catch((error) => showToast(error.message)));
+els.saveEdit.addEventListener("click", () => saveEdit().catch((error) => showToast(error.message)));
+els.copyPayload.addEventListener("click", async () => {
+  await navigator.clipboard.writeText(els.payload.textContent);
+  showToast("Payload copied.");
+});
+
+loadArtifacts().catch((error) => showToast(error.message));

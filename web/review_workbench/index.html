@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Aletheia Review Workbench</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <aside class="sidebar" aria-label="Artifact list">
+        <header class="sidebar-header">
+          <div>
+            <p class="eyebrow">Aletheia</p>
+            <h1>Review Workbench</h1>
+          </div>
+          <button id="refresh" class="icon-button" type="button" title="Refresh artifacts">↻</button>
+        </header>
+
+        <section class="gate-banner" aria-live="polite">
+          <strong>Canonical gate</strong>
+          <span>Only approved artifacts are eligible for default graph ingestion.</span>
+        </section>
+
+        <section class="filters" aria-label="Filters">
+          <input id="search" type="search" placeholder="Search name, key, description" />
+          <div class="filter-row">
+            <select id="type-filter" aria-label="Artifact type">
+              <option value="">All types</option>
+            </select>
+            <select id="status-filter" aria-label="Review status">
+              <option value="">All statuses</option>
+            </select>
+          </div>
+        </section>
+
+        <section id="stats" class="stats" aria-label="Artifact counts"></section>
+        <section id="artifact-list" class="artifact-list" aria-label="Artifacts"></section>
+      </aside>
+
+      <section class="workspace" aria-label="Artifact review detail">
+        <header class="workspace-header">
+          <div>
+            <p id="artifact-type" class="eyebrow">Select an artifact</p>
+            <h2 id="artifact-title">No artifact selected</h2>
+            <p id="artifact-key" class="muted">Choose an artifact from the left panel.</p>
+          </div>
+          <div class="status-stack">
+            <span id="status-pill" class="status-pill muted-pill">idle</span>
+            <span id="version-pill" class="version-pill">v-</span>
+          </div>
+        </header>
+
+        <section id="empty-state" class="empty-state">
+          Select an artifact to inspect evidence, review history, and publishing status.
+        </section>
+
+        <section id="detail-grid" class="detail-grid hidden">
+          <article class="panel primary-panel">
+            <div class="panel-header">
+              <h3>Artifact Detail</h3>
+              <span id="confidence" class="metric"></span>
+            </div>
+            <p id="description" class="description"></p>
+            <dl class="meta-grid">
+              <div>
+                <dt>Source agent</dt>
+                <dd id="source-agent"></dd>
+              </div>
+              <div>
+                <dt>Project</dt>
+                <dd id="project-id"></dd>
+              </div>
+              <div>
+                <dt>Updated</dt>
+                <dd id="updated-at"></dd>
+              </div>
+            </dl>
+            <div class="code-block-header">
+              <span>Payload</span>
+              <button id="copy-payload" type="button">Copy</button>
+            </div>
+            <pre id="payload" class="code-block"></pre>
+          </article>
+
+          <article class="panel">
+            <div class="panel-header">
+              <h3>Review Actions</h3>
+              <span class="hint">Reviewer: Itachi</span>
+            </div>
+            <textarea id="reason" rows="3" placeholder="Reason, comment, or reviewer note"></textarea>
+            <div class="action-row">
+              <button id="approve" class="action approve" type="button">Approve</button>
+              <button id="needs-changes" class="action changes" type="button">Needs changes</button>
+              <button id="reject" class="action reject" type="button">Reject</button>
+            </div>
+            <button id="comment" class="secondary-action" type="button">Add comment</button>
+          </article>
+
+          <article class="panel">
+            <div class="panel-header">
+              <h3>Quick Edit</h3>
+              <span class="hint">Audit event recorded</span>
+            </div>
+            <label>
+              Name
+              <input id="edit-name" type="text" />
+            </label>
+            <label>
+              Description
+              <textarea id="edit-description" rows="4"></textarea>
+            </label>
+            <label>
+              Payload JSON
+              <textarea id="edit-payload" rows="10" spellcheck="false"></textarea>
+            </label>
+            <button id="save-edit" class="secondary-action" type="button">Save edit</button>
+          </article>
+
+          <article class="panel wide-panel">
+            <div class="panel-header">
+              <h3>Evidence</h3>
+              <span id="evidence-count" class="metric"></span>
+            </div>
+            <div id="evidence-list" class="evidence-list"></div>
+          </article>
+
+          <article class="panel wide-panel">
+            <div class="panel-header">
+              <h3>Audit History</h3>
+              <span id="review-count" class="metric"></span>
+            </div>
+            <div id="review-list" class="review-list"></div>
+          </article>
+        </section>
+      </section>
+    </main>
+
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+    <script src="/app.js"></script>
+  </body>
+</html>
