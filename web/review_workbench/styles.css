@@ -145,6 +145,11 @@ textarea:focus {
   box-shadow: 0 0 0 2px rgba(122, 162, 247, 0.15);
 }
 
+textarea.invalid {
+  border-color: var(--red);
+  box-shadow: 0 0 0 2px rgba(255, 123, 114, 0.15);
+}
+
 .filter-row {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -318,6 +323,48 @@ textarea:focus {
   margin: 0;
   font-size: 15px;
   font-weight: 650;
+}
+
+.workflow-strip {
+  display: grid;
+  grid-template-columns: minmax(150px, 0.8fr) minmax(260px, 1.3fr) minmax(210px, 1fr) minmax(320px, 1.5fr);
+  gap: 12px;
+  padding: 12px;
+}
+
+.workflow-item {
+  display: grid;
+  align-content: start;
+  gap: 5px;
+  min-width: 0;
+  border: 1px solid var(--line-soft);
+  border-radius: 6px;
+  background: var(--panel-strong);
+  padding: 10px;
+}
+
+.workflow-label {
+  color: var(--dim);
+  font-size: 11px;
+  text-transform: uppercase;
+}
+
+.workflow-item strong {
+  overflow-wrap: anywhere;
+  line-height: 1.35;
+}
+
+.latest-audit span:last-child {
+  overflow-wrap: anywhere;
+  line-height: 1.45;
+}
+
+.eligible {
+  color: var(--green);
+}
+
+.not-eligible {
+  color: var(--yellow);
 }
 
 .hint {
@@ -497,7 +544,8 @@ label {
   }
 
   .meta-grid,
-  .action-row {
+  .action-row,
+  .workflow-strip {
     grid-template-columns: 1fr;
   }
 }

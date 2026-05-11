@@ -1,0 +1,120 @@
+{
+  "list_status": 200,
+  "list_count": 10,
+  "stats": [
+    {
+      "artifact_type": "link",
+      "status": "approved",
+      "count": 3
+    },
+    {
+      "artifact_type": "link",
+      "status": "draft",
+      "count": 1
+    },
+    {
+      "artifact_type": "link",
+      "status": "rejected",
+      "count": 1
+    },
+    {
+      "artifact_type": "object",
+      "status": "approved",
+      "count": 4
+    },
+    {
+      "artifact_type": "object",
+      "status": "draft",
+      "count": 1
+    }
+  ],
+  "detail_status": 200,
+  "initial_status": "draft",
+  "initial_reviews": 0,
+  "evidence_count": 1,
+  "reject_empty_reason_status": 200,
+  "reject_empty_reason_payload": {
+    "id": 16,
+    "project_id": "default",
+    "canonical_key": "object:employee",
+    "artifact_type": "object",
+    "name": "Employee",
+    "description": "Contains details about the enterprise's workforce, including personal information, job titles, departmental alignments, and reporting structures.",
+    "payload": {
+      "description": "Contains details about the enterprise's workforce, including personal information, job titles, departmental alignments, and reporting structures.",
+      "mapped_table_names": [
+        "employees"
+      ],
+      "name": "Employee"
+    },
+    "confidence": 1.0,
+    "source_refs": [
+      "table:employees"
+    ],
+    "status": "rejected",
+    "version": 2,
+    "source_agent": "ObjectModelerAgent",
+    "created_at": "2026-05-11 11:54:22.883725",
+    "updated_at": "2026-05-11 16:49:47.537504",
+    "evidence": [
+      {
+        "evidence_type": "table",
+        "source_ref": "table:employees",
+        "content_hash": "7056f4f45df714bd65cb781ea65fb8b6bc397d31978c1fcb3a43503db2fdefb9",
+        "summary": "[Employee] Contains details about the enterprise's workforce, including personal information, job titles, departmental alignments, and reporting structures.",
+        "raw_payload": {
+          "schema_name": null,
+          "table_comment": "[Employee] Contains details about the enterprise's workforce, including personal information, job titles, departmental alignments, and reporting structures.",
+          "table_name": "employees"
+        },
+        "confidence": 1.0,
+        "created_at": "2026-05-11 11:54:22.891925"
+      }
+    ],
+    "reviews": [
+      {
+        "decision": "rejected",
+        "reviewer": "SaskueSmoke",
+        "reason": "",
+        "before_status": "draft",
+        "after_status": "rejected",
+        "before_version": 1,
+        "after_version": 2,
+        "created_at": "2026-05-11 16:49:47.537504"
+      }
+    ]
+  },
+  "comment_empty_reason_status": 400,
+  "comment_empty_reason_payload": {
+    "error": "reason is required for comment"
+  },
+  "approve_empty_reason_status": 200,
+  "approve_empty_after_status": "approved",
+  "comment_with_reason_status": 200,
+  "reviews_after_comment": 3,
+  "latest_review": {
+    "decision": "comment",
+    "reviewer": "SaskueSmoke",
+    "reason": "browser smoke audit refresh check",
+    "before_status": "approved",
+    "after_status": "approved",
+    "before_version": 3,
+    "after_version": 3,
+    "created_at": "2026-05-11 16:49:47.587784"
+  },
+  "edit_valid_payload_status": 200,
+  "edit_after_version": 4,
+  "final_status_code": 200,
+  "final_status": "approved",
+  "final_review_count": 4,
+  "final_latest_review": {
+    "decision": "edit",
+    "reviewer": "SaskueSmoke",
+    "reason": "browser smoke edit check",
+    "before_status": "approved",
+    "after_status": "approved",
+    "before_version": 3,
+    "after_version": 4,
+    "created_at": "2026-05-11 16:49:47.602885"
+  }
+}

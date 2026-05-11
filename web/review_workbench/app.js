@@ -18,6 +18,11 @@ const els = {
   artifactKey: document.querySelector("#artifact-key"),
   statusPill: document.querySelector("#status-pill"),
   versionPill: document.querySelector("#version-pill"),
+  workflowStatus: document.querySelector("#workflow-status"),
+  workflowNext: document.querySelector("#workflow-next"),
+  workflowEligibility: document.querySelector("#workflow-eligibility"),
+  latestAuditDecision: document.querySelector("#latest-audit-decision"),
+  latestAuditDetail: document.querySelector("#latest-audit-detail"),
   confidence: document.querySelector("#confidence"),
   description: document.querySelector("#description"),
   sourceAgent: document.querySelector("#source-agent"),
@@ -79,6 +84,21 @@ function statusLabel(status) {
   if (status === "draft") return "draft · not canonical";
   if (status === "proposed") return "proposed · review";
   return `${status || "unknown"} · not canonical`;
+}
+
+function nextAction(status) {
+  if (status === "approved") return "Eligible now; comment, edit, or reject if evidence changes.";
+  if (status === "rejected") return "Excluded from ingestion; edit or regenerate before review.";
+  if (status === "needs_changes") return "Resolve requested changes, then approve or reject.";
+  if (status === "draft") return "Review evidence; approve to publish or reject with reason.";
+  if (status === "proposed") return "Make a review decision before publishing.";
+  return "Review status before publishing.";
+}
+
+function eligibilityText(status) {
+  return status === "approved"
+    ? "Eligible for default ingestion"
+    : "Not eligible for default ingestion";
 }
 
 async function fetchJson(url, options) {
@@ -186,6 +206,10 @@ function renderArtifact(artifact) {
   els.statusPill.textContent = statusLabel(artifact.status);
   els.statusPill.className = `status-pill ${statusClass(artifact.status)}`;
   els.versionPill.textContent = `v${artifact.version}`;
+  els.workflowStatus.textContent = statusLabel(artifact.status);
+  els.workflowNext.textContent = nextAction(artifact.status);
+  els.workflowEligibility.textContent = eligibilityText(artifact.status);
+  els.workflowEligibility.className = artifact.status === "approved" ? "eligible" : "not-eligible";
   els.confidence.textContent = `confidence ${Number(artifact.confidence ?? 0).toFixed(2)}`;
   els.description.textContent = artifact.description || "No description.";
   els.sourceAgent.textContent = artifact.source_agent || "-";
@@ -197,6 +221,7 @@ function renderArtifact(artifact) {
   els.editPayload.value = json(artifact.payload);
   renderEvidence(artifact.evidence || []);
   renderReviews(artifact.reviews || []);
+  renderLatestAudit((artifact.reviews || [])[0]);
 }
 
 function renderEvidence(evidence) {
@@ -219,6 +244,17 @@ function renderEvidence(evidence) {
       `,
     )
     .join("");
+}
+
+function renderLatestAudit(item) {
+  if (!item) {
+    els.latestAuditDecision.textContent = "No audit event";
+    els.latestAuditDetail.textContent = "Review events will appear here after actions.";
+    return;
+  }
+  els.latestAuditDecision.textContent = `${item.decision} by ${item.reviewer}`;
+  els.latestAuditDetail.textContent =
+    `${item.before_status} -> ${item.after_status} · v${item.before_version} -> v${item.after_version} · ${item.reason || "No reason"} · ${item.created_at || ""}`;
 }
 
 function renderReviews(reviews) {
@@ -262,6 +298,17 @@ async function runAction(action) {
   showToast(`${action} recorded for ${artifact.canonical_key}`);
 }
 
+function validatePayloadField() {
+  try {
+    JSON.parse(els.editPayload.value || "{}");
+    els.editPayload.classList.remove("invalid");
+    return true;
+  } catch (error) {
+    els.editPayload.classList.add("invalid");
+    return false;
+  }
+}
+
 async function saveEdit() {
   if (!state.selectedKey) return;
   let payload;
@@ -298,6 +345,7 @@ els.needsChanges.addEventListener("click", () => runAction("needs-changes").catc
 els.reject.addEventListener("click", () => runAction("reject").catch((error) => showToast(error.message)));
 els.comment.addEventListener("click", () => runAction("comment").catch((error) => showToast(error.message)));
 els.saveEdit.addEventListener("click", () => saveEdit().catch((error) => showToast(error.message)));
+els.editPayload.addEventListener("input", validatePayloadField);
 els.copyPayload.addEventListener("click", async () => {
   await navigator.clipboard.writeText(els.payload.textContent);
   showToast("Payload copied.");

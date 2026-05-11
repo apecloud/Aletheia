@@ -56,6 +56,26 @@
         </section>
 
         <section id="detail-grid" class="detail-grid hidden">
+          <article class="panel workflow-strip wide-panel">
+            <div class="workflow-item">
+              <span class="workflow-label">Current state</span>
+              <strong id="workflow-status">-</strong>
+            </div>
+            <div class="workflow-item">
+              <span class="workflow-label">Next action</span>
+              <strong id="workflow-next">-</strong>
+            </div>
+            <div class="workflow-item">
+              <span class="workflow-label">Default ingestion</span>
+              <strong id="workflow-eligibility">-</strong>
+            </div>
+            <div class="workflow-item latest-audit">
+              <span class="workflow-label">Latest audit</span>
+              <strong id="latest-audit-decision">No audit event</strong>
+              <span id="latest-audit-detail" class="muted">Review events will appear here after actions.</span>
+            </div>
+          </article>
+
           <article class="panel primary-panel">
             <div class="panel-header">
               <h3>Artifact Detail</h3>

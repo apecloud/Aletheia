@@ -40,6 +40,11 @@ def _json_dump(value):
     return json.dumps(value, ensure_ascii=False, sort_keys=True)
 
 
+def _require_reason(action, reason):
+    if action in {"reject", "rejected", "needs_changes", "comment"} and not reason.strip():
+        raise ValueError(f"reason is required for {action}")
+
+
 def _artifact_to_dict(row):
     return {
         "id": row["id"],
@@ -188,6 +193,7 @@ class ReviewRepository:
         return result
 
     def review_status(self, canonical_key, status, reviewer, reason):
+        _require_reason(status, reason or "")
         with self.engine.begin() as conn:
             artifact = self._fetch_for_update(conn, canonical_key)
             before_status = artifact["status"]
@@ -220,6 +226,7 @@ class ReviewRepository:
         return self.get_artifact(canonical_key)
 
     def comment(self, canonical_key, reviewer, reason):
+        _require_reason("comment", reason or "")
         with self.engine.begin() as conn:
             artifact = self._fetch_for_update(conn, canonical_key)
             self._record_review_event(
@@ -385,9 +392,6 @@ class ReviewWorkbenchHandler(BaseHTTPRequestHandler):
             elif action == "needs-changes":
                 result = self.repository.review_status(canonical_key, "needs_changes", reviewer, reason)
             elif action == "comment":
-                if not reason:
-                    self._send_error(HTTPStatus.BAD_REQUEST, "reason is required for comment")
-                    return
                 result = self.repository.comment(canonical_key, reviewer, reason)
             elif action == "edit":
                 payload = body.get("payload") if "payload" in body else None
@@ -407,6 +411,9 @@ class ReviewWorkbenchHandler(BaseHTTPRequestHandler):
             return
         except json.JSONDecodeError as exc:
             self._send_error(HTTPStatus.BAD_REQUEST, f"Invalid JSON: {exc}")
+            return
+        except ValueError as exc:
+            self._send_error(HTTPStatus.BAD_REQUEST, str(exc))
             return
         except Exception as exc:  # pragma: no cover - displayed to local operator
             self._send_error(HTTPStatus.INTERNAL_SERVER_ERROR, str(exc))
