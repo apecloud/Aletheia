@@ -1,0 +1,39 @@
+{
+  "dataset": "northwind",
+  "version": "v1",
+  "objects": [
+    {
+      "name": "Customer",
+      "tables": ["customers"]
+    },
+    {
+      "name": "Order",
+      "tables": ["orders", "order_details"]
+    },
+    {
+      "name": "Product",
+      "tables": ["products"]
+    },
+    {
+      "name": "Category",
+      "tables": ["categories"]
+    }
+  ],
+  "links": [
+    {
+      "source": "Customer",
+      "target": "Order",
+      "link_type": "1:N"
+    },
+    {
+      "source": "Order",
+      "target": "Product",
+      "link_type": "N:M"
+    },
+    {
+      "source": "Product",
+      "target": "Category",
+      "link_type": "N:1"
+    }
+  ]
+}

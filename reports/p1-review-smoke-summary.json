@@ -1,0 +1,128 @@
+{
+  "approved_required_keys": [
+    "link:category:1:n:product",
+    "link:customer:1:n:order",
+    "link:order:n:m:product",
+    "object:category",
+    "object:customer",
+    "object:order",
+    "object:product"
+  ],
+  "excluded_non_approved": [
+    {
+      "artifact_type": "link",
+      "canonical_key": "link:employee:1:n:employee",
+      "status": "rejected",
+      "version": 2
+    },
+    {
+      "artifact_type": "link",
+      "canonical_key": "link:employee:1:n:order",
+      "status": "draft",
+      "version": 1
+    },
+    {
+      "artifact_type": "object",
+      "canonical_key": "object:employee",
+      "status": "draft",
+      "version": 1
+    }
+  ],
+  "first_ingestion_attempt_note": "reports/p1-review-smoke-ingestion.log failed due to existing default-space schema drift; fresh-space first run exposed Nebula schema propagation delay; fresh-space rerun succeeded.",
+  "graph_space": "aletheia_p1_review_smoke",
+  "ingestion_failed_lines": [],
+  "ingestion_log": "reports/p1-review-smoke-ingestion-fresh-space-rerun.log",
+  "ingestion_processed_labels_or_edges": [
+    "Product",
+    "Category",
+    "Customer",
+    "Order",
+    "PLACED_ORDER",
+    "CONTAINS_PRODUCT",
+    "HAS_PRODUCT"
+  ],
+  "itachi_review_events": [
+    {
+      "after_status": "approved",
+      "after_version": 2,
+      "before_status": "draft",
+      "before_version": 1,
+      "canonical_key": "object:category",
+      "decision": "approved",
+      "reason": "P1 smoke approve v1 required canonical artifact",
+      "reviewer": "Itachi"
+    },
+    {
+      "after_status": "approved",
+      "after_version": 2,
+      "before_status": "draft",
+      "before_version": 1,
+      "canonical_key": "object:customer",
+      "decision": "approved",
+      "reason": "P1 smoke approve v1 required canonical artifact",
+      "reviewer": "Itachi"
+    },
+    {
+      "after_status": "approved",
+      "after_version": 2,
+      "before_status": "draft",
+      "before_version": 1,
+      "canonical_key": "object:order",
+      "decision": "approved",
+      "reason": "P1 smoke approve v1 required canonical artifact",
+      "reviewer": "Itachi"
+    },
+    {
+      "after_status": "approved",
+      "after_version": 2,
+      "before_status": "draft",
+      "before_version": 1,
+      "canonical_key": "object:product",
+      "decision": "approved",
+      "reason": "P1 smoke approve v1 required canonical artifact",
+      "reviewer": "Itachi"
+    },
+    {
+      "after_status": "approved",
+      "after_version": 2,
+      "before_status": "draft",
+      "before_version": 1,
+      "canonical_key": "link:category:1:n:product",
+      "decision": "approved",
+      "reason": "P1 smoke approve v1 required canonical artifact",
+      "reviewer": "Itachi"
+    },
+    {
+      "after_status": "approved",
+      "after_version": 2,
+      "before_status": "draft",
+      "before_version": 1,
+      "canonical_key": "link:customer:1:n:order",
+      "decision": "approved",
+      "reason": "P1 smoke approve v1 required canonical artifact",
+      "reviewer": "Itachi"
+    },
+    {
+      "after_status": "approved",
+      "after_version": 2,
+      "before_status": "draft",
+      "before_version": 1,
+      "canonical_key": "link:order:n:m:product",
+      "decision": "approved",
+      "reason": "P1 smoke approve v1 required canonical artifact",
+      "reviewer": "Itachi"
+    },
+    {
+      "after_status": "rejected",
+      "after_version": 2,
+      "before_status": "draft",
+      "before_version": 1,
+      "canonical_key": "link:employee:1:n:employee",
+      "decision": "rejected",
+      "reason": "P1 smoke rejected pending Employee-Employee evidence review",
+      "reviewer": "Itachi"
+    }
+  ],
+  "required_keys_all_approved": true,
+  "task": 10
+}

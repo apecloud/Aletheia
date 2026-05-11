@@ -9,6 +9,7 @@ from typing import List
 from litellm import completion
 import instructor
 from graph_db_client import NebulaGraphClient
+from ontology_artifacts import ensure_artifact_schema
 
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger("GraphIngestionAgent")
@@ -59,18 +60,21 @@ class GraphIngestionAgent:
         return context
 
     def ensure_metadata_columns(self):
-        with self.target_engine.begin() as conn:
-            conn.execute(text("ALTER TABLE aletheia_business_objects ADD COLUMN IF NOT EXISTS graph_label VARCHAR(255)"))
-            conn.execute(text("ALTER TABLE aletheia_business_objects ADD COLUMN IF NOT EXISTS extraction_sql TEXT"))
-            conn.execute(text("ALTER TABLE aletheia_business_objects ADD COLUMN IF NOT EXISTS ngql_schema TEXT"))
-            conn.execute(text("ALTER TABLE aletheia_business_links ADD COLUMN IF NOT EXISTS graph_edge_name VARCHAR(255)"))
-            conn.execute(text("ALTER TABLE aletheia_business_links ADD COLUMN IF NOT EXISTS extraction_sql TEXT"))
-            conn.execute(text("ALTER TABLE aletheia_business_links ADD COLUMN IF NOT EXISTS ngql_schema TEXT"))
+        ensure_artifact_schema(self.target_engine)
 
-    def run_phase_1(self, client, ontology_context):
+    def run_phase_1(self, client, ontology_context, include_unapproved: bool):
         logger.info("Phase 1: Nebula Graph Schema & Node Ingestion")
         with self.target_engine.connect() as conn:
-            objects = conn.execute(text("SELECT id, name, description, graph_label, extraction_sql, ngql_schema FROM aletheia_business_objects")).mappings().all()
+            status_filter = "" if include_unapproved else "WHERE a.status = 'approved'"
+            objects = conn.execute(text(f"""
+                SELECT o.id, o.name, o.description, o.graph_label, o.extraction_sql, o.ngql_schema,
+                       COALESCE(a.status, 'legacy') AS artifact_status
+                FROM aletheia_business_objects o
+                LEFT JOIN aletheia_ontology_artifacts a ON o.artifact_id = a.id
+                {status_filter}
+            """)).mappings().all()
+        if not objects and not include_unapproved:
+            logger.warning("No approved business object artifacts found. Use --include-unapproved for legacy/demo ingestion.")
             
         for obj in objects:
             if obj['graph_label'] and obj['extraction_sql'] and obj['ngql_schema']:
@@ -129,16 +133,21 @@ Rules:
             except Exception as e:
                 logger.error(f"❌ Failed to process object {obj['name']}: {e}")
 
-    def run_phase_2(self, client, ontology_context):
+    def run_phase_2(self, client, ontology_context, include_unapproved: bool):
         logger.info("Phase 2: Nebula Graph Schema & Edge Ingestion")
         with self.target_engine.connect() as conn:
+            status_filter = "" if include_unapproved else "WHERE a.status = 'approved'"
             links = conn.execute(text("""
                 SELECT l.id, l.description, s.name AS source_name, t.name AS target_name, 
-                       l.graph_edge_name, l.extraction_sql, l.ngql_schema
+                       l.graph_edge_name, l.extraction_sql, l.ngql_schema,
+                       COALESCE(a.status, 'legacy') AS artifact_status
                 FROM aletheia_business_links l
                 JOIN aletheia_business_objects s ON l.source_object_id = s.id
                 JOIN aletheia_business_objects t ON l.target_object_id = t.id
-            """)).mappings().all()
+                LEFT JOIN aletheia_ontology_artifacts a ON l.artifact_id = a.id
+                """ + status_filter)).mappings().all()
+        if not links and not include_unapproved:
+            logger.warning("No approved business link artifacts found. Use --include-unapproved for legacy/demo ingestion.")
             
         for link in links:
             if link['graph_edge_name'] and link['extraction_sql'] and link['ngql_schema']:
@@ -202,17 +211,17 @@ Rules:
             except Exception as e:
                 logger.error(f"❌ Failed to process link ID {link['id']} ({link['source_name']} -> {link['target_name']}): {e}")
 
-    def run(self, phase: str = "all"):
+    def run(self, phase: str = "all", include_unapproved: bool = False):
         logger.info("Gathering ontology context from PostGIS...")
         self.ensure_metadata_columns()
         ontology_context = self.fetch_ontology_context()
         client = instructor.from_litellm(completion)
         
         if phase in ["1", "all"]:
-            self.run_phase_1(client, ontology_context)
+            self.run_phase_1(client, ontology_context, include_unapproved)
             
         if phase in ["2", "all"]:
-            self.run_phase_2(client, ontology_context)
+            self.run_phase_2(client, ontology_context, include_unapproved)
 
         logger.info("Nebula ingestion complete.")
 
@@ -227,6 +236,7 @@ if __name__ == "__main__":
     parser.add_argument("--graph-space", default=os.environ.get("ALETHEIA_GRAPH_SPACE", "aletheia"))
     parser.add_argument("--model", default="gemini/gemini-3.1-pro-preview", help="Model name for litellm")
     parser.add_argument("--phase", default="all", choices=["1", "2", "all"], help="Which phase to run (1 for nodes, 2 for edges, all for both)")
+    parser.add_argument("--include-unapproved", action="store_true", help="Legacy/demo mode: ingest draft or unreviewed artifacts")
     args = parser.parse_args()
     
     agent = GraphIngestionAgent(
@@ -234,4 +244,4 @@ if __name__ == "__main__":
         nebula_ip=args.nebula_ip, nebula_port=args.nebula_port, nebula_user=args.nebula_user, nebula_pass=args.nebula_pass,
         graph_space=args.graph_space, model_name=args.model
     )
-    agent.run(phase=args.phase)
+    agent.run(phase=args.phase, include_unapproved=args.include_unapproved)

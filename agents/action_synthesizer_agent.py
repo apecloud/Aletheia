@@ -1,32 +1,17 @@
 import argparse
 import logging
 import os
-from sqlalchemy import create_engine, inspect, Column, Integer, String, Text, Boolean, DateTime, text
-from sqlalchemy.orm import declarative_base, sessionmaker
-from datetime import datetime
+from sqlalchemy import create_engine, inspect, text
+from sqlalchemy.orm import sessionmaker
 from pydantic import BaseModel, Field
 from typing import List, Optional
 
 from litellm import completion
 import instructor
+from ontology_artifacts import BusinessAction, delete_artifacts_by_type, ensure_artifact_schema, sync_action_artifact
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger("ActionSynthesizerAgent")
-
-Base = declarative_base()
-
-class BusinessAction(Base):
-    __tablename__ = 'aletheia_business_actions'
-    
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    name = Column(String(255), nullable=False)
-    action_type = Column(String(50)) # 'procedure' or 'trigger'
-    source_name = Column(String(255), nullable=False) # e.g. the sproc name
-    description = Column(Text)
-    is_safe = Column(Boolean, default=False)
-    inputs_json = Column(Text)
-    outputs_json = Column(Text)
-    created_at = Column(DateTime, default=datetime.utcnow)
 
 class ActionAnalysis(BaseModel):
     action_name: str = Field(description="A clean, business-friendly name for this action")
@@ -50,8 +35,8 @@ class ActionSynthesizerAgent:
         logger.info(f"Initialized Action Synthesizer with model: {self.model_name}")
 
     def setup_target_db(self):
-        Base.metadata.create_all(self.target_engine)
-        logger.info("Ensured aletheia_business_actions table exists.")
+        ensure_artifact_schema(self.target_engine)
+        logger.info("Ensured action and ontology artifact tables exist.")
 
     def run(self):
         self.setup_target_db()
@@ -59,6 +44,7 @@ class ActionSynthesizerAgent:
         
         try:
             # Clear previous runs
+            delete_artifacts_by_type(session, ["action"])
             session.execute(text('TRUNCATE TABLE aletheia_business_actions CASCADE'))
             session.commit()
             logger.info("Cleared old business actions.")
@@ -94,6 +80,8 @@ class ActionSynthesizerAgent:
                         outputs_json=analysis.outputs
                     )
                     session.add(action)
+                    session.flush()
+                    sync_action_artifact(session, action)
                 except Exception as e:
                     logger.error(f"Failed to analyze {r_name}: {e}")
 
@@ -119,6 +107,8 @@ class ActionSynthesizerAgent:
                         outputs_json=analysis.outputs
                     )
                     session.add(action)
+                    session.flush()
+                    sync_action_artifact(session, action)
                 except Exception as e:
                     logger.error(f"Failed to analyze trigger {t_name}: {e}")
 

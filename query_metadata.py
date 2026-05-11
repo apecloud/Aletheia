@@ -81,6 +81,24 @@ def print_business_actions(conn):
     except Exception as e:
          print("  (Table not found or error. Run Action Synthesizer Agent first.)")
 
+def print_ontology_artifacts(conn):
+    print("\n=== Ontology Artifacts ===")
+    try:
+        res = conn.execute(text("""
+            SELECT canonical_key, artifact_type, name, status, version, confidence, source_agent
+            FROM aletheia_ontology_artifacts
+            ORDER BY artifact_type, canonical_key
+        """)).fetchall()
+        if not res:
+            print("  (No ontology artifacts found. Run Object/Link/Action agents.)")
+        for row in res:
+            print(
+                f"[{row[1]}] {row[0]} status={row[3]} version={row[4]} "
+                f"confidence={row[5]} source={row[6]}\n    Name: {row[2]}"
+            )
+    except Exception:
+         print("  (Table not found or error. Run artifact-enabled agents first.)")
+
 def main():
     parser = argparse.ArgumentParser(description="Aletheia Ontology Query Tool", formatter_class=argparse.RawTextHelpFormatter)
     parser.add_argument("--schema", action="store_true", help="List all physical tables in the ontology database")
@@ -89,6 +107,7 @@ def main():
     parser.add_argument("--objects", action="store_true", help="List AI-generated business objects")
     parser.add_argument("--links", action="store_true", help="List relationships between business objects")
     parser.add_argument("--actions", action="store_true", help="List synthesized business actions (Stored Procedures/Triggers)")
+    parser.add_argument("--artifacts", action="store_true", help="List unified ontology artifacts")
     parser.add_argument("--all", action="store_true", help="Print a comprehensive summary of everything")
     
     args = parser.parse_args()
@@ -114,6 +133,8 @@ def main():
                 print_business_links(conn)
             if args.all or args.actions:
                 print_business_actions(conn)
+            if args.all or args.artifacts:
+                print_ontology_artifacts(conn)
     except Exception as e:
         print(f"Database error: {e}")
 

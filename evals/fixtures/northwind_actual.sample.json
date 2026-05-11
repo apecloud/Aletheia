@@ -1,0 +1,37 @@
+{
+  "business_objects": [
+    {
+      "name": "Customer",
+      "mapped_table_names": ["customers"]
+    },
+    {
+      "name": "Order",
+      "mapped_table_names": ["orders", "order_details"]
+    },
+    {
+      "name": "Product",
+      "mapped_table_names": ["products"]
+    },
+    {
+      "name": "Category",
+      "mapped_table_names": ["categories"]
+    }
+  ],
+  "links": [
+    {
+      "source_object_name": "Customer",
+      "target_object_name": "Order",
+      "link_type": "1:N"
+    },
+    {
+      "source_object_name": "Order",
+      "target_object_name": "Product",
+      "link_type": "N:M"
+    },
+    {
+      "source_object_name": "Category",
+      "target_object_name": "Product",
+      "link_type": "1:N"
+    }
+  ]
+}

@@ -3,8 +3,8 @@ import json
 import argparse
 import logging
 import pandas as pd
-from sqlalchemy import create_engine, Column, Integer, String, Text, ForeignKey, DateTime
-from sqlalchemy.orm import declarative_base, sessionmaker, relationship
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
 from datetime import datetime
 from pydantic import BaseModel, Field
 from typing import List
@@ -12,41 +12,10 @@ from typing import List
 # Industry Standard LLM Abstractions for Multi-Model Support
 from litellm import completion
 import instructor
+from ontology_artifacts import Base, ColumnProfile, ExtractedColumn, ExtractedTable
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger("DataProfilerAgent")
-
-Base = declarative_base()
-
-# --- Database Models ---
-class ExtractedTable(Base):
-    __tablename__ = 'aletheia_extracted_tables'
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    schema_name = Column(String(255))
-    table_name = Column(String(255), nullable=False)
-    table_comment = Column(String(1000))
-    extracted_at = Column(DateTime, default=datetime.utcnow)
-    columns = relationship("ExtractedColumn", back_populates="table")
-
-class ExtractedColumn(Base):
-    __tablename__ = 'aletheia_extracted_columns'
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    table_id = Column(Integer, ForeignKey('aletheia_extracted_tables.id'), nullable=False)
-    column_name = Column(String(255), nullable=False)
-    data_type = Column(String(255), nullable=False)
-    
-    table = relationship("ExtractedTable", back_populates="columns")
-    profile = relationship("ColumnProfile", back_populates="column", uselist=False)
-
-class ColumnProfile(Base):
-    __tablename__ = 'aletheia_column_profiles'
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    column_id = Column(Integer, ForeignKey('aletheia_extracted_columns.id'), nullable=False)
-    semantic_type = Column(String(255))
-    semantic_hypothesis = Column(Text)
-    profiled_at = Column(DateTime, default=datetime.utcnow)
-    
-    column = relationship("ExtractedColumn", back_populates="profile")
 
 # --- LLM Structured Output Models (Pydantic) ---
 class ColumnSemantic(BaseModel):

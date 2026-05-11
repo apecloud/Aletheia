@@ -1,0 +1,407 @@
+{
+  "artifacts": [
+    {
+      "artifact_type": "link",
+      "canonical_key": "link:category:1:n:product",
+      "confidence": 1.0,
+      "description": "The Category object defines groupings of products, and the Product object details categorical assignments, establishing a classification/master-data relationship.",
+      "evidence": [
+        {
+          "confidence": 1.0,
+          "content_hash": "31697bbee3fe414991abd22a2c9307b934343c9c813062d7c4a678bbd25e5297",
+          "evidence_type": "object",
+          "raw_payload": {
+            "artifact_id": 14
+          },
+          "source_ref": "object:Category",
+          "summary": "Defines the groupings or classifications of products offered by the enterprise, facilitating inventory management, sales reporting, and catalog navigation."
+        },
+        {
+          "confidence": 1.0,
+          "content_hash": "7931f55e53f612d7a8b714bfeae2f0c92c0566b7492bcfa30e918907426b09a7",
+          "evidence_type": "object",
+          "raw_payload": {
+            "artifact_id": 18
+          },
+          "source_ref": "object:Product",
+          "summary": "Contains the master catalog of goods and services available for sale, detailing item specifications, pricing, stock availability, and categorical assignments."
+        }
+      ],
+      "name": "Category 1:N Product",
+      "payload": {
+        "description": "The Category object defines groupings of products, and the Product object details categorical assignments, establishing a classification/master-data relationship.",
+        "link_type": "1:N",
+        "source_object_name": "Category",
+        "target_object_name": "Product"
+      },
+      "project_id": "default",
+      "source_agent": "LinkWeaverAgent",
+      "source_refs": [
+        "object:Category",
+        "object:Product"
+      ],
+      "status": "draft",
+      "version": 1
+    },
+    {
+      "artifact_type": "link",
+      "canonical_key": "link:customer:1:n:order",
+      "confidence": 1.0,
+      "description": "Customers place purchase transactions. The Order object explicitly records the header-level details of customer purchase transactions.",
+      "evidence": [
+        {
+          "confidence": 1.0,
+          "content_hash": "0fe2998699a920013a2fab975f18e7a2656e725ffe41bac531312e426759f350",
+          "evidence_type": "object",
+          "raw_payload": {
+            "artifact_id": 15
+          },
+          "source_ref": "object:Customer",
+          "summary": "Represents the individuals or organizations that purchase goods or services, containing key demographic, contact, and account information."
+        },
+        {
+          "confidence": 1.0,
+          "content_hash": "3392b05766a55aa7c7468251436c87da282b06b79b236c6215f3f3ea6903ed4b",
+          "evidence_type": "object",
+          "raw_payload": {
+            "artifact_id": 17
+          },
+          "source_ref": "object:Order",
+          "summary": "Records the header-level details of customer purchase transactions and captures the granular line-level specifics of a customer transaction, specifying the exact products purchased, quantities, unit prices, and applied discounts."
+        }
+      ],
+      "name": "Customer 1:N Order",
+      "payload": {
+        "description": "Customers place purchase transactions. The Order object explicitly records the header-level details of customer purchase transactions.",
+        "link_type": "1:N",
+        "source_object_name": "Customer",
+        "target_object_name": "Order"
+      },
+      "project_id": "default",
+      "source_agent": "LinkWeaverAgent",
+      "source_refs": [
+        "object:Customer",
+        "object:Order"
+      ],
+      "status": "draft",
+      "version": 1
+    },
+    {
+      "artifact_type": "link",
+      "canonical_key": "link:employee:1:n:employee",
+      "confidence": 1.0,
+      "description": "The Employee object contains reporting structures, indicating a hierarchical self-referencing relationship (e.g., manager to subordinates).",
+      "evidence": [
+        {
+          "confidence": 1.0,
+          "content_hash": "0d8e8597b9bab83df42b8b626d9b35d5f087134c0ffa5bf8eb92e9d6272df103",
+          "evidence_type": "object",
+          "raw_payload": {
+            "artifact_id": 16
+          },
+          "source_ref": "object:Employee",
+          "summary": "Contains details about the enterprise's workforce, including personal information, job titles, departmental alignments, and reporting structures."
+        },
+        {
+          "confidence": 1.0,
+          "content_hash": "0d8e8597b9bab83df42b8b626d9b35d5f087134c0ffa5bf8eb92e9d6272df103",
+          "evidence_type": "object",
+          "raw_payload": {
+            "artifact_id": 16
+          },
+          "source_ref": "object:Employee",
+          "summary": "Contains details about the enterprise's workforce, including personal information, job titles, departmental alignments, and reporting structures."
+        }
+      ],
+      "name": "Employee 1:N Employee",
+      "payload": {
+        "description": "The Employee object contains reporting structures, indicating a hierarchical self-referencing relationship (e.g., manager to subordinates).",
+        "link_type": "1:N",
+        "source_object_name": "Employee",
+        "target_object_name": "Employee"
+      },
+      "project_id": "default",
+      "source_agent": "LinkWeaverAgent",
+      "source_refs": [
+        "object:Employee"
+      ],
+      "status": "draft",
+      "version": 1
+    },
+    {
+      "artifact_type": "link",
+      "canonical_key": "link:employee:1:n:order",
+      "confidence": 1.0,
+      "description": "Employees typically process, manage, or are credited with Orders, acting as the sales representative or account manager for the transaction.",
+      "evidence": [
+        {
+          "confidence": 1.0,
+          "content_hash": "0d8e8597b9bab83df42b8b626d9b35d5f087134c0ffa5bf8eb92e9d6272df103",
+          "evidence_type": "object",
+          "raw_payload": {
+            "artifact_id": 16
+          },
+          "source_ref": "object:Employee",
+          "summary": "Contains details about the enterprise's workforce, including personal information, job titles, departmental alignments, and reporting structures."
+        },
+        {
+          "confidence": 1.0,
+          "content_hash": "3392b05766a55aa7c7468251436c87da282b06b79b236c6215f3f3ea6903ed4b",
+          "evidence_type": "object",
+          "raw_payload": {
+            "artifact_id": 17
+          },
+          "source_ref": "object:Order",
+          "summary": "Records the header-level details of customer purchase transactions and captures the granular line-level specifics of a customer transaction, specifying the exact products purchased, quantities, unit prices, and applied discounts."
+        }
+      ],
+      "name": "Employee 1:N Order",
+      "payload": {
+        "description": "Employees typically process, manage, or are credited with Orders, acting as the sales representative or account manager for the transaction.",
+        "link_type": "1:N",
+        "source_object_name": "Employee",
+        "target_object_name": "Order"
+      },
+      "project_id": "default",
+      "source_agent": "LinkWeaverAgent",
+      "source_refs": [
+        "object:Employee",
+        "object:Order"
+      ],
+      "status": "draft",
+      "version": 1
+    },
+    {
+      "artifact_type": "link",
+      "canonical_key": "link:order:n:m:product",
+      "confidence": 1.0,
+      "description": "The Order object captures granular line-level specifics specifying the exact products purchased, establishing a many-to-many relationship between Orders and Products.",
+      "evidence": [
+        {
+          "confidence": 1.0,
+          "content_hash": "3392b05766a55aa7c7468251436c87da282b06b79b236c6215f3f3ea6903ed4b",
+          "evidence_type": "object",
+          "raw_payload": {
+            "artifact_id": 17
+          },
+          "source_ref": "object:Order",
+          "summary": "Records the header-level details of customer purchase transactions and captures the granular line-level specifics of a customer transaction, specifying the exact products purchased, quantities, unit prices, and applied discounts."
+        },
+        {
+          "confidence": 1.0,
+          "content_hash": "7931f55e53f612d7a8b714bfeae2f0c92c0566b7492bcfa30e918907426b09a7",
+          "evidence_type": "object",
+          "raw_payload": {
+            "artifact_id": 18
+          },
+          "source_ref": "object:Product",
+          "summary": "Contains the master catalog of goods and services available for sale, detailing item specifications, pricing, stock availability, and categorical assignments."
+        }
+      ],
+      "name": "Order N:M Product",
+      "payload": {
+        "description": "The Order object captures granular line-level specifics specifying the exact products purchased, establishing a many-to-many relationship between Orders and Products.",
+        "link_type": "N:M",
+        "source_object_name": "Order",
+        "target_object_name": "Product"
+      },
+      "project_id": "default",
+      "source_agent": "LinkWeaverAgent",
+      "source_refs": [
+        "object:Order",
+        "object:Product"
+      ],
+      "status": "draft",
+      "version": 1
+    },
+    {
+      "artifact_type": "object",
+      "canonical_key": "object:category",
+      "confidence": 1.0,
+      "description": "Defines the groupings or classifications of products offered by the enterprise, facilitating inventory management, sales reporting, and catalog navigation.",
+      "evidence": [
+        {
+          "confidence": 1.0,
+          "content_hash": "44c09b04cd8c3f6a6c87e0455bbfeeb2495c58a8682f81400c18cb036108d3d4",
+          "evidence_type": "table",
+          "raw_payload": {
+            "schema_name": null,
+            "table_comment": "[Product Category] Defines the groupings or classifications of products offered by the enterprise, facilitating inventory management, sales reporting, and catalog navigation.",
+            "table_name": "categories"
+          },
+          "source_ref": "table:categories",
+          "summary": "[Product Category] Defines the groupings or classifications of products offered by the enterprise, facilitating inventory management, sales reporting, and catalog navigation."
+        }
+      ],
+      "name": "Category",
+      "payload": {
+        "description": "Defines the groupings or classifications of products offered by the enterprise, facilitating inventory management, sales reporting, and catalog navigation.",
+        "mapped_table_names": [
+          "categories"
+        ],
+        "name": "Category"
+      },
+      "project_id": "default",
+      "source_agent": "ObjectModelerAgent",
+      "source_refs": [
+        "table:categories"
+      ],
+      "status": "draft",
+      "version": 1
+    },
+    {
+      "artifact_type": "object",
+      "canonical_key": "object:customer",
+      "confidence": 1.0,
+      "description": "Represents the individuals or organizations that purchase goods or services, containing key demographic, contact, and account information.",
+      "evidence": [
+        {
+          "confidence": 1.0,
+          "content_hash": "990ee267b679fccaf04b303256fcfce69801f2ade7157174f3c68f4602e92852",
+          "evidence_type": "table",
+          "raw_payload": {
+            "schema_name": null,
+            "table_comment": "[Customer] Represents the individuals or organizations that purchase goods or services, containing key demographic, contact, and account information.",
+            "table_name": "customers"
+          },
+          "source_ref": "table:customers",
+          "summary": "[Customer] Represents the individuals or organizations that purchase goods or services, containing key demographic, contact, and account information."
+        }
+      ],
+      "name": "Customer",
+      "payload": {
+        "description": "Represents the individuals or organizations that purchase goods or services, containing key demographic, contact, and account information.",
+        "mapped_table_names": [
+          "customers"
+        ],
+        "name": "Customer"
+      },
+      "project_id": "default",
+      "source_agent": "ObjectModelerAgent",
+      "source_refs": [
+        "table:customers"
+      ],
+      "status": "draft",
+      "version": 1
+    },
+    {
+      "artifact_type": "object",
+      "canonical_key": "object:employee",
+      "confidence": 1.0,
+      "description": "Contains details about the enterprise's workforce, including personal information, job titles, departmental alignments, and reporting structures.",
+      "evidence": [
+        {
+          "confidence": 1.0,
+          "content_hash": "7056f4f45df714bd65cb781ea65fb8b6bc397d31978c1fcb3a43503db2fdefb9",
+          "evidence_type": "table",
+          "raw_payload": {
+            "schema_name": null,
+            "table_comment": "[Employee] Contains details about the enterprise's workforce, including personal information, job titles, departmental alignments, and reporting structures.",
+            "table_name": "employees"
+          },
+          "source_ref": "table:employees",
+          "summary": "[Employee] Contains details about the enterprise's workforce, including personal information, job titles, departmental alignments, and reporting structures."
+        }
+      ],
+      "name": "Employee",
+      "payload": {
+        "description": "Contains details about the enterprise's workforce, including personal information, job titles, departmental alignments, and reporting structures.",
+        "mapped_table_names": [
+          "employees"
+        ],
+        "name": "Employee"
+      },
+      "project_id": "default",
+      "source_agent": "ObjectModelerAgent",
+      "source_refs": [
+        "table:employees"
+      ],
+      "status": "draft",
+      "version": 1
+    },
+    {
+      "artifact_type": "object",
+      "canonical_key": "object:order",
+      "confidence": 1.0,
+      "description": "Records the header-level details of customer purchase transactions and captures the granular line-level specifics of a customer transaction, specifying the exact products purchased, quantities, unit prices, and applied discounts.",
+      "evidence": [
+        {
+          "confidence": 1.0,
+          "content_hash": "a111cf09f51547c7b57af3ca9be8bfd871c9d5acc13afdd1fa5a9a75dce6fa25",
+          "evidence_type": "table",
+          "raw_payload": {
+            "schema_name": null,
+            "table_comment": "[Order Line Item] Captures the granular line-level specifics of a customer transaction, specifying the exact products purchased, quantities, unit prices, and applied discounts.",
+            "table_name": "order_details"
+          },
+          "source_ref": "table:order_details",
+          "summary": "[Order Line Item] Captures the granular line-level specifics of a customer transaction, specifying the exact products purchased, quantities, unit prices, and applied discounts."
+        },
+        {
+          "confidence": 1.0,
+          "content_hash": "cec22f381994b692372a57e7311f8dda60fcce1edc30895bacf7ad715c3ee7fe",
+          "evidence_type": "table",
+          "raw_payload": {
+            "schema_name": null,
+            "table_comment": "[Sales Order] Records the header-level details of customer purchase transactions, tracking order dates, fulfillment status, shipping information, and total transaction value.",
+            "table_name": "orders"
+          },
+          "source_ref": "table:orders",
+          "summary": "[Sales Order] Records the header-level details of customer purchase transactions, tracking order dates, fulfillment status, shipping information, and total transaction value."
+        }
+      ],
+      "name": "Order",
+      "payload": {
+        "description": "Records the header-level details of customer purchase transactions and captures the granular line-level specifics of a customer transaction, specifying the exact products purchased, quantities, unit prices, and applied discounts.",
+        "mapped_table_names": [
+          "orders",
+          "order_details"
+        ],
+        "name": "Order"
+      },
+      "project_id": "default",
+      "source_agent": "ObjectModelerAgent",
+      "source_refs": [
+        "table:orders",
+        "table:order_details"
+      ],
+      "status": "draft",
+      "version": 1
+    },
+    {
+      "artifact_type": "object",
+      "canonical_key": "object:product",
+      "confidence": 1.0,
+      "description": "Contains the master catalog of goods and services available for sale, detailing item specifications, pricing, stock availability, and categorical assignments.",
+      "evidence": [
+        {
+          "confidence": 1.0,
+          "content_hash": "8bab937c7ee051373241754498843f343f73abca44f418f93d58710f07aca214",
+          "evidence_type": "table",
+          "raw_payload": {
+            "schema_name": null,
+            "table_comment": "[Product] Contains the master catalog of goods and services available for sale, detailing item specifications, pricing, stock availability, and categorical assignments.",
+            "table_name": "products"
+          },
+          "source_ref": "table:products",
+          "summary": "[Product] Contains the master catalog of goods and services available for sale, detailing item specifications, pricing, stock availability, and categorical assignments."
+        }
+      ],
+      "name": "Product",
+      "payload": {
+        "description": "Contains the master catalog of goods and services available for sale, detailing item specifications, pricing, stock availability, and categorical assignments.",
+        "mapped_table_names": [
+          "products"
+        ],
+        "name": "Product"
+      },
+      "project_id": "default",
+      "source_agent": "ObjectModelerAgent",
+      "source_refs": [
+        "table:products"
+      ],
+      "status": "draft",
+      "version": 1
+    }
+  ]
+}

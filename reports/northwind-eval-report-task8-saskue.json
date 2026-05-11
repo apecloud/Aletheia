@@ -1,0 +1,89 @@
+{
+  "golden": "/Users/slc/code/Aletheia/evals/fixtures/northwind_golden.json",
+  "actual": "reports/aletheia-artifact-snapshot-task6.json",
+  "evaluation": {
+    "objects": {
+      "expected_count": 4,
+      "actual_count": 5,
+      "matched_count": 4,
+      "precision": 0.8,
+      "recall": 1.0,
+      "missing": [],
+      "extra": [
+        {
+          "name": "Employee",
+          "tables": [
+            "employees"
+          ]
+        }
+      ]
+    },
+    "links": {
+      "expected_count": 3,
+      "actual_count": 5,
+      "matched_count": 3,
+      "precision": 0.6,
+      "recall": 1.0,
+      "missing": [],
+      "extra": [
+        {
+          "source": "Employee",
+          "target": "Employee",
+          "link_type": "1:N"
+        },
+        {
+          "source": "Employee",
+          "target": "Order",
+          "link_type": "1:N"
+        }
+      ]
+    }
+  },
+  "stability_diff": null,
+  "optional_golden": "evals/fixtures/northwind_optional.json",
+  "required_optional_evaluation": {
+    "objects": {
+      "required_count": 4,
+      "required_matched_count": 4,
+      "required_recall": 1.0,
+      "required_missing": [],
+      "optional_count": 1,
+      "optional_matched_count": 1,
+      "optional_recall": 1.0,
+      "optional_missing": [],
+      "optional_hit": [
+        {
+          "name": "Employee",
+          "tables": [
+            "employees"
+          ]
+        }
+      ],
+      "unexpected_extra": []
+    },
+    "links": {
+      "required_count": 3,
+      "required_matched_count": 3,
+      "required_recall": 1.0,
+      "required_missing": [],
+      "optional_count": 1,
+      "optional_matched_count": 1,
+      "optional_recall": 1.0,
+      "optional_missing": [],
+      "optional_hit": [
+        {
+          "source": "Employee",
+          "target": "Order",
+          "link_type": "1:N"
+        }
+      ],
+      "unexpected_extra": [
+        {
+          "source": "Employee",
+          "target": "Employee",
+          "link_type": "1:N"
+        }
+      ]
+    }
+  }
+}

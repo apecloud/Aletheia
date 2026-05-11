@@ -1,0 +1,29 @@
+{
+  "dataset": "northwind",
+  "version": "v2-optional",
+  "objects": [
+    {
+      "name": "Employee",
+      "tables": ["employees"]
+    }
+  ],
+  "links": [
+    {
+      "source": "Employee",
+      "target": "Order",
+      "link_type": "1:N"
+    },
+    {
+      "source": "Employee",
+      "target": "Employee",
+      "link_type": "1:N"
+    }
+  ],
+  "review_notes": [
+    {
+      "canonical_key": "link:employee:employee",
+      "status": "accepted_optional",
+      "reason": "Northwind employees.reportsTo is a self-reference to employees.employeeID; 8 of 9 rows have valid manager references in the loaded dataset."
+    }
+  ]
+}

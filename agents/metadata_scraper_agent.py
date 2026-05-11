@@ -1,38 +1,12 @@
 import os
 import argparse
 import logging
-from sqlalchemy import create_engine, inspect, Column, Integer, String, Boolean, ForeignKey, DateTime, text
-from sqlalchemy.orm import declarative_base, sessionmaker, relationship
-from datetime import datetime
+from sqlalchemy import create_engine, inspect, text
+from sqlalchemy.orm import sessionmaker
+from ontology_artifacts import Base, ExtractedColumn, ExtractedTable
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger("MetadataScraperAgent")
-
-Base = declarative_base()
-
-class ExtractedTable(Base):
-    __tablename__ = 'aletheia_extracted_tables'
-    
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    schema_name = Column(String(255))
-    table_name = Column(String(255), nullable=False)
-    table_comment = Column(String(1000))
-    extracted_at = Column(DateTime, default=datetime.utcnow)
-    
-    columns = relationship("ExtractedColumn", back_populates="table", cascade="all, delete")
-
-class ExtractedColumn(Base):
-    __tablename__ = 'aletheia_extracted_columns'
-    
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    table_id = Column(Integer, ForeignKey('aletheia_extracted_tables.id'), nullable=False)
-    column_name = Column(String(255), nullable=False)
-    data_type = Column(String(255), nullable=False)
-    is_primary_key = Column(Boolean, default=False)
-    is_nullable = Column(Boolean, default=True)
-    column_comment = Column(String(1000))
-    
-    table = relationship("ExtractedTable", back_populates="columns")
 
 class MetadataScraperAgent:
     def __init__(self, source_db_url: str, target_db_url: str):

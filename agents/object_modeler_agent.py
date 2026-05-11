@@ -2,59 +2,28 @@ import os
 import json
 import argparse
 import logging
-from sqlalchemy import create_engine, Column, Integer, String, Text, ForeignKey, DateTime
-from sqlalchemy.orm import declarative_base, sessionmaker, relationship
-from datetime import datetime
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
 from pydantic import BaseModel, Field
 from typing import List
 
 from litellm import completion
 import instructor
+from ontology_artifacts import (
+    Base,
+    ColumnProfile,
+    ExtractedColumn,
+    ExtractedTable,
+    BusinessObject,
+    BusinessLink,
+    ObjectTableMapping,
+    delete_artifacts_by_type,
+    ensure_artifact_schema,
+    sync_object_artifact,
+)
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger("ObjectModelerAgent")
-
-Base = declarative_base()
-
-# --- Existing Database Models ---
-class ExtractedTable(Base):
-    __tablename__ = 'aletheia_extracted_tables'
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    schema_name = Column(String(255))
-    table_name = Column(String(255), nullable=False)
-    table_comment = Column(String(1000))
-    columns = relationship("ExtractedColumn", back_populates="table")
-
-class ExtractedColumn(Base):
-    __tablename__ = 'aletheia_extracted_columns'
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    table_id = Column(Integer, ForeignKey('aletheia_extracted_tables.id'))
-    column_name = Column(String(255), nullable=False)
-    data_type = Column(String(255), nullable=False)
-    table = relationship("ExtractedTable", back_populates="columns")
-    profile = relationship("ColumnProfile", back_populates="column", uselist=False)
-
-class ColumnProfile(Base):
-    __tablename__ = 'aletheia_column_profiles'
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    column_id = Column(Integer, ForeignKey('aletheia_extracted_columns.id'))
-    semantic_type = Column(String(255))
-    semantic_hypothesis = Column(Text)
-    column = relationship("ExtractedColumn", back_populates="profile")
-
-# --- New Database Models for Object Modeler ---
-class BusinessObject(Base):
-    __tablename__ = 'aletheia_business_objects'
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    name = Column(String(255), nullable=False, unique=True)
-    description = Column(Text)
-    created_at = Column(DateTime, default=datetime.utcnow)
-
-class ObjectTableMapping(Base):
-    __tablename__ = 'aletheia_object_mappings'
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    object_id = Column(Integer, ForeignKey('aletheia_business_objects.id'))
-    table_id = Column(Integer, ForeignKey('aletheia_extracted_tables.id'))
 
 # --- LLM Structured Output Models (Pydantic) ---
 class BusinessObjectDraft(BaseModel):
@@ -72,8 +41,8 @@ class ObjectModelerAgent:
         self.metadata_engine = create_engine(metadata_db_url)
         self.model_name = model_name
         
-        # Ensure new ontology tables exist in PostGIS
-        Base.metadata.create_all(self.metadata_engine)
+        # Ensure ontology and artifact tables exist in PostGIS.
+        ensure_artifact_schema(self.metadata_engine)
         self.Session = sessionmaker(bind=self.metadata_engine)
         
         # Wrap LiteLLM with Instructor
@@ -112,6 +81,12 @@ class ObjectModelerAgent:
         Collapse these normalized physical tables into cohesive, high-level Business Objects.
         For example, 'orders' and 'order_items' might both map to a single 'Order' Business Object.
         If a table represents a standalone concept (like 'imdb_reviews'), map it to a 'MovieReview' object.
+
+        Keep stable classification/master-data tables as their own Business Objects when they are a
+        durable business vocabulary used by another object. For example, a `categories` table with
+        category id/name/description should become a `Category` Business Object, not only a field
+        embedded inside `Product`. Reference/detail tables such as `order_details` can be collapsed
+        into their transaction object when they do not represent a durable standalone vocabulary.
         """
         
         try:
@@ -143,8 +118,10 @@ class ObjectModelerAgent:
                 return
 
             # Clear old mappings (Idempotency)
+            session.query(BusinessLink).delete()
             session.query(ObjectTableMapping).delete()
             session.query(BusinessObject).delete()
+            delete_artifacts_by_type(session, ["object", "link"])
             session.commit()
 
             # Save objects and mappings
@@ -154,17 +131,20 @@ class ObjectModelerAgent:
                 new_obj = BusinessObject(name=obj_draft.name, description=obj_draft.description)
                 session.add(new_obj)
                 session.flush() # Get ID
+                mapped_tables = []
                 
                 for table_name in obj_draft.mapped_table_names:
                     table = session.query(ExtractedTable).filter_by(table_name=table_name).first()
                     if table:
+                        mapped_tables.append(table)
                         mapping = ObjectTableMapping(object_id=new_obj.id, table_id=table.id)
                         session.add(mapping)
                     else:
                         logger.warning(f"LLM mapped unknown table: {table_name}")
+                sync_object_artifact(session, new_obj, mapped_tables)
 
             session.commit()
-            logger.info("Successfully saved Business Objects and Mappings to PostGIS.")
+            logger.info("Successfully saved Business Objects, Mappings, and Ontology Artifacts to PostGIS.")
         except Exception as e:
             session.rollback()
             logger.error(f"Workflow error: {e}")

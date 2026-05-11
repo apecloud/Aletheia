@@ -1,0 +1,43 @@
+{
+  "golden": "evals/fixtures/northwind_golden.json",
+  "actual": "reports/aletheia-artifact-snapshot-task6.json",
+  "evaluation": {
+    "objects": {
+      "expected_count": 4,
+      "actual_count": 5,
+      "matched_count": 4,
+      "precision": 0.8,
+      "recall": 1.0,
+      "missing": [],
+      "extra": [
+        {
+          "name": "Employee",
+          "tables": [
+            "employees"
+          ]
+        }
+      ]
+    },
+    "links": {
+      "expected_count": 3,
+      "actual_count": 5,
+      "matched_count": 3,
+      "precision": 0.6,
+      "recall": 1.0,
+      "missing": [],
+      "extra": [
+        {
+          "source": "Employee",
+          "target": "Employee",
+          "link_type": "1:N"
+        },
+        {
+          "source": "Employee",
+          "target": "Order",
+          "link_type": "1:N"
+        }
+      ]
+    }
+  },
+  "stability_diff": null
+}

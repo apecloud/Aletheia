@@ -2,47 +2,25 @@ import os
 import json
 import argparse
 import logging
-from sqlalchemy import create_engine, Column, Integer, String, Text, ForeignKey, DateTime
-from sqlalchemy.orm import declarative_base, sessionmaker, relationship
-from datetime import datetime
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
 from pydantic import BaseModel, Field
 from typing import List
 
 from litellm import completion
 import instructor
+from ontology_artifacts import (
+    BusinessLink,
+    BusinessObject,
+    ExtractedTable,
+    ObjectTableMapping,
+    delete_artifacts_by_type,
+    ensure_artifact_schema,
+    sync_link_artifact,
+)
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger("LinkWeaverAgent")
-
-Base = declarative_base()
-
-# --- Existing Database Models ---
-class ExtractedTable(Base):
-    __tablename__ = 'aletheia_extracted_tables'
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    table_name = Column(String(255), nullable=False)
-
-class BusinessObject(Base):
-    __tablename__ = 'aletheia_business_objects'
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    name = Column(String(255), nullable=False, unique=True)
-    description = Column(Text)
-
-class ObjectTableMapping(Base):
-    __tablename__ = 'aletheia_object_mappings'
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    object_id = Column(Integer, ForeignKey('aletheia_business_objects.id'))
-    table_id = Column(Integer, ForeignKey('aletheia_extracted_tables.id'))
-
-# --- New Database Models for Link Weaver ---
-class BusinessLink(Base):
-    __tablename__ = 'aletheia_business_links'
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    source_object_id = Column(Integer, ForeignKey('aletheia_business_objects.id'), nullable=False)
-    target_object_id = Column(Integer, ForeignKey('aletheia_business_objects.id'), nullable=False)
-    link_type = Column(String(50)) # 1:1, 1:N, N:M
-    description = Column(Text)
-    created_at = Column(DateTime, default=datetime.utcnow)
 
 # --- LLM Structured Output Models (Pydantic) ---
 class LinkDraft(BaseModel):
@@ -61,8 +39,8 @@ class LinkWeaverAgent:
         self.metadata_engine = create_engine(metadata_db_url)
         self.model_name = model_name
         
-        # Ensure new link tables exist in PostGIS
-        Base.metadata.create_all(self.metadata_engine)
+        # Ensure ontology and artifact tables exist in PostGIS.
+        ensure_artifact_schema(self.metadata_engine)
         self.Session = sessionmaker(bind=self.metadata_engine)
         
         # Wrap LiteLLM with Instructor
@@ -94,6 +72,9 @@ class LinkWeaverAgent:
         Task:
         Discover explicit (foreign keys, naming conventions) and implicit semantic relationships between these Business Objects.
         If there are only independent objects, return an empty links list. But if they logically relate (e.g., Customer to Order, or Movie to Review), define the link.
+        Include classification/master-data relationships explicitly. For example, if Product has a
+        category identifier and Category is modeled as a Business Object, emit a Product -> Category
+        link even when Category only acts as a taxonomy/dimension for Product.
         """
         
         try:
@@ -126,6 +107,7 @@ class LinkWeaverAgent:
 
             # Clear old links
             session.query(BusinessLink).delete()
+            delete_artifacts_by_type(session, ["link"])
             session.commit()
 
             # Save new links
@@ -143,11 +125,13 @@ class LinkWeaverAgent:
                         description=link_draft.description
                     )
                     session.add(new_link)
+                    session.flush()
+                    sync_link_artifact(session, new_link, source_obj, target_obj)
                 else:
                     logger.warning(f"LLM referenced unknown objects in link: {link_draft.source_object_name} -> {link_draft.target_object_name}")
 
             session.commit()
-            logger.info("Successfully saved Business Links to PostGIS.")
+            logger.info("Successfully saved Business Links and Ontology Artifacts to PostGIS.")
         except Exception as e:
             session.rollback()
             logger.error(f"Workflow error: {e}")
