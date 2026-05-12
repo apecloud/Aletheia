@@ -218,7 +218,12 @@ function renderGraph() {
   const graph = state.graph;
   if (!graph) return;
   const positions = layoutGraph(graph);
-  const edgeMarkup = (graph.edges || [])
+  const selectedEdge = state.selectedEdgeId ? graphEdge(state.selectedEdgeId) : null;
+  const orderedEdges = [
+    ...(graph.edges || []).filter((edge) => edge.id !== state.selectedEdgeId),
+    ...(graph.edges || []).filter((edge) => edge.id === state.selectedEdgeId),
+  ];
+  const edgeMarkup = orderedEdges
     .map((edge) => {
       const source = positions.get(edge.source);
       const target = positions.get(edge.target);
@@ -238,9 +243,11 @@ function renderGraph() {
       const selected = state.selectedNodeId === node.id ? " selected" : "";
       const center = graph.center?.id === node.id ? " center" : "";
       const expanded = state.expandedNodeIds.has(node.id) ? " expanded" : "";
+      const endpoint = selectedEdge && (selectedEdge.source === node.id || selectedEdge.target === node.id) ? " endpoint" : "";
       const label = node.type === "Order" ? node.id.replace("Order:", "#") : node.label;
       return `
-        <g class="graph-node-svg${selected}${center}${expanded}" data-node="${escapeHtml(node.id)}" transform="translate(${node.x}, ${node.y})">
+        <g class="graph-node-svg${selected}${center}${expanded}${endpoint}" data-node="${escapeHtml(node.id)}" transform="translate(${node.x}, ${node.y})">
+          <circle class="graph-node-hit" r="${node.type === "Employee" ? 46 : 28}"></circle>
           <circle r="${node.type === "Employee" ? 34 : 18}"></circle>
           <text y="${node.type === "Employee" ? 54 : 34}" text-anchor="middle">${escapeHtml(label)}</text>
         </g>
@@ -254,12 +261,18 @@ function renderGraph() {
     </g>
   `;
   els.svg.querySelectorAll("[data-node]").forEach((item) => {
+    item.addEventListener("pointerdown", (event) => {
+      event.stopPropagation();
+    });
     item.addEventListener("click", (event) => {
       event.stopPropagation();
       selectNode(item.dataset.node).catch((error) => showToast(error.message));
     });
   });
   els.svg.querySelectorAll("[data-edge]").forEach((item) => {
+    item.addEventListener("pointerdown", (event) => {
+      event.stopPropagation();
+    });
     item.addEventListener("click", (event) => {
       event.stopPropagation();
       selectEdge(item.dataset.edge).catch((error) => showToast(error.message));
@@ -291,6 +304,8 @@ async function selectNode(nodeId) {
   const data = await fetchJson(urlWithTenant(`/api/graph/node/${encodeURIComponent(nodeId)}`));
   state.selectedDetail = data.node;
   renderNodeInspector(data.node);
+  els.graphStatus.textContent = `selected node ${nodeId}`;
+  els.graphStatus.className = "status-pill status-approved";
 }
 
 async function selectEdge(edgeId) {
@@ -304,6 +319,8 @@ async function selectEdge(edgeId) {
   const data = await fetchJson(urlWithTenant(`/api/graph/edge/${encodeURIComponent(edgeId)}`));
   state.selectedDetail = data.edge;
   renderEdgeInspector(data.edge);
+  els.graphStatus.textContent = `selected edge ${edgeId}`;
+  els.graphStatus.className = "status-pill status-approved";
 }
 
 function renderNodeInspector(node) {
@@ -540,7 +557,34 @@ function bindCanvas() {
     event.preventDefault();
     zoomBy(event.deltaY < 0 ? 1.12 : 0.88);
   });
+  els.svg.addEventListener(
+    "pointerdown",
+    (event) => {
+      const nodeEl = event.target.closest?.("[data-node]");
+      const edgeEl = event.target.closest?.("[data-edge]");
+      if (!nodeEl && !edgeEl) return;
+      event.preventDefault();
+      event.stopPropagation();
+      state.drag = null;
+      const selection = nodeEl
+        ? selectNode(nodeEl.dataset.node)
+        : selectEdge(edgeEl.dataset.edge);
+      selection.catch((error) => showToast(error.message));
+    },
+    true,
+  );
   els.svg.addEventListener("pointerdown", (event) => {
+    const nodeEl = event.target.closest?.("[data-node]");
+    const edgeEl = event.target.closest?.("[data-edge]");
+    if (nodeEl || edgeEl) {
+      event.stopPropagation();
+      state.drag = null;
+      const selection = nodeEl
+        ? selectNode(nodeEl.dataset.node)
+        : selectEdge(edgeEl.dataset.edge);
+      selection.catch((error) => showToast(error.message));
+      return;
+    }
     state.drag = { x: event.clientX, y: event.clientY, startX: state.transform.x, startY: state.transform.y };
     els.svg.setPointerCapture(event.pointerId);
   });

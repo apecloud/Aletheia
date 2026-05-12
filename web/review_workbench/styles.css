@@ -733,15 +733,34 @@ label {
   stroke-width: 2;
 }
 
+.graph-node-svg .graph-node-hit {
+  fill: transparent;
+  stroke: transparent;
+  stroke-width: 0;
+}
+
 .graph-node-svg.center circle {
   fill: #172033;
   stroke: rgba(122, 162, 247, 0.85);
   stroke-width: 3;
 }
 
+.graph-node-svg.center .graph-node-hit,
+.graph-node-svg.selected .graph-node-hit,
+.graph-node-svg.endpoint .graph-node-hit {
+  fill: transparent;
+  stroke: transparent;
+  stroke-width: 0;
+}
+
 .graph-node-svg.selected circle {
   stroke: var(--yellow);
   stroke-width: 4;
+}
+
+.graph-node-svg.endpoint circle {
+  stroke: var(--yellow);
+  stroke-width: 3;
 }
 
 .graph-node-svg.expanded circle {
@@ -751,7 +770,6 @@ label {
 .graph-node-svg text {
   fill: var(--muted);
   font-size: 12px;
-  pointer-events: none;
 }
 
 .graph-node-svg.center text,
@@ -776,7 +794,8 @@ label {
 
 .graph-edge-hit {
   cursor: pointer;
-  stroke: transparent;
+  pointer-events: stroke;
+  stroke: rgba(230, 196, 106, 0.01);
   stroke-width: 14;
 }
 
