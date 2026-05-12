@@ -94,6 +94,7 @@ class LinkWeaverAgent:
 
     def run(self):
         logger.info("Starting Link Weaving workflow...")
+        project_id = os.environ.get("ALETHEIA_TENANT", "default")
         session = self.Session()
         try:
             ontology_dump = self.fetch_ontology_dump(session)
@@ -106,19 +107,20 @@ class LinkWeaverAgent:
                 return
 
             # Clear old links
-            session.query(BusinessLink).delete()
-            delete_artifacts_by_type(session, ["link"])
+            session.query(BusinessLink).filter_by(project_id=project_id).delete()
+            delete_artifacts_by_type(session, ["link"], project_id=project_id)
             session.commit()
 
             # Save new links
             for link_draft in llm_links.links:
                 logger.info(f"Weaved Link: {link_draft.source_object_name} --({link_draft.link_type})--> {link_draft.target_object_name}")
                 
-                source_obj = session.query(BusinessObject).filter_by(name=link_draft.source_object_name).first()
-                target_obj = session.query(BusinessObject).filter_by(name=link_draft.target_object_name).first()
+                source_obj = session.query(BusinessObject).filter_by(project_id=project_id, name=link_draft.source_object_name).first()
+                target_obj = session.query(BusinessObject).filter_by(project_id=project_id, name=link_draft.target_object_name).first()
                 
                 if source_obj and target_obj:
                     new_link = BusinessLink(
+                        project_id=project_id,
                         source_object_id=source_obj.id,
                         target_object_id=target_obj.id,
                         link_type=link_draft.link_type,

@@ -22,6 +22,17 @@
           <span>Only approved artifacts are eligible for default graph ingestion.</span>
         </section>
 
+        <section class="tenant-panel" aria-label="Tenant context">
+          <label>
+            Tenant
+            <select id="tenant-switcher"></select>
+          </label>
+          <dl>
+            <div><dt>Namespace</dt><dd id="tenant-namespace">-</dd></div>
+            <div><dt>Graph database</dt><dd id="tenant-graph">-</dd></div>
+          </dl>
+        </section>
+
         <section class="filters" aria-label="Filters">
           <input id="search" type="search" placeholder="Search name, key, description" />
           <div class="filter-row">
@@ -93,7 +104,7 @@
                 <dd id="source-agent"></dd>
               </div>
               <div>
-                <dt>Project</dt>
+                <dt>Tenant</dt>
                 <dd id="project-id"></dd>
               </div>
               <div>

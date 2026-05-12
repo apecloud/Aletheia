@@ -1,0 +1,247 @@
+{
+  "task": "#36 Multi-tenant validation",
+  "passed": true,
+  "tenant_summary": {
+    "default": {
+      "tenant_id": "default",
+      "namespace": "northwind",
+      "display_name": "Northwind Demo",
+      "graph_database": "aletheia",
+      "status": "active"
+    },
+    "northwind-sandbox": {
+      "tenant_id": "northwind-sandbox",
+      "namespace": "northwind_sandbox",
+      "display_name": "Northwind Sandbox",
+      "graph_database": "aletheia_sandbox",
+      "status": "active"
+    }
+  },
+  "artifact_isolation": {
+    "default_count": 10,
+    "default_project_ids": [
+      "default"
+    ],
+    "sandbox_count": 3,
+    "sandbox_project_ids": [
+      "northwind-sandbox"
+    ],
+    "default_object_count": 5,
+    "sandbox_object_count": 2,
+    "sandbox_comment_status": 200,
+    "sandbox_comment_seen_in_sandbox": true,
+    "sandbox_comment_seen_in_default": false
+  },
+  "instance_gate": {
+    "default_types": {
+      "tenant": {
+        "tenant_id": "default",
+        "namespace": "northwind",
+        "display_name": "Northwind Demo",
+        "graph_database": "aletheia",
+        "status": "active"
+      },
+      "types": [
+        {
+          "type": "Employee",
+          "label": "Employee",
+          "ontology_artifact": "object:employee",
+          "tenant_id": "default"
+        },
+        {
+          "type": "Order",
+          "label": "Order",
+          "ontology_artifact": "object:order",
+          "tenant_id": "default"
+        }
+      ]
+    },
+    "sandbox_types": {
+      "tenant": {
+        "tenant_id": "northwind-sandbox",
+        "namespace": "northwind_sandbox",
+        "display_name": "Northwind Sandbox",
+        "graph_database": "aletheia_sandbox",
+        "status": "active"
+      },
+      "types": [
+        {
+          "type": "Employee",
+          "label": "Employee",
+          "ontology_artifact": "object:employee",
+          "tenant_id": "northwind-sandbox"
+        }
+      ]
+    },
+    "default_search_first": {
+      "id": "Employee:4",
+      "tenant_id": "default",
+      "type": "Employee",
+      "label": "Margaret Peacock",
+      "summary": "Sales Representative",
+      "source_table": "employees",
+      "source_pk": "employeeID=4",
+      "ontology_artifact": "object:employee"
+    },
+    "sandbox_search": {
+      "instances": [
+        {
+          "id": "Employee:4",
+          "tenant_id": "northwind-sandbox",
+          "type": "Employee",
+          "label": "Margaret Peacock",
+          "summary": "Sales Representative",
+          "source_table": "employees",
+          "source_pk": "employeeID=4",
+          "ontology_artifact": "object:employee"
+        }
+      ],
+      "approved": true,
+      "tenant": {
+        "tenant_id": "northwind-sandbox",
+        "namespace": "northwind_sandbox",
+        "display_name": "Northwind Sandbox",
+        "graph_database": "aletheia_sandbox",
+        "status": "active"
+      }
+    },
+    "default_graph": {
+      "approved": true,
+      "graph_database": "aletheia",
+      "nodes": 157,
+      "edges": 156,
+      "checksum": "ff3557ce250ade95cd7a127009f7e293c68890b13109fe3a3e213fa8d8447c91"
+    },
+    "sandbox_graph": {
+      "approved": false,
+      "tenant": {
+        "tenant_id": "northwind-sandbox",
+        "namespace": "northwind_sandbox",
+        "display_name": "Northwind Sandbox",
+        "graph_database": "aletheia_sandbox",
+        "status": "active"
+      },
+      "missing_approved_artifacts": [
+        "object:order",
+        "link:employee:1:n:order"
+      ],
+      "center": null,
+      "nodes": [],
+      "edges": []
+    },
+    "default_edge_sample": {
+      "id": "Employee:4->Order:10250",
+      "tenant_id": "default",
+      "namespace": "northwind",
+      "graph_database": "aletheia",
+      "source_ref": "orders.employeeID",
+      "join_condition": "orders.employeeID = employees.employeeID",
+      "ontology_link": "link:employee:1:n:order"
+    },
+    "sandbox_edge_status": 404
+  },
+  "graph_routing": [
+    {
+      "tenant_id": "default",
+      "namespace": "northwind",
+      "graph_database": "aletheia",
+      "agent_tenant_id": "default",
+      "agent_graph_space": "aletheia",
+      "client_space": "aletheia"
+    },
+    {
+      "tenant_id": "northwind-sandbox",
+      "namespace": "northwind_sandbox",
+      "graph_database": "aletheia_sandbox",
+      "agent_tenant_id": "northwind-sandbox",
+      "agent_graph_space": "aletheia_sandbox",
+      "client_space": "aletheia_sandbox"
+    }
+  ],
+  "checks": [
+    {
+      "name": "tenants endpoint lists default and sandbox",
+      "passed": true
+    },
+    {
+      "name": "default current tenant metadata correct",
+      "passed": true
+    },
+    {
+      "name": "sandbox current tenant metadata correct",
+      "passed": true
+    },
+    {
+      "name": "default artifacts all scoped to default",
+      "passed": true
+    },
+    {
+      "name": "sandbox artifacts all scoped to northwind-sandbox",
+      "passed": true
+    },
+    {
+      "name": "artifact result sets differ between tenants",
+      "passed": true
+    },
+    {
+      "name": "default has approved employee/order/link",
+      "passed": true
+    },
+    {
+      "name": "sandbox employee exists but order/link not approved or absent",
+      "passed": true
+    },
+    {
+      "name": "review comment writes only sandbox tenant",
+      "passed": true
+    },
+    {
+      "name": "default instance types include Employee and Order",
+      "passed": true
+    },
+    {
+      "name": "sandbox instance types do not expose Order when sandbox order not approved",
+      "passed": true
+    },
+    {
+      "name": "default search finds Employee 4 Margaret",
+      "passed": true
+    },
+    {
+      "name": "sandbox search uses sandbox tenant and does not leak default orders",
+      "passed": true
+    },
+    {
+      "name": "default graph positive path 157 nodes / 156 edges",
+      "passed": true
+    },
+    {
+      "name": "default graph IDs checksum matches baseline",
+      "passed": true
+    },
+    {
+      "name": "sandbox graph negative gate 0 nodes / 0 edges",
+      "passed": true
+    },
+    {
+      "name": "sandbox graph reports missing tenant-approved order/link",
+      "passed": true
+    },
+    {
+      "name": "default edge resolves with default graph database",
+      "passed": true
+    },
+    {
+      "name": "sandbox edge blocked",
+      "passed": true
+    },
+    {
+      "name": "routing registry maps distinct graph databases",
+      "passed": true
+    },
+    {
+      "name": "GraphIngestionAgent receives tenant graph space",
+      "passed": true
+    }
+  ]
+}

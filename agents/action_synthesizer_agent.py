@@ -40,12 +40,13 @@ class ActionSynthesizerAgent:
 
     def run(self):
         self.setup_target_db()
+        project_id = os.environ.get("ALETHEIA_TENANT", "default")
         session = self.TargetSession()
         
         try:
             # Clear previous runs
-            delete_artifacts_by_type(session, ["action"])
-            session.execute(text('TRUNCATE TABLE aletheia_business_actions CASCADE'))
+            delete_artifacts_by_type(session, ["action"], project_id=project_id)
+            session.execute(text("DELETE FROM aletheia_business_actions WHERE project_id = :project_id"), {"project_id": project_id})
             session.commit()
             logger.info("Cleared old business actions.")
             
@@ -71,6 +72,7 @@ class ActionSynthesizerAgent:
                     )
                     
                     action = BusinessAction(
+                        project_id=project_id,
                         name=analysis.action_name,
                         action_type=r_type.lower(),
                         source_name=r_name,
@@ -98,6 +100,7 @@ class ActionSynthesizerAgent:
                     )
                     
                     action = BusinessAction(
+                        project_id=project_id,
                         name=analysis.action_name,
                         action_type='trigger',
                         source_name=t_name,

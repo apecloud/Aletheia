@@ -120,6 +120,35 @@ button {
   color: var(--green);
 }
 
+.tenant-panel {
+  display: grid;
+  gap: 10px;
+  margin: 0 16px 16px;
+  padding: 12px;
+  border: 1px solid rgba(122, 162, 247, 0.35);
+  border-radius: 8px;
+  background: rgba(122, 162, 247, 0.07);
+}
+
+.tenant-panel label {
+  margin: 0;
+}
+
+.tenant-panel dl {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+}
+
+.tenant-panel div {
+  min-width: 0;
+}
+
+.tenant-panel dd {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+}
+
 .filters {
   display: grid;
   gap: 10px;

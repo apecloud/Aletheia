@@ -2,12 +2,17 @@ const state = {
   results: [],
   graph: null,
   selected: null,
+  tenant: new URLSearchParams(window.location.search).get("tenant") || "default",
+  tenants: [],
 };
 
 const els = {
   type: document.querySelector("#instance-type"),
   query: document.querySelector("#instance-query"),
   searchButton: document.querySelector("#instance-search-button"),
+  tenantSwitcher: document.querySelector("#tenant-switcher"),
+  tenantNamespace: document.querySelector("#tenant-namespace"),
+  tenantGraph: document.querySelector("#tenant-graph"),
   results: document.querySelector("#instance-results"),
   graphTitle: document.querySelector("#graph-title"),
   graphSubtitle: document.querySelector("#graph-subtitle"),
@@ -46,10 +51,34 @@ async function fetchJson(url) {
   return data;
 }
 
+function urlWithTenant(path, params = {}) {
+  const query = new URLSearchParams(params);
+  query.set("tenant", state.tenant);
+  return `${path}?${query.toString()}`;
+}
+
+async function loadTenants() {
+  const data = await fetchJson(urlWithTenant("/api/tenants"));
+  state.tenants = data.tenants || [];
+  const current = data.current || state.tenants.find((tenant) => tenant.tenant_id === state.tenant);
+  state.tenant = current?.tenant_id || data.default_tenant_id || state.tenant;
+  els.tenantSwitcher.innerHTML = state.tenants
+    .map(
+      (tenant) =>
+        `<option value="${escapeHtml(tenant.tenant_id)}">${escapeHtml(tenant.display_name)} / ${escapeHtml(tenant.namespace)}</option>`,
+    )
+    .join("");
+  els.tenantSwitcher.value = state.tenant;
+  if (current) {
+    els.tenantNamespace.textContent = current.namespace;
+    els.tenantGraph.textContent = current.graph_database;
+  }
+}
+
 async function searchInstances() {
   const type = els.type.value || "Employee";
   const query = els.query.value.trim();
-  const data = await fetchJson(`/api/instances/search?type=${encodeURIComponent(type)}&q=${encodeURIComponent(query)}`);
+  const data = await fetchJson(urlWithTenant("/api/instances/search", { type, q: query }));
   state.results = data.instances || [];
   renderResults(data);
   if (state.results.length > 0) {
@@ -90,7 +119,12 @@ function renderResults(data) {
 }
 
 async function loadNeighborhood(type, id) {
-  const graph = await fetchJson(`/api/instances/${encodeURIComponent(type)}/${encodeURIComponent(id)}/neighborhood?depth=1&limit=200`);
+  const graph = await fetchJson(
+    urlWithTenant(`/api/instances/${encodeURIComponent(type)}/${encodeURIComponent(id)}/neighborhood`, {
+      depth: "1",
+      limit: "200",
+    }),
+  );
   state.graph = graph;
   if (graph.approved === false) {
     els.approvedWarning.classList.remove("hidden");
@@ -144,7 +178,7 @@ function renderGraph(graph) {
   els.graphArea.querySelectorAll("[data-edge]").forEach((edgeEl) => {
     edgeEl.addEventListener("click", async () => {
       const edge = graph.edges.find((candidate) => candidate.id === edgeEl.dataset.edge);
-      const detail = await fetchJson(`/api/instances/edge?source=${encodeURIComponent(edge.source)}&target=${encodeURIComponent(edge.target)}`);
+      const detail = await fetchJson(urlWithTenant("/api/instances/edge", { source: edge.source, target: edge.target }));
       showEdgeDetail(detail);
     });
   });
@@ -152,16 +186,17 @@ function renderGraph(graph) {
 
 async function showNodeDetail(node) {
   const id = node.id.split(":")[1];
-  const detail = await fetchJson(`/api/instances/${encodeURIComponent(node.type)}/${encodeURIComponent(id)}`);
+  const detail = await fetchJson(urlWithTenant(`/api/instances/${encodeURIComponent(node.type)}/${encodeURIComponent(id)}`));
   els.detailKind.textContent = `${detail.type} node`;
   els.detailTitle.textContent = detail.label;
   els.detailBody.innerHTML = `
     <section class="detail-section">
-      <a class="panel-link" href="/?artifact=${encodeURIComponent(detail.ontology_artifact)}">Open ontology artifact</a>
+      <a class="panel-link" href="/?tenant=${encodeURIComponent(state.tenant)}&artifact=${encodeURIComponent(detail.ontology_artifact)}">Open ontology artifact</a>
     </section>
     <section class="detail-section">
       <h3>Source</h3>
       <p>${escapeHtml(detail.source_table)} · ${escapeHtml(detail.source_pk)}</p>
+      <p class="muted">${escapeHtml(detail.namespace)} · graph ${escapeHtml(detail.graph_database)}</p>
     </section>
     <section class="detail-section">
       <h3>Key properties</h3>
@@ -179,7 +214,7 @@ function showEdgeDetail(edge) {
   els.detailTitle.textContent = edge.label;
   els.detailBody.innerHTML = `
     <section class="detail-section">
-      <a class="panel-link" href="/?artifact=${encodeURIComponent(edge.ontology_link)}">Open ontology link</a>
+      <a class="panel-link" href="/?tenant=${encodeURIComponent(state.tenant)}&artifact=${encodeURIComponent(edge.ontology_link)}">Open ontology link</a>
     </section>
     <section class="detail-section">
       <h3>Provenance</h3>
@@ -187,6 +222,7 @@ function showEdgeDetail(edge) {
         <div><dt>Source field</dt><dd>${escapeHtml(edge.source_field)}</dd></div>
         <div><dt>Join condition</dt><dd>${escapeHtml(edge.join_condition)}</dd></div>
         <div><dt>Ontology link</dt><dd>${escapeHtml(edge.ontology_link)}</dd></div>
+        <div><dt>Graph database</dt><dd>${escapeHtml(edge.graph_database)}</dd></div>
       </dl>
       <p class="muted">${escapeHtml(edge.evidence)}</p>
     </section>
@@ -205,11 +241,20 @@ els.searchButton.addEventListener("click", () => searchInstances().catch((error)
 els.query.addEventListener("keydown", (event) => {
   if (event.key === "Enter") searchInstances().catch((error) => showToast(error.message));
 });
+els.tenantSwitcher.addEventListener("change", async () => {
+  state.tenant = els.tenantSwitcher.value;
+  const url = new URL(window.location.href);
+  url.searchParams.set("tenant", state.tenant);
+  window.history.replaceState({}, "", url);
+  await loadTenants();
+  await searchInstances();
+});
 
 const params = new URLSearchParams(window.location.search);
 if (params.get("type")) els.type.value = params.get("type");
 if (params.get("q")) els.query.value = params.get("q");
-searchInstances()
+loadTenants()
+  .then(() => searchInstances())
   .then(async () => {
     if (params.get("id")) await loadNeighborhood(params.get("type") || "Employee", params.get("id"));
   })

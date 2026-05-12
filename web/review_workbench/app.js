@@ -2,6 +2,8 @@ const state = {
   artifacts: [],
   selectedKey: null,
   selectedArtifact: null,
+  tenant: new URLSearchParams(window.location.search).get("tenant") || "default",
+  tenants: [],
 };
 
 const els = {
@@ -11,6 +13,9 @@ const els = {
   typeFilter: document.querySelector("#type-filter"),
   statusFilter: document.querySelector("#status-filter"),
   refresh: document.querySelector("#refresh"),
+  tenantSwitcher: document.querySelector("#tenant-switcher"),
+  tenantNamespace: document.querySelector("#tenant-namespace"),
+  tenantGraph: document.querySelector("#tenant-graph"),
   empty: document.querySelector("#empty-state"),
   grid: document.querySelector("#detail-grid"),
   artifactType: document.querySelector("#artifact-type"),
@@ -112,17 +117,45 @@ async function fetchJson(url, options) {
   return data;
 }
 
+function urlWithTenant(path, params = {}) {
+  const query = new URLSearchParams(params);
+  query.set("tenant", state.tenant);
+  return `${path}?${query.toString()}`;
+}
+
+async function loadTenants() {
+  const data = await fetchJson(urlWithTenant("/api/tenants"));
+  state.tenants = data.tenants || [];
+  const current = data.current || state.tenants.find((tenant) => tenant.tenant_id === state.tenant);
+  state.tenant = current?.tenant_id || data.default_tenant_id || state.tenant;
+  els.tenantSwitcher.innerHTML = state.tenants
+    .map(
+      (tenant) =>
+        `<option value="${escapeHtml(tenant.tenant_id)}">${escapeHtml(tenant.display_name)} / ${escapeHtml(tenant.namespace)}</option>`,
+    )
+    .join("");
+  els.tenantSwitcher.value = state.tenant;
+  renderTenant(current);
+}
+
+function renderTenant(tenant) {
+  if (!tenant) return;
+  els.tenantNamespace.textContent = tenant.namespace;
+  els.tenantGraph.textContent = tenant.graph_database;
+}
+
 function filterParams() {
   const params = new URLSearchParams();
   if (els.search.value.trim()) params.set("search", els.search.value.trim());
   if (els.typeFilter.value) params.set("artifact_type", els.typeFilter.value);
   if (els.statusFilter.value) params.set("status", els.statusFilter.value);
-  return params.toString();
+  return params;
 }
 
 async function loadArtifacts() {
   const query = filterParams();
-  const data = await fetchJson(`/api/artifacts${query ? `?${query}` : ""}`);
+  query.set("tenant", state.tenant);
+  const data = await fetchJson(`/api/artifacts?${query.toString()}`);
   state.artifacts = data.artifacts || [];
   renderFilterOptions(data.stats || []);
   renderStats(data.stats || []);
@@ -197,7 +230,7 @@ function renderList() {
 async function selectArtifact(canonicalKey) {
   state.selectedKey = canonicalKey;
   renderList();
-  const artifact = await fetchJson(`/api/artifacts/${encodeURIComponent(canonicalKey)}`);
+  const artifact = await fetchJson(urlWithTenant(`/api/artifacts/${encodeURIComponent(canonicalKey)}`));
   state.selectedArtifact = artifact;
   renderArtifact(artifact);
 }
@@ -218,7 +251,9 @@ function renderArtifact(artifact) {
   els.confidence.textContent = `confidence ${Number(artifact.confidence ?? 0).toFixed(2)}`;
   els.description.textContent = artifact.description || "No description.";
   els.sourceAgent.textContent = artifact.source_agent || "-";
-  els.projectId.textContent = artifact.project_id || "-";
+  els.projectId.textContent = artifact.tenant
+    ? `${artifact.tenant.display_name} / ${artifact.tenant.namespace}`
+    : artifact.project_id || "-";
   els.updatedAt.textContent = artifact.updated_at || "-";
   els.payload.textContent = json(artifact.payload);
   els.editName.value = artifact.name || "";
@@ -266,13 +301,13 @@ function renderLatestAudit(item) {
 function renderInstanceLink(artifact) {
   const key = artifact.canonical_key;
   if (key === "object:employee") {
-    els.instanceLink.href = "/instances.html?type=Employee";
+    els.instanceLink.href = `/instances.html?tenant=${encodeURIComponent(state.tenant)}&type=Employee`;
     els.instanceLink.textContent = "Browse Employee instances";
   } else if (key === "link:employee:1:n:order") {
-    els.instanceLink.href = "/instances.html?type=Employee&id=4";
+    els.instanceLink.href = `/instances.html?tenant=${encodeURIComponent(state.tenant)}&type=Employee&id=4`;
     els.instanceLink.textContent = "Open Employee #4 -> Orders";
   } else if (key === "object:order") {
-    els.instanceLink.href = "/instances.html?type=Employee&id=4";
+    els.instanceLink.href = `/instances.html?tenant=${encodeURIComponent(state.tenant)}&type=Employee&id=4`;
     els.instanceLink.textContent = "View Orders through Employee #4";
   } else {
     els.instanceLink.classList.add("hidden");
@@ -312,7 +347,7 @@ async function runAction(action) {
     showToast("Reason is required for this action.");
     return;
   }
-  const artifact = await fetchJson(`/api/artifacts/${encodeURIComponent(state.selectedKey)}/${action}`, {
+  const artifact = await fetchJson(urlWithTenant(`/api/artifacts/${encodeURIComponent(state.selectedKey)}/${action}`), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ reviewer: "Itachi", reason }),
@@ -345,7 +380,7 @@ async function saveEdit() {
     return;
   }
   const reason = els.reason.value.trim() || "Workbench edit";
-  const artifact = await fetchJson(`/api/artifacts/${encodeURIComponent(state.selectedKey)}/edit`, {
+  const artifact = await fetchJson(urlWithTenant(`/api/artifacts/${encodeURIComponent(state.selectedKey)}/edit`), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -366,6 +401,16 @@ els.refresh.addEventListener("click", () => loadArtifacts().catch((error) => sho
 els.search.addEventListener("input", debounce(() => loadArtifacts().catch((error) => showToast(error.message))));
 els.typeFilter.addEventListener("change", () => loadArtifacts().catch((error) => showToast(error.message)));
 els.statusFilter.addEventListener("change", () => loadArtifacts().catch((error) => showToast(error.message)));
+els.tenantSwitcher.addEventListener("change", async () => {
+  state.tenant = els.tenantSwitcher.value;
+  state.selectedKey = null;
+  const url = new URL(window.location.href);
+  url.searchParams.set("tenant", state.tenant);
+  url.searchParams.delete("artifact");
+  window.history.replaceState({}, "", url);
+  await loadTenants();
+  await loadArtifacts();
+});
 els.approve.addEventListener("click", () => runAction("approve").catch((error) => showToast(error.message)));
 els.needsChanges.addEventListener("click", () => runAction("needs-changes").catch((error) => showToast(error.message)));
 els.reject.addEventListener("click", () => runAction("reject").catch((error) => showToast(error.message)));
@@ -377,4 +422,6 @@ els.copyPayload.addEventListener("click", async () => {
   showToast("Payload copied.");
 });
 
-loadArtifacts().catch((error) => showToast(error.message));
+loadTenants()
+  .then(() => loadArtifacts())
+  .catch((error) => showToast(error.message));

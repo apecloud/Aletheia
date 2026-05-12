@@ -12,12 +12,26 @@ PROJECT_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 cd "$PROJECT_ROOT"
 
 # Optional parameter to specify phase: 1 (nodes), 2 (edges), or all (default).
-# Pass --include-unapproved as a second argument for explicit legacy/demo mode.
+# Pass --include-unapproved as a later argument for explicit legacy/demo mode.
 PHASE=${1:-all}
+TENANT=${ALETHEIA_TENANT:-default}
 INCLUDE_UNAPPROVED_FLAG=""
-if [ "${2:-}" == "--include-unapproved" ]; then
-    INCLUDE_UNAPPROVED_FLAG="--include-unapproved"
-fi
+shift || true
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --tenant)
+            TENANT="$2"
+            shift 2
+            ;;
+        --include-unapproved)
+            INCLUDE_UNAPPROVED_FLAG="--include-unapproved"
+            shift
+            ;;
+        *)
+            shift
+            ;;
+    esac
+done
 
 echo "================================================="
 echo "Starting Graph Ingestion Agent (Nebula Graph)..."
@@ -41,11 +55,12 @@ else
 fi
 
 echo "Using Model: $MODEL"
+echo "Using Tenant: $TENANT"
 
 echo "-------------------------------------------------"
 echo "Executing Graph ETL Pipeline..."
 echo "-------------------------------------------------"
-python agents/graph_ingestion_agent.py --model "$MODEL" --phase "$PHASE" $INCLUDE_UNAPPROVED_FLAG
+python agents/graph_ingestion_agent.py --tenant "$TENANT" --model "$MODEL" --phase "$PHASE" $INCLUDE_UNAPPROVED_FLAG
 
 echo "================================================="
 echo "Done! The data is now available in Nebula Graph."

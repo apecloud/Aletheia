@@ -14,6 +14,7 @@ DB_URL = os.environ.get(
     "ALETHEIA_PG_URL",
     f"postgresql+psycopg2://aletheia_pg_user:aletheia_pg_password@127.0.0.1:5432/{os.environ.get('ALETHEIA_PG_DB', 'aletheia_ontology')}",
 )
+DEFAULT_TENANT = os.environ.get("ALETHEIA_TENANT", "default")
 
 
 def get_engine():
@@ -30,7 +31,7 @@ def _json_dump(value):
     return json.dumps(value, ensure_ascii=False, sort_keys=True)
 
 
-def fetch_snapshot(conn):
+def fetch_snapshot(conn, tenant_id):
     artifacts = conn.execute(
         text(
             """
@@ -38,9 +39,11 @@ def fetch_snapshot(conn):
                    payload_json, confidence, source_refs_json, status, version,
                    source_agent, created_at, updated_at
             FROM aletheia_ontology_artifacts
+            WHERE project_id = :tenant_id
             ORDER BY canonical_key
             """
-        )
+        ),
+        {"tenant_id": tenant_id},
     ).mappings().all()
     evidence = conn.execute(
         text(
@@ -90,7 +93,7 @@ def export_snapshot(args):
     engine = get_engine()
     ensure_artifact_schema(engine)
     with engine.connect() as conn:
-        snapshot = fetch_snapshot(conn)
+        snapshot = fetch_snapshot(conn, args.tenant)
     body = json.dumps(snapshot, ensure_ascii=False, indent=2, sort_keys=True)
     if args.output:
         Path(args.output).write_text(body + "\n", encoding="utf-8")
@@ -107,9 +110,11 @@ def list_artifacts(args):
                 """
                 SELECT canonical_key, artifact_type, name, status, version, source_agent
                 FROM aletheia_ontology_artifacts
+                WHERE project_id = :tenant
                 ORDER BY artifact_type, canonical_key
                 """
-            )
+            ),
+            {"tenant": args.tenant},
         ).mappings().all()
     for row in rows:
         print(
@@ -118,18 +123,18 @@ def list_artifacts(args):
         )
 
 
-def _fetch_artifact_for_update(conn, canonical_key):
+def _fetch_artifact_for_update(conn, canonical_key, tenant):
     row = conn.execute(
         text(
             """
-            SELECT id, canonical_key, artifact_type, name, description, payload_json,
+            SELECT id, project_id, canonical_key, artifact_type, name, description, payload_json,
                    status, version
             FROM aletheia_ontology_artifacts
-            WHERE canonical_key = :canonical_key
+            WHERE project_id = :tenant AND canonical_key = :canonical_key
             FOR UPDATE
             """
         ),
-        {"canonical_key": canonical_key},
+        {"tenant": tenant, "canonical_key": canonical_key},
     ).mappings().first()
     if not row:
         raise SystemExit(f"Artifact not found: {canonical_key}")
@@ -154,17 +159,18 @@ def _record_review_event(
         text(
             """
             INSERT INTO aletheia_artifact_reviews
-            (artifact_id, canonical_key, decision, reviewer, reason,
+            (artifact_id, project_id, canonical_key, decision, reviewer, reason,
              before_status, after_status, before_version, after_version,
              before_payload_json, after_payload_json, created_at)
             VALUES
-            (:artifact_id, :canonical_key, :decision, :reviewer, :reason,
+            (:artifact_id, :project_id, :canonical_key, :decision, :reviewer, :reason,
              :before_status, :after_status, :before_version, :after_version,
              :before_payload_json, :after_payload_json, NOW())
             """
         ),
         {
             "artifact_id": artifact["id"],
+            "project_id": artifact.get("project_id", DEFAULT_TENANT),
             "canonical_key": artifact["canonical_key"],
             "decision": decision,
             "reviewer": reviewer,
@@ -183,7 +189,7 @@ def _review_status(args, status):
     engine = get_engine()
     ensure_artifact_schema(engine)
     with engine.begin() as conn:
-        artifact = _fetch_artifact_for_update(conn, args.canonical_key)
+        artifact = _fetch_artifact_for_update(conn, args.canonical_key, args.tenant)
         before_status = artifact["status"]
         before_version = artifact["version"]
         before_payload_json = artifact["payload_json"]
@@ -193,10 +199,10 @@ def _review_status(args, status):
                 """
                 UPDATE aletheia_ontology_artifacts
                 SET status = :status, version = version + 1, updated_at = NOW()
-                WHERE canonical_key = :canonical_key
+                WHERE project_id = :tenant AND canonical_key = :canonical_key
                 """
             ),
-            {"status": status, "canonical_key": args.canonical_key},
+            {"tenant": args.tenant, "status": status, "canonical_key": args.canonical_key},
         )
         _record_review_event(
             conn,
@@ -234,7 +240,7 @@ def comment_artifact(args):
     engine = get_engine()
     ensure_artifact_schema(engine)
     with engine.begin() as conn:
-        artifact = _fetch_artifact_for_update(conn, args.canonical_key)
+        artifact = _fetch_artifact_for_update(conn, args.canonical_key, args.tenant)
         _record_review_event(
             conn,
             artifact=artifact,
@@ -255,7 +261,7 @@ def edit_artifact(args):
     engine = get_engine()
     ensure_artifact_schema(engine)
     with engine.begin() as conn:
-        artifact = _fetch_artifact_for_update(conn, args.canonical_key)
+        artifact = _fetch_artifact_for_update(conn, args.canonical_key, args.tenant)
         payload = _load_json(artifact["payload_json"], {})
         if args.payload_json:
             payload = json.loads(args.payload_json)
@@ -274,10 +280,11 @@ def edit_artifact(args):
                     payload_json = :payload_json,
                     version = version + 1,
                     updated_at = NOW()
-                WHERE canonical_key = :canonical_key
+                WHERE project_id = :tenant AND canonical_key = :canonical_key
                 """
             ),
             {
+                "tenant": args.tenant,
                 "name": name,
                 "description": description,
                 "payload_json": after_payload_json,
@@ -311,10 +318,10 @@ def show_artifact(args):
                        payload_json, confidence, source_refs_json, status, version,
                        source_agent, created_at, updated_at
                 FROM aletheia_ontology_artifacts
-                WHERE canonical_key = :canonical_key
+                WHERE project_id = :tenant AND canonical_key = :canonical_key
                 """
             ),
-            {"canonical_key": args.canonical_key},
+            {"tenant": args.tenant, "canonical_key": args.canonical_key},
         ).mappings().first()
         if not artifact:
             raise SystemExit(f"Artifact not found: {args.canonical_key}")
@@ -404,18 +411,25 @@ def main():
     parser = argparse.ArgumentParser(description="Aletheia ontology artifact inspection and review CLI")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
+    def add_tenant_arg(subparser):
+        subparser.add_argument("--tenant", default=DEFAULT_TENANT, help="Tenant/project scope")
+
     export_parser = subparsers.add_parser("snapshot", help="Export artifact snapshot as JSON")
+    add_tenant_arg(export_parser)
     export_parser.add_argument("--output", "-o", help="Write snapshot to a file")
     export_parser.set_defaults(func=export_snapshot)
 
     list_parser = subparsers.add_parser("list", help="List artifact status and versions")
+    add_tenant_arg(list_parser)
     list_parser.set_defaults(func=list_artifacts)
 
     show_parser = subparsers.add_parser("show", help="Show one artifact with evidence and review history")
+    add_tenant_arg(show_parser)
     show_parser.add_argument("canonical_key")
     show_parser.set_defaults(func=show_artifact)
 
     status_parser = subparsers.add_parser("status", help="Set artifact status and record a review event")
+    add_tenant_arg(status_parser)
     status_parser.add_argument("canonical_key")
     status_parser.add_argument("status", choices=["draft", "proposed", "approved", "rejected", "needs_changes", "deprecated"])
     status_parser.add_argument("--reviewer", default=os.environ.get("USER", "unknown"))
@@ -423,30 +437,35 @@ def main():
     status_parser.set_defaults(func=update_status)
 
     approve_parser = subparsers.add_parser("approve", help="Approve an artifact for canonical/ingestion use")
+    add_tenant_arg(approve_parser)
     approve_parser.add_argument("canonical_key")
     approve_parser.add_argument("--reviewer", default=os.environ.get("USER", "unknown"))
     approve_parser.add_argument("--reason")
     approve_parser.set_defaults(func=approve_artifact)
 
     reject_parser = subparsers.add_parser("reject", help="Reject an artifact")
+    add_tenant_arg(reject_parser)
     reject_parser.add_argument("canonical_key")
     reject_parser.add_argument("--reviewer", default=os.environ.get("USER", "unknown"))
     reject_parser.add_argument("--reason", required=True)
     reject_parser.set_defaults(func=reject_artifact)
 
     changes_parser = subparsers.add_parser("needs-changes", help="Mark an artifact as needing changes")
+    add_tenant_arg(changes_parser)
     changes_parser.add_argument("canonical_key")
     changes_parser.add_argument("--reviewer", default=os.environ.get("USER", "unknown"))
     changes_parser.add_argument("--reason", required=True)
     changes_parser.set_defaults(func=needs_changes)
 
     comment_parser = subparsers.add_parser("comment", help="Add a review/audit comment without changing status")
+    add_tenant_arg(comment_parser)
     comment_parser.add_argument("canonical_key")
     comment_parser.add_argument("--reviewer", default=os.environ.get("USER", "unknown"))
     comment_parser.add_argument("--reason", required=True)
     comment_parser.set_defaults(func=comment_artifact)
 
     edit_parser = subparsers.add_parser("edit", help="Edit artifact name/description/payload and record audit history")
+    add_tenant_arg(edit_parser)
     edit_parser.add_argument("canonical_key")
     edit_parser.add_argument("--reviewer", default=os.environ.get("USER", "unknown"))
     edit_parser.add_argument("--reason", required=True)

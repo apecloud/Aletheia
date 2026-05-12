@@ -106,6 +106,7 @@ class ObjectModelerAgent:
 
     def run(self):
         logger.info("Starting Object Modeling workflow...")
+        project_id = os.environ.get("ALETHEIA_TENANT", "default")
         session = self.Session()
         try:
             metadata_dump = self.fetch_semantic_metadata(session)
@@ -118,17 +119,24 @@ class ObjectModelerAgent:
                 return
 
             # Clear old mappings (Idempotency)
-            session.query(BusinessLink).delete()
-            session.query(ObjectTableMapping).delete()
-            session.query(BusinessObject).delete()
-            delete_artifacts_by_type(session, ["object", "link"])
+            object_ids = [
+                row[0]
+                for row in session.query(BusinessObject.id).filter_by(project_id=project_id).all()
+            ]
+            session.query(BusinessLink).filter_by(project_id=project_id).delete()
+            if object_ids:
+                session.query(ObjectTableMapping).filter(ObjectTableMapping.object_id.in_(object_ids)).delete(
+                    synchronize_session=False
+                )
+            session.query(BusinessObject).filter_by(project_id=project_id).delete()
+            delete_artifacts_by_type(session, ["object", "link"], project_id=project_id)
             session.commit()
 
             # Save objects and mappings
             for obj_draft in llm_ontology.business_objects:
                 logger.info(f"Identified Business Object: {obj_draft.name}")
                 
-                new_obj = BusinessObject(name=obj_draft.name, description=obj_draft.description)
+                new_obj = BusinessObject(project_id=project_id, name=obj_draft.name, description=obj_draft.description)
                 session.add(new_obj)
                 session.flush() # Get ID
                 mapped_tables = []

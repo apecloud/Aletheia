@@ -10,6 +10,7 @@ from litellm import completion
 import instructor
 from graph_db_client import NebulaGraphClient
 from ontology_artifacts import ensure_artifact_schema
+from tenant_registry import TenantRegistry
 
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger("GraphIngestionAgent")
@@ -25,9 +26,22 @@ class EdgeExtractionQuery(BaseModel):
     ngql_schema: str = Field(description="Nebula Graph nGQL CREATE EDGE command. E.g., CREATE EDGE PLACED_ORDER ()")
 
 class GraphIngestionAgent:
-    def __init__(self, source_db_url: str, target_db_url: str, nebula_ip: str, nebula_port: int, nebula_user: str, nebula_pass: str, graph_space: str, model_name: str):
+    def __init__(
+        self,
+        source_db_url: str,
+        target_db_url: str,
+        nebula_ip: str,
+        nebula_port: int,
+        nebula_user: str,
+        nebula_pass: str,
+        graph_space: str,
+        model_name: str,
+        tenant_id: str = "default",
+    ):
         self.source_engine = create_engine(source_db_url)
         self.target_engine = create_engine(target_db_url)
+        self.tenant_id = tenant_id
+        self.graph_space = graph_space
         
         self.graph_client = NebulaGraphClient(
             ip=nebula_ip, 
@@ -43,7 +57,12 @@ class GraphIngestionAgent:
         else:
             self.model_name = model_name
             
-        logger.info(f"Initialized Graph Ingestion Agent with model: {self.model_name}")
+        logger.info(
+            "Initialized Graph Ingestion Agent with model=%s tenant=%s graph_database=%s",
+            self.model_name,
+            self.tenant_id,
+            self.graph_space,
+        )
 
     def __del__(self):
         if hasattr(self, 'graph_client'):
@@ -72,7 +91,8 @@ class GraphIngestionAgent:
                 FROM aletheia_business_objects o
                 LEFT JOIN aletheia_ontology_artifacts a ON o.artifact_id = a.id
                 {status_filter}
-            """)).mappings().all()
+                {"AND" if status_filter else "WHERE"} COALESCE(o.project_id, 'default') = :tenant_id
+            """), {"tenant_id": self.tenant_id}).mappings().all()
         if not objects and not include_unapproved:
             logger.warning("No approved business object artifacts found. Use --include-unapproved for legacy/demo ingestion.")
             
@@ -145,7 +165,9 @@ Rules:
                 JOIN aletheia_business_objects s ON l.source_object_id = s.id
                 JOIN aletheia_business_objects t ON l.target_object_id = t.id
                 LEFT JOIN aletheia_ontology_artifacts a ON l.artifact_id = a.id
-                """ + status_filter)).mappings().all()
+                """ + status_filter + f"""
+                {"AND" if status_filter else "WHERE"} COALESCE(l.project_id, 'default') = :tenant_id
+                """), {"tenant_id": self.tenant_id}).mappings().all()
         if not links and not include_unapproved:
             logger.warning("No approved business link artifacts found. Use --include-unapproved for legacy/demo ingestion.")
             
@@ -227,21 +249,27 @@ Rules:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--source", default=os.environ.get("ALETHEIA_MYSQL_URL", f"mysql+pymysql://aletheia_user:aletheia_password@127.0.0.1:3306/{os.environ.get('ALETHEIA_MYSQL_DB', 'aletheia_test_data')}"))
-    parser.add_argument("--target", default=os.environ.get("ALETHEIA_PG_URL", f"postgresql+psycopg2://aletheia_pg_user:aletheia_pg_password@127.0.0.1:5432/{os.environ.get('ALETHEIA_PG_DB', 'aletheia_ontology')}"))
+    parser.add_argument("--tenant", default=os.environ.get("ALETHEIA_TENANT", "default"))
+    parser.add_argument("--tenants-file", help="JSON file defining tenant graph/database routing")
+    parser.add_argument("--source")
+    parser.add_argument("--target")
     parser.add_argument("--nebula-ip", default="127.0.0.1")
     parser.add_argument("--nebula-port", type=int, default=9669)
     parser.add_argument("--nebula-user", default="root")
     parser.add_argument("--nebula-pass", default="nebula")
-    parser.add_argument("--graph-space", default=os.environ.get("ALETHEIA_GRAPH_SPACE", "aletheia"))
+    parser.add_argument("--graph-space")
     parser.add_argument("--model", default="gemini/gemini-3.1-pro-preview", help="Model name for litellm")
     parser.add_argument("--phase", default="all", choices=["1", "2", "all"], help="Which phase to run (1 for nodes, 2 for edges, all for both)")
     parser.add_argument("--include-unapproved", action="store_true", help="Legacy/demo mode: ingest draft or unreviewed artifacts")
     args = parser.parse_args()
+    tenant = TenantRegistry.load(args.tenants_file).get(args.tenant)
     
     agent = GraphIngestionAgent(
-        source_db_url=args.source, target_db_url=args.target, 
+        source_db_url=args.source or tenant.source_db_url,
+        target_db_url=args.target or tenant.metadata_db_url,
         nebula_ip=args.nebula_ip, nebula_port=args.nebula_port, nebula_user=args.nebula_user, nebula_pass=args.nebula_pass,
-        graph_space=args.graph_space, model_name=args.model
+        graph_space=args.graph_space or tenant.graph_database,
+        model_name=args.model,
+        tenant_id=tenant.tenant_id,
     )
     agent.run(phase=args.phase, include_unapproved=args.include_unapproved)

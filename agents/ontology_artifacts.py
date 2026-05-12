@@ -1,5 +1,6 @@
 import json
 import hashlib
+import os
 from datetime import datetime
 from typing import Any, Iterable
 
@@ -65,6 +66,7 @@ class BusinessObject(Base):
     __tablename__ = "aletheia_business_objects"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
+    project_id = Column(String(255), nullable=False, default="default")
     name = Column(String(255), nullable=False, unique=True)
     description = Column(Text)
     artifact_id = Column(Integer, ForeignKey("aletheia_ontology_artifacts.id"))
@@ -86,6 +88,7 @@ class BusinessLink(Base):
     __tablename__ = "aletheia_business_links"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
+    project_id = Column(String(255), nullable=False, default="default")
     source_object_id = Column(Integer, ForeignKey("aletheia_business_objects.id"), nullable=False)
     target_object_id = Column(Integer, ForeignKey("aletheia_business_objects.id"), nullable=False)
     link_type = Column(String(50))
@@ -101,6 +104,7 @@ class BusinessAction(Base):
     __tablename__ = "aletheia_business_actions"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
+    project_id = Column(String(255), nullable=False, default="default")
     name = Column(String(255), nullable=False)
     action_type = Column(String(50))
     source_name = Column(String(255), nullable=False)
@@ -117,7 +121,7 @@ class OntologyArtifact(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     project_id = Column(String(255), nullable=False, default="default")
-    canonical_key = Column(String(255), nullable=False, unique=True)
+    canonical_key = Column(String(255), nullable=False)
     artifact_type = Column(String(50), nullable=False)
     name = Column(String(255), nullable=False)
     description = Column(Text)
@@ -154,6 +158,7 @@ class ArtifactReviewEvent(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     artifact_id = Column(Integer, ForeignKey("aletheia_ontology_artifacts.id"), nullable=False)
+    project_id = Column(String(255), nullable=False, default="default")
     canonical_key = Column(String(255), nullable=False)
     decision = Column(String(50), nullable=False)
     reviewer = Column(String(255), nullable=False)
@@ -177,13 +182,14 @@ def upsert_artifact(
     payload: dict[str, Any],
     source_refs: Iterable[str],
     source_agent: str,
-    project_id: str = "default",
+    project_id: str | None = None,
     confidence: float = 1.0,
     status: str = "draft",
 ) -> OntologyArtifact:
     canonical_key = canonical_key_for(artifact_type, natural_key)
+    project_id = project_id or os.environ.get("ALETHEIA_TENANT", "default")
     source_refs_list = list(dict.fromkeys(source_refs))
-    artifact = session.query(OntologyArtifact).filter_by(canonical_key=canonical_key).first()
+    artifact = session.query(OntologyArtifact).filter_by(project_id=project_id, canonical_key=canonical_key).first()
 
     if artifact:
         is_new = False
@@ -286,14 +292,16 @@ def replace_evidence(
         )
 
 
-def delete_artifacts_by_type(session, artifact_types: Iterable[str]) -> None:
+def delete_artifacts_by_type(session, artifact_types: Iterable[str], project_id: str | None = None) -> None:
     artifact_type_list = list(artifact_types)
     if not artifact_type_list:
         return
+    project_id = project_id or os.environ.get("ALETHEIA_TENANT", "default")
     artifact_ids = [
         row[0]
         for row in session.query(OntologyArtifact.id)
         .filter(OntologyArtifact.artifact_type.in_(artifact_type_list))
+        .filter(OntologyArtifact.project_id == project_id)
         .all()
     ]
     if not artifact_ids:
@@ -309,6 +317,14 @@ def delete_artifacts_by_type(session, artifact_types: Iterable[str]) -> None:
 def ensure_artifact_schema(engine) -> None:
     Base.metadata.create_all(engine)
     with engine.begin() as conn:
+        conn.execute(text("ALTER TABLE aletheia_artifact_reviews ADD COLUMN IF NOT EXISTS project_id VARCHAR(255) DEFAULT 'default'"))
+        conn.execute(text("UPDATE aletheia_artifact_reviews r SET project_id = a.project_id FROM aletheia_ontology_artifacts a WHERE r.artifact_id = a.id AND (r.project_id IS NULL OR r.project_id = 'default')"))
+        conn.execute(text("ALTER TABLE aletheia_artifact_reviews ALTER COLUMN project_id SET NOT NULL"))
+        conn.execute(text("ALTER TABLE aletheia_business_objects ADD COLUMN IF NOT EXISTS project_id VARCHAR(255) DEFAULT 'default'"))
+        conn.execute(text("ALTER TABLE aletheia_business_links ADD COLUMN IF NOT EXISTS project_id VARCHAR(255) DEFAULT 'default'"))
+        conn.execute(text("ALTER TABLE aletheia_business_actions ADD COLUMN IF NOT EXISTS project_id VARCHAR(255) DEFAULT 'default'"))
+        conn.execute(text("ALTER TABLE aletheia_ontology_artifacts DROP CONSTRAINT IF EXISTS aletheia_ontology_artifacts_canonical_key_key"))
+        conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_aletheia_artifacts_project_key ON aletheia_ontology_artifacts (project_id, canonical_key)"))
         conn.execute(text("ALTER TABLE aletheia_business_objects ADD COLUMN IF NOT EXISTS artifact_id INTEGER"))
         conn.execute(text("ALTER TABLE aletheia_business_objects ADD COLUMN IF NOT EXISTS graph_label VARCHAR(255)"))
         conn.execute(text("ALTER TABLE aletheia_business_objects ADD COLUMN IF NOT EXISTS extraction_sql TEXT"))
@@ -318,6 +334,10 @@ def ensure_artifact_schema(engine) -> None:
         conn.execute(text("ALTER TABLE aletheia_business_links ADD COLUMN IF NOT EXISTS extraction_sql TEXT"))
         conn.execute(text("ALTER TABLE aletheia_business_links ADD COLUMN IF NOT EXISTS ngql_schema TEXT"))
         conn.execute(text("ALTER TABLE aletheia_business_actions ADD COLUMN IF NOT EXISTS artifact_id INTEGER"))
+
+
+def _project_id_for(row) -> str:
+    return getattr(row, "project_id", None) or os.environ.get("ALETHEIA_TENANT", "default")
 
 
 def sync_object_artifact(session, obj: BusinessObject, mapped_tables: list[ExtractedTable]) -> OntologyArtifact:
@@ -335,6 +355,7 @@ def sync_object_artifact(session, obj: BusinessObject, mapped_tables: list[Extra
         },
         source_refs=source_refs,
         source_agent="ObjectModelerAgent",
+        project_id=_project_id_for(obj),
     )
     replace_evidence(
         session,
@@ -376,6 +397,7 @@ def sync_link_artifact(session, link: BusinessLink, source_obj: BusinessObject, 
             f"object:{target_obj.name}",
         ],
         source_agent="LinkWeaverAgent",
+        project_id=_project_id_for(link),
     )
     replace_evidence(
         session,
@@ -416,6 +438,7 @@ def sync_action_artifact(session, action: BusinessAction) -> OntologyArtifact:
         },
         source_refs=[f"{action.action_type}:{action.source_name}"],
         source_agent="ActionSynthesizerAgent",
+        project_id=_project_id_for(action),
         status="draft" if action.is_safe else "needs_review",
     )
     replace_evidence(

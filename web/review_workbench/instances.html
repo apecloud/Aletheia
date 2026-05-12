@@ -22,6 +22,17 @@
           <span>Default instance browsing uses only approved Object and Link artifacts.</span>
         </section>
 
+        <section class="tenant-panel" aria-label="Tenant context">
+          <label>
+            Tenant
+            <select id="tenant-switcher"></select>
+          </label>
+          <dl>
+            <div><dt>Namespace</dt><dd id="tenant-namespace">-</dd></div>
+            <div><dt>Graph database</dt><dd id="tenant-graph">-</dd></div>
+          </dl>
+        </section>
+
         <section class="filters">
           <select id="instance-type" aria-label="Object type">
             <option value="Employee">Employee</option>

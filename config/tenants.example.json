@@ -1,0 +1,19 @@
+{
+  "default_tenant": "default",
+  "tenants": [
+    {
+      "tenant_id": "default",
+      "namespace": "northwind",
+      "display_name": "Northwind Demo",
+      "graph_database": "aletheia",
+      "status": "active"
+    },
+    {
+      "tenant_id": "northwind-sandbox",
+      "namespace": "northwind_sandbox",
+      "display_name": "Northwind Sandbox",
+      "graph_database": "aletheia_sandbox",
+      "status": "active"
+    }
+  ]
+}
