@@ -1,0 +1,287 @@
+{
+  "task": 50,
+  "validated_at": "2026-05-12T07:17:35.093772+00:00",
+  "base_url": "http://127.0.0.1:8766",
+  "result": "PASS",
+  "default_runs": [
+    {
+      "approved": true,
+      "tenant_id": "default",
+      "run_key": "reasoning:employee-4-workload-analysis:run:1778570254960",
+      "status": "completed",
+      "finding_count": 2,
+      "finding_statuses": [
+        "draft",
+        "draft"
+      ],
+      "evidence_path_counts": [
+        4,
+        3
+      ],
+      "tool_calls": [
+        {
+          "approved_only": true,
+          "status": "completed",
+          "tenant_id": "default",
+          "tool": "graph_query"
+        },
+        {
+          "id": "4",
+          "object_type": "Employee",
+          "status": "completed",
+          "tenant_id": "default",
+          "tool": "instance_lookup"
+        },
+        {
+          "id": "10250",
+          "object_type": "Order",
+          "status": "completed",
+          "tenant_id": "default",
+          "tool": "instance_lookup"
+        },
+        {
+          "canonical_key": "link:employee:1:n:order",
+          "status": "completed",
+          "tenant_id": "default",
+          "tool": "artifact_lookup"
+        },
+        {
+          "status": "completed",
+          "tenant_id": "default",
+          "tool": "propose_finding",
+          "write_scope": "draft_reasoning_artifact"
+        },
+        {
+          "status": "completed",
+          "tenant_id": "default",
+          "tool": "propose_action",
+          "write_scope": "draft_action_proposal"
+        }
+      ],
+      "unsupported_claims": [],
+      "eval_result": {
+        "approved_only": true,
+        "evidence_path_count": 4,
+        "finding_count": 2,
+        "passed": true,
+        "tenant_id": "default",
+        "unsupported_claims": []
+      },
+      "output_summary": "Employee #4 handled 156 orders, 18.8% of all Northwind orders in this tenant. The largest customer contributes 5 orders (3.2% of Employee #4's workload), so customer concentration risk is low; the primary signal is workload volume."
+    },
+    {
+      "approved": true,
+      "tenant_id": "default",
+      "run_key": "reasoning:employee-4-workload-analysis:run:1778570255023",
+      "status": "completed",
+      "finding_count": 2,
+      "finding_statuses": [
+        "draft",
+        "draft"
+      ],
+      "evidence_path_counts": [
+        4,
+        3
+      ],
+      "tool_calls": [
+        {
+          "approved_only": true,
+          "status": "completed",
+          "tenant_id": "default",
+          "tool": "graph_query"
+        },
+        {
+          "id": "4",
+          "object_type": "Employee",
+          "status": "completed",
+          "tenant_id": "default",
+          "tool": "instance_lookup"
+        },
+        {
+          "id": "10250",
+          "object_type": "Order",
+          "status": "completed",
+          "tenant_id": "default",
+          "tool": "instance_lookup"
+        },
+        {
+          "canonical_key": "link:employee:1:n:order",
+          "status": "completed",
+          "tenant_id": "default",
+          "tool": "artifact_lookup"
+        },
+        {
+          "status": "completed",
+          "tenant_id": "default",
+          "tool": "propose_finding",
+          "write_scope": "draft_reasoning_artifact"
+        },
+        {
+          "status": "completed",
+          "tenant_id": "default",
+          "tool": "propose_action",
+          "write_scope": "draft_action_proposal"
+        }
+      ],
+      "unsupported_claims": [],
+      "eval_result": {
+        "approved_only": true,
+        "evidence_path_count": 4,
+        "finding_count": 2,
+        "passed": true,
+        "tenant_id": "default",
+        "unsupported_claims": []
+      },
+      "output_summary": "Employee #4 handled 156 orders, 18.8% of all Northwind orders in this tenant. The largest customer contributes 5 orders (3.2% of Employee #4's workload), so customer concentration risk is low; the primary signal is workload volume."
+    }
+  ],
+  "repeat_run_stability": {
+    "finding_count_stable": true,
+    "evidence_path_counts": [
+      4,
+      3
+    ],
+    "unsupported_claims": [],
+    "employee_4_order_fact": "156 orders / 830 total orders / 18.8% share"
+  },
+  "evidence_checks": [
+    {
+      "finding": "finding:employee-4-workload-concentration:run-1778570255023",
+      "kind": "instance_node",
+      "url": "/instances.html?tenant=default&type=Employee&id=4&node=Employee%3A4",
+      "status": 200,
+      "source_ref": "employees.employeeID=4"
+    },
+    {
+      "finding": "finding:employee-4-workload-concentration:run-1778570255023",
+      "kind": "instance_edge",
+      "url": "/instances.html?tenant=default&type=Employee&id=4&edgeSource=Employee%3A4&edgeTarget=Order%3A10250",
+      "status": 200,
+      "source_ref": "orders.employeeID"
+    },
+    {
+      "finding": "finding:employee-4-workload-concentration:run-1778570255023",
+      "kind": "ontology_artifact",
+      "url": "/?tenant=default&artifact=link%3Aemployee%3A1%3An%3Aorder",
+      "status": 200,
+      "source_ref": "artifact:link:employee:1:n:order"
+    },
+    {
+      "finding": "finding:employee-4-workload-concentration:run-1778570255023",
+      "kind": "aggregate",
+      "url": "/reasoning.html?tenant=default&task=reasoning:employee-4-workload-analysis",
+      "status": 200,
+      "source_ref": "orders.employeeID=4"
+    },
+    {
+      "finding": "finding:employee-4-follow-up-risk-review:run-1778570255023",
+      "kind": "instance_node",
+      "url": "/instances.html?tenant=default&type=Employee&id=4&node=Employee%3A4",
+      "status": 200,
+      "source_ref": "employees.employeeID=4"
+    },
+    {
+      "finding": "finding:employee-4-follow-up-risk-review:run-1778570255023",
+      "kind": "instance_edge",
+      "url": "/instances.html?tenant=default&type=Employee&id=4&edgeSource=Employee%3A4&edgeTarget=Order%3A10250",
+      "status": 200,
+      "source_ref": "orders.employeeID"
+    },
+    {
+      "finding": "finding:employee-4-follow-up-risk-review:run-1778570255023",
+      "kind": "aggregate",
+      "url": "/reasoning.html?tenant=default&task=reasoning:employee-4-workload-analysis",
+      "status": 200,
+      "source_ref": "orders.employeeID=4"
+    }
+  ],
+  "direct_api_evidence": {
+    "edge_ontology_link": "link:employee:1:n:order",
+    "edge_source_field": "orders.employeeID",
+    "artifact_status": "approved",
+    "artifact_version_before": 6,
+    "artifact_version_after": 6
+  },
+  "sandbox_negative_gate": {
+    "approved": false,
+    "status": "blocked",
+    "finding_count": 0,
+    "missing_approved_artifacts": [
+      "object:order",
+      "link:employee:1:n:order"
+    ],
+    "evidence_path_count": 0,
+    "sandbox_get_default_finding_status": 404
+  },
+  "unsupported_claim_validation": {
+    "api_injection_endpoint": "not present in MVP; validation checks deterministic output and evidence coverage",
+    "run_eval_unsupported_claims": [],
+    "finding_checks": [
+      {
+        "finding": "finding:employee-4-workload-concentration:run-1778570255023",
+        "unsupported_claims": [],
+        "has_156_orders_evidence": true,
+        "has_customer_evidence": true,
+        "evidence_count": 4
+      },
+      {
+        "finding": "finding:employee-4-follow-up-risk-review:run-1778570255023",
+        "unsupported_claims": [],
+        "has_156_orders_evidence": true,
+        "has_customer_evidence": true,
+        "evidence_count": 3
+      }
+    ]
+  },
+  "write_boundary": {
+    "agent_created_statuses": [
+      "draft",
+      "draft"
+    ],
+    "write_tool_scopes": [
+      {
+        "status": "completed",
+        "tenant_id": "default",
+        "tool": "propose_finding",
+        "write_scope": "draft_reasoning_artifact"
+      },
+      {
+        "status": "completed",
+        "tenant_id": "default",
+        "tool": "propose_action",
+        "write_scope": "draft_action_proposal"
+      }
+    ],
+    "needs_changes_without_reason_status": 400,
+    "manual_review_status": "approved",
+    "manual_review_latest_event": {
+      "decision": "approved",
+      "reviewer": "Saskue",
+      "reason": "task #50 manual review gate validation",
+      "before_status": "draft",
+      "after_status": "approved",
+      "before_version": 1,
+      "after_version": 2,
+      "created_at": "2026-05-12 07:17:35.077338"
+    },
+    "canonical_artifact_status_before_after": [
+      "approved",
+      "approved"
+    ],
+    "canonical_artifact_version_before_after": [
+      6,
+      6
+    ]
+  },
+  "ui_checks": {
+    "reasoning_url": "http://127.0.0.1:8766/reasoning.html?tenant=default&task=reasoning%3Aemployee-4-workload-analysis",
+    "sandbox_url": "http://127.0.0.1:8766/reasoning.html?tenant=northwind-sandbox&task=reasoning%3Aemployee-4-workload-analysis",
+    "static_tokens_present": [
+      "portal-shell",
+      "nav-reasoning",
+      "Reasoning trace",
+      "evidence-paths",
+      "review-gate"
+    ]
+  }
+}

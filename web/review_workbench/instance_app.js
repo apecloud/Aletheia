@@ -17,6 +17,7 @@ const els = {
   shellTenantMeta: document.querySelector("#shell-tenant-meta"),
   navWorkbench: document.querySelector("#nav-workbench"),
   navInstances: document.querySelector("#nav-instances"),
+  navReasoning: document.querySelector("#nav-reasoning"),
   breadcrumb: document.querySelector("#breadcrumb"),
   results: document.querySelector("#instance-results"),
   graphTitle: document.querySelector("#graph-title"),
@@ -82,6 +83,7 @@ async function loadTenants() {
   }
   els.navWorkbench.href = `/?tenant=${encodeURIComponent(state.tenant)}`;
   els.navInstances.href = `/instances.html?tenant=${encodeURIComponent(state.tenant)}&type=Employee&id=4`;
+  els.navReasoning.href = `/reasoning.html?tenant=${encodeURIComponent(state.tenant)}`;
 }
 
 async function searchInstances() {

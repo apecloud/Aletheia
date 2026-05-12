@@ -172,6 +172,77 @@ class ArtifactReviewEvent(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
+class ReasoningTask(Base):
+    __tablename__ = "aletheia_reasoning_tasks"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    project_id = Column(String(255), nullable=False, default="default")
+    canonical_key = Column(String(255), nullable=False)
+    question = Column(Text, nullable=False)
+    scope_json = Column(Text, nullable=False, default="{}")
+    allowed_tools_json = Column(Text, nullable=False, default="[]")
+    status = Column(String(50), nullable=False, default="active")
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class ReasoningRun(Base):
+    __tablename__ = "aletheia_reasoning_runs"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    task_id = Column(Integer, ForeignKey("aletheia_reasoning_tasks.id"), nullable=False)
+    project_id = Column(String(255), nullable=False, default="default")
+    run_key = Column(String(255), nullable=False)
+    agent_name = Column(String(255), nullable=False)
+    prompt_version = Column(String(100), nullable=False)
+    query_plan_json = Column(Text, nullable=False, default="[]")
+    tool_calls_json = Column(Text, nullable=False, default="[]")
+    evidence_paths_json = Column(Text, nullable=False, default="[]")
+    output_json = Column(Text, nullable=False, default="{}")
+    eval_result_json = Column(Text, nullable=False, default="{}")
+    status = Column(String(50), nullable=False, default="completed")
+    latency_ms = Column(Integer, nullable=False, default=0)
+    cost_estimate = Column(Float, nullable=False, default=0.0)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class ReasoningFinding(Base):
+    __tablename__ = "aletheia_reasoning_findings"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    run_id = Column(Integer, ForeignKey("aletheia_reasoning_runs.id"), nullable=False)
+    project_id = Column(String(255), nullable=False, default="default")
+    canonical_key = Column(String(255), nullable=False)
+    title = Column(String(255), nullable=False)
+    conclusion = Column(Text, nullable=False)
+    confidence = Column(Float, nullable=False, default=0.0)
+    supporting_evidence_json = Column(Text, nullable=False, default="[]")
+    counter_evidence_json = Column(Text, nullable=False, default="[]")
+    recommended_action_json = Column(Text, nullable=False, default="{}")
+    status = Column(String(50), nullable=False, default="draft")
+    version = Column(Integer, nullable=False, default=1)
+    source_agent = Column(String(255), nullable=False, default="ReasoningWorkbenchAgent")
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class ReasoningReviewEvent(Base):
+    __tablename__ = "aletheia_reasoning_reviews"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    finding_id = Column(Integer, ForeignKey("aletheia_reasoning_findings.id"), nullable=False)
+    project_id = Column(String(255), nullable=False, default="default")
+    canonical_key = Column(String(255), nullable=False)
+    decision = Column(String(50), nullable=False)
+    reviewer = Column(String(255), nullable=False)
+    reason = Column(Text)
+    before_status = Column(String(50))
+    after_status = Column(String(50))
+    before_version = Column(Integer)
+    after_version = Column(Integer)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
 def upsert_artifact(
     session,
     *,
@@ -334,6 +405,9 @@ def ensure_artifact_schema(engine) -> None:
         conn.execute(text("ALTER TABLE aletheia_business_links ADD COLUMN IF NOT EXISTS extraction_sql TEXT"))
         conn.execute(text("ALTER TABLE aletheia_business_links ADD COLUMN IF NOT EXISTS ngql_schema TEXT"))
         conn.execute(text("ALTER TABLE aletheia_business_actions ADD COLUMN IF NOT EXISTS artifact_id INTEGER"))
+        conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_aletheia_reasoning_tasks_project_key ON aletheia_reasoning_tasks (project_id, canonical_key)"))
+        conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_aletheia_reasoning_runs_project_key ON aletheia_reasoning_runs (project_id, run_key)"))
+        conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_aletheia_reasoning_findings_project_key ON aletheia_reasoning_findings (project_id, canonical_key)"))
 
 
 def _project_id_for(row) -> str:

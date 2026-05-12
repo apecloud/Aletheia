@@ -3,6 +3,7 @@ import json
 import mimetypes
 import os
 import sys
+import time
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -737,9 +738,621 @@ class InstanceRepository:
         return {key: _jsonable(value) for key, value in dict(row).items()}
 
 
+class ReasoningRepository:
+    TASK_KEY = "reasoning:employee-4-workload-analysis"
+    QUESTION = "Why did Employee #4 handle so many orders? Is there abnormal workload or customer concentration risk?"
+    REQUIRED_ARTIFACTS = ["object:employee", "object:order", "link:employee:1:n:order"]
+
+    def __init__(self, tenant_registry, instance_repository, ensure_schema=False):
+        self.tenant_registry = tenant_registry
+        self.instance_repository = instance_repository
+        self.ensure_schema = ensure_schema
+        self.metadata_engines = {}
+        self.source_engines = {}
+
+    def tenant(self, tenant_id=None):
+        return self.tenant_registry.get(tenant_id)
+
+    def metadata_engine_for(self, tenant):
+        engine = self.metadata_engines.get(tenant.metadata_db_url)
+        if engine is None:
+            engine = create_engine(tenant.metadata_db_url)
+            self.metadata_engines[tenant.metadata_db_url] = engine
+            if self.ensure_schema:
+                ensure_artifact_schema(engine)
+            self.tenant_registry.ensure_metadata(engine)
+        return engine
+
+    def source_engine_for(self, tenant):
+        engine = self.source_engines.get(tenant.source_db_url)
+        if engine is None:
+            engine = create_engine(tenant.source_db_url)
+            self.source_engines[tenant.source_db_url] = engine
+        return engine
+
+    def list_tasks(self, tenant):
+        task = self.ensure_default_task(tenant)
+        latest = self.latest_run(tenant, self.TASK_KEY)
+        return {
+            "tenant": tenant.public_dict(),
+            "tasks": [
+                {
+                    **task,
+                    "latest_run": latest,
+                }
+            ],
+        }
+
+    def get_task(self, tenant, task_key):
+        task = self.ensure_default_task(tenant)
+        if task_key != self.TASK_KEY:
+            return None
+        return {
+            "tenant": tenant.public_dict(),
+            "task": task,
+            "latest_run": self.latest_run(tenant, task_key),
+            "findings": self.list_findings(tenant, task_key),
+        }
+
+    def ensure_default_task(self, tenant):
+        scope = {
+            "object_type": "Employee",
+            "instance_id": "4",
+            "depth": 1,
+            "required_artifacts": self.REQUIRED_ARTIFACTS,
+            "graph_database": tenant.graph_database,
+            "mvp_boundary": "fixed Northwind Employee #4 workload analysis",
+        }
+        allowed_tools = ["graph_query", "instance_lookup", "artifact_lookup", "propose_finding", "propose_action"]
+        with self.metadata_engine_for(tenant).begin() as conn:
+            conn.execute(
+                text(
+                    """
+                    INSERT INTO aletheia_reasoning_tasks
+                    (project_id, canonical_key, question, scope_json, allowed_tools_json, status, created_at, updated_at)
+                    VALUES (:tenant_id, :canonical_key, :question, :scope_json, :allowed_tools_json, 'active', NOW(), NOW())
+                    ON CONFLICT (project_id, canonical_key) DO UPDATE SET
+                      question = EXCLUDED.question,
+                      scope_json = EXCLUDED.scope_json,
+                      allowed_tools_json = EXCLUDED.allowed_tools_json,
+                      status = 'active',
+                      updated_at = NOW()
+                    """
+                ),
+                {
+                    "tenant_id": tenant.tenant_id,
+                    "canonical_key": self.TASK_KEY,
+                    "question": self.QUESTION,
+                    "scope_json": _json_dump(scope),
+                    "allowed_tools_json": _json_dump(allowed_tools),
+                },
+            )
+            row = conn.execute(
+                text(
+                    """
+                    SELECT id, project_id, canonical_key, question, scope_json, allowed_tools_json,
+                           status, created_at, updated_at
+                    FROM aletheia_reasoning_tasks
+                    WHERE project_id = :tenant_id AND canonical_key = :canonical_key
+                    """
+                ),
+                {"tenant_id": tenant.tenant_id, "canonical_key": self.TASK_KEY},
+            ).mappings().first()
+        return self._task_to_dict(row)
+
+    def run_task(self, tenant, task_key):
+        if task_key != self.TASK_KEY:
+            return None
+        started = time.monotonic()
+        task = self.ensure_default_task(tenant)
+        graph = self.graph_query(tenant, "Employee", "4")
+        query_plan = [
+            "Validate current tenant and approved-only artifact gate.",
+            "Read Employee #4 1-hop Employee -> Order graph.",
+            "Inspect Employee #4 source row and representative Order evidence.",
+            "Aggregate workload and customer concentration from tenant source rows.",
+            "Propose draft finding and action proposal with evidence paths.",
+        ]
+        tool_calls = [
+            {"tool": "graph_query", "tenant_id": tenant.tenant_id, "approved_only": True, "status": "completed" if graph.get("approved") else "blocked"},
+        ]
+        if not graph.get("approved"):
+            output = {
+                "summary": "Reasoning blocked by tenant-scoped approved-only gate.",
+                "missing_approved_artifacts": graph.get("missing_approved_artifacts", []),
+                "unsupported_claims": [],
+            }
+            eval_result = {
+                "passed": False,
+                "reason": "missing approved artifacts",
+                "unsupported_claims": [],
+                "evidence_path_count": 0,
+            }
+            run = self._record_run(
+                tenant,
+                task,
+                query_plan,
+                tool_calls,
+                [],
+                output,
+                eval_result,
+                "blocked",
+                started,
+            )
+            return {"tenant": tenant.public_dict(), "task": task, "run": run, "findings": [], "approved": False}
+
+        employee = self.instance_lookup(tenant, "Employee", "4")
+        edge = self.edge_lookup(tenant, "Employee:4", "Order:10250")
+        artifact = self.artifact_lookup(tenant, "link:employee:1:n:order")
+        workload = self._workload_stats(tenant, "4")
+        evidence_paths = self._evidence_paths(tenant, employee, edge, artifact, workload)
+        tool_calls.extend(
+            [
+                {"tool": "instance_lookup", "tenant_id": tenant.tenant_id, "object_type": "Employee", "id": "4", "status": "completed"},
+                {"tool": "instance_lookup", "tenant_id": tenant.tenant_id, "object_type": "Order", "id": "10250", "status": "completed"},
+                {"tool": "artifact_lookup", "tenant_id": tenant.tenant_id, "canonical_key": "link:employee:1:n:order", "status": "completed"},
+                {"tool": "propose_finding", "tenant_id": tenant.tenant_id, "write_scope": "draft_reasoning_artifact", "status": "completed"},
+                {"tool": "propose_action", "tenant_id": tenant.tenant_id, "write_scope": "draft_action_proposal", "status": "completed"},
+            ]
+        )
+        concentration_label = "moderate"
+        if workload["top_customer_share"] >= 0.35:
+            concentration_label = "high"
+        elif workload["top_customer_share"] < 0.2:
+            concentration_label = "low"
+        conclusion = (
+            f"Employee #4 handled {workload['order_count']} orders, "
+            f"{workload['employee_share_percent']:.1f}% of all Northwind orders in this tenant. "
+            f"The largest customer contributes {workload['top_customer_orders']} orders "
+            f"({workload['top_customer_share_percent']:.1f}% of Employee #4's workload), "
+            f"so customer concentration risk is {concentration_label}; the primary signal is workload volume."
+        )
+        recommended_action = {
+            "type": "review_workload",
+            "title": "Review Employee #4 workload distribution",
+            "description": "Validate whether this order volume reflects role specialization, historical assignment rules, or a workload imbalance before changing operations.",
+            "execution_boundary": "proposal_only",
+        }
+        finding_suffix = f"run-{int(time.time() * 1000)}"
+        workload_finding = {
+            "canonical_key": f"finding:employee-4-workload-concentration:{finding_suffix}",
+            "title": "Employee #4 carries a high order volume with bounded customer concentration",
+            "conclusion": conclusion,
+            "confidence": 0.82,
+            "supporting_evidence": evidence_paths,
+            "counter_evidence": [
+                {
+                    "kind": "limitation",
+                    "summary": "MVP uses 1-hop Employee -> Order evidence only; it does not yet inspect product, revenue, or time-window seasonality.",
+                }
+            ],
+            "recommended_action": recommended_action,
+        }
+        follow_up_finding = {
+            "canonical_key": f"finding:employee-4-follow-up-risk-review:{finding_suffix}",
+            "title": "Employee #4 workload needs time, customer, and freight follow-up before action",
+            "conclusion": (
+                "The approved 1-hop graph supports the workload concentration claim, but it is not enough "
+                "to classify operational risk as abnormal. A reviewer should inspect orderDate, customer mix, "
+                "and freight distribution before changing assignment rules."
+            ),
+            "confidence": 0.74,
+            "supporting_evidence": [
+                evidence_paths[0],
+                evidence_paths[1],
+                evidence_paths[3],
+            ],
+            "counter_evidence": [
+                {
+                    "kind": "scope_limit",
+                    "summary": "No product, category, or revenue 2-hop evidence is used in this MVP run.",
+                },
+                {
+                    "kind": "review_required",
+                    "summary": "The recommended action is a review proposal, not an automated operational change.",
+                },
+            ],
+            "recommended_action": {
+                "type": "inspect_distribution",
+                "title": "Inspect time, customer, and freight distribution for Employee #4",
+                "description": "Run a bounded follow-up analysis before deciding whether the workload is normal specialization or a risk.",
+                "execution_boundary": "proposal_only",
+            },
+        }
+        findings = [workload_finding, follow_up_finding]
+        output = {
+            "summary": conclusion,
+            "finding_keys": [finding["canonical_key"] for finding in findings],
+            "unsupported_claims": [],
+        }
+        eval_result = {
+            "passed": len(findings) >= 2 and all(len(finding["supporting_evidence"]) >= 2 for finding in findings),
+            "unsupported_claims": [],
+            "evidence_path_count": len(evidence_paths),
+            "finding_count": len(findings),
+            "tenant_id": tenant.tenant_id,
+            "approved_only": True,
+        }
+        run = self._record_run(
+            tenant,
+            task,
+            query_plan,
+            tool_calls,
+            evidence_paths,
+            output,
+            eval_result,
+            "completed",
+            started,
+        )
+        finding_rows = [self._record_finding(tenant, run, finding) for finding in findings]
+        return {
+            "tenant": tenant.public_dict(),
+            "task": task,
+            "run": run,
+            "findings": finding_rows,
+            "approved": True,
+        }
+
+    def graph_query(self, tenant, object_type, instance_id):
+        return self.instance_repository.neighborhood(tenant, object_type, instance_id, depth=1, limit=200)
+
+    def instance_lookup(self, tenant, object_type, instance_id):
+        return self.instance_repository.detail(tenant, object_type, instance_id)
+
+    def edge_lookup(self, tenant, source, target):
+        return self.instance_repository.edge_detail(tenant, source, target)
+
+    def artifact_lookup(self, tenant, canonical_key):
+        with self.metadata_engine_for(tenant).connect() as conn:
+            row = conn.execute(
+                text(
+                    """
+                    SELECT id, project_id, canonical_key, artifact_type, name, description,
+                           payload_json, confidence, source_refs_json, status, version,
+                           source_agent, created_at, updated_at
+                    FROM aletheia_ontology_artifacts
+                    WHERE project_id = :tenant_id AND canonical_key = :canonical_key AND status = 'approved'
+                    """
+                ),
+                {"tenant_id": tenant.tenant_id, "canonical_key": canonical_key},
+            ).mappings().first()
+        return _artifact_to_dict(row) if row else None
+
+    def list_findings(self, tenant, task_key):
+        if task_key != self.TASK_KEY:
+            return []
+        with self.metadata_engine_for(tenant).connect() as conn:
+            rows = conn.execute(
+                text(
+                    """
+                    SELECT f.id, f.run_id, f.project_id, f.canonical_key, f.title, f.conclusion,
+                           f.confidence, f.supporting_evidence_json, f.counter_evidence_json,
+                           f.recommended_action_json, f.status, f.version, f.source_agent,
+                           f.created_at, f.updated_at
+                    FROM aletheia_reasoning_findings f
+                    JOIN aletheia_reasoning_runs r ON f.run_id = r.id
+                    JOIN aletheia_reasoning_tasks t ON r.task_id = t.id
+                    WHERE f.project_id = :tenant_id AND t.canonical_key = :task_key
+                    ORDER BY f.updated_at DESC, f.id DESC
+                    """
+                ),
+                {"tenant_id": tenant.tenant_id, "task_key": task_key},
+            ).mappings().all()
+        return [self._finding_to_dict(row) for row in rows]
+
+    def latest_run(self, tenant, task_key):
+        with self.metadata_engine_for(tenant).connect() as conn:
+            row = conn.execute(
+                text(
+                    """
+                    SELECT r.id, r.project_id, r.run_key, r.agent_name, r.prompt_version,
+                           r.query_plan_json, r.tool_calls_json, r.evidence_paths_json,
+                           r.output_json, r.eval_result_json, r.status, r.latency_ms,
+                           r.cost_estimate, r.created_at
+                    FROM aletheia_reasoning_runs r
+                    JOIN aletheia_reasoning_tasks t ON r.task_id = t.id
+                    WHERE r.project_id = :tenant_id AND t.canonical_key = :task_key
+                    ORDER BY r.created_at DESC, r.id DESC
+                    LIMIT 1
+                    """
+                ),
+                {"tenant_id": tenant.tenant_id, "task_key": task_key},
+            ).mappings().first()
+        return self._run_to_dict(row) if row else None
+
+    def review_finding(self, tenant, canonical_key, status, reviewer, reason):
+        _require_reason(status, reason or "")
+        with self.metadata_engine_for(tenant).begin() as conn:
+            finding = conn.execute(
+                text(
+                    """
+                    SELECT id, project_id, canonical_key, status, version
+                    FROM aletheia_reasoning_findings
+                    WHERE project_id = :tenant_id AND canonical_key = :canonical_key
+                    FOR UPDATE
+                    """
+                ),
+                {"tenant_id": tenant.tenant_id, "canonical_key": canonical_key},
+            ).mappings().first()
+            if not finding:
+                raise KeyError(canonical_key)
+            before_status = finding["status"]
+            before_version = finding["version"]
+            after_version = before_version if status == "comment" else before_version + 1
+            after_status = before_status if status == "comment" else status
+            if status != "comment":
+                conn.execute(
+                    text(
+                        """
+                        UPDATE aletheia_reasoning_findings
+                        SET status = :status, version = version + 1, updated_at = NOW()
+                        WHERE project_id = :tenant_id AND canonical_key = :canonical_key
+                        """
+                    ),
+                    {"tenant_id": tenant.tenant_id, "canonical_key": canonical_key, "status": status},
+                )
+            conn.execute(
+                text(
+                    """
+                    INSERT INTO aletheia_reasoning_reviews
+                    (finding_id, project_id, canonical_key, decision, reviewer, reason,
+                     before_status, after_status, before_version, after_version, created_at)
+                    VALUES
+                    (:finding_id, :project_id, :canonical_key, :decision, :reviewer, :reason,
+                     :before_status, :after_status, :before_version, :after_version, NOW())
+                    """
+                ),
+                {
+                    "finding_id": finding["id"],
+                    "project_id": finding["project_id"],
+                    "canonical_key": finding["canonical_key"],
+                    "decision": status,
+                    "reviewer": reviewer,
+                    "reason": reason,
+                    "before_status": before_status,
+                    "after_status": after_status,
+                    "before_version": before_version,
+                    "after_version": after_version,
+                },
+            )
+        return self.get_finding(tenant, canonical_key)
+
+    def get_finding(self, tenant, canonical_key):
+        with self.metadata_engine_for(tenant).connect() as conn:
+            row = conn.execute(
+                text(
+                    """
+                    SELECT id, run_id, project_id, canonical_key, title, conclusion, confidence,
+                           supporting_evidence_json, counter_evidence_json, recommended_action_json,
+                           status, version, source_agent, created_at, updated_at
+                    FROM aletheia_reasoning_findings
+                    WHERE project_id = :tenant_id AND canonical_key = :canonical_key
+                    """
+                ),
+                {"tenant_id": tenant.tenant_id, "canonical_key": canonical_key},
+            ).mappings().first()
+            if not row:
+                return None
+            reviews = conn.execute(
+                text(
+                    """
+                    SELECT decision, reviewer, reason, before_status, after_status,
+                           before_version, after_version, created_at
+                    FROM aletheia_reasoning_reviews
+                    WHERE project_id = :tenant_id AND canonical_key = :canonical_key
+                    ORDER BY created_at DESC, id DESC
+                    """
+                ),
+                {"tenant_id": tenant.tenant_id, "canonical_key": canonical_key},
+            ).mappings().all()
+        finding = self._finding_to_dict(row)
+        finding["reviews"] = [dict(review) for review in reviews]
+        return finding
+
+    def _workload_stats(self, tenant, employee_id):
+        with self.source_engine_for(tenant).connect() as conn:
+            order_count = conn.execute(
+                text("SELECT COUNT(*) FROM orders WHERE employeeID = :employee_id"),
+                {"employee_id": employee_id},
+            ).scalar()
+            total_orders = conn.execute(text("SELECT COUNT(*) FROM orders")).scalar()
+            top_customer = conn.execute(
+                text(
+                    """
+                    SELECT customerID, COUNT(*) AS order_count
+                    FROM orders
+                    WHERE employeeID = :employee_id
+                    GROUP BY customerID
+                    ORDER BY order_count DESC, customerID
+                    LIMIT 1
+                    """
+                ),
+                {"employee_id": employee_id},
+            ).mappings().first()
+        top_customer_orders = int(top_customer["order_count"]) if top_customer else 0
+        top_customer_share = top_customer_orders / order_count if order_count else 0
+        employee_share = order_count / total_orders if total_orders else 0
+        return {
+            "order_count": int(order_count or 0),
+            "total_orders": int(total_orders or 0),
+            "employee_share": employee_share,
+            "employee_share_percent": employee_share * 100,
+            "top_customer_id": top_customer["customerID"] if top_customer else None,
+            "top_customer_orders": top_customer_orders,
+            "top_customer_share": top_customer_share,
+            "top_customer_share_percent": top_customer_share * 100,
+        }
+
+    def _evidence_paths(self, tenant, employee, edge, artifact, workload):
+        return [
+            {
+                "kind": "instance_node",
+                "label": "Employee #4 source row",
+                "summary": f"{employee['label']} is the center of the workload analysis.",
+                "url": f"/instances.html?tenant={tenant.tenant_id}&type=Employee&id=4&node=Employee%3A4",
+                "source_ref": "employees.employeeID=4",
+                "payload": {"node_id": "Employee:4", "ontology_artifact": "object:employee"},
+            },
+            {
+                "kind": "instance_edge",
+                "label": "Employee #4 -> Order #10250 edge",
+                "summary": "Representative approved Employee-Order edge with source row provenance.",
+                "url": f"/instances.html?tenant={tenant.tenant_id}&type=Employee&id=4&edgeSource=Employee%3A4&edgeTarget=Order%3A10250",
+                "source_ref": "orders.employeeID",
+                "payload": {"edge_id": edge["id"] if edge else None, "ontology_link": "link:employee:1:n:order"},
+            },
+            {
+                "kind": "ontology_artifact",
+                "label": "Approved Employee-Order ontology link",
+                "summary": artifact["description"] if artifact else "Approved link artifact required for graph evidence.",
+                "url": f"/?tenant={tenant.tenant_id}&artifact=link%3Aemployee%3A1%3An%3Aorder",
+                "source_ref": "artifact:link:employee:1:n:order",
+                "payload": {"status": artifact["status"] if artifact else None},
+            },
+            {
+                "kind": "aggregate",
+                "label": "Tenant source-row workload aggregate",
+                "summary": f"Employee #4 handled {workload['order_count']} of {workload['total_orders']} orders.",
+                "url": f"/reasoning.html?tenant={tenant.tenant_id}&task={self.TASK_KEY}",
+                "source_ref": "orders.employeeID=4",
+                "payload": workload,
+            },
+        ]
+
+    def _record_run(self, tenant, task, query_plan, tool_calls, evidence_paths, output, eval_result, status, started):
+        run_key = f"{self.TASK_KEY}:run:{int(time.time() * 1000)}"
+        latency_ms = int((time.monotonic() - started) * 1000)
+        with self.metadata_engine_for(tenant).begin() as conn:
+            row = conn.execute(
+                text(
+                    """
+                    INSERT INTO aletheia_reasoning_runs
+                    (task_id, project_id, run_key, agent_name, prompt_version,
+                     query_plan_json, tool_calls_json, evidence_paths_json,
+                     output_json, eval_result_json, status, latency_ms, cost_estimate, created_at)
+                    VALUES
+                    (:task_id, :tenant_id, :run_key, 'ReasoningWorkbenchAgent', 'northwind-workload-v1',
+                     :query_plan_json, :tool_calls_json, :evidence_paths_json,
+                     :output_json, :eval_result_json, :status, :latency_ms, 0.0, NOW())
+                    RETURNING id, project_id, run_key, agent_name, prompt_version,
+                              query_plan_json, tool_calls_json, evidence_paths_json,
+                              output_json, eval_result_json, status, latency_ms,
+                              cost_estimate, created_at
+                    """
+                ),
+                {
+                    "task_id": task["id"],
+                    "tenant_id": tenant.tenant_id,
+                    "run_key": run_key,
+                    "query_plan_json": _json_dump(query_plan),
+                    "tool_calls_json": _json_dump(tool_calls),
+                    "evidence_paths_json": _json_dump(evidence_paths),
+                    "output_json": _json_dump(output),
+                    "eval_result_json": _json_dump(eval_result),
+                    "status": status,
+                    "latency_ms": latency_ms,
+                },
+            ).mappings().first()
+        return self._run_to_dict(row)
+
+    def _record_finding(self, tenant, run, finding):
+        with self.metadata_engine_for(tenant).begin() as conn:
+            row = conn.execute(
+                text(
+                    """
+                    INSERT INTO aletheia_reasoning_findings
+                    (run_id, project_id, canonical_key, title, conclusion, confidence,
+                     supporting_evidence_json, counter_evidence_json, recommended_action_json,
+                     status, version, source_agent, created_at, updated_at)
+                    VALUES
+                    (:run_id, :tenant_id, :canonical_key, :title, :conclusion, :confidence,
+                     :supporting_evidence_json, :counter_evidence_json, :recommended_action_json,
+                     'draft', 1, 'ReasoningWorkbenchAgent', NOW(), NOW())
+                    ON CONFLICT (project_id, canonical_key) DO UPDATE SET
+                      run_id = EXCLUDED.run_id,
+                      title = EXCLUDED.title,
+                      conclusion = EXCLUDED.conclusion,
+                      confidence = EXCLUDED.confidence,
+                      supporting_evidence_json = EXCLUDED.supporting_evidence_json,
+                      counter_evidence_json = EXCLUDED.counter_evidence_json,
+                      recommended_action_json = EXCLUDED.recommended_action_json,
+                      status = 'draft',
+                      version = aletheia_reasoning_findings.version + 1,
+                      updated_at = NOW()
+                    RETURNING id, run_id, project_id, canonical_key, title, conclusion, confidence,
+                              supporting_evidence_json, counter_evidence_json, recommended_action_json,
+                              status, version, source_agent, created_at, updated_at
+                    """
+                ),
+                {
+                    "run_id": run["id"],
+                    "tenant_id": tenant.tenant_id,
+                    "canonical_key": finding["canonical_key"],
+                    "title": finding["title"],
+                    "conclusion": finding["conclusion"],
+                    "confidence": finding["confidence"],
+                    "supporting_evidence_json": _json_dump(finding["supporting_evidence"]),
+                    "counter_evidence_json": _json_dump(finding["counter_evidence"]),
+                    "recommended_action_json": _json_dump(finding["recommended_action"]),
+                },
+            ).mappings().first()
+        return self._finding_to_dict(row)
+
+    def _task_to_dict(self, row):
+        return {
+            "id": row["id"],
+            "tenant_id": row["project_id"],
+            "canonical_key": row["canonical_key"],
+            "question": row["question"],
+            "scope": _load_json(row["scope_json"], {}),
+            "allowed_tools": _load_json(row["allowed_tools_json"], []),
+            "status": row["status"],
+            "created_at": str(row["created_at"]) if row["created_at"] else None,
+            "updated_at": str(row["updated_at"]) if row["updated_at"] else None,
+        }
+
+    def _run_to_dict(self, row):
+        return {
+            "id": row["id"],
+            "tenant_id": row["project_id"],
+            "run_key": row["run_key"],
+            "agent_name": row["agent_name"],
+            "prompt_version": row["prompt_version"],
+            "query_plan": _load_json(row["query_plan_json"], []),
+            "tool_calls": _load_json(row["tool_calls_json"], []),
+            "evidence_paths": _load_json(row["evidence_paths_json"], []),
+            "output": _load_json(row["output_json"], {}),
+            "eval_result": _load_json(row["eval_result_json"], {}),
+            "status": row["status"],
+            "latency_ms": row["latency_ms"],
+            "cost_estimate": row["cost_estimate"],
+            "created_at": str(row["created_at"]) if row["created_at"] else None,
+        }
+
+    def _finding_to_dict(self, row):
+        return {
+            "id": row["id"],
+            "run_id": row["run_id"],
+            "tenant_id": row["project_id"],
+            "canonical_key": row["canonical_key"],
+            "title": row["title"],
+            "conclusion": row["conclusion"],
+            "confidence": row["confidence"],
+            "supporting_evidence": _load_json(row["supporting_evidence_json"], []),
+            "counter_evidence": _load_json(row["counter_evidence_json"], []),
+            "recommended_action": _load_json(row["recommended_action_json"], {}),
+            "status": row["status"],
+            "version": row["version"],
+            "source_agent": row["source_agent"],
+            "created_at": str(row["created_at"]) if row["created_at"] else None,
+            "updated_at": str(row["updated_at"]) if row["updated_at"] else None,
+        }
+
+
 class ReviewWorkbenchHandler(BaseHTTPRequestHandler):
     repository = None
     instance_repository = None
+    reasoning_repository = None
 
     def log_message(self, fmt, *args):
         sys.stderr.write("%s - %s\n" % (self.log_date_time_string(), fmt % args))
@@ -764,6 +1377,25 @@ class ReviewWorkbenchHandler(BaseHTTPRequestHandler):
             filters = {key: values[0] for key, values in parse_qs(parsed.query).items() if values and values[0]}
             filters.pop("tenant", None)
             self._send_json(self.repository.list_artifacts(tenant, filters))
+            return
+        if parsed.path == "/api/reasoning/tasks":
+            self._send_json(self.reasoning_repository.list_tasks(tenant))
+            return
+        if parsed.path.startswith("/api/reasoning/tasks/"):
+            task_key = unquote(parsed.path.removeprefix("/api/reasoning/tasks/"))
+            task = self.reasoning_repository.get_task(tenant, task_key)
+            if task is None:
+                self._send_error(HTTPStatus.NOT_FOUND, f"Reasoning task not found: {task_key}")
+                return
+            self._send_json(task)
+            return
+        if parsed.path.startswith("/api/reasoning/findings/"):
+            finding_key = unquote(parsed.path.removeprefix("/api/reasoning/findings/"))
+            finding = self.reasoning_repository.get_finding(tenant, finding_key)
+            if finding is None:
+                self._send_error(HTTPStatus.NOT_FOUND, f"Reasoning finding not found: {finding_key}")
+                return
+            self._send_json({"tenant": tenant.public_dict(), "finding": finding})
             return
         if parsed.path == "/api/instances/types":
             self._send_json(self.instance_repository.types(tenant))
@@ -822,6 +1454,50 @@ class ReviewWorkbenchHandler(BaseHTTPRequestHandler):
             tenant = self._tenant(parsed)
         except (KeyError, ValueError) as exc:
             self._send_error(HTTPStatus.BAD_REQUEST, str(exc))
+            return
+        if parsed.path.startswith("/api/reasoning/tasks/") and parsed.path.endswith("/run"):
+            task_key = unquote(parsed.path.removeprefix("/api/reasoning/tasks/").removesuffix("/run").rstrip("/"))
+            result = self.reasoning_repository.run_task(tenant, task_key)
+            if result is None:
+                self._send_error(HTTPStatus.NOT_FOUND, f"Reasoning task not found: {task_key}")
+                return
+            self._send_json(result)
+            return
+        if parsed.path.startswith("/api/reasoning/findings/"):
+            parts = parsed.path.removeprefix("/api/reasoning/findings/").split("/")
+            if len(parts) != 2:
+                self._send_error(HTTPStatus.NOT_FOUND, "Expected /api/reasoning/findings/<canonical_key>/<action>")
+                return
+            finding_key = unquote(parts[0])
+            action = parts[1]
+            try:
+                body = self._read_json()
+                reviewer = body.get("reviewer") or "Itachi"
+                reason = body.get("reason") or ""
+                if action == "approve":
+                    result = self.reasoning_repository.review_finding(tenant, finding_key, "approved", reviewer, reason)
+                elif action == "reject":
+                    result = self.reasoning_repository.review_finding(tenant, finding_key, "rejected", reviewer, reason)
+                elif action == "needs-changes":
+                    result = self.reasoning_repository.review_finding(tenant, finding_key, "needs_changes", reviewer, reason)
+                elif action == "comment":
+                    result = self.reasoning_repository.review_finding(tenant, finding_key, "comment", reviewer, reason)
+                else:
+                    self._send_error(HTTPStatus.NOT_FOUND, f"Unknown reasoning action: {action}")
+                    return
+            except KeyError as exc:
+                self._send_error(HTTPStatus.NOT_FOUND, f"Reasoning finding not found: {exc.args[0]}")
+                return
+            except json.JSONDecodeError as exc:
+                self._send_error(HTTPStatus.BAD_REQUEST, f"Invalid JSON: {exc}")
+                return
+            except ValueError as exc:
+                self._send_error(HTTPStatus.BAD_REQUEST, str(exc))
+                return
+            except Exception as exc:  # pragma: no cover - displayed to local operator
+                self._send_error(HTTPStatus.INTERNAL_SERVER_ERROR, str(exc))
+                return
+            self._send_json({"tenant": tenant.public_dict(), "finding": result})
             return
         if not parsed.path.startswith("/api/artifacts/"):
             self._send_error(HTTPStatus.NOT_FOUND, "Unknown API endpoint")
@@ -924,6 +1600,11 @@ def main():
     registry = TenantRegistry.load(args.tenants_file)
     ReviewWorkbenchHandler.repository = ReviewRepository(registry, ensure_schema=args.ensure_schema)
     ReviewWorkbenchHandler.instance_repository = InstanceRepository(registry, ensure_schema=args.ensure_schema)
+    ReviewWorkbenchHandler.reasoning_repository = ReasoningRepository(
+        registry,
+        ReviewWorkbenchHandler.instance_repository,
+        ensure_schema=args.ensure_schema,
+    )
     server = LocalThreadingHTTPServer((args.host, args.port), ReviewWorkbenchHandler)
     print(f"Review Workbench: http://{args.host}:{args.port}", flush=True)
     try:

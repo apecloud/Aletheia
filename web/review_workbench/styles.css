@@ -127,6 +127,12 @@ button {
   min-height: calc(100vh - 64px);
 }
 
+.reasoning-shell {
+  display: grid;
+  grid-template-columns: minmax(300px, 360px) minmax(420px, 1fr) minmax(340px, 440px);
+  min-height: calc(100vh - 64px);
+}
+
 .sidebar {
   display: flex;
   min-height: calc(100vh - 64px);
@@ -362,6 +368,16 @@ textarea.invalid {
 .neighborhood-panel {
   min-width: 0;
   background: var(--bg);
+}
+
+.reasoning-evidence {
+  min-width: 0;
+  background: var(--bg);
+}
+
+.reasoning-sidebar,
+.reasoning-trace {
+  min-width: 0;
 }
 
 .workspace-header {
@@ -733,6 +749,30 @@ label {
   min-width: 0;
 }
 
+.reasoning-paths {
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+}
+
+.evidence-path-card {
+  box-shadow: none;
+}
+
+.trace-list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding-left: 18px;
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.review-gate {
+  margin: 0 16px 16px;
+  box-shadow: none;
+}
+
 .toast {
   position: fixed;
   right: 16px;
@@ -776,6 +816,7 @@ label {
   .app-shell,
   .detail-grid,
   .instance-shell,
+  .reasoning-shell,
   .edge-list {
     grid-template-columns: 1fr;
   }
