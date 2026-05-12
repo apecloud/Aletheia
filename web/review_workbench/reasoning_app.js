@@ -1,11 +1,14 @@
+const params = new URLSearchParams(window.location.search);
+
 const state = {
-  tenant: new URLSearchParams(window.location.search).get("tenant") || "default",
+  tenant: params.get("tenant") || "default",
   tenants: [],
-  taskKey: new URLSearchParams(window.location.search).get("task") || "reasoning:employee-4-workload-analysis",
+  taskKey: params.get("task") || "reasoning:employee-4-workload-analysis",
   task: null,
   run: null,
   findings: [],
   selectedFinding: null,
+  graphHandoff: null,
 };
 
 const els = {
@@ -71,6 +74,82 @@ function urlWithTenant(path, params = {}) {
   return `${path}?${query.toString()}`;
 }
 
+function scopeLabel(task = state.task) {
+  const scope = task?.scope || {};
+  if (scope.center_node) return `Graph node ${scope.center_node}`;
+  if (scope.center_edge) return `Graph edge ${scope.center_edge.source} -> ${scope.center_edge.target}`;
+  return `${scope.object_type || "Employee"}:${scope.instance_id || "4"}`;
+}
+
+function taskDisplayTitle(task = state.task) {
+  const scope = task?.scope || {};
+  if (scope.center_node) return `Scoped reasoning: ${scope.center_node}`;
+  if (scope.center_edge) return `Scoped reasoning: ${scope.center_edge.source} -> ${scope.center_edge.target}`;
+  return task?.canonical_key || "Reasoning task";
+}
+
+function graphHandoffPayload() {
+  if (params.get("source") !== "graph") return null;
+  const centerNode = params.get("center_node");
+  const edgeSource = params.get("center_edge_source");
+  const edgeTarget = params.get("center_edge_target");
+  if (!centerNode && (!edgeSource || !edgeTarget)) return null;
+  const centerEdge =
+    edgeSource && edgeTarget
+      ? { id: params.get("center_edge_id") || `${edgeSource}->${edgeTarget}`, source: edgeSource, target: edgeTarget }
+      : null;
+  const evidencePath = {
+    kind: params.get("evidence_kind") || (centerEdge ? "graph_edge" : "graph_node"),
+    label: params.get("evidence_label") || centerNode || centerEdge?.id,
+    summary: params.get("evidence_summary") || params.get("evidence_label") || centerNode || centerEdge?.id,
+    url: params.get("graph_url") || `/graph.html?tenant=${encodeURIComponent(state.tenant)}`,
+    source_ref: params.get("evidence_source_ref") || "",
+    payload: centerEdge
+      ? {
+          edge_id: centerEdge.id,
+          ontology_link: params.get("ontology_link") || undefined,
+        }
+      : {
+          node_id: centerNode,
+          ontology_artifact: params.get("ontology_artifact") || undefined,
+        },
+  };
+  return {
+    question:
+      params.get("question") ||
+      `Explain the approved graph evidence around ${centerNode || centerEdge.id} and identify any workload, concentration, or provenance risk.`,
+    graph_url: evidencePath.url,
+    autorun: params.get("autorun") === "1",
+    scope: {
+      center_node: centerNode || undefined,
+      center_edge: centerEdge || undefined,
+      depth: Number(params.get("depth") || 1),
+      node_limit: Number(params.get("limit") || 200),
+      edge_limit: Number(params.get("limit") || 200),
+      allowed_node_types: ["Employee", "Order"],
+      allowed_link_keys: ["link:employee:1:n:order"],
+      approved_only: true,
+      evidence_paths: [evidencePath],
+    },
+  };
+}
+
+async function acceptGraphHandoffIfPresent() {
+  const payload = graphHandoffPayload();
+  if (!payload) return false;
+  state.graphHandoff = payload;
+  els.runStatus.textContent = "creating scoped task";
+  const data = await fetchJson(urlWithTenant("/api/reasoning/tasks/from-graph"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ question: payload.question, graph_url: payload.graph_url, scope: payload.scope }),
+  });
+  state.taskKey = data.task.canonical_key;
+  updateUrl({ keepGraphScope: true });
+  showToast("Scoped reasoning task opened from graph selection");
+  return true;
+}
+
 async function loadTenants() {
   const data = await fetchJson(urlWithTenant("/api/tenants"));
   state.tenants = data.tenants || [];
@@ -116,7 +195,7 @@ function renderTasks(tasks) {
           </span>
           <span class="key-text">${escapeHtml(task.question)}</span>
           <span class="artifact-item-meta">
-            <span>${escapeHtml(task.scope?.object_type || "Employee")}:${escapeHtml(task.scope?.instance_id || "4")}</span>
+            <span>${escapeHtml(scopeLabel(task))}</span>
             <span>${task.latest_run ? escapeHtml(task.latest_run.status) : "not run"}</span>
           </span>
         </button>
@@ -139,14 +218,18 @@ async function loadTaskDetail() {
   state.findings = data.findings || [];
   state.selectedFinding = state.findings[0] || null;
   renderTask();
+  if (state.graphHandoff?.autorun && !state.run) {
+    state.graphHandoff.autorun = false;
+    await runTask();
+  }
 }
 
 function renderTask() {
-  els.taskTitle.textContent = state.task?.canonical_key || "Reasoning task";
+  els.taskTitle.textContent = taskDisplayTitle();
   els.taskQuestion.textContent = state.task?.question || "";
   els.runStatus.textContent = state.run?.status || "not run";
   els.runStatus.className = `status-pill ${state.run?.status === "completed" ? "status-approved" : "muted-pill"}`;
-  els.breadcrumb.textContent = `Reasoning / ${state.task?.scope?.object_type || "Employee"}:${state.task?.scope?.instance_id || "4"}`;
+  els.breadcrumb.textContent = `Reasoning / ${scopeLabel()}`;
   if (state.run?.status === "blocked") {
     const missing = state.run.output?.missing_approved_artifacts || [];
     els.warning.classList.remove("hidden");
@@ -238,10 +321,30 @@ function renderTrace() {
   `;
 }
 
-function updateUrl() {
+function updateUrl({ keepGraphScope = false } = {}) {
   const url = new URL(window.location.href);
   url.searchParams.set("tenant", state.tenant);
   url.searchParams.set("task", state.taskKey);
+  if (!keepGraphScope) {
+    [
+      "source",
+      "center_node",
+      "center_edge_id",
+      "center_edge_source",
+      "center_edge_target",
+      "question",
+      "depth",
+      "limit",
+      "graph_url",
+      "evidence_kind",
+      "evidence_label",
+      "evidence_summary",
+      "evidence_source_ref",
+      "ontology_link",
+      "ontology_artifact",
+      "autorun",
+    ].forEach((key) => url.searchParams.delete(key));
+  }
   window.history.replaceState({}, "", url);
 }
 
@@ -293,5 +396,6 @@ els.rejectFinding.addEventListener("click", () => reviewFinding("reject").catch(
 els.commentFinding.addEventListener("click", () => reviewFinding("comment").catch((error) => showToast(error.message)));
 
 loadTenants()
+  .then(() => acceptGraphHandoffIfPresent())
   .then(() => loadTasks())
   .catch((error) => showToast(error.message));

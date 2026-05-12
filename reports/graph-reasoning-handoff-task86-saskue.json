@@ -1,0 +1,95 @@
+{
+  "task": "#86 Graph Reasoning Handoff Validation",
+  "passed": true,
+  "validated_at": "2026-05-13T00:52:00+08:00",
+  "entrypoint": "http://127.0.0.1:8767/graph.html?tenant=default&type=Employee&id=4&depth=1&limit=200",
+  "implementation_under_review": {
+    "task": "#85",
+    "report": "reports/graph-reasoning-handoff-implementation-report.md",
+    "files_changed": [
+      "web/review_workbench/graph.html",
+      "web/review_workbench/graph_app.js",
+      "web/review_workbench/reasoning_app.js"
+    ]
+  },
+  "validation_method": "Real Playwright/Chrome UI flow: click graph node/edge, then click the top Reasoning navigation tab. No direct API-only shortcut.",
+  "node_handoff": {
+    "graph_click_target": "Employee:4 text label",
+    "click_point": {"x": 685.0, "y": 669.07},
+    "reasoning_nav_includes": [
+      "source=graph",
+      "center_node=Employee%3A4",
+      "evidence_kind=graph_node",
+      "autorun=1"
+    ],
+    "reasoning_url_task": "reasoning-graph-scope-default-employee-4-d1",
+    "task_title": "Scoped reasoning: Employee:4",
+    "breadcrumb": "Reasoning / Graph node Employee:4",
+    "run_status": "completed",
+    "finding_status": "draft · v1",
+    "evidence_contains": ["Employee:4", "graph_node", "employeeID=4"],
+    "trace_contains": ["approved_only", "draft_only", "draft_reasoning_artifact"],
+    "not_default_fixed_task": true,
+    "refresh_restores_context": true
+  },
+  "edge_handoff": {
+    "graph_click_target": "real SVG edge line coordinate",
+    "selected_edge": "Employee:4->Order:10640",
+    "hit": {"tag": "line", "class": "graph-edge adjacent", "edge": "Employee:4->Order:10640"},
+    "reasoning_nav_includes": [
+      "source=graph",
+      "center_edge_source=Employee%3A4",
+      "center_edge_target=Order%3A10640",
+      "evidence_kind=graph_edge",
+      "ontology_link=link%3Aemployee%3A1%3An%3Aorder",
+      "autorun=1"
+    ],
+    "reasoning_url_task": "reasoning-graph-scope-default-employee-4-toorder-10640-d1",
+    "task_title": "Scoped reasoning: Employee:4 -> Order:10640",
+    "breadcrumb": "Reasoning / Graph edge Employee:4 -> Order:10640",
+    "run_status": "completed",
+    "finding_status": "draft · v1",
+    "evidence_contains": ["Employee:4->Order:10640", "graph_edge", "orders.employeeID"],
+    "trace_contains": ["approved_only", "draft_only", "draft_reasoning_artifact"],
+    "not_default_fixed_task": true,
+    "refresh_restores_context": true
+  },
+  "existing_task_behavior": {
+    "canonical_task_keys": [
+      "reasoning-graph-scope-default-employee-4-d1",
+      "reasoning-graph-scope-default-employee-4-toorder-10640-d1",
+      "reasoning-graph-scope-default-employee-4-toorder-10250-d1"
+    ],
+    "behavior": "Handoff opens/upserts the canonical scoped task key for the selected node/edge instead of creating unbounded duplicate task keys."
+  },
+  "regressions": {
+    "default_graph": {
+      "approved": true,
+      "nodes": 157,
+      "edges": 156,
+      "order_ids_sha256": "ff3557ce250ade95cd7a127009f7e293c68890b13109fe3a3e213fa8d8447c91"
+    },
+    "sandbox_graph": {
+      "approved": false,
+      "nodes": 0,
+      "edges": 0,
+      "missing_approved_artifacts": ["object:order", "link:employee:1:n:order"]
+    },
+    "sandbox_ui": {
+      "status": "blocked",
+      "nodes": 0,
+      "edges": 0
+    },
+    "canonical_safety": {
+      "link:employee:1:n:order": {"status": "approved", "version": 6}
+    }
+  },
+  "verification_commands": [
+    "python3 /tmp/validate_graph_reasoning_handoff_task86.py",
+    "node --check web/review_workbench/graph_app.js && node --check web/review_workbench/reasoning_app.js && node --check web/review_workbench/app.js && node --check web/review_workbench/instance_app.js && node --check web/review_workbench/settings_app.js && git diff --check",
+    ".venv/bin/python -m compileall -q review_workbench.py agents query_artifacts.py evals tests",
+    ".venv/bin/python -m unittest tests/test_ontology_eval.py"
+  ],
+  "screenshot": "/tmp/aletheia-graph-reasoning-handoff-task86.png",
+  "report": "reports/graph-reasoning-handoff-task86-saskue.md"
+}

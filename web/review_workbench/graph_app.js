@@ -115,6 +115,7 @@ async function loadTenants() {
   els.navGraph.href = `/graph.html?tenant=${encodeURIComponent(state.tenant)}&type=Employee&id=4&depth=1`;
   els.navReasoning.href = `/reasoning.html?tenant=${encodeURIComponent(state.tenant)}`;
   els.navSettings.href = `/settings.html?tenant=${encodeURIComponent(state.tenant)}`;
+  updateReasoningHandoff();
 }
 
 async function loadGraph({ preserveSelection = false } = {}) {
@@ -304,6 +305,7 @@ async function selectNode(nodeId) {
   const data = await fetchJson(urlWithTenant(`/api/graph/node/${encodeURIComponent(nodeId)}`));
   state.selectedDetail = data.node;
   renderNodeInspector(data.node);
+  updateReasoningHandoff();
   els.graphStatus.textContent = `selected node ${nodeId}`;
   els.graphStatus.className = "status-pill status-approved";
 }
@@ -319,6 +321,7 @@ async function selectEdge(edgeId) {
   const data = await fetchJson(urlWithTenant(`/api/graph/edge/${encodeURIComponent(edgeId)}`));
   state.selectedDetail = data.edge;
   renderEdgeInspector(data.edge);
+  updateReasoningHandoff();
   els.graphStatus.textContent = `selected edge ${edgeId}`;
   els.graphStatus.className = "status-pill status-approved";
 }
@@ -355,7 +358,7 @@ function renderNodeInspector(node) {
       <pre class="code-block">${escapeHtml(json(node.source_row))}</pre>
     </section>
   `;
-  els.reasoningResult.textContent = "Ready to create a scoped draft reasoning task from this node.";
+  els.reasoningResult.innerHTML = `<a class="panel-link" href="${escapeHtml(reasoningHandoffUrl())}">Open reasoning for ${escapeHtml(node.id)}</a>`;
 }
 
 function renderEdgeInspector(edge) {
@@ -395,7 +398,7 @@ function renderEdgeInspector(edge) {
       <pre class="code-block">${escapeHtml(json(edge.target_row))}</pre>
     </section>
   `;
-  els.reasoningResult.textContent = "Ready to create a scoped draft reasoning task from this edge.";
+  els.reasoningResult.innerHTML = `<a class="panel-link" href="${escapeHtml(reasoningHandoffUrl())}">Open reasoning for this edge</a>`;
 }
 
 async function expandSelected() {
@@ -517,39 +520,52 @@ function evidencePaths() {
   return [];
 }
 
+function selectedGraphScopeParams() {
+  if (!state.selectedKind || !state.selectedDetail) return null;
+  const next = new URLSearchParams();
+  next.set("tenant", state.tenant);
+  next.set("source", "graph");
+  next.set("question", els.reasoningQuestion.value);
+  next.set("depth", els.depth.value || "1");
+  next.set("limit", els.limit.value || "200");
+  next.set("graph_url", `${window.location.pathname}${window.location.search}`);
+  next.set("evidence_kind", state.selectedKind === "edge" ? "graph_edge" : "graph_node");
+  next.set("evidence_label", state.selectedDetail.id);
+  if (state.selectedKind === "edge") {
+    next.set("center_edge_id", state.selectedDetail.id);
+    next.set("center_edge_source", state.selectedDetail.source);
+    next.set("center_edge_target", state.selectedDetail.target);
+    next.set("evidence_summary", state.selectedDetail.evidence || state.selectedDetail.label || state.selectedDetail.id);
+    next.set("evidence_source_ref", state.selectedDetail.source_field || "");
+    if (state.selectedDetail.ontology_link) next.set("ontology_link", state.selectedDetail.ontology_link);
+  } else {
+    next.set("center_node", state.selectedDetail.id);
+    next.set("evidence_summary", state.selectedDetail.label || state.selectedDetail.id);
+    next.set("evidence_source_ref", state.selectedDetail.source_pk || "");
+    if (state.selectedDetail.ontology_artifact) next.set("ontology_artifact", state.selectedDetail.ontology_artifact);
+  }
+  next.set("autorun", "1");
+  return next;
+}
+
+function reasoningHandoffUrl() {
+  const next = selectedGraphScopeParams();
+  if (!next) return `/reasoning.html?tenant=${encodeURIComponent(state.tenant)}`;
+  return `/reasoning.html?${next.toString()}`;
+}
+
+function updateReasoningHandoff() {
+  if (!els.navReasoning) return;
+  els.navReasoning.href = reasoningHandoffUrl();
+}
+
 async function createReasoningTask() {
   if (!state.selectedKind || !state.selectedDetail) {
     showToast("Select a node or edge first");
     return;
   }
-  const centerEdge =
-    state.selectedKind === "edge"
-      ? { id: state.selectedDetail.id, source: state.selectedDetail.source, target: state.selectedDetail.target }
-      : null;
-  const payload = {
-    question: els.reasoningQuestion.value,
-    graph_url: `${window.location.pathname}${window.location.search}`,
-    scope: {
-      center_node: state.selectedKind === "node" ? state.selectedDetail.id : undefined,
-      center_edge: centerEdge,
-      depth: Number(els.depth.value || 1),
-      node_limit: Number(els.limit.value || 200),
-      edge_limit: Number(els.limit.value || 200),
-      allowed_node_types: ["Employee", "Order"],
-      allowed_link_keys: ["link:employee:1:n:order"],
-      approved_only: true,
-      evidence_paths: evidencePaths(),
-    },
-  };
-  els.reasoningStatus.textContent = "creating";
-  const data = await fetchJson(urlWithTenant("/api/reasoning/tasks/from-graph"), {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  });
-  els.reasoningStatus.textContent = "draft-only";
-  els.reasoningResult.innerHTML = `<a class="panel-link" href="${escapeHtml(data.reasoning_url)}">Open scoped reasoning task</a>`;
-  showToast("Scoped reasoning task created");
+  els.reasoningStatus.textContent = "opening";
+  window.location.href = reasoningHandoffUrl();
 }
 
 function bindCanvas() {
@@ -614,6 +630,12 @@ els.focusSelected.addEventListener("click", focusSelected);
 els.expandSelected.addEventListener("click", () => expandSelected().catch((error) => showToast(error.message)));
 els.collapseExpanded.addEventListener("click", collapseExpanded);
 els.startReasoning.addEventListener("click", () => createReasoningTask().catch((error) => showToast(error.message)));
+els.reasoningQuestion.addEventListener("change", () => {
+  updateReasoningHandoff();
+  if (state.selectedKind && state.selectedDetail) {
+    els.reasoningResult.innerHTML = `<a class="panel-link" href="${escapeHtml(reasoningHandoffUrl())}">Open scoped reasoning task</a>`;
+  }
+});
 
 if (params.get("type")) els.centerType.value = params.get("type");
 if (params.get("id")) els.centerId.value = params.get("id");
