@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Aletheia Graph Explorer</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header class="portal-shell" aria-label="Portal navigation">
+      <div class="portal-brand">
+        <p class="eyebrow">Aletheia Portal</p>
+        <strong>Graph Explorer</strong>
+      </div>
+      <nav class="portal-nav" aria-label="Primary views">
+        <a id="nav-workbench" class="portal-nav-item" href="/">Workbench</a>
+        <a id="nav-instances" class="portal-nav-item" href="/instances.html">Instance Explorer</a>
+        <a id="nav-graph" class="portal-nav-item active" href="/graph.html">Graph</a>
+        <a id="nav-reasoning" class="portal-nav-item" href="/reasoning.html">Reasoning</a>
+        <a id="nav-settings" class="portal-nav-item" href="/settings.html">Settings</a>
+      </nav>
+      <div class="portal-context" aria-label="Current tenant">
+        <span id="shell-tenant-label">Tenant -</span>
+        <span id="shell-tenant-meta">namespace - · graph -</span>
+      </div>
+      <div id="breadcrumb" class="breadcrumb">Graph / Employee:4</div>
+    </header>
+
+    <main class="graph-shell">
+      <aside class="graph-scope-panel" aria-label="Graph scope">
+        <header class="sidebar-header">
+          <div>
+            <p class="eyebrow">Approved graph</p>
+            <h1>Scope</h1>
+          </div>
+          <button id="reload-graph" class="icon-button" type="button" title="Reload graph">↻</button>
+        </header>
+
+        <section class="gate-banner">
+          <strong>Read-only scope</strong>
+          <span>Graph browsing uses tenant-scoped approved Object and Link artifacts only.</span>
+        </section>
+
+        <section class="tenant-panel" aria-label="Tenant context">
+          <label>
+            Tenant
+            <select id="tenant-switcher"></select>
+          </label>
+          <dl>
+            <div><dt>Namespace</dt><dd id="tenant-namespace">-</dd></div>
+            <div><dt>Graph database</dt><dd id="tenant-graph">-</dd></div>
+          </dl>
+        </section>
+
+        <section class="filters graph-scope-controls">
+          <label>
+            Center type
+            <select id="center-type">
+              <option value="Employee">Employee</option>
+            </select>
+          </label>
+          <label>
+            Center ID
+            <input id="center-id" type="text" value="4" />
+          </label>
+          <div class="filter-row">
+            <label>
+              Depth
+              <input id="graph-depth" type="number" min="1" max="2" value="1" />
+            </label>
+            <label>
+              Node limit
+              <input id="graph-limit" type="number" min="1" max="300" value="200" />
+            </label>
+          </div>
+          <button id="load-graph" class="secondary-action" type="button">Load graph</button>
+        </section>
+
+        <section class="detail-body compact-detail">
+          <section class="detail-section">
+            <h3>Current scope</h3>
+            <dl class="provenance-grid">
+              <div><dt>Center</dt><dd id="scope-center">-</dd></div>
+              <div><dt>Nodes</dt><dd id="scope-nodes">0</dd></div>
+              <div><dt>Edges</dt><dd id="scope-edges">0</dd></div>
+              <div><dt>Limit</dt><dd id="scope-limit">-</dd></div>
+            </dl>
+          </section>
+          <section class="detail-section">
+            <h3>Expand history</h3>
+            <div id="expand-history" class="review-list">
+              <p class="muted">No expansions yet.</p>
+            </div>
+          </section>
+        </section>
+      </aside>
+
+      <section class="graph-workspace" aria-label="Interactive graph canvas">
+        <header class="workspace-header">
+          <div>
+            <p class="eyebrow">Graph Canvas</p>
+            <h2 id="graph-title">Employee #4 approved neighborhood</h2>
+            <p id="graph-subtitle" class="muted">Zoom, pan, select, expand, collapse, focus, or fit the current graph.</p>
+          </div>
+          <span id="graph-status" class="status-pill muted-pill">idle</span>
+        </header>
+
+        <section id="graph-warning" class="empty-state hidden"></section>
+        <section class="graph-toolbar" aria-label="Graph tools">
+          <button id="zoom-in" class="icon-button" type="button" title="Zoom in">+</button>
+          <button id="zoom-out" class="icon-button" type="button" title="Zoom out">-</button>
+          <button id="fit-view" class="secondary-action" type="button">Fit view</button>
+          <button id="focus-selected" class="secondary-action" type="button">Focus selected</button>
+          <button id="expand-selected" class="secondary-action" type="button">Expand</button>
+          <button id="collapse-expanded" class="secondary-action" type="button">Collapse expanded</button>
+        </section>
+        <section id="graph-canvas" class="graph-canvas" aria-label="Graph canvas">
+          <svg id="graph-svg" class="graph-svg" role="img" aria-label="Approved graph visualization"></svg>
+        </section>
+      </section>
+
+      <aside class="detail-panel graph-inspector" aria-label="Graph inspector and reasoning">
+        <header class="sidebar-header">
+          <div>
+            <p id="inspector-kind" class="eyebrow">Inspector</p>
+            <h1 id="inspector-title">Select graph item</h1>
+          </div>
+        </header>
+        <section id="inspector-body" class="detail-body">
+          <p class="muted">Click a node or edge to inspect properties, provenance, and reasoning options.</p>
+        </section>
+        <section class="panel graph-reasoning-panel">
+          <div class="panel-header">
+            <h3>Scoped reasoning</h3>
+            <span id="reasoning-status" class="status-pill muted-pill">draft-only</span>
+          </div>
+          <label>
+            Question
+            <select id="reasoning-question">
+              <option value="Explain this node's role in the graph">Explain this node's role in the graph</option>
+              <option value="Find workload or concentration risk around this node">Find workload or concentration risk around this node</option>
+              <option value="Explain why this edge exists">Explain why this edge exists</option>
+              <option value="Find unusual neighbors within this approved scope">Find unusual neighbors within this approved scope</option>
+            </select>
+          </label>
+          <button id="start-reasoning" class="secondary-action" type="button">Create scoped reasoning task</button>
+          <p id="reasoning-result" class="muted">Select a node or edge first.</p>
+        </section>
+      </aside>
+    </main>
+
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+    <script src="/graph_app.js"></script>
+  </body>
+</html>

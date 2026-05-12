@@ -1,0 +1,141 @@
+{
+  "task": "#74 Interactive Graph Explorer Validation",
+  "passed": true,
+  "validated_at": "2026-05-12T23:10:00+08:00",
+  "entrypoint": "http://127.0.0.1:8767/graph.html?tenant=default&type=Employee&id=4&depth=1&limit=200",
+  "baseline": {
+    "tenant": "default",
+    "center_node": "Employee:4",
+    "employee_label": "Margaret Peacock",
+    "nodes": 157,
+    "edges": 156,
+    "order_count": 156,
+    "first_order_ids": [10250, 10252, 10257, 10259, 10260, 10261, 10267, 10281, 10282, 10284],
+    "last_order_ids": [11018, 11024, 11026, 11029, 11040, 11044, 11061, 11062, 11072, 11076],
+    "order_ids_sha256": "ff3557ce250ade95cd7a127009f7e293c68890b13109fe3a3e213fa8d8447c91"
+  },
+  "api_validation": {
+    "context": {
+      "approved": true,
+      "graph_database": "aletheia",
+      "depth": 1,
+      "limit": 200,
+      "limits": {"requested_limit": 200, "applied_limit": 200, "hard_limit": 300, "truncated": false},
+      "nodes": 157,
+      "edges": 156,
+      "handled_orders": 156,
+      "returned_orders": 156
+    },
+    "clamp": {
+      "request": "depth=99&limit=999",
+      "depth": 2,
+      "limit": 300,
+      "limits": {"requested_limit": 999, "applied_limit": 300, "hard_limit": 300, "truncated": true}
+    },
+    "node_detail": {
+      "node": "Employee:4",
+      "source_table": "employees",
+      "source_pk": "employeeID=4",
+      "ontology_artifact": "object:employee",
+      "neighborhood_nodes": 157,
+      "neighborhood_edges": 156,
+      "relation_count": {"link:employee:1:n:order": 156}
+    },
+    "edge_detail": {
+      "edge": "Employee:4->Order:10250",
+      "source": "Employee:4",
+      "target": "Order:10250",
+      "join_condition": "orders.employeeID = employees.employeeID",
+      "source_field": "orders.employeeID",
+      "ontology_link": "link:employee:1:n:order",
+      "artifact_status": "approved",
+      "artifact_version": 6
+    },
+    "sandbox": {
+      "tenant": "northwind-sandbox",
+      "approved": false,
+      "nodes": 0,
+      "edges": 0,
+      "missing_approved_artifacts": ["object:order", "link:employee:1:n:order"],
+      "edge_endpoint_status": 404
+    }
+  },
+  "browser_interaction_validation": {
+    "initial": {"status": "157 nodes / 156 edges", "nodes": 157, "edges": 156, "inspector_title": "Margaret Peacock"},
+    "zoom": {"before": "translate(325, 391) scale(0.42)", "after_zoom_in": "translate(325, 391) scale(0.504)", "scale_increased": true},
+    "pan": {"before": "translate(325, 391) scale(0.4032)", "after_drag": "translate(385, 431) scale(0.4032)", "changed": true},
+    "select_node": {
+      "url_contains": "node=Order%3A10250",
+      "inspector_kind": "ORDER NODE",
+      "inspector_title": "Order #10250",
+      "has_source_row": true,
+      "has_artifact_link": true
+    },
+    "select_edge": {
+      "url_contains": "edge=Employee%3A4-%3EOrder%3A10250",
+      "inspector_kind": "GRAPH EDGE",
+      "inspector_title": "Employee:4->Order:10250",
+      "has_join": true,
+      "has_link": true,
+      "has_version": true,
+      "has_instance_link": true,
+      "has_artifact_link": true
+    },
+    "expand": {"history": "Employee:4 returned 157 nodes / 156 edges within approved scope", "expanded_class": "graph-node-svg selected center expanded"},
+    "collapse": {"history": "No expansions yet.", "nodes": 157, "edges": 156},
+    "focus": {"url_contains": "node=Employee%3A4", "center": "Employee:4"},
+    "fit_view": {"transform": "translate(325, 391) scale(0.42)", "scale_is_042": true},
+    "url_restore_edge": {"inspector_title": "Employee:4->Order:10250", "has_join": true},
+    "sandbox_blocked_regression": {
+      "status": "blocked",
+      "nodes": 0,
+      "edges": 0,
+      "warning_contains": ["object:order", "link:employee:1:n:order"],
+      "phantom_node_regression_fixed": true
+    },
+    "screenshot": "/tmp/aletheia-graph-validation.png"
+  },
+  "scoped_reasoning_validation": {
+    "node_task": {
+      "task_key": "reasoning-graph-scope-default-employee-4-d1",
+      "center_node": "Employee:4",
+      "approved_only": true,
+      "depth": 1,
+      "node_limit": 200,
+      "review_gate": "draft_only",
+      "evidence_path_count": 1,
+      "run_status": "completed",
+      "finding_status": "draft",
+      "recommended_action_boundary": "proposal_only",
+      "unsupported_claims": []
+    },
+    "edge_task": {
+      "task_key": "reasoning-graph-scope-default-employee-4-toorder-10250-d1",
+      "center_edge": {"source": "Employee:4", "target": "Order:10250"},
+      "approved_only": true,
+      "depth": 1,
+      "node_limit": 200,
+      "review_gate": "draft_only",
+      "evidence_path_count": 1,
+      "run_status": "completed",
+      "finding_status": "draft",
+      "recommended_action_boundary": "proposal_only",
+      "unsupported_claims": []
+    },
+    "sandbox_create_rejected": {
+      "status": 400,
+      "error": "center_node is outside the approved graph scope"
+    }
+  },
+  "canonical_safety": {
+    "link:employee:1:n:order": {"status": "approved", "version": 6},
+    "default_graph_after_validation": {"nodes": 157, "edges": 156, "order_ids_sha256": "ff3557ce250ade95cd7a127009f7e293c68890b13109fe3a3e213fa8d8447c91"}
+  },
+  "verification_commands": [
+    "node --check web/review_workbench/graph_app.js && node --check web/review_workbench/app.js && node --check web/review_workbench/instance_app.js && node --check web/review_workbench/reasoning_app.js && node --check web/review_workbench/settings_app.js && git diff --check",
+    ".venv/bin/python -m compileall -q review_workbench.py agents query_artifacts.py evals tests",
+    ".venv/bin/python -m unittest tests/test_ontology_eval.py",
+    "python3 /tmp/validate_graph_ui.py"
+  ],
+  "report": "reports/interactive-graph-task74-saskue.md"
+}

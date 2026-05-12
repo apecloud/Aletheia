@@ -12,7 +12,7 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from socketserver import TCPServer
-from urllib.parse import parse_qs, unquote, urlparse
+from urllib.parse import parse_qs, quote, unquote, urlparse
 
 from sqlalchemy import create_engine, text
 
@@ -551,6 +551,9 @@ class InstanceRepository:
     def neighborhood(self, tenant, object_type, instance_id, depth=1, limit=200):
         if object_type.lower() != "employee":
             return None
+        depth = max(1, min(int(depth), 2))
+        requested_limit = int(limit)
+        limit = max(1, min(requested_limit, 300))
         artifacts = self._approved_artifacts(
             tenant,
             ["object:employee", "object:order", "link:employee:1:n:order"]
@@ -588,19 +591,33 @@ class InstanceRepository:
             ).mappings().all()
         center = self._employee_node(tenant, employee)
         order_nodes = [self._order_node(tenant, row) for row in orders]
-        edges = [self._employee_order_edge(tenant, employee, row) for row in orders]
+        link_artifact = artifacts.get("link:employee:1:n:order")
+        edges = [self._employee_order_edge(tenant, employee, row, artifact=link_artifact) for row in orders]
         return {
             "approved": True,
             "tenant": tenant.public_dict(),
             "graph_database": tenant.graph_database,
-            "depth": min(int(depth), 1),
+            "depth": depth,
             "limit": limit,
+            "limits": {"requested_limit": requested_limit, "applied_limit": limit, "hard_limit": 300, "truncated": requested_limit > limit},
             "center": center,
             "nodes": [center] + order_nodes,
             "edges": edges,
             "relations_summary": {
                 "handled_orders": self._order_count_for_employee(tenant, instance_id),
                 "returned_orders": len(orders),
+            },
+            "scope": {
+                "tenant_id": tenant.tenant_id,
+                "center_node": center["id"],
+                "type": object_type,
+                "id": str(instance_id),
+                "depth": depth,
+                "node_limit": limit,
+                "edge_limit": limit,
+                "allowed_node_types": ["Employee", "Order"],
+                "allowed_link_keys": ["link:employee:1:n:order"],
+                "approved_only": True,
             },
         }
 
@@ -619,14 +636,20 @@ class InstanceRepository:
         order = self._fetch_order(tenant, order_id)
         if not employee or not order or str(order.get("employeeID")) != str(employee_id):
             return None
-        return self._employee_order_edge(tenant, employee, order, include_rows=True)
+        return self._employee_order_edge(
+            tenant,
+            employee,
+            order,
+            include_rows=True,
+            artifact=artifacts.get("link:employee:1:n:order"),
+        )
 
     def _approved_artifacts(self, tenant, keys):
         with self.metadata_engine_for(tenant).connect() as conn:
             rows = conn.execute(
                 text(
                     """
-                    SELECT canonical_key, name, artifact_type, status, payload_json
+                    SELECT canonical_key, name, artifact_type, status, version, payload_json
                     FROM aletheia_ontology_artifacts
                     WHERE project_id = :tenant_id AND canonical_key = ANY(:keys) AND status = 'approved'
                     """
@@ -714,7 +737,7 @@ class InstanceRepository:
             "status": "approved",
         }
 
-    def _employee_order_edge(self, tenant, employee, order, include_rows=False):
+    def _employee_order_edge(self, tenant, employee, order, include_rows=False, artifact=None):
         edge = {
             "id": f"Employee:{employee['employeeID']}->Order:{order['orderID']}",
             "tenant_id": tenant.tenant_id,
@@ -730,6 +753,8 @@ class InstanceRepository:
             "evidence": "orders.employeeID matches employees.employeeID for this Employee-Order relationship.",
             "source_field": "orders.employeeID",
             "target_field": "employees.employeeID",
+            "artifact_status": artifact.get("status") if artifact else "approved",
+            "artifact_version": artifact.get("version") if artifact else None,
         }
         if include_rows:
             edge["source_instance"] = self._employee_node(tenant, employee)
@@ -775,28 +800,142 @@ class ReasoningRepository:
         return engine
 
     def list_tasks(self, tenant):
-        task = self.ensure_default_task(tenant)
-        latest = self.latest_run(tenant, self.TASK_KEY)
+        self.ensure_default_task(tenant)
+        with self.metadata_engine_for(tenant).connect() as conn:
+            rows = conn.execute(
+                text(
+                    """
+                    SELECT id, project_id, canonical_key, question, scope_json, allowed_tools_json,
+                           status, created_at, updated_at
+                    FROM aletheia_reasoning_tasks
+                    WHERE project_id = :tenant_id
+                    ORDER BY updated_at DESC, id DESC
+                    """
+                ),
+                {"tenant_id": tenant.tenant_id},
+            ).mappings().all()
+        tasks = [self._task_to_dict(row) for row in rows]
         return {
             "tenant": tenant.public_dict(),
             "tasks": [
                 {
                     **task,
-                    "latest_run": latest,
+                    "latest_run": self.latest_run(tenant, task["canonical_key"]),
                 }
+                for task in tasks
             ],
         }
 
     def get_task(self, tenant, task_key):
         task = self.ensure_default_task(tenant)
         if task_key != self.TASK_KEY:
-            return None
+            task = self._get_task_row(tenant, task_key)
+            if task is None:
+                return None
         return {
             "tenant": tenant.public_dict(),
             "task": task,
             "latest_run": self.latest_run(tenant, task_key),
             "findings": self.list_findings(tenant, task_key),
         }
+
+    def create_scoped_task_from_graph(self, tenant, payload):
+        scope = payload.get("scope") or {}
+        center_node = scope.get("center_node")
+        center_edge = scope.get("center_edge")
+        if not center_node and not center_edge:
+            raise ValueError("center_node or center_edge is required")
+        depth = max(1, min(int(scope.get("depth") or 1), 2))
+        node_limit = max(1, min(int(scope.get("node_limit") or 100), 300))
+        edge_limit = max(1, min(int(scope.get("edge_limit") or 100), 300))
+        key_source = center_node or f"{center_edge.get('source')}->{center_edge.get('target')}"
+        canonical_key = f"reasoning:graph-scope:{tenant.tenant_id}:{key_source}:d{depth}".lower().replace(":", "-").replace(">", "to")
+        question = payload.get("question") or (
+            f"Explain the approved graph evidence around {key_source} and identify any workload, concentration, or provenance risk."
+        )
+        if center_node:
+            if ":" not in center_node:
+                raise ValueError("center_node must be like Employee:4")
+            object_type, instance_id = center_node.split(":", 1)
+            graph = self.instance_repository.neighborhood(tenant, object_type, instance_id, depth=depth, limit=node_limit)
+            if not graph or not graph.get("approved"):
+                raise ValueError("center_node is outside the approved graph scope")
+        if center_edge:
+            source = center_edge.get("source")
+            target = center_edge.get("target")
+            if not source or not target or not self.instance_repository.edge_detail(tenant, source, target):
+                raise ValueError("center_edge is outside the approved graph scope")
+        task_scope = {
+            "source": "graph_explorer",
+            "tenant_id": tenant.tenant_id,
+            "center_node": center_node,
+            "center_edge": center_edge,
+            "depth": depth,
+            "node_limit": node_limit,
+            "edge_limit": edge_limit,
+            "allowed_node_types": scope.get("allowed_node_types") or ["Employee", "Order"],
+            "allowed_link_keys": scope.get("allowed_link_keys") or ["link:employee:1:n:order"],
+            "approved_only": True,
+            "evidence_paths": scope.get("evidence_paths") or [],
+            "review_gate": "draft_only",
+            "graph_url": payload.get("graph_url"),
+        }
+        allowed_tools = ["graph_query", "instance_lookup", "edge_lookup", "artifact_lookup", "propose_finding", "propose_action"]
+        with self.metadata_engine_for(tenant).begin() as conn:
+            conn.execute(
+                text(
+                    """
+                    INSERT INTO aletheia_reasoning_tasks
+                    (project_id, canonical_key, question, scope_json, allowed_tools_json, status, created_at, updated_at)
+                    VALUES (:tenant_id, :canonical_key, :question, :scope_json, :allowed_tools_json, 'active', NOW(), NOW())
+                    ON CONFLICT (project_id, canonical_key) DO UPDATE SET
+                      question = EXCLUDED.question,
+                      scope_json = EXCLUDED.scope_json,
+                      allowed_tools_json = EXCLUDED.allowed_tools_json,
+                      status = 'active',
+                      updated_at = NOW()
+                    """
+                ),
+                {
+                    "tenant_id": tenant.tenant_id,
+                    "canonical_key": canonical_key,
+                    "question": question,
+                    "scope_json": _json_dump(task_scope),
+                    "allowed_tools_json": _json_dump(allowed_tools),
+                },
+            )
+            row = conn.execute(
+                text(
+                    """
+                    SELECT id, project_id, canonical_key, question, scope_json, allowed_tools_json,
+                           status, created_at, updated_at
+                    FROM aletheia_reasoning_tasks
+                    WHERE project_id = :tenant_id AND canonical_key = :canonical_key
+                    """
+                ),
+                {"tenant_id": tenant.tenant_id, "canonical_key": canonical_key},
+            ).mappings().first()
+        task = self._task_to_dict(row)
+        return {
+            "tenant": tenant.public_dict(),
+            "task": task,
+            "reasoning_url": f"/reasoning.html?tenant={tenant.tenant_id}&task={canonical_key}",
+        }
+
+    def _get_task_row(self, tenant, task_key):
+        with self.metadata_engine_for(tenant).connect() as conn:
+            row = conn.execute(
+                text(
+                    """
+                    SELECT id, project_id, canonical_key, question, scope_json, allowed_tools_json,
+                           status, created_at, updated_at
+                    FROM aletheia_reasoning_tasks
+                    WHERE project_id = :tenant_id AND canonical_key = :canonical_key
+                    """
+                ),
+                {"tenant_id": tenant.tenant_id, "canonical_key": task_key},
+            ).mappings().first()
+        return self._task_to_dict(row) if row else None
 
     def ensure_default_task(self, tenant):
         scope = {
@@ -846,7 +985,7 @@ class ReasoningRepository:
 
     def run_task(self, tenant, task_key):
         if task_key != self.TASK_KEY:
-            return None
+            return self.run_scoped_graph_task(tenant, task_key)
         started = time.monotonic()
         task = self.ensure_default_task(tenant)
         graph = self.graph_query(tenant, "Employee", "4")
@@ -997,6 +1136,81 @@ class ReasoningRepository:
             "approved": True,
         }
 
+    def run_scoped_graph_task(self, tenant, task_key):
+        started = time.monotonic()
+        task = self._get_task_row(tenant, task_key)
+        if task is None:
+            return None
+        scope = task.get("scope") or {}
+        query_plan = [
+            "Validate tenant-scoped graph task and approved-only scope.",
+            "Read only the selected node or edge evidence path from Graph Explorer.",
+            "Propose a draft finding without approving, ingesting, or changing canonical graph data.",
+        ]
+        tool_calls = [
+            {"tool": "graph_query", "tenant_id": tenant.tenant_id, "approved_only": True, "status": "completed"},
+            {"tool": "propose_finding", "tenant_id": tenant.tenant_id, "write_scope": "draft_reasoning_artifact", "status": "completed"},
+        ]
+        evidence_paths = scope.get("evidence_paths") or []
+        center = scope.get("center_node") or scope.get("center_edge") or {}
+        title = f"Scoped graph reasoning remains draft-only for {center}"
+        conclusion = (
+            "This scoped graph task was created from Graph Explorer evidence. "
+            "It is constrained to approved Employee/Order nodes and the Employee-Order link, "
+            "and the output is a draft finding for review."
+        )
+        if not evidence_paths:
+            tool_calls[0]["status"] = "blocked"
+            output = {
+                "summary": "Scoped graph reasoning blocked because no evidence paths were provided.",
+                "unsupported_claims": ["missing evidence path"],
+            }
+            eval_result = {
+                "passed": False,
+                "approved_only": True,
+                "draft_only": True,
+                "unsupported_claims": ["missing evidence path"],
+                "evidence_path_count": 0,
+            }
+            run = self._record_run(tenant, task, query_plan, tool_calls, [], output, eval_result, "blocked", started)
+            return {"tenant": tenant.public_dict(), "task": task, "run": run, "findings": [], "approved": False}
+        finding = {
+            "canonical_key": f"finding:graph-scope:{task_key}:run-{int(time.time() * 1000)}",
+            "title": title,
+            "conclusion": conclusion,
+            "confidence": 0.72,
+            "supporting_evidence": evidence_paths,
+            "counter_evidence": [
+                {
+                    "kind": "scope_limit",
+                    "summary": "The task cannot expand beyond the selected approved graph scope without a new bounded graph request.",
+                }
+            ],
+            "recommended_action": {
+                "type": "review_graph_scope",
+                "title": "Review scoped graph evidence before operational action",
+                "description": "Use this draft as a reviewer prompt; do not treat it as an approved finding until it passes the review gate.",
+                "execution_boundary": "proposal_only",
+            },
+        }
+        output = {
+            "summary": conclusion,
+            "finding_keys": [finding["canonical_key"]],
+            "unsupported_claims": [],
+            "draft_only": True,
+        }
+        eval_result = {
+            "passed": True,
+            "approved_only": True,
+            "draft_only": True,
+            "unsupported_claims": [],
+            "evidence_path_count": len(evidence_paths),
+            "tenant_id": tenant.tenant_id,
+        }
+        run = self._record_run(tenant, task, query_plan, tool_calls, evidence_paths, output, eval_result, "completed", started)
+        finding_row = self._record_finding(tenant, run, finding)
+        return {"tenant": tenant.public_dict(), "task": task, "run": run, "findings": [finding_row], "approved": True}
+
     def graph_query(self, tenant, object_type, instance_id):
         return self.instance_repository.neighborhood(tenant, object_type, instance_id, depth=1, limit=200)
 
@@ -1023,8 +1237,6 @@ class ReasoningRepository:
         return _artifact_to_dict(row) if row else None
 
     def list_findings(self, tenant, task_key):
-        if task_key != self.TASK_KEY:
-            return []
         with self.metadata_engine_for(tenant).connect() as conn:
             rows = conn.execute(
                 text(
@@ -1224,7 +1436,7 @@ class ReasoningRepository:
         ]
 
     def _record_run(self, tenant, task, query_plan, tool_calls, evidence_paths, output, eval_result, status, started):
-        run_key = f"{self.TASK_KEY}:run:{int(time.time() * 1000)}"
+        run_key = f"{task['canonical_key']}:run:{int(time.time() * 1000)}"
         latency_ms = int((time.monotonic() - started) * 1000)
         with self.metadata_engine_for(tenant).begin() as conn:
             row = conn.execute(
@@ -2229,6 +2441,57 @@ class ReviewWorkbenchHandler(BaseHTTPRequestHandler):
                 return
             self._send_json({"tenant": tenant.public_dict(), "finding": finding})
             return
+        if parsed.path == "/api/graph/context":
+            query = parse_qs(parsed.query)
+            object_type = query.get("type", ["Employee"])[0]
+            instance_id = query.get("id", ["4"])[0]
+            depth = int(query.get("depth", ["1"])[0])
+            limit = int(query.get("limit", ["200"])[0])
+            graph = self.instance_repository.neighborhood(tenant, object_type, instance_id, depth=depth, limit=limit)
+            if graph is None:
+                self._send_error(HTTPStatus.NOT_FOUND, "Graph context not found")
+                return
+            if graph.get("approved"):
+                graph["graph_url"] = (
+                    f"/graph.html?tenant={quote(tenant.tenant_id)}&type={quote(object_type)}"
+                    f"&id={quote(str(instance_id))}&depth={graph.get('depth', depth)}&limit={graph.get('limit', limit)}"
+                )
+            self._send_json(graph)
+            return
+        if parsed.path.startswith("/api/graph/node/"):
+            node_key = unquote(parsed.path.removeprefix("/api/graph/node/"))
+            if ":" not in node_key:
+                self._send_error(HTTPStatus.BAD_REQUEST, "Expected node key like Employee:4")
+                return
+            object_type, instance_id = node_key.split(":", 1)
+            detail = self.instance_repository.detail(tenant, object_type, instance_id)
+            if detail is None:
+                self._send_error(HTTPStatus.NOT_FOUND, "Graph node not found or not approved")
+                return
+            if object_type.lower() == "employee":
+                graph = self.instance_repository.neighborhood(tenant, object_type, instance_id, depth=1, limit=300)
+                if graph and graph.get("approved"):
+                    detail["neighborhood_summary"] = {
+                        "nodes": len(graph.get("nodes", [])),
+                        "edges": len(graph.get("edges", [])),
+                        "by_relation": {"link:employee:1:n:order": len(graph.get("edges", []))},
+                    }
+            else:
+                detail["neighborhood_summary"] = {"nodes": 1, "edges": 0, "by_relation": {}}
+            self._send_json({"tenant": tenant.public_dict(), "node": detail})
+            return
+        if parsed.path.startswith("/api/graph/edge/"):
+            edge_key = unquote(parsed.path.removeprefix("/api/graph/edge/"))
+            if "->" not in edge_key:
+                self._send_error(HTTPStatus.BAD_REQUEST, "Expected edge key like Employee:4->Order:10250")
+                return
+            source, target = edge_key.split("->", 1)
+            edge = self.instance_repository.edge_detail(tenant, source, target)
+            if edge is None:
+                self._send_error(HTTPStatus.NOT_FOUND, "Graph edge not found or not approved")
+                return
+            self._send_json({"tenant": tenant.public_dict(), "edge": edge})
+            return
         if parsed.path == "/api/instances/types":
             self._send_json(self.instance_repository.types(tenant))
             return
@@ -2324,6 +2587,36 @@ class ReviewWorkbenchHandler(BaseHTTPRequestHandler):
                 return
             if result is None:
                 self._send_error(HTTPStatus.NOT_FOUND, f"Runtime not found: {runtime_id}")
+                return
+            self._send_json(result)
+            return
+        if parsed.path == "/api/graph/expand":
+            try:
+                body = self._read_json()
+                node_key = body.get("node_key") or body.get("center_node") or "Employee:4"
+                if ":" not in node_key:
+                    raise ValueError("node_key must be like Employee:4")
+                object_type, instance_id = node_key.split(":", 1)
+                depth = int(body.get("depth") or 1)
+                limit = int(body.get("limit") or body.get("node_limit") or 200)
+                graph = self.instance_repository.neighborhood(tenant, object_type, instance_id, depth=depth, limit=limit)
+            except ValueError as exc:
+                self._send_error(HTTPStatus.BAD_REQUEST, str(exc))
+                return
+            if graph is None:
+                self._send_error(HTTPStatus.NOT_FOUND, "Graph expansion not found")
+                return
+            self._send_json(graph)
+            return
+        if parsed.path == "/api/reasoning/tasks/from-graph":
+            try:
+                body = self._read_json()
+                result = self.reasoning_repository.create_scoped_task_from_graph(tenant, body)
+            except ValueError as exc:
+                self._send_error(HTTPStatus.BAD_REQUEST, str(exc))
+                return
+            except Exception as exc:  # pragma: no cover - displayed to local operator
+                self._send_error(HTTPStatus.INTERNAL_SERVER_ERROR, str(exc))
                 return
             self._send_json(result)
             return

@@ -16,6 +16,7 @@ const els = {
   shellTenantMeta: document.querySelector("#shell-tenant-meta"),
   navWorkbench: document.querySelector("#nav-workbench"),
   navInstances: document.querySelector("#nav-instances"),
+  navGraph: document.querySelector("#nav-graph"),
   navReasoning: document.querySelector("#nav-reasoning"),
   navSettings: document.querySelector("#nav-settings"),
   breadcrumb: document.querySelector("#breadcrumb"),
@@ -90,6 +91,7 @@ async function loadTenants() {
   }
   els.navWorkbench.href = `/?tenant=${encodeURIComponent(state.tenant)}`;
   els.navInstances.href = `/instances.html?tenant=${encodeURIComponent(state.tenant)}&type=Employee&id=4`;
+  els.navGraph.href = `/graph.html?tenant=${encodeURIComponent(state.tenant)}&type=Employee&id=4&depth=1`;
   els.navReasoning.href = `/reasoning.html?tenant=${encodeURIComponent(state.tenant)}&task=${encodeURIComponent(state.taskKey)}`;
   els.navSettings.href = `/settings.html?tenant=${encodeURIComponent(state.tenant)}`;
   els.breadcrumb.textContent = `Reasoning / ${state.taskKey}`;
