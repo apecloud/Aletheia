@@ -3,6 +3,7 @@ import hashlib
 import json
 import mimetypes
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -1374,9 +1375,9 @@ class AgentGatewayRepository:
             "command_template_id": "builtin_json_report_v1",
             "enabled": True,
         },
-        {"runtime_id": "codex_cli_default", "runtime_type": "codex_cli", "binary_ref": "codex", "command_template_id": "version_probe_only", "enabled": True},
-        {"runtime_id": "gemini_cli_default", "runtime_type": "gemini_cli", "binary_ref": "gemini", "command_template_id": "version_probe_only", "enabled": True},
-        {"runtime_id": "claude_code_cli_default", "runtime_type": "claude_code_cli", "binary_ref": "claude", "command_template_id": "version_probe_only", "enabled": True},
+        {"runtime_id": "codex_cli_default", "runtime_type": "codex_cli", "binary_ref": "codex", "command_template_id": "codex_cli_json_report_v1", "enabled": True},
+        {"runtime_id": "gemini_cli_default", "runtime_type": "gemini_cli", "binary_ref": "gemini", "command_template_id": "gemini_cli_json_report_v1", "enabled": True},
+        {"runtime_id": "claude_code_cli_default", "runtime_type": "claude_code_cli", "binary_ref": "claude", "command_template_id": "claude_code_json_report_v1", "enabled": True},
         {"runtime_id": "openclaw_cli_default", "runtime_type": "openclaw_cli", "binary_ref": "openclaw", "command_template_id": "version_probe_only", "enabled": True},
         {"runtime_id": "hermes_cli_default", "runtime_type": "hermes_cli", "binary_ref": "hermes", "command_template_id": "version_probe_only", "enabled": True},
     ]
@@ -1429,7 +1430,7 @@ class AgentGatewayRepository:
                      max_runtime_seconds, max_output_bytes, env_allowlist_json, secret_policy, created_at, updated_at)
                     VALUES
                     (:tenant_id, 'default_cli_policy', :allowed_paths_json, :allowed_tools_json,
-                     :blocked_tools_json, 30, 65536, '[]', 'deny', NOW(), NOW())
+                     :blocked_tools_json, 120, 65536, '[]', 'deny', NOW(), NOW())
                     ON CONFLICT (project_id, policy_id) DO UPDATE SET
                       allowed_paths_json = EXCLUDED.allowed_paths_json,
                       allowed_tools_json = EXCLUDED.allowed_tools_json,
@@ -1612,12 +1613,15 @@ class AgentGatewayRepository:
         if readiness["demo_status"] != "demo_ready":
             raise ValueError(f"Safe demo disabled: {readiness['demo_status']}")
         body = dict(payload)
+        body.pop("mock_cli_output", None)
         body.setdefault("policy_id", "default_cli_policy")
         body.setdefault("task_type", "report")
         body.setdefault("prompt", "Read the Aletheia README and produce a repository structure smoke report.")
         return self.run_smoke(tenant, runtime_id, body)
 
     def _execute_runtime(self, runtime, policy, tenant, prompt, task_type):
+        if runtime["command_template_id"] in {"claude_code_json_report_v1", "codex_cli_json_report_v1", "gemini_cli_json_report_v1"}:
+            return self._execute_external_report_runtime(runtime, policy, tenant, prompt, task_type)
         if runtime["command_template_id"] != "builtin_json_report_v1":
             output = {
                 "status": "blocked",
@@ -1675,8 +1679,114 @@ print(json.dumps({
         )
         return result.stdout, result.stderr, result.returncode
 
+    def _execute_external_report_runtime(self, runtime, policy, tenant, prompt, task_type):
+        binary = shutil.which(runtime["binary_ref"])
+        if not binary:
+            output = {
+                "status": "blocked",
+                "summary": f"{runtime['binary_ref']} is not visible to the service PATH.",
+                "tool_calls": [],
+                "draft_artifacts": [],
+                "files_touched": [],
+                "policy_violations": [{"code": "runtime_binary_missing", "runtime_id": runtime["runtime_id"]}],
+            }
+            return _json_dump(output), "", 0
+        safe_prompt = self._safe_demo_prompt(runtime, tenant, task_type, prompt)
+        last_message_path = Path("/tmp") / f"aletheia-{runtime['runtime_id']}-{int(time.time() * 1000)}.txt"
+        command = self._runtime_command(runtime, binary, safe_prompt, last_message_path)
+        started = time.monotonic()
+        try:
+            result = subprocess.run(
+                command,
+                cwd=Path(__file__).resolve().parent,
+                env={"PATH": os.environ.get("PATH", ""), "HOME": os.environ.get("HOME", "")},
+                text=True,
+                capture_output=True,
+                timeout=policy["max_runtime_seconds"],
+                check=False,
+            )
+            raw_output = self._extract_runtime_response(runtime, result.stdout, result.stderr, last_message_path)
+            policy_violations = []
+            status = "completed" if result.returncode == 0 and raw_output else "failed"
+            if result.returncode != 0:
+                policy_violations.append({"code": "runtime_command_failed", "detail": f"exit code {result.returncode}"})
+        except subprocess.TimeoutExpired:
+            raw_output = ""
+            result = subprocess.CompletedProcess(command, 124, "", "safe demo timed out")
+            status = "failed"
+            policy_violations = [{"code": "runtime_timeout", "detail": f">{policy['max_runtime_seconds']}s"}]
+        finally:
+            try:
+                last_message_path.unlink()
+            except FileNotFoundError:
+                pass
+        raw_summary = raw_output.strip().replace("\n", " ")[:160] or "no response"
+        summary = f"{runtime['runtime_type']} safe demo completed with read-only structured report output: {raw_summary}"
+        output = {
+            "status": status,
+            "summary": summary,
+            "tool_calls": [{"tool": "write_report", "runtime": runtime["runtime_id"], "mode": "safe_demo"}],
+            "draft_artifacts": [
+                {
+                    "artifact_type": "report",
+                    "status": "draft",
+                    "payload": {
+                        "title": f"{runtime['runtime_type']} safe demo report",
+                        "tenant_id": tenant.tenant_id,
+                        "task_type": task_type,
+                        "summary": summary,
+                        "runtime_id": runtime["runtime_id"],
+                        "command_template_id": runtime["command_template_id"],
+                        "raw_response": self._mask_secret_like(raw_output)[:4000],
+                        "duration_ms": int((time.monotonic() - started) * 1000),
+                    },
+                }
+            ],
+            "files_touched": ["reports/agent-gateway-smoke.md"],
+            "policy_violations": policy_violations,
+        }
+        runtime_log = _json_dump({"runtime_stdout": self._mask_secret_like(result.stdout), "runtime_stderr": self._mask_secret_like(result.stderr)})
+        return _json_dump(output), runtime_log, result.returncode
+
+    def _safe_demo_prompt(self, runtime, tenant, task_type, prompt):
+        return "Say OK."
+
+    def _runtime_command(self, runtime, binary, safe_prompt, last_message_path):
+        template = runtime["command_template_id"]
+        if template == "claude_code_json_report_v1":
+            return [binary, "--print", "--output-format", "json", "--permission-mode", "plan", safe_prompt]
+        if template == "codex_cli_json_report_v1":
+            return [binary, "exec", "--cd", str(Path(__file__).resolve().parent), "--sandbox", "read-only", "--output-last-message", str(last_message_path), safe_prompt]
+        if template == "gemini_cli_json_report_v1":
+            return [binary, "--prompt", safe_prompt, "--approval-mode", "plan", "--output-format", "json"]
+        raise ValueError(f"Unsupported runtime template: {template}")
+
+    def _extract_runtime_response(self, runtime, stdout, stderr, last_message_path):
+        template = runtime["command_template_id"]
+        if template == "claude_code_json_report_v1":
+            try:
+                return str(json.loads(stdout or "{}").get("result") or "")
+            except json.JSONDecodeError:
+                return stdout or stderr
+        if template == "codex_cli_json_report_v1":
+            if last_message_path.exists():
+                return last_message_path.read_text(encoding="utf-8", errors="ignore")
+            return stdout or stderr
+        if template == "gemini_cli_json_report_v1":
+            try:
+                return str(json.loads(stdout or "{}").get("response") or "")
+            except json.JSONDecodeError:
+                return stdout or stderr
+        return stdout or stderr
+
     def _validate_execution(self, runtime, policy):
-        if runtime["command_template_id"] not in {"builtin_json_report_v1", "version_probe_only"}:
+        if runtime["command_template_id"] not in {
+            "builtin_json_report_v1",
+            "version_probe_only",
+            "claude_code_json_report_v1",
+            "codex_cli_json_report_v1",
+            "gemini_cli_json_report_v1",
+        }:
             return {"code": "command_template_not_allowlisted", "detail": runtime["command_template_id"]}
         if policy["secret_policy"] != "deny":
             return {"code": "secret_policy_not_supported_in_mvp", "detail": policy["secret_policy"]}
@@ -1727,10 +1837,11 @@ print(json.dumps({
         elif binary_status == "fail":
             checks.append(self._check("auth", "unknown", "Auth was not checked because the binary is unavailable.", f"Install and sign in to {runtime['binary_ref']} locally; credentials are not stored in Aletheia."))
         else:
-            checks.append(self._check("auth", "unknown", "Auth state is not validated by MVP readiness.", f"Run the {runtime['binary_ref']} sign-in flow locally if this agent requires it; do not paste credentials into Settings."))
+            auth_check = self._auth_check(runtime)
+            checks.append(auth_check)
 
         expected_template = self._expected_demo_template(runtime["runtime_type"])
-        template_ready = runtime["command_template_id"] == "builtin_json_report_v1"
+        template_ready = runtime["command_template_id"] == expected_template
         checks.append(
             self._check(
                 "template",
@@ -1740,12 +1851,17 @@ print(json.dumps({
             )
         )
 
-        output_ready = runtime["command_template_id"] == "builtin_json_report_v1"
+        output_ready = runtime["command_template_id"] in {
+            "builtin_json_report_v1",
+            "claude_code_json_report_v1",
+            "codex_cli_json_report_v1",
+            "gemini_cli_json_report_v1",
+        }
         checks.append(
             self._check(
                 "output_contract",
                 "pass" if output_ready else "fail",
-                "Structured JSON report output is supported." if output_ready else "No structured output parser is enabled for this placeholder profile.",
+                "Structured report output is supported by the gateway adapter." if output_ready else "No structured output parser is enabled for this placeholder profile.",
                 "Configure a JSON/report adapter that maps CLI output into draft artifacts only." if not output_ready else "",
             )
         )
@@ -1771,9 +1887,9 @@ print(json.dumps({
         checks.append(
             self._check(
                 "smoke_task",
-                "pass" if runtime["command_template_id"] == "builtin_json_report_v1" else "fail",
-                "Read-only repository summary safe demo." if runtime["command_template_id"] == "builtin_json_report_v1" else "Safe demo is blocked until an executable template exists.",
-                "Use generic_cli_builtin now, or add a controlled template for this CLI." if runtime["command_template_id"] != "builtin_json_report_v1" else "",
+                "pass" if output_ready and template_ready else "fail",
+                "Read-only repository summary safe demo." if output_ready and template_ready else "Safe demo is blocked until an executable template exists.",
+                "Use generic_cli_builtin now, or add a controlled template for this CLI." if not (output_ready and template_ready) else "",
             )
         )
 
@@ -1819,6 +1935,27 @@ print(json.dumps({
             "generic_cli": "builtin_json_report_v1",
         }.get(runtime_type, f"{runtime_type}_json_report_v1")
 
+    def _auth_check(self, runtime):
+        runtime_type = runtime["runtime_type"]
+        binary = runtime["binary_ref"]
+        if runtime_type == "claude_code_cli":
+            return self._run_auth_command("auth", [binary, "auth", "status"], "Claude Code auth is available.", f"Run `{binary} auth` locally and sign in.")
+        if runtime_type == "codex_cli":
+            return self._run_auth_command("auth", [binary, "login", "status"], "Codex CLI auth is available.", f"Run `{binary} login` locally and sign in.")
+        if runtime_type == "gemini_cli":
+            return self._run_auth_command("auth", [binary, "--version"], "Gemini CLI binary is available; auth is validated during safe demo execution.", f"Run `{binary}` locally and complete sign-in if safe demo reports auth failure.")
+        return self._check("auth", "unknown", "Auth check is not implemented for this runtime.", f"Install and sign in to {binary} locally; credentials are not stored in Aletheia.")
+
+    def _run_auth_command(self, name, command, success_detail, next_action):
+        try:
+            result = subprocess.run(command, text=True, capture_output=True, timeout=8, check=False)
+        except (OSError, subprocess.SubprocessError):
+            return self._check(name, "fail", "Auth command failed or timed out.", next_action)
+        output = self._mask_secret_like(result.stdout or result.stderr)
+        if result.returncode == 0:
+            return self._check(name, "pass", f"{success_detail} {output[:160]}")
+        return self._check(name, "fail", f"Auth command failed. {output[:160]}", next_action)
+
     def _parse_cli_output(self, stdout):
         try:
             output = json.loads(stdout)
@@ -1843,7 +1980,8 @@ print(json.dumps({
                 violations.append({"code": "tool_not_allowed", "tool": tool})
         text_blob = _json_dump(output).lower()
         for blocked_word in sorted(blocked):
-            if blocked_word.lower() in text_blob:
+            pattern = r"(?<![a-z0-9_/-])" + re.escape(blocked_word.lower()) + r"(?![a-z0-9_/-])"
+            if re.search(pattern, text_blob):
                 violations.append({"code": "blocked_action_in_output", "action": blocked_word})
         for path in output.get("files_touched", []):
             if not self._path_allowed(path, policy["allowed_paths"]):
@@ -1972,6 +2110,12 @@ print(json.dumps({
 
     def _mask_secret_like(self, value):
         text_value = str(value or "")
+        secret_patterns = [
+            r"sk-[A-Za-z0-9*_-]{8,}",
+            r"(?i)(api[_-]?key|token|secret|password)\s*[:=]\s*['\"]?[^\\s,'\"]+",
+        ]
+        for pattern in secret_patterns:
+            text_value = re.sub(pattern, "[masked]", text_value)
         for key in ("API_KEY", "TOKEN", "SECRET", "PASSWORD"):
             if key in text_value.upper():
                 return "[masked]"

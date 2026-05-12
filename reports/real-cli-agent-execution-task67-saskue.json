@@ -1,0 +1,756 @@
+{
+  "task": 67,
+  "result": "PASS",
+  "validated_at": "2026-05-12T12:45:49.408563+00:00",
+  "base_url": "http://127.0.0.1:8767",
+  "readiness": {
+    "generic_cli_builtin": {
+      "runtime_id": "generic_cli_builtin",
+      "demo_status": "demo_ready",
+      "safe_demo_enabled": true,
+      "checks": [
+        {
+          "name": "runtime_enabled",
+          "status": "pass",
+          "detail": "Runtime profile is enabled.",
+          "next_action": ""
+        },
+        {
+          "name": "binary",
+          "status": "pass",
+          "detail": "python available for builtin template.",
+          "next_action": ""
+        },
+        {
+          "name": "path_visible",
+          "status": "pass",
+          "detail": "Runtime binary is visible to the service process.",
+          "next_action": ""
+        },
+        {
+          "name": "auth",
+          "status": "pass",
+          "detail": "No external auth required.",
+          "next_action": ""
+        },
+        {
+          "name": "template",
+          "status": "pass",
+          "detail": "builtin_json_report_v1 is configured.",
+          "next_action": ""
+        },
+        {
+          "name": "output_contract",
+          "status": "pass",
+          "detail": "Structured report output is supported by the gateway adapter.",
+          "next_action": ""
+        },
+        {
+          "name": "policy",
+          "status": "pass",
+          "detail": "Default CLI policy is deny-by-default with allowed paths and blocked actions.",
+          "next_action": ""
+        },
+        {
+          "name": "working_dir",
+          "status": "pass",
+          "detail": "/Users/slc/code/Aletheia",
+          "next_action": ""
+        },
+        {
+          "name": "smoke_task",
+          "status": "pass",
+          "detail": "Read-only repository summary safe demo.",
+          "next_action": ""
+        }
+      ]
+    },
+    "claude_code_cli_default": {
+      "runtime_id": "claude_code_cli_default",
+      "demo_status": "demo_ready",
+      "safe_demo_enabled": true,
+      "checks": [
+        {
+          "name": "runtime_enabled",
+          "status": "pass",
+          "detail": "Runtime profile is enabled.",
+          "next_action": ""
+        },
+        {
+          "name": "binary",
+          "status": "pass",
+          "detail": "claude found in service PATH.",
+          "next_action": ""
+        },
+        {
+          "name": "path_visible",
+          "status": "pass",
+          "detail": "Runtime binary is visible to the service process.",
+          "next_action": ""
+        },
+        {
+          "name": "auth",
+          "status": "pass",
+          "detail": "Claude Code auth is available. [masked]",
+          "next_action": ""
+        },
+        {
+          "name": "template",
+          "status": "pass",
+          "detail": "claude_code_json_report_v1 is configured.",
+          "next_action": ""
+        },
+        {
+          "name": "output_contract",
+          "status": "pass",
+          "detail": "Structured report output is supported by the gateway adapter.",
+          "next_action": ""
+        },
+        {
+          "name": "policy",
+          "status": "pass",
+          "detail": "Default CLI policy is deny-by-default with allowed paths and blocked actions.",
+          "next_action": ""
+        },
+        {
+          "name": "working_dir",
+          "status": "pass",
+          "detail": "/Users/slc/code/Aletheia",
+          "next_action": ""
+        },
+        {
+          "name": "smoke_task",
+          "status": "pass",
+          "detail": "Read-only repository summary safe demo.",
+          "next_action": ""
+        }
+      ]
+    },
+    "codex_cli_default": {
+      "runtime_id": "codex_cli_default",
+      "demo_status": "demo_ready",
+      "safe_demo_enabled": true,
+      "checks": [
+        {
+          "name": "runtime_enabled",
+          "status": "pass",
+          "detail": "Runtime profile is enabled.",
+          "next_action": ""
+        },
+        {
+          "name": "binary",
+          "status": "pass",
+          "detail": "codex found in service PATH.",
+          "next_action": ""
+        },
+        {
+          "name": "path_visible",
+          "status": "pass",
+          "detail": "Runtime binary is visible to the service process.",
+          "next_action": ""
+        },
+        {
+          "name": "auth",
+          "status": "pass",
+          "detail": "Codex CLI auth is available. Logged in using an API key - [masked]\n",
+          "next_action": ""
+        },
+        {
+          "name": "template",
+          "status": "pass",
+          "detail": "codex_cli_json_report_v1 is configured.",
+          "next_action": ""
+        },
+        {
+          "name": "output_contract",
+          "status": "pass",
+          "detail": "Structured report output is supported by the gateway adapter.",
+          "next_action": ""
+        },
+        {
+          "name": "policy",
+          "status": "pass",
+          "detail": "Default CLI policy is deny-by-default with allowed paths and blocked actions.",
+          "next_action": ""
+        },
+        {
+          "name": "working_dir",
+          "status": "pass",
+          "detail": "/Users/slc/code/Aletheia",
+          "next_action": ""
+        },
+        {
+          "name": "smoke_task",
+          "status": "pass",
+          "detail": "Read-only repository summary safe demo.",
+          "next_action": ""
+        }
+      ]
+    },
+    "gemini_cli_default": {
+      "runtime_id": "gemini_cli_default",
+      "demo_status": "demo_ready",
+      "safe_demo_enabled": true,
+      "checks": [
+        {
+          "name": "runtime_enabled",
+          "status": "pass",
+          "detail": "Runtime profile is enabled.",
+          "next_action": ""
+        },
+        {
+          "name": "binary",
+          "status": "pass",
+          "detail": "gemini found in service PATH.",
+          "next_action": ""
+        },
+        {
+          "name": "path_visible",
+          "status": "pass",
+          "detail": "Runtime binary is visible to the service process.",
+          "next_action": ""
+        },
+        {
+          "name": "auth",
+          "status": "pass",
+          "detail": "Gemini CLI binary is available; auth is validated during safe demo execution. 0.41.1\n",
+          "next_action": ""
+        },
+        {
+          "name": "template",
+          "status": "pass",
+          "detail": "gemini_cli_json_report_v1 is configured.",
+          "next_action": ""
+        },
+        {
+          "name": "output_contract",
+          "status": "pass",
+          "detail": "Structured report output is supported by the gateway adapter.",
+          "next_action": ""
+        },
+        {
+          "name": "policy",
+          "status": "pass",
+          "detail": "Default CLI policy is deny-by-default with allowed paths and blocked actions.",
+          "next_action": ""
+        },
+        {
+          "name": "working_dir",
+          "status": "pass",
+          "detail": "/Users/slc/code/Aletheia",
+          "next_action": ""
+        },
+        {
+          "name": "smoke_task",
+          "status": "pass",
+          "detail": "Read-only repository summary safe demo.",
+          "next_action": ""
+        }
+      ]
+    },
+    "openclaw_cli_default": {
+      "runtime_id": "openclaw_cli_default",
+      "demo_status": "not_installed",
+      "safe_demo_enabled": false,
+      "checks": [
+        {
+          "name": "runtime_enabled",
+          "status": "pass",
+          "detail": "Runtime profile is enabled.",
+          "next_action": ""
+        },
+        {
+          "name": "binary",
+          "status": "fail",
+          "detail": "openclaw is not visible to the service PATH.",
+          "next_action": "Install openclaw and restart the service with a PATH that can resolve it."
+        },
+        {
+          "name": "path_visible",
+          "status": "fail",
+          "detail": "Runtime binary is not visible from the background service.",
+          "next_action": "Expose openclaw through the service PATH, not only the interactive shell."
+        },
+        {
+          "name": "auth",
+          "status": "unknown",
+          "detail": "Auth was not checked because the binary is unavailable.",
+          "next_action": "Install and sign in to openclaw locally; credentials are not stored in Aletheia."
+        },
+        {
+          "name": "template",
+          "status": "fail",
+          "detail": "openclaw_cli_json_report_v1 is required for executable demo; current template is version_probe_only.",
+          "next_action": "Add an allowlisted openclaw_cli_json_report_v1 runtime template before enabling safe demo."
+        },
+        {
+          "name": "output_contract",
+          "status": "fail",
+          "detail": "No structured output parser is enabled for this placeholder profile.",
+          "next_action": "Configure a JSON/report adapter that maps CLI output into draft artifacts only."
+        },
+        {
+          "name": "policy",
+          "status": "pass",
+          "detail": "Default CLI policy is deny-by-default with allowed paths and blocked actions.",
+          "next_action": ""
+        },
+        {
+          "name": "working_dir",
+          "status": "pass",
+          "detail": "/Users/slc/code/Aletheia",
+          "next_action": ""
+        },
+        {
+          "name": "smoke_task",
+          "status": "fail",
+          "detail": "Safe demo is blocked until an executable template exists.",
+          "next_action": "Use generic_cli_builtin now, or add a controlled template for this CLI."
+        }
+      ]
+    },
+    "hermes_cli_default": {
+      "runtime_id": "hermes_cli_default",
+      "demo_status": "not_installed",
+      "safe_demo_enabled": false,
+      "checks": [
+        {
+          "name": "runtime_enabled",
+          "status": "pass",
+          "detail": "Runtime profile is enabled.",
+          "next_action": ""
+        },
+        {
+          "name": "binary",
+          "status": "fail",
+          "detail": "hermes is not visible to the service PATH.",
+          "next_action": "Install hermes and restart the service with a PATH that can resolve it."
+        },
+        {
+          "name": "path_visible",
+          "status": "fail",
+          "detail": "Runtime binary is not visible from the background service.",
+          "next_action": "Expose hermes through the service PATH, not only the interactive shell."
+        },
+        {
+          "name": "auth",
+          "status": "unknown",
+          "detail": "Auth was not checked because the binary is unavailable.",
+          "next_action": "Install and sign in to hermes locally; credentials are not stored in Aletheia."
+        },
+        {
+          "name": "template",
+          "status": "fail",
+          "detail": "hermes_cli_json_report_v1 is required for executable demo; current template is version_probe_only.",
+          "next_action": "Add an allowlisted hermes_cli_json_report_v1 runtime template before enabling safe demo."
+        },
+        {
+          "name": "output_contract",
+          "status": "fail",
+          "detail": "No structured output parser is enabled for this placeholder profile.",
+          "next_action": "Configure a JSON/report adapter that maps CLI output into draft artifacts only."
+        },
+        {
+          "name": "policy",
+          "status": "pass",
+          "detail": "Default CLI policy is deny-by-default with allowed paths and blocked actions.",
+          "next_action": ""
+        },
+        {
+          "name": "working_dir",
+          "status": "pass",
+          "detail": "/Users/slc/code/Aletheia",
+          "next_action": ""
+        },
+        {
+          "name": "smoke_task",
+          "status": "fail",
+          "detail": "Safe demo is blocked until an executable template exists.",
+          "next_action": "Use generic_cli_builtin now, or add a controlled template for this CLI."
+        }
+      ]
+    }
+  },
+  "safe_demo_completed": {
+    "generic_cli_builtin": {
+      "run_key": "agent-run:generic_cli_builtin:1778589888493",
+      "tenant_id": "default",
+      "runtime_id": "generic_cli_builtin",
+      "policy_id": "default_cli_policy",
+      "task_type": "report",
+      "prompt_hash": "2839837b9c1a2355d0ddaac2af30d424d7debb6a24bb7ffb5e201b7c3e380592",
+      "status": "completed",
+      "tool_calls": [
+        {
+          "path": "README.md",
+          "tool": "read"
+        }
+      ],
+      "policy_violations": [],
+      "files_touched": [
+        "reports/agent-gateway-smoke.md"
+      ],
+      "output_refs": {
+        "latency_ms": 30,
+        "stderr_ref": "inline_masked",
+        "stdout_ref": "inline_masked",
+        "summary": "Aletheia contains agents, a review workbench, reasoning UI, reports, and evaluation fixtures."
+      },
+      "stdout_ref": "{\"draft_artifacts\": [{\"artifact_type\": \"report\", \"payload\": {\"summary\": \"Smoke run produced a draft report only.\", \"task_type\": \"report\", \"tenant_id\": \"default\", \"title\": \"Repository structure smoke report\"}}], \"files_touched\": [\"reports/agent-gateway-smoke.md\"], \"policy_violations\": [], \"status\": \"completed\", \"stderr_ref\": \"inline\", \"stdout_ref\": \"inline\", \"summary\": \"Aletheia contains agents, a review workbench, reasoning UI, reports, and evaluation fixtures.\", \"tool_calls\": [{\"path\": \"README.md\", \"tool\": \"read\"}]}\n",
+      "stderr_ref": "",
+      "started_at": "2026-05-12 12:44:48.525885",
+      "finished_at": "2026-05-12 12:44:48.525885"
+    },
+    "claude_code_cli_default": {
+      "run_key": "agent-run:claude_code_cli_default:1778589888779",
+      "tenant_id": "default",
+      "runtime_id": "claude_code_cli_default",
+      "policy_id": "default_cli_policy",
+      "task_type": "report",
+      "prompt_hash": "2839837b9c1a2355d0ddaac2af30d424d7debb6a24bb7ffb5e201b7c3e380592",
+      "status": "completed",
+      "tool_calls": [
+        {
+          "mode": "safe_demo",
+          "runtime": "claude_code_cli_default",
+          "tool": "write_report"
+        }
+      ],
+      "policy_violations": [],
+      "files_touched": [
+        "reports/agent-gateway-smoke.md"
+      ],
+      "output_refs": {
+        "latency_ms": 5654,
+        "stderr_ref": "inline_masked",
+        "stdout_ref": "inline_masked",
+        "summary": "claude_code_cli safe demo completed with read-only structured report output: OK."
+      },
+      "stdout_ref": "{\"draft_artifacts\": [{\"artifact_type\": \"report\", \"payload\": {\"command_template_id\": \"claude_code_json_report_v1\", \"duration_ms\": 5654, \"raw_response\": \"OK.\", \"runtime_id\": \"claude_code_cli_default\", \"summary\": \"claude_code_cli safe demo completed with read-only structured report output: OK.\", \"task_type\": \"report\", \"tenant_id\": \"default\", \"title\": \"claude_code_cli safe demo report\"}, \"status\": \"draft\"}], \"files_touched\": [\"reports/agent-gateway-smoke.md\"], \"policy_violations\": [], \"status\": \"completed\", \"summary\": \"claude_code_cli safe demo completed with read-only structured report output: OK.\", \"tool_calls\": [{\"mode\": \"safe_demo\", \"runtime\": \"claude_code_cli_default\", \"tool\": \"write_report\"}]}",
+      "stderr_ref": "{\"runtime_stderr\": \"\", \"runtime_stdout\": \"[masked]\"}",
+      "started_at": "2026-05-12 12:44:54.436030",
+      "finished_at": "2026-05-12 12:44:54.436030"
+    },
+    "codex_cli_default": {
+      "run_key": "agent-run:codex_cli_default:1778589894535",
+      "tenant_id": "default",
+      "runtime_id": "codex_cli_default",
+      "policy_id": "default_cli_policy",
+      "task_type": "report",
+      "prompt_hash": "2839837b9c1a2355d0ddaac2af30d424d7debb6a24bb7ffb5e201b7c3e380592",
+      "status": "completed",
+      "tool_calls": [
+        {
+          "mode": "safe_demo",
+          "runtime": "codex_cli_default",
+          "tool": "write_report"
+        }
+      ],
+      "policy_violations": [],
+      "files_touched": [
+        "reports/agent-gateway-smoke.md"
+      ],
+      "output_refs": {
+        "latency_ms": 5715,
+        "stderr_ref": "inline_masked",
+        "stdout_ref": "inline_masked",
+        "summary": "codex_cli safe demo completed with read-only structured report output: OK"
+      },
+      "stdout_ref": "{\"draft_artifacts\": [{\"artifact_type\": \"report\", \"payload\": {\"command_template_id\": \"codex_cli_json_report_v1\", \"duration_ms\": 5714, \"raw_response\": \"OK\", \"runtime_id\": \"codex_cli_default\", \"summary\": \"codex_cli safe demo completed with read-only structured report output: OK\", \"task_type\": \"report\", \"tenant_id\": \"default\", \"title\": \"codex_cli safe demo report\"}, \"status\": \"draft\"}], \"files_touched\": [\"reports/agent-gateway-smoke.md\"], \"policy_violations\": [], \"status\": \"completed\", \"summary\": \"codex_cli safe demo completed with read-only structured report output: OK\", \"tool_calls\": [{\"mode\": \"safe_demo\", \"runtime\": \"codex_cli_default\", \"tool\": \"write_report\"}]}",
+      "stderr_ref": "{\"runtime_stderr\": \"[masked]\", \"runtime_stdout\": \"OK\\n\"}",
+      "started_at": "2026-05-12 12:45:00.252870",
+      "finished_at": "2026-05-12 12:45:00.252870"
+    },
+    "gemini_cli_default": {
+      "run_key": "agent-run:gemini_cli_default:1778589900833",
+      "tenant_id": "default",
+      "runtime_id": "gemini_cli_default",
+      "policy_id": "default_cli_policy",
+      "task_type": "report",
+      "prompt_hash": "2839837b9c1a2355d0ddaac2af30d424d7debb6a24bb7ffb5e201b7c3e380592",
+      "status": "completed",
+      "tool_calls": [
+        {
+          "mode": "safe_demo",
+          "runtime": "gemini_cli_default",
+          "tool": "write_report"
+        }
+      ],
+      "policy_violations": [],
+      "files_touched": [
+        "reports/agent-gateway-smoke.md"
+      ],
+      "output_refs": {
+        "latency_ms": 14305,
+        "stderr_ref": "inline_masked",
+        "stdout_ref": "inline_masked",
+        "summary": "gemini_cli safe demo completed with read-only structured report output: OK."
+      },
+      "stdout_ref": "{\"draft_artifacts\": [{\"artifact_type\": \"report\", \"payload\": {\"command_template_id\": \"gemini_cli_json_report_v1\", \"duration_ms\": 14305, \"raw_response\": \"OK.\", \"runtime_id\": \"gemini_cli_default\", \"summary\": \"gemini_cli safe demo completed with read-only structured report output: OK.\", \"task_type\": \"report\", \"tenant_id\": \"default\", \"title\": \"gemini_cli safe demo report\"}, \"status\": \"draft\"}], \"files_touched\": [\"reports/agent-gateway-smoke.md\"], \"policy_violations\": [], \"status\": \"completed\", \"summary\": \"gemini_cli safe demo completed with read-only structured report output: OK.\", \"tool_calls\": [{\"mode\": \"safe_demo\", \"runtime\": \"gemini_cli_default\", \"tool\": \"write_report\"}]}",
+      "stderr_ref": "{\"runtime_stderr\": \"Warning: 256-color support not detected. Using a terminal with at least 256-color support is recommended for a better visual experience.\\n# [Aletheia] recent context, 2026-05-12 8:45pm GMT+8\\n\\nNo previous sessions found.\\n\\nView Observations Live @ http://localhost:37777\\nRipgrep is not available. Falling back to GrepTool.\\nHook system message: # [Aletheia] recent context, 2026-05-12 8:45pm GMT+8\\n\\nNo previous sessions found.\\n\\nView Observations Live @ http://localhost:37777\\n\", \"runtime_stdout\": \"[masked]\"}",
+      "started_at": "2026-05-12 12:45:15.140544",
+      "finished_at": "2026-05-12 12:45:15.140544"
+    }
+  },
+  "disabled_safe_demo": {
+    "openclaw_cli_default": {
+      "error": "Safe demo disabled: not_installed"
+    },
+    "hermes_cli_default": {
+      "error": "Safe demo disabled: not_installed"
+    }
+  },
+  "mock_cli_output_ignored_by_safe_demo": {
+    "generic_cli_builtin": {
+      "run_key": "agent-run:generic_cli_builtin:1778589915212",
+      "tenant_id": "default",
+      "runtime_id": "generic_cli_builtin",
+      "policy_id": "default_cli_policy",
+      "task_type": "report",
+      "prompt_hash": "2839837b9c1a2355d0ddaac2af30d424d7debb6a24bb7ffb5e201b7c3e380592",
+      "status": "completed",
+      "tool_calls": [
+        {
+          "path": "README.md",
+          "tool": "read"
+        }
+      ],
+      "policy_violations": [],
+      "files_touched": [
+        "reports/agent-gateway-smoke.md"
+      ],
+      "output_refs": {
+        "latency_ms": 34,
+        "stderr_ref": "inline_masked",
+        "stdout_ref": "inline_masked",
+        "summary": "Aletheia contains agents, a review workbench, reasoning UI, reports, and evaluation fixtures."
+      },
+      "stdout_ref": "{\"draft_artifacts\": [{\"artifact_type\": \"report\", \"payload\": {\"summary\": \"Smoke run produced a draft report only.\", \"task_type\": \"report\", \"tenant_id\": \"default\", \"title\": \"Repository structure smoke report\"}}], \"files_touched\": [\"reports/agent-gateway-smoke.md\"], \"policy_violations\": [], \"status\": \"completed\", \"stderr_ref\": \"inline\", \"stdout_ref\": \"inline\", \"summary\": \"Aletheia contains agents, a review workbench, reasoning UI, reports, and evaluation fixtures.\", \"tool_calls\": [{\"path\": \"README.md\", \"tool\": \"read\"}]}\n",
+      "stderr_ref": "",
+      "started_at": "2026-05-12 12:45:15.248968",
+      "finished_at": "2026-05-12 12:45:15.248968"
+    },
+    "claude_code_cli_default": {
+      "run_key": "agent-run:claude_code_cli_default:1778589915506",
+      "tenant_id": "default",
+      "runtime_id": "claude_code_cli_default",
+      "policy_id": "default_cli_policy",
+      "task_type": "report",
+      "prompt_hash": "2839837b9c1a2355d0ddaac2af30d424d7debb6a24bb7ffb5e201b7c3e380592",
+      "status": "completed",
+      "tool_calls": [
+        {
+          "mode": "safe_demo",
+          "runtime": "claude_code_cli_default",
+          "tool": "write_report"
+        }
+      ],
+      "policy_violations": [],
+      "files_touched": [
+        "reports/agent-gateway-smoke.md"
+      ],
+      "output_refs": {
+        "latency_ms": 5415,
+        "stderr_ref": "inline_masked",
+        "stdout_ref": "inline_masked",
+        "summary": "claude_code_cli safe demo completed with read-only structured report output: OK."
+      },
+      "stdout_ref": "{\"draft_artifacts\": [{\"artifact_type\": \"report\", \"payload\": {\"command_template_id\": \"claude_code_json_report_v1\", \"duration_ms\": 5414, \"raw_response\": \"OK.\", \"runtime_id\": \"claude_code_cli_default\", \"summary\": \"claude_code_cli safe demo completed with read-only structured report output: OK.\", \"task_type\": \"report\", \"tenant_id\": \"default\", \"title\": \"claude_code_cli safe demo report\"}, \"status\": \"draft\"}], \"files_touched\": [\"reports/agent-gateway-smoke.md\"], \"policy_violations\": [], \"status\": \"completed\", \"summary\": \"claude_code_cli safe demo completed with read-only structured report output: OK.\", \"tool_calls\": [{\"mode\": \"safe_demo\", \"runtime\": \"claude_code_cli_default\", \"tool\": \"write_report\"}]}",
+      "stderr_ref": "{\"runtime_stderr\": \"\", \"runtime_stdout\": \"[masked]\"}",
+      "started_at": "2026-05-12 12:45:20.923094",
+      "finished_at": "2026-05-12 12:45:20.923094"
+    },
+    "codex_cli_default": {
+      "run_key": "agent-run:codex_cli_default:1778589921022",
+      "tenant_id": "default",
+      "runtime_id": "codex_cli_default",
+      "policy_id": "default_cli_policy",
+      "task_type": "report",
+      "prompt_hash": "2839837b9c1a2355d0ddaac2af30d424d7debb6a24bb7ffb5e201b7c3e380592",
+      "status": "completed",
+      "tool_calls": [
+        {
+          "mode": "safe_demo",
+          "runtime": "codex_cli_default",
+          "tool": "write_report"
+        }
+      ],
+      "policy_violations": [],
+      "files_touched": [
+        "reports/agent-gateway-smoke.md"
+      ],
+      "output_refs": {
+        "latency_ms": 7408,
+        "stderr_ref": "inline_masked",
+        "stdout_ref": "inline_masked",
+        "summary": "codex_cli safe demo completed with read-only structured report output: OK"
+      },
+      "stdout_ref": "{\"draft_artifacts\": [{\"artifact_type\": \"report\", \"payload\": {\"command_template_id\": \"codex_cli_json_report_v1\", \"duration_ms\": 7407, \"raw_response\": \"OK\", \"runtime_id\": \"codex_cli_default\", \"summary\": \"codex_cli safe demo completed with read-only structured report output: OK\", \"task_type\": \"report\", \"tenant_id\": \"default\", \"title\": \"codex_cli safe demo report\"}, \"status\": \"draft\"}], \"files_touched\": [\"reports/agent-gateway-smoke.md\"], \"policy_violations\": [], \"status\": \"completed\", \"summary\": \"codex_cli safe demo completed with read-only structured report output: OK\", \"tool_calls\": [{\"mode\": \"safe_demo\", \"runtime\": \"codex_cli_default\", \"tool\": \"write_report\"}]}",
+      "stderr_ref": "{\"runtime_stderr\": \"[masked]\", \"runtime_stdout\": \"OK\\n\"}",
+      "started_at": "2026-05-12 12:45:28.432537",
+      "finished_at": "2026-05-12 12:45:28.432537"
+    },
+    "gemini_cli_default": {
+      "run_key": "agent-run:gemini_cli_default:1778589929013",
+      "tenant_id": "default",
+      "runtime_id": "gemini_cli_default",
+      "policy_id": "default_cli_policy",
+      "task_type": "report",
+      "prompt_hash": "2839837b9c1a2355d0ddaac2af30d424d7debb6a24bb7ffb5e201b7c3e380592",
+      "status": "completed",
+      "tool_calls": [
+        {
+          "mode": "safe_demo",
+          "runtime": "gemini_cli_default",
+          "tool": "write_report"
+        }
+      ],
+      "policy_violations": [],
+      "files_touched": [
+        "reports/agent-gateway-smoke.md"
+      ],
+      "output_refs": {
+        "latency_ms": 18380,
+        "stderr_ref": "inline_masked",
+        "stdout_ref": "inline_masked",
+        "summary": "gemini_cli safe demo completed with read-only structured report output: OK."
+      },
+      "stdout_ref": "{\"draft_artifacts\": [{\"artifact_type\": \"report\", \"payload\": {\"command_template_id\": \"gemini_cli_json_report_v1\", \"duration_ms\": 18379, \"raw_response\": \"OK.\", \"runtime_id\": \"gemini_cli_default\", \"summary\": \"gemini_cli safe demo completed with read-only structured report output: OK.\", \"task_type\": \"report\", \"tenant_id\": \"default\", \"title\": \"gemini_cli safe demo report\"}, \"status\": \"draft\"}], \"files_touched\": [\"reports/agent-gateway-smoke.md\"], \"policy_violations\": [], \"status\": \"completed\", \"summary\": \"gemini_cli safe demo completed with read-only structured report output: OK.\", \"tool_calls\": [{\"mode\": \"safe_demo\", \"runtime\": \"gemini_cli_default\", \"tool\": \"write_report\"}]}",
+      "stderr_ref": "{\"runtime_stderr\": \"Warning: 256-color support not detected. Using a terminal with at least 256-color support is recommended for a better visual experience.\\n# [Aletheia] recent context, 2026-05-12 8:45pm GMT+8\\n\\nNo previous sessions found.\\n\\nView Observations Live @ http://localhost:37777\\nRipgrep is not available. Falling back to GrepTool.\\nHook system message: # [Aletheia] recent context, 2026-05-12 8:45pm GMT+8\\n\\nNo previous sessions found.\\n\\nView Observations Live @ http://localhost:37777\\n\", \"runtime_stdout\": \"[masked]\"}",
+      "started_at": "2026-05-12 12:45:47.395227",
+      "finished_at": "2026-05-12 12:45:47.395227"
+    }
+  },
+  "lower_level_policy_validator": {
+    "run_key": "agent-run:generic_cli_builtin:1778589947419",
+    "tenant_id": "default",
+    "runtime_id": "generic_cli_builtin",
+    "policy_id": "default_cli_policy",
+    "task_type": "report",
+    "prompt_hash": "b6677aada46ab62f8045a5e28bbfd2155cf28f36dc2a394fb25736f40590d3c0",
+    "status": "blocked",
+    "tool_calls": [
+      {
+        "tool": "approve_finding"
+      },
+      {
+        "tool": "ingest_graph"
+      }
+    ],
+    "policy_violations": [
+      {
+        "code": "blocked_tool_call",
+        "tool": "approve_finding"
+      },
+      {
+        "code": "blocked_tool_call",
+        "tool": "ingest_graph"
+      },
+      {
+        "action": "approve",
+        "code": "blocked_action_in_output"
+      },
+      {
+        "action": "approve_finding",
+        "code": "blocked_action_in_output"
+      },
+      {
+        "action": "commit",
+        "code": "blocked_action_in_output"
+      },
+      {
+        "action": "ingest",
+        "code": "blocked_action_in_output"
+      },
+      {
+        "action": "ingest_graph",
+        "code": "blocked_action_in_output"
+      },
+      {
+        "action": "push",
+        "code": "blocked_action_in_output"
+      },
+      {
+        "action": "secret_read",
+        "code": "blocked_action_in_output"
+      },
+      {
+        "code": "path_not_allowed",
+        "path": "/tmp/outside.txt"
+      },
+      {
+        "code": "non_draft_output",
+        "status": "approved"
+      }
+    ],
+    "files_touched": [
+      "/tmp/outside.txt"
+    ],
+    "output_refs": {
+      "latency_ms": 0,
+      "stderr_ref": "inline_masked",
+      "stdout_ref": "inline_masked",
+      "summary": "commit push approve ingest secret_read /tmp/outside.txt"
+    },
+    "stdout_ref": "[masked]",
+    "stderr_ref": "",
+    "started_at": "2026-05-12 12:45:47.420487",
+    "finished_at": "2026-05-12 12:45:47.420487"
+  },
+  "tenant_isolation": {
+    "sandbox_safe_demo_run": {
+      "run_key": "agent-run:generic_cli_builtin:1778589947454",
+      "tenant_id": "northwind-sandbox",
+      "runtime_id": "generic_cli_builtin",
+      "policy_id": "default_cli_policy",
+      "task_type": "report",
+      "prompt_hash": "2839837b9c1a2355d0ddaac2af30d424d7debb6a24bb7ffb5e201b7c3e380592",
+      "status": "completed",
+      "tool_calls": [
+        {
+          "path": "README.md",
+          "tool": "read"
+        }
+      ],
+      "policy_violations": [],
+      "files_touched": [
+        "reports/agent-gateway-smoke.md"
+      ],
+      "output_refs": {
+        "latency_ms": 33,
+        "stderr_ref": "inline_masked",
+        "stdout_ref": "inline_masked",
+        "summary": "Aletheia contains agents, a review workbench, reasoning UI, reports, and evaluation fixtures."
+      },
+      "stdout_ref": "{\"draft_artifacts\": [{\"artifact_type\": \"report\", \"payload\": {\"summary\": \"Smoke run produced a draft report only.\", \"task_type\": \"report\", \"tenant_id\": \"northwind-sandbox\", \"title\": \"Repository structure smoke report\"}}], \"files_touched\": [\"reports/agent-gateway-smoke.md\"], \"policy_violations\": [], \"status\": \"completed\", \"stderr_ref\": \"inline\", \"stdout_ref\": \"inline\", \"summary\": \"Aletheia contains agents, a review workbench, reasoning UI, reports, and evaluation fixtures.\", \"tool_calls\": [{\"path\": \"README.md\", \"tool\": \"read\"}]}\n",
+      "stderr_ref": "",
+      "started_at": "2026-05-12 12:45:47.489279",
+      "finished_at": "2026-05-12 12:45:47.489279"
+    },
+    "default_sandbox_run_overlap": []
+  },
+  "secret_scan": {
+    "readiness_leaks": [],
+    "safe_demo_leaks": [],
+    "mock_ignored_leaks": []
+  },
+  "canonical_snapshot_before": {
+    "artifact_status": "approved",
+    "artifact_version": 6,
+    "graph_approved": true,
+    "node_count": 157,
+    "edge_count": 156
+  },
+  "canonical_snapshot_after": {
+    "artifact_status": "approved",
+    "artifact_version": 6,
+    "graph_approved": true,
+    "node_count": 157,
+    "edge_count": 156
+  },
+  "verification_commands": {
+    "command": "node --check web/review_workbench/app.js && node --check web/review_workbench/instance_app.js && node --check web/review_workbench/reasoning_app.js && node --check web/review_workbench/settings_app.js && git diff --check && .venv/bin/python -m compileall -q review_workbench.py agents query_artifacts.py evals tests && .venv/bin/python -m unittest tests/test_ontology_eval.py",
+    "stdout": "",
+    "stderr": "......\n----------------------------------------------------------------------\nRan 6 tests in 0.004s\n\nOK\n"
+  }
+}
