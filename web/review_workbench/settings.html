@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Aletheia AI Runtime Settings</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header class="portal-shell" aria-label="Portal navigation">
+      <div class="portal-brand">
+        <p class="eyebrow">Aletheia Portal</p>
+        <strong>AI Runtime Settings</strong>
+      </div>
+      <nav class="portal-nav" aria-label="Primary views">
+        <a id="nav-workbench" class="portal-nav-item" href="/">Workbench</a>
+        <a id="nav-instances" class="portal-nav-item" href="/instances.html">Instance Explorer</a>
+        <a id="nav-reasoning" class="portal-nav-item" href="/reasoning.html">Reasoning</a>
+        <a id="nav-settings" class="portal-nav-item active" href="/settings.html">Settings</a>
+      </nav>
+      <div class="portal-context" aria-label="Current tenant">
+        <span id="shell-tenant-label">Tenant -</span>
+        <span id="shell-tenant-meta">namespace - · graph -</span>
+      </div>
+      <div id="breadcrumb" class="breadcrumb">Settings / CLI Agents</div>
+    </header>
+
+    <main class="settings-shell">
+      <aside class="sidebar" aria-label="CLI runtime list">
+        <header class="sidebar-header">
+          <div>
+            <p class="eyebrow">AI Runtime</p>
+            <h1>CLI Agents</h1>
+          </div>
+          <button id="refresh" class="icon-button" type="button" title="Refresh settings">↻</button>
+        </header>
+
+        <section class="gate-banner">
+          <strong>Default deny</strong>
+          <span>Only allowlisted runtime templates can run. Secrets are not passed to CLI agents.</span>
+        </section>
+
+        <section class="tenant-panel" aria-label="Tenant context">
+          <label>
+            Tenant
+            <select id="tenant-switcher"></select>
+          </label>
+          <dl>
+            <div><dt>Namespace</dt><dd id="tenant-namespace">-</dd></div>
+            <div><dt>Graph database</dt><dd id="tenant-graph">-</dd></div>
+          </dl>
+        </section>
+
+        <section id="runtime-list" class="artifact-list" aria-label="Runtime profiles"></section>
+      </aside>
+
+      <section class="workspace" aria-label="Runtime configuration detail">
+        <header class="workspace-header">
+          <div>
+            <p class="eyebrow">Controlled Gateway</p>
+            <h2 id="runtime-title">Select a runtime</h2>
+            <p id="runtime-subtitle" class="muted">Health check and smoke run use allowlisted templates only.</p>
+          </div>
+          <span id="runtime-status" class="status-pill muted-pill">unknown</span>
+        </header>
+
+        <section class="detail-grid">
+          <article class="panel primary-panel">
+            <div class="panel-header">
+              <h3>Runtime</h3>
+              <span id="runtime-type" class="metric">-</span>
+            </div>
+            <dl class="meta-grid">
+              <div><dt>Binary</dt><dd id="runtime-binary">-</dd></div>
+              <div><dt>Template</dt><dd id="runtime-template">-</dd></div>
+              <div><dt>Enabled</dt><dd id="runtime-enabled">-</dd></div>
+            </dl>
+            <div class="action-row">
+              <button id="health-check" class="secondary-action" type="button">Run health check</button>
+              <button id="smoke-run" class="secondary-action" type="button">Run smoke</button>
+              <button id="copy-policy" class="secondary-action" type="button">Copy policy</button>
+            </div>
+          </article>
+
+          <article class="panel">
+            <div class="panel-header">
+              <h3>Policy</h3>
+              <span id="policy-id" class="metric">default_cli_policy</span>
+            </div>
+            <div id="policy-detail" class="detail-body compact-detail"></div>
+          </article>
+
+          <article class="panel wide-panel">
+            <div class="panel-header">
+              <h3>Recent AgentRuns</h3>
+              <span id="run-count" class="metric">0</span>
+            </div>
+            <div id="run-list" class="review-list"></div>
+          </article>
+        </section>
+      </section>
+    </main>
+
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+    <script src="/settings_app.js"></script>
+  </body>
+</html>

@@ -243,6 +243,71 @@ class ReasoningReviewEvent(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
+class AgentRuntimeConfig(Base):
+    __tablename__ = "aletheia_agent_runtime_configs"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    runtime_id = Column(String(255), nullable=False, unique=True)
+    runtime_type = Column(String(100), nullable=False)
+    binary_ref = Column(String(500), nullable=False)
+    command_template_id = Column(String(255), nullable=False)
+    enabled = Column(Boolean, nullable=False, default=True)
+    health_status = Column(String(50), nullable=False, default="unknown")
+    health_detail_json = Column(Text, nullable=False, default="{}")
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class AgentPolicy(Base):
+    __tablename__ = "aletheia_agent_policies"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    policy_id = Column(String(255), nullable=False)
+    project_id = Column(String(255), nullable=False, default="default")
+    allowed_paths_json = Column(Text, nullable=False, default="[]")
+    allowed_tools_json = Column(Text, nullable=False, default="[]")
+    blocked_tools_json = Column(Text, nullable=False, default="[]")
+    max_runtime_seconds = Column(Integer, nullable=False, default=30)
+    max_output_bytes = Column(Integer, nullable=False, default=65536)
+    env_allowlist_json = Column(Text, nullable=False, default="[]")
+    secret_policy = Column(String(100), nullable=False, default="deny")
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class AgentRun(Base):
+    __tablename__ = "aletheia_agent_runs"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    run_key = Column(String(255), nullable=False)
+    project_id = Column(String(255), nullable=False, default="default")
+    runtime_id = Column(String(255), nullable=False)
+    policy_id = Column(String(255), nullable=False)
+    task_type = Column(String(100), nullable=False)
+    prompt_hash = Column(String(128), nullable=False)
+    status = Column(String(50), nullable=False, default="pending")
+    tool_calls_json = Column(Text, nullable=False, default="[]")
+    policy_violations_json = Column(Text, nullable=False, default="[]")
+    files_touched_json = Column(Text, nullable=False, default="[]")
+    output_refs_json = Column(Text, nullable=False, default="{}")
+    stdout_ref = Column(Text)
+    stderr_ref = Column(Text)
+    started_at = Column(DateTime, default=datetime.utcnow)
+    finished_at = Column(DateTime)
+
+
+class AgentOutputArtifact(Base):
+    __tablename__ = "aletheia_agent_output_artifacts"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    run_id = Column(Integer, ForeignKey("aletheia_agent_runs.id"), nullable=False)
+    project_id = Column(String(255), nullable=False, default="default")
+    artifact_type = Column(String(100), nullable=False)
+    payload_json = Column(Text, nullable=False, default="{}")
+    status = Column(String(50), nullable=False, default="draft")
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
 def upsert_artifact(
     session,
     *,
@@ -408,6 +473,8 @@ def ensure_artifact_schema(engine) -> None:
         conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_aletheia_reasoning_tasks_project_key ON aletheia_reasoning_tasks (project_id, canonical_key)"))
         conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_aletheia_reasoning_runs_project_key ON aletheia_reasoning_runs (project_id, run_key)"))
         conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_aletheia_reasoning_findings_project_key ON aletheia_reasoning_findings (project_id, canonical_key)"))
+        conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_aletheia_agent_policies_project_key ON aletheia_agent_policies (project_id, policy_id)"))
+        conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_aletheia_agent_runs_project_key ON aletheia_agent_runs (project_id, run_key)"))
 
 
 def _project_id_for(row) -> str:

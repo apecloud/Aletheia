@@ -1,7 +1,10 @@
 import argparse
+import hashlib
 import json
 import mimetypes
 import os
+import shutil
+import subprocess
 import sys
 import time
 from http import HTTPStatus
@@ -1349,10 +1352,526 @@ class ReasoningRepository:
         }
 
 
+class AgentGatewayRepository:
+    BLOCKED_TOOLS = {
+        "approve",
+        "approve_finding",
+        "ingest",
+        "ingest_graph",
+        "modify_canonical_artifact",
+        "commit",
+        "push",
+        "deploy",
+        "secret_read",
+        "direct_db_write",
+    }
+    REQUIRED_OUTPUT_FIELDS = {"status", "summary", "tool_calls", "draft_artifacts", "files_touched", "policy_violations"}
+    RUNTIME_PROFILES = [
+        {
+            "runtime_id": "generic_cli_builtin",
+            "runtime_type": "generic_cli",
+            "binary_ref": sys.executable,
+            "command_template_id": "builtin_json_report_v1",
+            "enabled": True,
+        },
+        {"runtime_id": "codex_cli_default", "runtime_type": "codex_cli", "binary_ref": "codex", "command_template_id": "version_probe_only", "enabled": True},
+        {"runtime_id": "gemini_cli_default", "runtime_type": "gemini_cli", "binary_ref": "gemini", "command_template_id": "version_probe_only", "enabled": True},
+        {"runtime_id": "claude_code_cli_default", "runtime_type": "claude_code_cli", "binary_ref": "claude", "command_template_id": "version_probe_only", "enabled": True},
+        {"runtime_id": "openclaw_cli_default", "runtime_type": "openclaw_cli", "binary_ref": "openclaw", "command_template_id": "version_probe_only", "enabled": True},
+        {"runtime_id": "hermes_cli_default", "runtime_type": "hermes_cli", "binary_ref": "hermes", "command_template_id": "version_probe_only", "enabled": True},
+    ]
+
+    def __init__(self, tenant_registry, ensure_schema=False):
+        self.tenant_registry = tenant_registry
+        self.ensure_schema = ensure_schema
+        self.metadata_engines = {}
+
+    def tenant(self, tenant_id=None):
+        return self.tenant_registry.get(tenant_id)
+
+    def metadata_engine_for(self, tenant):
+        engine = self.metadata_engines.get(tenant.metadata_db_url)
+        if engine is None:
+            engine = create_engine(tenant.metadata_db_url)
+            self.metadata_engines[tenant.metadata_db_url] = engine
+            if self.ensure_schema:
+                ensure_artifact_schema(engine)
+            self.tenant_registry.ensure_metadata(engine)
+        return engine
+
+    def ensure_defaults(self, tenant):
+        with self.metadata_engine_for(tenant).begin() as conn:
+            for profile in self.RUNTIME_PROFILES:
+                conn.execute(
+                    text(
+                        """
+                        INSERT INTO aletheia_agent_runtime_configs
+                        (runtime_id, runtime_type, binary_ref, command_template_id, enabled,
+                         health_status, health_detail_json, created_at, updated_at)
+                        VALUES
+                        (:runtime_id, :runtime_type, :binary_ref, :command_template_id, :enabled,
+                         'unknown', '{}', NOW(), NOW())
+                        ON CONFLICT (runtime_id) DO UPDATE SET
+                          runtime_type = EXCLUDED.runtime_type,
+                          binary_ref = EXCLUDED.binary_ref,
+                          command_template_id = EXCLUDED.command_template_id,
+                          enabled = EXCLUDED.enabled,
+                          updated_at = NOW()
+                        """
+                    ),
+                    profile,
+                )
+            conn.execute(
+                text(
+                    """
+                    INSERT INTO aletheia_agent_policies
+                    (project_id, policy_id, allowed_paths_json, allowed_tools_json, blocked_tools_json,
+                     max_runtime_seconds, max_output_bytes, env_allowlist_json, secret_policy, created_at, updated_at)
+                    VALUES
+                    (:tenant_id, 'default_cli_policy', :allowed_paths_json, :allowed_tools_json,
+                     :blocked_tools_json, 30, 65536, '[]', 'deny', NOW(), NOW())
+                    ON CONFLICT (project_id, policy_id) DO UPDATE SET
+                      allowed_paths_json = EXCLUDED.allowed_paths_json,
+                      allowed_tools_json = EXCLUDED.allowed_tools_json,
+                      blocked_tools_json = EXCLUDED.blocked_tools_json,
+                      max_runtime_seconds = EXCLUDED.max_runtime_seconds,
+                      max_output_bytes = EXCLUDED.max_output_bytes,
+                      env_allowlist_json = EXCLUDED.env_allowlist_json,
+                      secret_policy = EXCLUDED.secret_policy,
+                      updated_at = NOW()
+                    """
+                ),
+                {
+                    "tenant_id": tenant.tenant_id,
+                    "allowed_paths_json": _json_dump(["reports", "web/review_workbench", "agents", "README.md"]),
+                    "allowed_tools_json": _json_dump(["read", "test", "propose_patch", "propose_finding", "write_report"]),
+                    "blocked_tools_json": _json_dump(sorted(self.BLOCKED_TOOLS)),
+                },
+            )
+
+    def list_settings(self, tenant):
+        self.ensure_defaults(tenant)
+        with self.metadata_engine_for(tenant).connect() as conn:
+            runtimes = conn.execute(
+                text(
+                    """
+                    SELECT runtime_id, runtime_type, binary_ref, command_template_id, enabled,
+                           health_status, health_detail_json, created_at, updated_at
+                    FROM aletheia_agent_runtime_configs
+                    ORDER BY runtime_type, runtime_id
+                    """
+                )
+            ).mappings().all()
+            policies = conn.execute(
+                text(
+                    """
+                    SELECT policy_id, project_id, allowed_paths_json, allowed_tools_json,
+                           blocked_tools_json, max_runtime_seconds, max_output_bytes,
+                           env_allowlist_json, secret_policy, created_at, updated_at
+                    FROM aletheia_agent_policies
+                    WHERE project_id = :tenant_id
+                    ORDER BY policy_id
+                    """
+                ),
+                {"tenant_id": tenant.tenant_id},
+            ).mappings().all()
+            runs = conn.execute(
+                text(
+                    """
+                    SELECT run_key, project_id, runtime_id, policy_id, task_type, prompt_hash,
+                           status, tool_calls_json, policy_violations_json, files_touched_json,
+                           output_refs_json, stdout_ref, stderr_ref, started_at, finished_at
+                    FROM aletheia_agent_runs
+                    WHERE project_id = :tenant_id
+                    ORDER BY started_at DESC, id DESC
+                    LIMIT 20
+                    """
+                ),
+                {"tenant_id": tenant.tenant_id},
+            ).mappings().all()
+        return {
+            "tenant": tenant.public_dict(),
+            "runtimes": [self._runtime_to_dict(row) for row in runtimes],
+            "policies": [self._policy_to_dict(row) for row in policies],
+            "runs": [self._run_to_dict(row) for row in runs],
+            "secret_policy": {"storage": "credential_ref_only", "ui": "masked", "default": "deny"},
+        }
+
+    def health_check(self, tenant, runtime_id):
+        self.ensure_defaults(tenant)
+        runtime = self._get_runtime(tenant, runtime_id)
+        if not runtime:
+            return None
+        status = "unavailable"
+        detail = {
+            "binary_ref": self._mask_binary(runtime["binary_ref"]),
+            "secret_masked": True,
+            "command_template_id": runtime["command_template_id"],
+        }
+        if runtime["command_template_id"] == "builtin_json_report_v1":
+            status = "available"
+            detail["version"] = f"python {sys.version.split()[0]}"
+        else:
+            binary = shutil.which(runtime["binary_ref"])
+            detail["resolved"] = bool(binary)
+            if binary:
+                probe = self._probe_version(binary)
+                status = "available" if probe["ok"] else "unavailable"
+                detail.update(probe)
+        with self.metadata_engine_for(tenant).begin() as conn:
+            conn.execute(
+                text(
+                    """
+                    UPDATE aletheia_agent_runtime_configs
+                    SET health_status = :status, health_detail_json = :detail, updated_at = NOW()
+                    WHERE runtime_id = :runtime_id
+                    """
+                ),
+                {"status": status, "detail": _json_dump(detail), "runtime_id": runtime_id},
+            )
+        return {"tenant": tenant.public_dict(), "runtime": {**self._runtime_to_dict(runtime), "health_status": status, "health_detail": detail}}
+
+    def run_smoke(self, tenant, runtime_id, payload):
+        self.ensure_defaults(tenant)
+        runtime = self._get_runtime(tenant, runtime_id)
+        if not runtime:
+            return None
+        policy = self._get_policy(tenant, payload.get("policy_id") or "default_cli_policy")
+        if not policy:
+            raise ValueError("policy not found")
+        prompt = payload.get("prompt") or "Summarize the Aletheia repository structure as a JSON report."
+        task_type = payload.get("task_type") or "report"
+        run_key = f"agent-run:{runtime_id}:{int(time.time() * 1000)}"
+        prompt_hash = hashlib.sha256(prompt.encode("utf-8")).hexdigest()
+        started = time.monotonic()
+
+        command_violation = self._validate_execution(runtime, policy)
+        if command_violation:
+            output = {
+                "status": "blocked",
+                "summary": "Command execution blocked by local policy.",
+                "tool_calls": [],
+                "draft_artifacts": [],
+                "files_touched": [],
+                "policy_violations": [command_violation],
+            }
+            stdout, stderr, returncode = _json_dump(output), "", 0
+        elif "mock_cli_output" in payload:
+            stdout = str(payload.get("mock_cli_output") or "")
+            stderr, returncode = "", 0
+        else:
+            stdout, stderr, returncode = self._execute_runtime(runtime, policy, tenant, prompt, task_type)
+            if len(stdout.encode("utf-8")) > policy["max_output_bytes"]:
+                stdout = stdout.encode("utf-8")[: policy["max_output_bytes"]].decode("utf-8", errors="ignore")
+                stderr = f"{stderr}\noutput truncated by max_output_bytes".strip()
+
+        output, parse_violations = self._parse_cli_output(stdout)
+        reported_violations = output.get("policy_violations", [])
+        if not isinstance(reported_violations, list):
+            reported_violations = [{"code": "invalid_reported_policy_violations"}]
+        policy_violations = parse_violations + reported_violations + self._validate_output(output, policy, tenant)
+        structural_failure = any(
+            violation.get("code") in {"non_json_output", "missing_required_fields"}
+            for violation in policy_violations
+        )
+        status = output.get("status", "failed") if not policy_violations else "blocked"
+        if structural_failure:
+            status = "failed"
+        if returncode != 0:
+            status = "failed"
+            policy_violations.append({"code": "command_failed", "detail": f"exit code {returncode}"})
+        run = self._record_run(
+            tenant,
+            run_key=run_key,
+            runtime_id=runtime["runtime_id"],
+            policy_id=policy["policy_id"],
+            task_type=task_type,
+            prompt_hash=prompt_hash,
+            status=status,
+            output=output,
+            policy_violations=policy_violations,
+            stdout=stdout,
+            stderr=stderr,
+            latency_ms=int((time.monotonic() - started) * 1000),
+        )
+        return {"tenant": tenant.public_dict(), "run": run}
+
+    def _execute_runtime(self, runtime, policy, tenant, prompt, task_type):
+        if runtime["command_template_id"] != "builtin_json_report_v1":
+            output = {
+                "status": "blocked",
+                "summary": f"{runtime['runtime_type']} execution is not enabled in MVP; health check only.",
+                "tool_calls": [],
+                "draft_artifacts": [],
+                "files_touched": [],
+                "policy_violations": [{"code": "runtime_probe_only", "runtime_id": runtime["runtime_id"]}],
+            }
+            return _json_dump(output), "", 0
+        script = """
+import json
+import os
+payload = json.loads(os.environ["ALETHEIA_AGENT_TASK"])
+print(json.dumps({
+  "status": "completed",
+  "summary": "Aletheia contains agents, a review workbench, reasoning UI, reports, and evaluation fixtures.",
+  "tool_calls": [{"tool": "read", "path": "README.md"}],
+  "draft_artifacts": [{
+    "artifact_type": "report",
+    "payload": {
+      "title": "Repository structure smoke report",
+      "tenant_id": payload["tenant_id"],
+      "task_type": payload["task_type"],
+      "summary": "Smoke run produced a draft report only."
+    }
+  }],
+  "files_touched": ["reports/agent-gateway-smoke.md"],
+  "policy_violations": [],
+  "stdout_ref": "inline",
+  "stderr_ref": "inline"
+}, sort_keys=True))
+"""
+        env = {
+            "PATH": os.environ.get("PATH", ""),
+            "ALETHEIA_AGENT_TASK": _json_dump(
+                {
+                    "tenant_id": tenant.tenant_id,
+                    "task_type": task_type,
+                    "prompt": prompt,
+                    "allowed_paths": policy["allowed_paths"],
+                    "allowed_tools": policy["allowed_tools"],
+                    "blocked_tools": policy["blocked_tools"],
+                }
+            ),
+        }
+        result = subprocess.run(
+            [sys.executable, "-c", script],
+            cwd=Path(__file__).resolve().parent,
+            env=env,
+            text=True,
+            capture_output=True,
+            timeout=policy["max_runtime_seconds"],
+            check=False,
+        )
+        return result.stdout, result.stderr, result.returncode
+
+    def _validate_execution(self, runtime, policy):
+        if runtime["command_template_id"] not in {"builtin_json_report_v1", "version_probe_only"}:
+            return {"code": "command_template_not_allowlisted", "detail": runtime["command_template_id"]}
+        if policy["secret_policy"] != "deny":
+            return {"code": "secret_policy_not_supported_in_mvp", "detail": policy["secret_policy"]}
+        return None
+
+    def _parse_cli_output(self, stdout):
+        try:
+            output = json.loads(stdout)
+        except json.JSONDecodeError as exc:
+            return {"status": "failed", "summary": "CLI output was not valid JSON", "tool_calls": [], "draft_artifacts": [], "files_touched": [], "policy_violations": []}, [
+                {"code": "non_json_output", "detail": str(exc)}
+            ]
+        missing = sorted(self.REQUIRED_OUTPUT_FIELDS - set(output))
+        if missing:
+            return output, [{"code": "missing_required_fields", "fields": missing}]
+        return output, []
+
+    def _validate_output(self, output, policy, tenant):
+        violations = []
+        blocked = set(policy["blocked_tools"]) | self.BLOCKED_TOOLS
+        allowed = set(policy["allowed_tools"])
+        for call in output.get("tool_calls", []):
+            tool = str(call.get("tool") or call.get("name") or "").lower()
+            if tool in blocked:
+                violations.append({"code": "blocked_tool_call", "tool": tool})
+            if tool and tool not in allowed and tool not in blocked:
+                violations.append({"code": "tool_not_allowed", "tool": tool})
+        text_blob = _json_dump(output).lower()
+        for blocked_word in sorted(blocked):
+            if blocked_word.lower() in text_blob:
+                violations.append({"code": "blocked_action_in_output", "action": blocked_word})
+        for path in output.get("files_touched", []):
+            if not self._path_allowed(path, policy["allowed_paths"]):
+                violations.append({"code": "path_not_allowed", "path": path})
+        for artifact in output.get("draft_artifacts", []):
+            status = artifact.get("status", "draft")
+            if status not in {"draft", "accepted_for_review"}:
+                violations.append({"code": "non_draft_output", "status": status})
+            payload = artifact.get("payload", {})
+            if payload.get("tenant_id") and payload.get("tenant_id") != tenant.tenant_id:
+                violations.append({"code": "tenant_mismatch", "tenant_id": payload.get("tenant_id")})
+        return violations
+
+    def _path_allowed(self, path, allowed_paths):
+        normalized = str(path).strip().lstrip("/")
+        if ".." in Path(normalized).parts:
+            return False
+        return any(normalized == allowed.rstrip("/") or normalized.startswith(f"{allowed.rstrip('/')}/") for allowed in allowed_paths)
+
+    def _record_run(self, tenant, *, run_key, runtime_id, policy_id, task_type, prompt_hash, status, output, policy_violations, stdout, stderr, latency_ms):
+        files_touched = output.get("files_touched", [])
+        tool_calls = output.get("tool_calls", [])
+        output_refs = {
+            "summary": output.get("summary"),
+            "stdout_ref": "inline_masked",
+            "stderr_ref": "inline_masked",
+            "latency_ms": latency_ms,
+        }
+        with self.metadata_engine_for(tenant).begin() as conn:
+            row = conn.execute(
+                text(
+                    """
+                    INSERT INTO aletheia_agent_runs
+                    (run_key, project_id, runtime_id, policy_id, task_type, prompt_hash,
+                     status, tool_calls_json, policy_violations_json, files_touched_json,
+                     output_refs_json, stdout_ref, stderr_ref, started_at, finished_at)
+                    VALUES
+                    (:run_key, :tenant_id, :runtime_id, :policy_id, :task_type, :prompt_hash,
+                     :status, :tool_calls_json, :policy_violations_json, :files_touched_json,
+                     :output_refs_json, :stdout_ref, :stderr_ref, NOW(), NOW())
+                    RETURNING run_key, project_id, runtime_id, policy_id, task_type, prompt_hash,
+                              status, tool_calls_json, policy_violations_json, files_touched_json,
+                              output_refs_json, stdout_ref, stderr_ref, started_at, finished_at
+                    """
+                ),
+                {
+                    "run_key": run_key,
+                    "tenant_id": tenant.tenant_id,
+                    "runtime_id": runtime_id,
+                    "policy_id": policy_id,
+                    "task_type": task_type,
+                    "prompt_hash": prompt_hash,
+                    "status": status,
+                    "tool_calls_json": _json_dump(tool_calls),
+                    "policy_violations_json": _json_dump(policy_violations),
+                    "files_touched_json": _json_dump(files_touched),
+                    "output_refs_json": _json_dump(output_refs),
+                    "stdout_ref": self._mask_secret_like(stdout),
+                    "stderr_ref": self._mask_secret_like(stderr),
+                },
+            ).mappings().first()
+            run_id = conn.execute(text("SELECT id FROM aletheia_agent_runs WHERE project_id = :tenant_id AND run_key = :run_key"), {"tenant_id": tenant.tenant_id, "run_key": run_key}).scalar()
+            if status == "completed":
+                for artifact in output.get("draft_artifacts", []):
+                    conn.execute(
+                        text(
+                            """
+                            INSERT INTO aletheia_agent_output_artifacts
+                            (run_id, project_id, artifact_type, payload_json, status, created_at)
+                            VALUES (:run_id, :tenant_id, :artifact_type, :payload_json, :status, NOW())
+                            """
+                        ),
+                        {
+                            "run_id": run_id,
+                            "tenant_id": tenant.tenant_id,
+                            "artifact_type": artifact.get("artifact_type", "report"),
+                            "payload_json": _json_dump(artifact.get("payload", {})),
+                            "status": artifact.get("status", "draft"),
+                        },
+                    )
+        return self._run_to_dict(row)
+
+    def _get_runtime(self, tenant, runtime_id):
+        with self.metadata_engine_for(tenant).connect() as conn:
+            return conn.execute(
+                text(
+                    """
+                    SELECT runtime_id, runtime_type, binary_ref, command_template_id, enabled,
+                           health_status, health_detail_json, created_at, updated_at
+                    FROM aletheia_agent_runtime_configs
+                    WHERE runtime_id = :runtime_id
+                    """
+                ),
+                {"runtime_id": runtime_id},
+            ).mappings().first()
+
+    def _get_policy(self, tenant, policy_id):
+        with self.metadata_engine_for(tenant).connect() as conn:
+            row = conn.execute(
+                text(
+                    """
+                    SELECT policy_id, project_id, allowed_paths_json, allowed_tools_json,
+                           blocked_tools_json, max_runtime_seconds, max_output_bytes,
+                           env_allowlist_json, secret_policy, created_at, updated_at
+                    FROM aletheia_agent_policies
+                    WHERE project_id = :tenant_id AND policy_id = :policy_id
+                    """
+                ),
+                {"tenant_id": tenant.tenant_id, "policy_id": policy_id},
+            ).mappings().first()
+        return self._policy_to_dict(row) if row else None
+
+    def _probe_version(self, binary):
+        for args in ([binary, "--version"], [binary, "version"]):
+            try:
+                result = subprocess.run(args, text=True, capture_output=True, timeout=5, check=False)
+                output = (result.stdout or result.stderr or "").strip().splitlines()
+                if result.returncode == 0 and output:
+                    return {"ok": True, "version": self._mask_secret_like(output[0])[:240]}
+            except (OSError, subprocess.SubprocessError):
+                continue
+        return {"ok": False, "version": "unavailable"}
+
+    def _mask_binary(self, value):
+        return Path(value).name if "/" in value else value
+
+    def _mask_secret_like(self, value):
+        text_value = str(value or "")
+        for key in ("API_KEY", "TOKEN", "SECRET", "PASSWORD"):
+            if key in text_value.upper():
+                return "[masked]"
+        return text_value[:8192]
+
+    def _runtime_to_dict(self, row):
+        return {
+            "runtime_id": row["runtime_id"],
+            "runtime_type": row["runtime_type"],
+            "binary_ref": self._mask_binary(row["binary_ref"]),
+            "command_template_id": row["command_template_id"],
+            "enabled": row["enabled"],
+            "health_status": row["health_status"],
+            "health_detail": _load_json(row["health_detail_json"], {}),
+            "created_at": str(row["created_at"]) if row.get("created_at") else None,
+            "updated_at": str(row["updated_at"]) if row.get("updated_at") else None,
+        }
+
+    def _policy_to_dict(self, row):
+        return {
+            "policy_id": row["policy_id"],
+            "tenant_id": row["project_id"],
+            "allowed_paths": _load_json(row["allowed_paths_json"], []),
+            "allowed_tools": _load_json(row["allowed_tools_json"], []),
+            "blocked_tools": _load_json(row["blocked_tools_json"], []),
+            "max_runtime_seconds": row["max_runtime_seconds"],
+            "max_output_bytes": row["max_output_bytes"],
+            "env_allowlist": _load_json(row["env_allowlist_json"], []),
+            "secret_policy": row["secret_policy"],
+            "created_at": str(row["created_at"]) if row.get("created_at") else None,
+            "updated_at": str(row["updated_at"]) if row.get("updated_at") else None,
+        }
+
+    def _run_to_dict(self, row):
+        return {
+            "run_key": row["run_key"],
+            "tenant_id": row["project_id"],
+            "runtime_id": row["runtime_id"],
+            "policy_id": row["policy_id"],
+            "task_type": row["task_type"],
+            "prompt_hash": row["prompt_hash"],
+            "status": row["status"],
+            "tool_calls": _load_json(row["tool_calls_json"], []),
+            "policy_violations": _load_json(row["policy_violations_json"], []),
+            "files_touched": _load_json(row["files_touched_json"], []),
+            "output_refs": _load_json(row["output_refs_json"], {}),
+            "stdout_ref": row["stdout_ref"],
+            "stderr_ref": row["stderr_ref"],
+            "started_at": str(row["started_at"]) if row["started_at"] else None,
+            "finished_at": str(row["finished_at"]) if row["finished_at"] else None,
+        }
+
+
 class ReviewWorkbenchHandler(BaseHTTPRequestHandler):
     repository = None
     instance_repository = None
     reasoning_repository = None
+    agent_gateway_repository = None
 
     def log_message(self, fmt, *args):
         sys.stderr.write("%s - %s\n" % (self.log_date_time_string(), fmt % args))
@@ -1377,6 +1896,9 @@ class ReviewWorkbenchHandler(BaseHTTPRequestHandler):
             filters = {key: values[0] for key, values in parse_qs(parsed.query).items() if values and values[0]}
             filters.pop("tenant", None)
             self._send_json(self.repository.list_artifacts(tenant, filters))
+            return
+        if parsed.path == "/api/agent-gateway/settings":
+            self._send_json(self.agent_gateway_repository.list_settings(tenant))
             return
         if parsed.path == "/api/reasoning/tasks":
             self._send_json(self.reasoning_repository.list_tasks(tenant))
@@ -1454,6 +1976,30 @@ class ReviewWorkbenchHandler(BaseHTTPRequestHandler):
             tenant = self._tenant(parsed)
         except (KeyError, ValueError) as exc:
             self._send_error(HTTPStatus.BAD_REQUEST, str(exc))
+            return
+        if parsed.path.startswith("/api/agent-gateway/runtimes/") and parsed.path.endswith("/health"):
+            runtime_id = unquote(parsed.path.removeprefix("/api/agent-gateway/runtimes/").removesuffix("/health").rstrip("/"))
+            result = self.agent_gateway_repository.health_check(tenant, runtime_id)
+            if result is None:
+                self._send_error(HTTPStatus.NOT_FOUND, f"Runtime not found: {runtime_id}")
+                return
+            self._send_json(result)
+            return
+        if parsed.path == "/api/agent-gateway/runs":
+            try:
+                body = self._read_json()
+                runtime_id = body.get("runtime_id") or "generic_cli_builtin"
+                result = self.agent_gateway_repository.run_smoke(tenant, runtime_id, body)
+            except ValueError as exc:
+                self._send_error(HTTPStatus.BAD_REQUEST, str(exc))
+                return
+            except Exception as exc:  # pragma: no cover - displayed to local operator
+                self._send_error(HTTPStatus.INTERNAL_SERVER_ERROR, str(exc))
+                return
+            if result is None:
+                self._send_error(HTTPStatus.NOT_FOUND, f"Runtime not found: {runtime_id}")
+                return
+            self._send_json(result)
             return
         if parsed.path.startswith("/api/reasoning/tasks/") and parsed.path.endswith("/run"):
             task_key = unquote(parsed.path.removeprefix("/api/reasoning/tasks/").removesuffix("/run").rstrip("/"))
@@ -1605,6 +2151,7 @@ def main():
         ReviewWorkbenchHandler.instance_repository,
         ensure_schema=args.ensure_schema,
     )
+    ReviewWorkbenchHandler.agent_gateway_repository = AgentGatewayRepository(registry, ensure_schema=args.ensure_schema)
     server = LocalThreadingHTTPServer((args.host, args.port), ReviewWorkbenchHandler)
     print(f"Review Workbench: http://{args.host}:{args.port}", flush=True)
     try:

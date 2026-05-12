@@ -133,6 +133,12 @@ button {
   min-height: calc(100vh - 64px);
 }
 
+.settings-shell {
+  display: grid;
+  grid-template-columns: minmax(320px, 390px) minmax(0, 1fr);
+  min-height: calc(100vh - 64px);
+}
+
 .sidebar {
   display: flex;
   min-height: calc(100vh - 64px);
@@ -773,6 +779,10 @@ label {
   box-shadow: none;
 }
 
+.compact-detail {
+  padding: 0;
+}
+
 .toast {
   position: fixed;
   right: 16px;
@@ -817,6 +827,7 @@ label {
   .detail-grid,
   .instance-shell,
   .reasoning-shell,
+  .settings-shell,
   .edge-list {
     grid-template-columns: 1fr;
   }
