@@ -43,7 +43,7 @@ button {
 
 .portal-shell {
   display: grid;
-  grid-template-columns: minmax(220px, 0.9fr) auto minmax(260px, 1fr) minmax(220px, 0.8fr);
+  grid-template-columns: minmax(200px, 0.7fr) minmax(560px, 1.5fr) minmax(220px, 0.7fr) minmax(180px, 0.5fr);
   align-items: center;
   gap: 16px;
   min-height: 64px;
@@ -63,6 +63,7 @@ button {
 
 .portal-nav {
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
   padding: 4px;
   border: 1px solid var(--line);
@@ -72,10 +73,246 @@ button {
 
 .portal-nav-item {
   min-height: 34px;
-  padding: 8px 12px;
+  padding: 8px 10px;
   border-radius: 6px;
   color: var(--muted);
   text-decoration: none;
+}
+
+.portal-home,
+.quality-shell {
+  min-height: calc(100vh - 64px);
+  padding: 22px;
+}
+
+.portal-hero {
+  display: grid;
+  grid-template-columns: minmax(360px, 1fr) minmax(420px, 0.9fr);
+  align-items: end;
+  gap: 24px;
+  padding: 22px 0 18px;
+}
+
+.portal-hero h1,
+.question-compose h1 {
+  max-width: 760px;
+  margin: 6px 0 0;
+  font-size: 30px;
+  line-height: 1.12;
+  letter-spacing: 0;
+}
+
+.question-bar,
+.question-form {
+  display: grid;
+  gap: 10px;
+}
+
+.question-bar {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.question-bar input,
+.question-form textarea,
+.question-form input,
+.question-form select {
+  width: 100%;
+}
+
+.knowledge-strip {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(150px, 1fr));
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.metric-card {
+  display: grid;
+  gap: 6px;
+  min-height: 106px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+}
+
+.metric-card span,
+.metric-card small {
+  color: var(--muted);
+}
+
+.metric-card strong {
+  font-size: 24px;
+  line-height: 1.1;
+}
+
+.portal-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.45fr) minmax(320px, 0.8fr);
+  gap: 18px;
+  align-items: start;
+}
+
+.portal-main-column,
+.portal-side-column {
+  display: grid;
+  gap: 18px;
+}
+
+.finding-card-list,
+.task-card-list {
+  display: grid;
+  gap: 12px;
+}
+
+.finding-card,
+.task-card {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  background: #14171b;
+}
+
+.finding-card h3,
+.task-card h3 {
+  margin: 0;
+  font-size: 17px;
+}
+
+.finding-card p,
+.task-card p {
+  margin: 0;
+  color: var(--muted);
+}
+
+.finding-card-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.compact-meta {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 8px;
+  margin: 0;
+}
+
+.compact-meta div {
+  display: grid;
+  gap: 3px;
+}
+
+.compact-meta dt {
+  color: var(--dim);
+  font-size: 12px;
+}
+
+.compact-meta dd {
+  margin: 0;
+  color: var(--text);
+}
+
+.attention-list,
+.timeline-list {
+  display: grid;
+  gap: 10px;
+}
+
+.attention-item,
+.timeline-item,
+.quick-task {
+  display: grid;
+  gap: 5px;
+  padding: 12px;
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  background: #14171b;
+  color: var(--text);
+  text-decoration: none;
+}
+
+.attention-item.high {
+  border-color: rgba(255, 123, 114, 0.45);
+}
+
+.attention-item.medium,
+.attention-item.review {
+  border-color: rgba(230, 196, 106, 0.45);
+}
+
+.attention-item span,
+.attention-item small,
+.timeline-item small {
+  color: var(--muted);
+}
+
+.quick-task-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 10px;
+}
+
+.quick-task {
+  justify-content: center;
+  min-height: 46px;
+  text-align: center;
+}
+
+.question-shell,
+.findings-shell {
+  display: grid;
+  grid-template-columns: minmax(340px, 420px) minmax(0, 1fr);
+  min-height: calc(100vh - 64px);
+}
+
+.question-compose,
+.question-history,
+.finding-detail-workspace {
+  padding: 20px;
+}
+
+.question-compose,
+.findings-sidebar {
+  border-right: 1px solid var(--line);
+  background: #121417;
+}
+
+.question-history {
+  min-width: 0;
+}
+
+.explanation-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 0.7fr);
+  gap: 16px;
+  padding: 20px;
+}
+
+.explanation-layout .wide-panel {
+  grid-column: 1 / -1;
+}
+
+.finding-detail-workspace {
+  padding: 0;
+}
+
+@media (max-width: 1100px) {
+  .portal-shell,
+  .portal-hero,
+  .portal-grid,
+  .question-shell,
+  .findings-shell,
+  .explanation-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .knowledge-strip {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 .portal-nav-item:hover,

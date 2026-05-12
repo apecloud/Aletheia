@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Aletheia Quality</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header class="portal-shell" aria-label="Portal navigation">
+      <div class="portal-brand">
+        <p class="eyebrow">Aletheia Portal</p>
+        <strong>Quality & Attention</strong>
+      </div>
+      <nav class="portal-nav" aria-label="Primary views">
+        <a id="nav-workbench" class="portal-nav-item" href="/">Workbench</a>
+        <a id="nav-questions" class="portal-nav-item" href="/questions.html">Questions</a>
+        <a id="nav-findings" class="portal-nav-item" href="/findings.html">Findings</a>
+        <a id="nav-evidence" class="portal-nav-item" href="/findings.html">Evidence</a>
+        <a id="nav-explore" class="portal-nav-item" href="/graph.html">Explore</a>
+        <a id="nav-quality" class="portal-nav-item active" href="/quality.html">Quality</a>
+        <a id="nav-ontology" class="portal-nav-item" href="/ontology.html">Ontology</a>
+        <a id="nav-runtime" class="portal-nav-item" href="/settings.html">Runtime</a>
+        <a id="nav-audit" class="portal-nav-item" href="/ontology.html">Audit</a>
+      </nav>
+      <div class="portal-context" aria-label="Current tenant">
+        <span id="shell-tenant-label">Tenant -</span>
+        <span id="shell-tenant-meta">namespace - · graph -</span>
+      </div>
+      <div id="breadcrumb" class="breadcrumb">Quality / Attention items</div>
+    </header>
+
+    <main class="quality-shell">
+      <section class="knowledge-strip" aria-label="Quality counts">
+        <article class="metric-card"><span>Draft findings</span><strong id="draft-count">-</strong><small>awaiting review</small></article>
+        <article class="metric-card"><span>Low confidence</span><strong id="low-count">-</strong><small>needs scrutiny</small></article>
+        <article class="metric-card"><span>Blocked reasoning</span><strong id="blocked-run-count">-</strong><small>approved-only / evidence gaps</small></article>
+        <article class="metric-card"><span>Agent policy</span><strong id="agent-count">-</strong><small>blocked or violations</small></article>
+        <article class="metric-card"><span>Sandbox gate</span><strong id="sandbox-state">-</strong><small>negative control</small></article>
+      </section>
+
+      <section class="portal-grid">
+        <article class="panel">
+          <div class="panel-header">
+            <h2>Attention Queue</h2>
+            <span id="attention-count" class="metric">-</span>
+          </div>
+          <div id="attention-list" class="attention-list"></div>
+        </article>
+
+        <article class="panel">
+          <div class="panel-header">
+            <h2>Sandbox / Missing Approved Artifacts</h2>
+            <span class="metric">approved-only gate</span>
+          </div>
+          <div id="sandbox-gaps" class="evidence-list"></div>
+        </article>
+      </section>
+    </main>
+
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+    <script src="/quality_app.js"></script>
+  </body>
+</html>

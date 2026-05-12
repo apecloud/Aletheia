@@ -50,6 +50,10 @@ def _json_dump(value):
     return json.dumps(value, ensure_ascii=False, sort_keys=True)
 
 
+def _slug(value):
+    return re.sub(r"[^a-z0-9]+", "-", str(value).lower()).strip("-") or "scope"
+
+
 def _jsonable(value):
     if hasattr(value, "isoformat"):
         return value.isoformat()
@@ -826,6 +830,156 @@ class ReasoningRepository:
             ],
         }
 
+    def list_findings_overview(self, tenant, limit=50):
+        with self.metadata_engine_for(tenant).connect() as conn:
+            rows = conn.execute(
+                text(
+                    """
+                    SELECT f.id, f.run_id, f.project_id, f.canonical_key, f.title, f.conclusion,
+                           f.confidence, f.supporting_evidence_json, f.counter_evidence_json,
+                           f.recommended_action_json, f.status, f.version, f.source_agent,
+                           f.created_at, f.updated_at,
+                           t.canonical_key AS task_key, t.question, t.scope_json,
+                           r.run_key, r.status AS run_status, r.created_at AS run_created_at
+                    FROM aletheia_reasoning_findings f
+                    JOIN aletheia_reasoning_runs r ON f.run_id = r.id
+                    JOIN aletheia_reasoning_tasks t ON r.task_id = t.id
+                    WHERE f.project_id = :tenant_id
+                    ORDER BY f.updated_at DESC, f.id DESC
+                    LIMIT :limit
+                    """
+                ),
+                {"tenant_id": tenant.tenant_id, "limit": limit},
+            ).mappings().all()
+        findings = []
+        for row in rows:
+            finding = self._finding_to_dict(row)
+            finding["task_key"] = row["task_key"]
+            finding["question"] = row["question"]
+            finding["task_scope"] = _load_json(row["scope_json"], {})
+            finding["run_key"] = row["run_key"]
+            finding["run_status"] = row["run_status"]
+            finding["run_created_at"] = str(row["run_created_at"]) if row["run_created_at"] else None
+            findings.append(finding)
+        return findings
+
+    def finding_detail(self, tenant, canonical_key):
+        with self.metadata_engine_for(tenant).connect() as conn:
+            row = conn.execute(
+                text(
+                    """
+                    SELECT f.id, f.run_id, f.project_id, f.canonical_key, f.title, f.conclusion,
+                           f.confidence, f.supporting_evidence_json, f.counter_evidence_json,
+                           f.recommended_action_json, f.status, f.version, f.source_agent,
+                           f.created_at, f.updated_at,
+                           t.canonical_key AS task_key, t.question, t.scope_json,
+                           r.run_key, r.agent_name, r.prompt_version, r.query_plan_json,
+                           r.tool_calls_json, r.evidence_paths_json, r.output_json,
+                           r.eval_result_json, r.status AS run_status, r.latency_ms,
+                           r.cost_estimate, r.created_at AS run_created_at
+                    FROM aletheia_reasoning_findings f
+                    JOIN aletheia_reasoning_runs r ON f.run_id = r.id
+                    JOIN aletheia_reasoning_tasks t ON r.task_id = t.id
+                    WHERE f.project_id = :tenant_id AND f.canonical_key = :canonical_key
+                    """
+                ),
+                {"tenant_id": tenant.tenant_id, "canonical_key": canonical_key},
+            ).mappings().first()
+        if not row:
+            return None
+        finding = self._finding_to_dict(row)
+        finding["task"] = {
+            "canonical_key": row["task_key"],
+            "question": row["question"],
+            "scope": _load_json(row["scope_json"], {}),
+        }
+        finding["run"] = self._run_to_dict(
+            {
+                "id": row["run_id"],
+                "project_id": row["project_id"],
+                "run_key": row["run_key"],
+                "agent_name": row["agent_name"],
+                "prompt_version": row["prompt_version"],
+                "query_plan_json": row["query_plan_json"],
+                "tool_calls_json": row["tool_calls_json"],
+                "evidence_paths_json": row["evidence_paths_json"],
+                "output_json": row["output_json"],
+                "eval_result_json": row["eval_result_json"],
+                "status": row["run_status"],
+                "latency_ms": row["latency_ms"],
+                "cost_estimate": row["cost_estimate"],
+                "created_at": row["run_created_at"],
+            }
+        )
+        return finding
+
+    def list_runs_overview(self, tenant, limit=30):
+        with self.metadata_engine_for(tenant).connect() as conn:
+            rows = conn.execute(
+                text(
+                    """
+                    SELECT r.id, r.project_id, r.run_key, r.agent_name, r.prompt_version,
+                           r.query_plan_json, r.tool_calls_json, r.evidence_paths_json,
+                           r.output_json, r.eval_result_json, r.status, r.latency_ms,
+                           r.cost_estimate, r.created_at,
+                           t.canonical_key AS task_key, t.question, t.scope_json
+                    FROM aletheia_reasoning_runs r
+                    JOIN aletheia_reasoning_tasks t ON r.task_id = t.id
+                    WHERE r.project_id = :tenant_id
+                    ORDER BY r.created_at DESC, r.id DESC
+                    LIMIT :limit
+                    """
+                ),
+                {"tenant_id": tenant.tenant_id, "limit": limit},
+            ).mappings().all()
+        runs = []
+        for row in rows:
+            run = self._run_to_dict(row)
+            run["task_key"] = row["task_key"]
+            run["question"] = row["question"]
+            run["task_scope"] = _load_json(row["scope_json"], {})
+            runs.append(run)
+        return runs
+
+    def create_question_task(self, tenant, payload):
+        question = (payload.get("question") or "").strip()
+        if not question:
+            raise ValueError("question is required")
+        scope = payload.get("scope") or {}
+        center_node = scope.get("center_node") or "Employee:4"
+        depth = int(scope.get("depth") or 1)
+        limit = int(scope.get("limit") or 200)
+        return self.create_scoped_task_from_graph(
+            tenant,
+            {
+                "question": question,
+                "source": "question_center",
+                "graph_url": scope.get("graph_url")
+                or f"/graph.html?tenant={quote(tenant.tenant_id)}&type=Employee&id=4&depth={depth}&limit={limit}",
+                "scope": {
+                    "source": "question_center",
+                    "center_node": center_node,
+                    "depth": depth,
+                    "node_limit": limit,
+                    "edge_limit": limit,
+                    "allowed_node_types": ["Employee", "Order"],
+                    "allowed_link_keys": ["link:employee:1:n:order"],
+                    "approved_only": True,
+                    "evidence_paths": [
+                        {
+                            "kind": "question_scope",
+                            "label": center_node,
+                            "summary": f"Question Center scoped task for: {question}",
+                            "url": scope.get("graph_url")
+                            or f"/graph.html?tenant={quote(tenant.tenant_id)}&type=Employee&id=4&depth={depth}&limit={limit}",
+                            "source_ref": "question_center",
+                            "payload": {"scope": scope.get("type") or "tenant", "center_node": center_node},
+                        }
+                    ],
+                },
+            },
+        )
+
     def get_task(self, tenant, task_key):
         task = self.ensure_default_task(tenant)
         if task_key != self.TASK_KEY:
@@ -849,7 +1003,14 @@ class ReasoningRepository:
         node_limit = max(1, min(int(scope.get("node_limit") or 100), 300))
         edge_limit = max(1, min(int(scope.get("edge_limit") or 100), 300))
         key_source = center_node or f"{center_edge.get('source')}->{center_edge.get('target')}"
-        canonical_key = f"reasoning:graph-scope:{tenant.tenant_id}:{key_source}:d{depth}".lower().replace(":", "-").replace(">", "to")
+        task_source = scope.get("source") or payload.get("source") or "graph_explorer"
+        evidence_paths = scope.get("evidence_paths") or []
+        evidence_kind = evidence_paths[0].get("kind") if evidence_paths else ("graph_edge" if center_edge else "graph_node")
+        identity_parts = [tenant.tenant_id, task_source, evidence_kind, key_source, f"d{depth}", f"n{node_limit}", f"e{edge_limit}"]
+        if task_source == "question_center":
+            question_hash = hashlib.sha1((payload.get("question") or "").encode("utf-8")).hexdigest()[:10]
+            identity_parts.append(f"q{question_hash}")
+        canonical_key = f"reasoning:graph-scope:{'-'.join(_slug(part) for part in identity_parts)}"
         question = payload.get("question") or (
             f"Explain the approved graph evidence around {key_source} and identify any workload, concentration, or provenance risk."
         )
@@ -866,7 +1027,7 @@ class ReasoningRepository:
             if not source or not target or not self.instance_repository.edge_detail(tenant, source, target):
                 raise ValueError("center_edge is outside the approved graph scope")
         task_scope = {
-            "source": "graph_explorer",
+            "source": task_source,
             "tenant_id": tenant.tenant_id,
             "center_node": center_node,
             "center_edge": center_edge,
@@ -876,7 +1037,7 @@ class ReasoningRepository:
             "allowed_node_types": scope.get("allowed_node_types") or ["Employee", "Order"],
             "allowed_link_keys": scope.get("allowed_link_keys") or ["link:employee:1:n:order"],
             "approved_only": True,
-            "evidence_paths": scope.get("evidence_paths") or [],
+            "evidence_paths": evidence_paths,
             "review_gate": "draft_only",
             "graph_url": payload.get("graph_url"),
         }
@@ -2411,6 +2572,17 @@ class ReviewWorkbenchHandler(BaseHTTPRequestHandler):
             filters.pop("tenant", None)
             self._send_json(self.repository.list_artifacts(tenant, filters))
             return
+        if parsed.path == "/api/portal/overview":
+            self._send_json(self._portal_overview(tenant))
+            return
+        if parsed.path.startswith("/api/portal/findings/"):
+            finding_key = unquote(parsed.path.removeprefix("/api/portal/findings/"))
+            finding = self.reasoning_repository.finding_detail(tenant, finding_key)
+            if finding is None:
+                self._send_error(HTTPStatus.NOT_FOUND, f"Reasoning finding not found: {finding_key}")
+                return
+            self._send_json({"tenant": tenant.public_dict(), "finding": finding})
+            return
         if parsed.path == "/api/agent-gateway/settings":
             self._send_json(self.agent_gateway_repository.list_settings(tenant))
             return
@@ -2620,6 +2792,18 @@ class ReviewWorkbenchHandler(BaseHTTPRequestHandler):
                 return
             self._send_json(result)
             return
+        if parsed.path == "/api/reasoning/questions":
+            try:
+                body = self._read_json()
+                result = self.reasoning_repository.create_question_task(tenant, body)
+            except ValueError as exc:
+                self._send_error(HTTPStatus.BAD_REQUEST, str(exc))
+                return
+            except Exception as exc:  # pragma: no cover - displayed to local operator
+                self._send_error(HTTPStatus.INTERNAL_SERVER_ERROR, str(exc))
+                return
+            self._send_json(result)
+            return
         if parsed.path.startswith("/api/reasoning/tasks/") and parsed.path.endswith("/run"):
             task_key = unquote(parsed.path.removeprefix("/api/reasoning/tasks/").removesuffix("/run").rstrip("/"))
             result = self.reasoning_repository.run_task(tenant, task_key)
@@ -2712,6 +2896,131 @@ class ReviewWorkbenchHandler(BaseHTTPRequestHandler):
             self._send_error(HTTPStatus.INTERNAL_SERVER_ERROR, str(exc))
             return
         self._send_json(result)
+
+    def _portal_overview(self, tenant):
+        artifact_result = self.repository.list_artifacts(tenant, {})
+        artifacts = artifact_result.get("artifacts", [])
+        artifact_stats = artifact_result.get("stats", [])
+        tasks = self.reasoning_repository.list_tasks(tenant).get("tasks", [])
+        findings = self.reasoning_repository.list_findings_overview(tenant, limit=25)
+        runs = self.reasoning_repository.list_runs_overview(tenant, limit=25)
+        agent_settings = self.agent_gateway_repository.list_settings(tenant)
+        agent_runs = agent_settings.get("runs", [])
+        default_graph = self.instance_repository.neighborhood(tenant, "Employee", "4", depth=1, limit=200)
+        sandbox_graph = None
+        try:
+            sandbox_graph = self.instance_repository.neighborhood(
+                self.repository.tenant_registry.get("northwind-sandbox"), "Employee", "4", depth=1, limit=200
+            )
+        except Exception:
+            sandbox_graph = None
+        approved_artifacts = [artifact for artifact in artifacts if artifact.get("status") == "approved"]
+        draft_findings = [finding for finding in findings if finding.get("status") == "draft"]
+        low_confidence = [finding for finding in findings if float(finding.get("confidence") or 0) < 0.75]
+        blocked_runs = [run for run in runs if run.get("status") in {"blocked", "failed"}]
+        blocked_agent_runs = [
+            run
+            for run in agent_runs
+            if run.get("status") in {"blocked", "failed"} or run.get("policy_violations")
+        ]
+        attention_items = []
+        for finding in draft_findings[:5]:
+            attention_items.append(
+                {
+                    "kind": "draft",
+                    "severity": "review",
+                    "title": "Draft finding awaits review",
+                    "summary": finding.get("title"),
+                    "href": f"/findings.html?tenant={quote(tenant.tenant_id)}&finding={quote(finding.get('canonical_key'))}",
+                }
+            )
+        for finding in low_confidence[:4]:
+            attention_items.append(
+                {
+                    "kind": "low_confidence",
+                    "severity": "medium",
+                    "title": "Low confidence conclusion",
+                    "summary": f"{finding.get('title')} · confidence {float(finding.get('confidence') or 0):.2f}",
+                    "href": f"/findings.html?tenant={quote(tenant.tenant_id)}&finding={quote(finding.get('canonical_key'))}",
+                }
+            )
+        for run in blocked_runs[:4]:
+            attention_items.append(
+                {
+                    "kind": "blocked_reasoning",
+                    "severity": "high",
+                    "title": "Reasoning run blocked",
+                    "summary": run.get("output", {}).get("summary") or run.get("run_key"),
+                    "href": f"/questions.html?tenant={quote(tenant.tenant_id)}&task={quote(run.get('task_key'))}",
+                }
+            )
+        if sandbox_graph and sandbox_graph.get("approved") is False:
+            attention_items.append(
+                {
+                    "kind": "missing_approved_artifacts",
+                    "severity": "high",
+                    "title": "Sandbox approved-only gate blocks graph reasoning",
+                    "summary": ", ".join(sandbox_graph.get("missing_approved_artifacts") or []),
+                    "href": f"/quality.html?tenant={quote(tenant.tenant_id)}",
+                }
+            )
+        for run in blocked_agent_runs[:4]:
+            attention_items.append(
+                {
+                    "kind": "policy_violation",
+                    "severity": "high",
+                    "title": "Agent runtime requires attention",
+                    "summary": run.get("run_key"),
+                    "href": f"/settings.html?tenant={quote(tenant.tenant_id)}",
+                }
+            )
+        latest_times = [
+            item.get("updated_at") or item.get("created_at")
+            for item in [*findings, *tasks, *artifacts]
+            if item.get("updated_at") or item.get("created_at")
+        ]
+        return {
+            "tenant": tenant.public_dict(),
+            "knowledge_status": {
+                "entity_count": len(default_graph.get("nodes", [])) if default_graph and default_graph.get("approved") else 0,
+                "relation_count": len(default_graph.get("edges", [])) if default_graph and default_graph.get("approved") else 0,
+                "artifact_count": len(artifacts),
+                "approved_artifact_count": len(approved_artifacts),
+                "finding_count": len(findings),
+                "task_count": len(tasks),
+                "approved_only": True,
+                "system_state": "ready" if default_graph and default_graph.get("approved") else "blocked",
+                "latest_update": max(latest_times) if latest_times else None,
+                "graph_database": tenant.graph_database,
+                "namespace": tenant.namespace,
+            },
+            "artifact_stats": artifact_stats,
+            "key_findings": findings[:8],
+            "attention_items": attention_items[:12],
+            "quality": {
+                "draft_findings": len(draft_findings),
+                "low_confidence_findings": len(low_confidence),
+                "blocked_reasoning_runs": len(blocked_runs),
+                "blocked_agent_runs": len(blocked_agent_runs),
+                "sandbox_missing_artifacts": sandbox_graph.get("missing_approved_artifacts", []) if sandbox_graph else [],
+                "sandbox_approved": sandbox_graph.get("approved") if sandbox_graph else None,
+            },
+            "recent_changes": {
+                "tasks": tasks[:8],
+                "runs": runs[:8],
+                "findings": findings[:8],
+                "agent_runs": agent_runs[:5],
+            },
+            "quick_tasks": [
+                {"label": "Ask a question", "href": f"/questions.html?tenant={quote(tenant.tenant_id)}"},
+                {"label": "Explain a finding", "href": f"/findings.html?tenant={quote(tenant.tenant_id)}"},
+                {"label": "Inspect an entity", "href": f"/instances.html?tenant={quote(tenant.tenant_id)}&type=Employee&id=4"},
+                {"label": "View evidence chain", "href": f"/findings.html?tenant={quote(tenant.tenant_id)}"},
+                {"label": "Trace graph path", "href": f"/graph.html?tenant={quote(tenant.tenant_id)}&type=Employee&id=4&depth=1&limit=200"},
+                {"label": "Check quality issues", "href": f"/quality.html?tenant={quote(tenant.tenant_id)}"},
+                {"label": "Run scoped reasoning", "href": f"/questions.html?tenant={quote(tenant.tenant_id)}&template=scoped"},
+            ],
+        }
 
     def _tenant(self, parsed):
         query = parse_qs(parsed.query)

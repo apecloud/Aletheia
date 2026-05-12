@@ -1,0 +1,64 @@
+{
+  "task": 95,
+  "result": "FAIL",
+  "blocking_issue": {
+    "title": "Graph handoff can display stale Question Center evidence for the same scoped graph task",
+    "repro_url": "http://127.0.0.1:8768/reasoning.html?tenant=default&source=graph&question=Explain+this+node%27s+role+in+the+graph&depth=1&limit=200&graph_url=%2Fgraph.html%3Ftenant%3Ddefault%26type%3DEmployee%26id%3D4%26depth%3D1%26limit%3D200%26node%3DEmployee%253A4&evidence_kind=graph_node&evidence_label=Employee%3A4&center_node=Employee%3A4&evidence_summary=Margaret+Peacock&evidence_source_ref=employeeID%3D4&ontology_artifact=object%3Aemployee&autorun=1",
+    "actual_displayed_evidence": {
+      "label": "Employee:4",
+      "kind": "question_scope",
+      "summary": "Question Center scoped task for: Which evidence supports Employee #4 workload risk?",
+      "source_ref": "question_center"
+    },
+    "expected_evidence": {
+      "label": "Employee:4",
+      "kind": "graph_node",
+      "summary": "Margaret Peacock",
+      "source_ref": "employeeID=4"
+    },
+    "api_mismatch": {
+      "task_scope_evidence_kind": "graph_node",
+      "latest_run_evidence_kind": "question_scope",
+      "displayed_finding_evidence_kind": "question_scope"
+    },
+    "screenshot": "/tmp/aletheia-task95-fail-graph-node-stale-evidence.png"
+  },
+  "passed_before_blocker": {
+    "workbench_default_not_graph": true,
+    "workbench_sections_present": [
+      "knowledge space/status metrics",
+      "key findings",
+      "attention items",
+      "quick tasks",
+      "recent changes"
+    ],
+    "finding_detail_explanation_structure": true,
+    "question_center_creates_scoped_task": true,
+    "quality_panel_present": true,
+    "navigation_reframe_present": true,
+    "default_graph": {
+      "approved": true,
+      "nodes": 157,
+      "edges": 156,
+      "checksum": "ff3557ce250ade95cd7a127009f7e293c68890b13109fe3a3e213fa8d8447c91"
+    },
+    "sandbox_graph": {
+      "approved": false,
+      "nodes": 0,
+      "edges": 0,
+      "missing": [
+        "object:order",
+        "link:employee:1:n:order"
+      ]
+    },
+    "canonical_link": {
+      "canonical_key": "link:employee:1:n:order",
+      "status": "approved",
+      "version": 6
+    }
+  },
+  "non_blocking_observations": [
+    "Workbench status module is labeled Knowledge space instead of PRD wording Knowledge Status, but required status content is present."
+  ],
+  "report": "reports/reasoning-portal-task95-saskue-fail.md"
+}

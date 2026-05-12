@@ -14,10 +14,10 @@ const els = {
   shellTenantLabel: document.querySelector("#shell-tenant-label"),
   shellTenantMeta: document.querySelector("#shell-tenant-meta"),
   navWorkbench: document.querySelector("#nav-workbench"),
-  navInstances: document.querySelector("#nav-instances"),
-  navGraph: document.querySelector("#nav-graph"),
+  navInstances: document.querySelector("#nav-instances") || document.querySelector("#nav-explore"),
+  navGraph: document.querySelector("#nav-graph") || document.querySelector("#nav-explore"),
   navReasoning: document.querySelector("#nav-reasoning"),
-  navSettings: document.querySelector("#nav-settings"),
+  navSettings: document.querySelector("#nav-settings") || document.querySelector("#nav-runtime"),
   refresh: document.querySelector("#refresh"),
   runtimeList: document.querySelector("#runtime-list"),
   runtimeTitle: document.querySelector("#runtime-title"),
@@ -94,7 +94,7 @@ async function loadTenants() {
   els.navWorkbench.href = `/?tenant=${encodeURIComponent(state.tenant)}`;
   els.navInstances.href = `/instances.html?tenant=${encodeURIComponent(state.tenant)}&type=Employee&id=4`;
   els.navGraph.href = `/graph.html?tenant=${encodeURIComponent(state.tenant)}&type=Employee&id=4&depth=1`;
-  els.navReasoning.href = `/reasoning.html?tenant=${encodeURIComponent(state.tenant)}`;
+  if (els.navReasoning) els.navReasoning.href = `/reasoning.html?tenant=${encodeURIComponent(state.tenant)}`;
   els.navSettings.href = `/settings.html?tenant=${encodeURIComponent(state.tenant)}`;
 }
 

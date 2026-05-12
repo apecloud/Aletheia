@@ -18,10 +18,10 @@ const els = {
   shellTenantLabel: document.querySelector("#shell-tenant-label"),
   shellTenantMeta: document.querySelector("#shell-tenant-meta"),
   navWorkbench: document.querySelector("#nav-workbench"),
-  navInstances: document.querySelector("#nav-instances"),
-  navGraph: document.querySelector("#nav-graph"),
+  navInstances: document.querySelector("#nav-instances") || document.querySelector("#nav-explore"),
+  navGraph: document.querySelector("#nav-graph") || document.querySelector("#nav-explore"),
   navReasoning: document.querySelector("#nav-reasoning"),
-  navSettings: document.querySelector("#nav-settings"),
+  navSettings: document.querySelector("#nav-settings") || document.querySelector("#nav-runtime"),
   breadcrumb: document.querySelector("#breadcrumb"),
   runTask: document.querySelector("#run-task"),
   taskList: document.querySelector("#task-list"),
@@ -134,6 +134,32 @@ function graphHandoffPayload() {
   };
 }
 
+function evidenceSignature(path = {}) {
+  return [
+    path.kind || "",
+    path.label || "",
+    path.source_ref || "",
+    path.payload?.node_id || "",
+    path.payload?.edge_id || "",
+  ].join("|");
+}
+
+function currentRunMatchesHandoff() {
+  if (!state.graphHandoff) return true;
+  const expected = state.graphHandoff.scope?.evidence_paths?.[0];
+  const actual = state.run?.evidence_paths?.[0];
+  if (!expected || !actual) return false;
+  return evidenceSignature(expected) === evidenceSignature(actual);
+}
+
+function currentFindingMatchesHandoff() {
+  if (!state.graphHandoff) return true;
+  const expected = state.graphHandoff.scope?.evidence_paths?.[0];
+  const actual = state.selectedFinding?.supporting_evidence?.[0];
+  if (!expected || !actual) return false;
+  return evidenceSignature(expected) === evidenceSignature(actual);
+}
+
 async function acceptGraphHandoffIfPresent() {
   const payload = graphHandoffPayload();
   if (!payload) return false;
@@ -171,7 +197,7 @@ async function loadTenants() {
   els.navWorkbench.href = `/?tenant=${encodeURIComponent(state.tenant)}`;
   els.navInstances.href = `/instances.html?tenant=${encodeURIComponent(state.tenant)}&type=Employee&id=4`;
   els.navGraph.href = `/graph.html?tenant=${encodeURIComponent(state.tenant)}&type=Employee&id=4&depth=1`;
-  els.navReasoning.href = `/reasoning.html?tenant=${encodeURIComponent(state.tenant)}&task=${encodeURIComponent(state.taskKey)}`;
+  if (els.navReasoning) els.navReasoning.href = `/reasoning.html?tenant=${encodeURIComponent(state.tenant)}&task=${encodeURIComponent(state.taskKey)}`;
   els.navSettings.href = `/settings.html?tenant=${encodeURIComponent(state.tenant)}`;
   els.breadcrumb.textContent = `Reasoning / ${state.taskKey}`;
 }
@@ -217,8 +243,11 @@ async function loadTaskDetail() {
   state.run = data.latest_run;
   state.findings = data.findings || [];
   state.selectedFinding = state.findings[0] || null;
+  if (state.graphHandoff && !currentFindingMatchesHandoff()) {
+    state.selectedFinding = null;
+  }
   renderTask();
-  if (state.graphHandoff?.autorun && !state.run) {
+  if (state.graphHandoff?.autorun && (!state.run || !currentRunMatchesHandoff())) {
     state.graphHandoff.autorun = false;
     await runTask();
   }

@@ -22,10 +22,11 @@ const els = {
   shellTenantLabel: document.querySelector("#shell-tenant-label"),
   shellTenantMeta: document.querySelector("#shell-tenant-meta"),
   navWorkbench: document.querySelector("#nav-workbench"),
-  navInstances: document.querySelector("#nav-instances"),
-  navGraph: document.querySelector("#nav-graph"),
+  navQuestions: document.querySelector("#nav-questions"),
+  navInstances: document.querySelector("#nav-instances") || document.querySelector("#nav-explore"),
+  navGraph: document.querySelector("#nav-graph") || document.querySelector("#nav-explore"),
   navReasoning: document.querySelector("#nav-reasoning"),
-  navSettings: document.querySelector("#nav-settings"),
+  navSettings: document.querySelector("#nav-settings") || document.querySelector("#nav-runtime"),
   breadcrumb: document.querySelector("#breadcrumb"),
   reloadGraph: document.querySelector("#reload-graph"),
   centerType: document.querySelector("#center-type"),
@@ -111,9 +112,10 @@ async function loadTenants() {
     els.shellTenantMeta.textContent = `namespace ${current.namespace} · graph ${current.graph_database}`;
   }
   els.navWorkbench.href = `/?tenant=${encodeURIComponent(state.tenant)}`;
+  if (els.navQuestions) els.navQuestions.href = `/questions.html?tenant=${encodeURIComponent(state.tenant)}`;
   els.navInstances.href = `/instances.html?tenant=${encodeURIComponent(state.tenant)}&type=Employee&id=4`;
   els.navGraph.href = `/graph.html?tenant=${encodeURIComponent(state.tenant)}&type=Employee&id=4&depth=1`;
-  els.navReasoning.href = `/reasoning.html?tenant=${encodeURIComponent(state.tenant)}`;
+  if (els.navReasoning) els.navReasoning.href = `/reasoning.html?tenant=${encodeURIComponent(state.tenant)}`;
   els.navSettings.href = `/settings.html?tenant=${encodeURIComponent(state.tenant)}`;
   updateReasoningHandoff();
 }
@@ -556,7 +558,7 @@ function reasoningHandoffUrl() {
 
 function updateReasoningHandoff() {
   if (!els.navReasoning) return;
-  els.navReasoning.href = reasoningHandoffUrl();
+  if (els.navReasoning) els.navReasoning.href = reasoningHandoffUrl();
 }
 
 async function createReasoningTask() {
