@@ -7,6 +7,21 @@
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
+    <header class="portal-shell" aria-label="Portal navigation">
+      <div class="portal-brand">
+        <p class="eyebrow">Aletheia Portal</p>
+        <strong>Ontology Review</strong>
+      </div>
+      <nav class="portal-nav" aria-label="Primary views">
+        <a id="nav-workbench" class="portal-nav-item active" href="/">Workbench</a>
+        <a id="nav-instances" class="portal-nav-item" href="/instances.html">Instance Explorer</a>
+      </nav>
+      <div class="portal-context" aria-label="Current tenant">
+        <span id="shell-tenant-label">Tenant -</span>
+        <span id="shell-tenant-meta">namespace - · graph -</span>
+      </div>
+      <div id="breadcrumb" class="breadcrumb">Workbench / Select artifact</div>
+    </header>
     <main class="app-shell">
       <aside class="sidebar" aria-label="Artifact list">
         <header class="sidebar-header">

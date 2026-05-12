@@ -13,6 +13,11 @@ const els = {
   tenantSwitcher: document.querySelector("#tenant-switcher"),
   tenantNamespace: document.querySelector("#tenant-namespace"),
   tenantGraph: document.querySelector("#tenant-graph"),
+  shellTenantLabel: document.querySelector("#shell-tenant-label"),
+  shellTenantMeta: document.querySelector("#shell-tenant-meta"),
+  navWorkbench: document.querySelector("#nav-workbench"),
+  navInstances: document.querySelector("#nav-instances"),
+  breadcrumb: document.querySelector("#breadcrumb"),
   results: document.querySelector("#instance-results"),
   graphTitle: document.querySelector("#graph-title"),
   graphSubtitle: document.querySelector("#graph-subtitle"),
@@ -72,7 +77,11 @@ async function loadTenants() {
   if (current) {
     els.tenantNamespace.textContent = current.namespace;
     els.tenantGraph.textContent = current.graph_database;
+    els.shellTenantLabel.textContent = current.display_name;
+    els.shellTenantMeta.textContent = `namespace ${current.namespace} · graph ${current.graph_database}`;
   }
+  els.navWorkbench.href = `/?tenant=${encodeURIComponent(state.tenant)}`;
+  els.navInstances.href = `/instances.html?tenant=${encodeURIComponent(state.tenant)}&type=Employee&id=4`;
 }
 
 async function searchInstances() {
@@ -137,6 +146,7 @@ async function loadNeighborhood(type, id) {
   els.graphTitle.textContent = graph.center?.label || "Employee -> Orders";
   els.graphSubtitle.textContent = `Depth ${graph.depth}; ${graph.relations_summary.returned_orders} of ${graph.relations_summary.handled_orders} orders returned.`;
   els.graphCount.textContent = `${graph.edges.length} edges`;
+  els.breadcrumb.textContent = `Instance Explorer / ${graph.center?.id || `${type}:${id}`} / Orders`;
   renderGraph(graph);
   showNodeDetail(graph.center);
 }
@@ -187,8 +197,14 @@ function renderGraph(graph) {
 async function showNodeDetail(node) {
   const id = node.id.split(":")[1];
   const detail = await fetchJson(urlWithTenant(`/api/instances/${encodeURIComponent(node.type)}/${encodeURIComponent(id)}`));
+  updateInstanceUrl({
+    type: state.graph?.center?.type || node.type,
+    id: state.graph?.center?.source_pk,
+    node: detail.id,
+  });
   els.detailKind.textContent = `${detail.type} node`;
   els.detailTitle.textContent = detail.label;
+  els.breadcrumb.textContent = `Instance Explorer / ${detail.id}`;
   els.detailBody.innerHTML = `
     <section class="detail-section">
       <a class="panel-link" href="/?tenant=${encodeURIComponent(state.tenant)}&artifact=${encodeURIComponent(detail.ontology_artifact)}">Open ontology artifact</a>
@@ -210,8 +226,15 @@ async function showNodeDetail(node) {
 }
 
 function showEdgeDetail(edge) {
+  updateInstanceUrl({
+    type: state.graph?.center?.type || "Employee",
+    id: state.graph?.center?.source_pk,
+    edgeSource: edge.source,
+    edgeTarget: edge.target,
+  });
   els.detailKind.textContent = "Employee-Order edge";
   els.detailTitle.textContent = edge.label;
+  els.breadcrumb.textContent = `Instance Explorer / ${edge.source} -> ${edge.target}`;
   els.detailBody.innerHTML = `
     <section class="detail-section">
       <a class="panel-link" href="/?tenant=${encodeURIComponent(state.tenant)}&artifact=${encodeURIComponent(edge.ontology_link)}">Open ontology link</a>
@@ -237,6 +260,22 @@ function showEdgeDetail(edge) {
   `;
 }
 
+function updateInstanceUrl(params = {}) {
+  const url = new URL(window.location.href);
+  url.searchParams.set("tenant", state.tenant);
+  if (params.type) url.searchParams.set("type", params.type);
+  if (params.id) url.searchParams.set("id", params.id);
+  url.searchParams.delete("node");
+  url.searchParams.delete("edgeSource");
+  url.searchParams.delete("edgeTarget");
+  if (params.node) url.searchParams.set("node", params.node);
+  if (params.edgeSource && params.edgeTarget) {
+    url.searchParams.set("edgeSource", params.edgeSource);
+    url.searchParams.set("edgeTarget", params.edgeTarget);
+  }
+  window.history.replaceState({}, "", url);
+}
+
 els.searchButton.addEventListener("click", () => searchInstances().catch((error) => showToast(error.message)));
 els.query.addEventListener("keydown", (event) => {
   if (event.key === "Enter") searchInstances().catch((error) => showToast(error.message));
@@ -257,5 +296,18 @@ loadTenants()
   .then(() => searchInstances())
   .then(async () => {
     if (params.get("id")) await loadNeighborhood(params.get("type") || "Employee", params.get("id"));
+    if (params.get("node") && state.graph) {
+      const node = state.graph.nodes.find((candidate) => candidate.id === params.get("node"));
+      if (node) await showNodeDetail(node);
+    }
+    if (params.get("edgeSource") && params.get("edgeTarget")) {
+      const detail = await fetchJson(
+        urlWithTenant("/api/instances/edge", {
+          source: params.get("edgeSource"),
+          target: params.get("edgeTarget"),
+        }),
+      );
+      showEdgeDetail(detail);
+    }
   })
   .catch((error) => showToast(error.message));

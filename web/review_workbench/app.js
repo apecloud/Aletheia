@@ -16,6 +16,11 @@ const els = {
   tenantSwitcher: document.querySelector("#tenant-switcher"),
   tenantNamespace: document.querySelector("#tenant-namespace"),
   tenantGraph: document.querySelector("#tenant-graph"),
+  shellTenantLabel: document.querySelector("#shell-tenant-label"),
+  shellTenantMeta: document.querySelector("#shell-tenant-meta"),
+  navWorkbench: document.querySelector("#nav-workbench"),
+  navInstances: document.querySelector("#nav-instances"),
+  breadcrumb: document.querySelector("#breadcrumb"),
   empty: document.querySelector("#empty-state"),
   grid: document.querySelector("#detail-grid"),
   artifactType: document.querySelector("#artifact-type"),
@@ -142,6 +147,10 @@ function renderTenant(tenant) {
   if (!tenant) return;
   els.tenantNamespace.textContent = tenant.namespace;
   els.tenantGraph.textContent = tenant.graph_database;
+  els.shellTenantLabel.textContent = `${tenant.display_name}`;
+  els.shellTenantMeta.textContent = `namespace ${tenant.namespace} · graph ${tenant.graph_database}`;
+  els.navWorkbench.href = `/?tenant=${encodeURIComponent(state.tenant)}`;
+  els.navInstances.href = `/instances.html?tenant=${encodeURIComponent(state.tenant)}&type=Employee&id=4`;
 }
 
 function filterParams() {
@@ -229,10 +238,18 @@ function renderList() {
 
 async function selectArtifact(canonicalKey) {
   state.selectedKey = canonicalKey;
+  updateWorkbenchUrl(canonicalKey);
   renderList();
   const artifact = await fetchJson(urlWithTenant(`/api/artifacts/${encodeURIComponent(canonicalKey)}`));
   state.selectedArtifact = artifact;
   renderArtifact(artifact);
+}
+
+function updateWorkbenchUrl(canonicalKey) {
+  const url = new URL(window.location.href);
+  url.searchParams.set("tenant", state.tenant);
+  url.searchParams.set("artifact", canonicalKey);
+  window.history.replaceState({}, "", url);
 }
 
 function renderArtifact(artifact) {
@@ -263,6 +280,7 @@ function renderArtifact(artifact) {
   renderReviews(artifact.reviews || []);
   renderLatestAudit((artifact.reviews || [])[0]);
   renderInstanceLink(artifact);
+  els.breadcrumb.textContent = `Workbench / ${artifact.artifact_type} / ${artifact.canonical_key}`;
 }
 
 function renderEvidence(evidence) {
@@ -304,10 +322,10 @@ function renderInstanceLink(artifact) {
     els.instanceLink.href = `/instances.html?tenant=${encodeURIComponent(state.tenant)}&type=Employee`;
     els.instanceLink.textContent = "Browse Employee instances";
   } else if (key === "link:employee:1:n:order") {
-    els.instanceLink.href = `/instances.html?tenant=${encodeURIComponent(state.tenant)}&type=Employee&id=4`;
+    els.instanceLink.href = `/instances.html?tenant=${encodeURIComponent(state.tenant)}&type=Employee&id=4&edgeSource=${encodeURIComponent("Employee:4")}&edgeTarget=${encodeURIComponent("Order:10250")}`;
     els.instanceLink.textContent = "Open Employee #4 -> Orders";
   } else if (key === "object:order") {
-    els.instanceLink.href = `/instances.html?tenant=${encodeURIComponent(state.tenant)}&type=Employee&id=4`;
+    els.instanceLink.href = `/instances.html?tenant=${encodeURIComponent(state.tenant)}&type=Employee&id=4&node=${encodeURIComponent("Order:10250")}`;
     els.instanceLink.textContent = "View Orders through Employee #4";
   } else {
     els.instanceLink.classList.add("hidden");
