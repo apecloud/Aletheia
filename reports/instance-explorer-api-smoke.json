@@ -1,0 +1,52 @@
+{
+  "approved_positive_path": {
+    "approved": true,
+    "edges": 156,
+    "first_order_id": "10250",
+    "handled_orders": 156,
+    "last_order_id": "11076",
+    "nodes": 157,
+    "order_id_checksum": "ff3557ce250ade95cd7a127009f7e293c68890b13109fe3a3e213fa8d8447c91",
+    "returned_orders": 156,
+    "search_first": {
+      "id": "Employee:4",
+      "label": "Margaret Peacock",
+      "ontology_artifact": "object:employee",
+      "source_pk": "employeeID=4",
+      "source_table": "employees",
+      "summary": "Sales Representative",
+      "type": "Employee"
+    },
+    "types": {
+      "types": [
+        {
+          "label": "Employee",
+          "ontology_artifact": "object:employee",
+          "type": "Employee"
+        },
+        {
+          "label": "Order",
+          "ontology_artifact": "object:order",
+          "type": "Order"
+        }
+      ]
+    }
+  },
+  "edge_detail_sample": {
+    "id": "Employee:4->Order:10250",
+    "join_condition": "orders.employeeID = employees.employeeID",
+    "ontology_link": "link:employee:1:n:order",
+    "source_field": "orders.employeeID",
+    "source_ref": "orders.employeeID",
+    "target_employeeID": 4,
+    "target_field": "employees.employeeID"
+  },
+  "gate_negative_path": {
+    "approved": false,
+    "edges": 0,
+    "missing_approved_artifacts": [
+      "link:employee:1:n:order"
+    ],
+    "nodes": 0
+  }
+}

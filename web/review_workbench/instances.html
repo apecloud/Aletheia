@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Aletheia Instance Explorer</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="instance-shell">
+      <aside class="instance-search" aria-label="Instance search">
+        <header class="sidebar-header">
+          <div>
+            <p class="eyebrow">Aletheia</p>
+            <h1>Instance Explorer</h1>
+          </div>
+          <a class="icon-button nav-icon" href="/" title="Back to review workbench">↩</a>
+        </header>
+
+        <section class="gate-banner">
+          <strong>Approved-only</strong>
+          <span>Default instance browsing uses only approved Object and Link artifacts.</span>
+        </section>
+
+        <section class="filters">
+          <select id="instance-type" aria-label="Object type">
+            <option value="Employee">Employee</option>
+          </select>
+          <input id="instance-query" type="search" value="Margaret" placeholder="Search employee name or ID" />
+          <button id="instance-search-button" class="secondary-action" type="button">Search</button>
+        </section>
+
+        <section id="instance-results" class="artifact-list" aria-label="Instance search results"></section>
+      </aside>
+
+      <section class="neighborhood-panel" aria-label="One-hop neighborhood">
+        <header class="workspace-header">
+          <div>
+            <p class="eyebrow">Depth 1 Neighborhood</p>
+            <h2 id="graph-title">Employee -> Orders</h2>
+            <p id="graph-subtitle" class="muted">Search for an Employee to load its 1-hop Orders.</p>
+          </div>
+          <span id="graph-count" class="status-pill">0 edges</span>
+        </header>
+
+        <section id="approved-warning" class="empty-state hidden"></section>
+        <section id="graph-area" class="graph-area"></section>
+      </section>
+
+      <aside class="detail-panel" aria-label="Instance detail and provenance">
+        <header class="sidebar-header">
+          <div>
+            <p id="detail-kind" class="eyebrow">Detail</p>
+            <h1 id="detail-title">Select an instance</h1>
+          </div>
+        </header>
+        <section id="detail-body" class="detail-body">
+          <p class="muted">Click an Employee, Order, or edge to inspect source row and provenance.</p>
+        </section>
+      </aside>
+    </main>
+
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+    <script src="/instance_app.js"></script>
+  </body>
+</html>

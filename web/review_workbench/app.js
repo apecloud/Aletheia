@@ -23,6 +23,8 @@ const els = {
   workflowEligibility: document.querySelector("#workflow-eligibility"),
   latestAuditDecision: document.querySelector("#latest-audit-decision"),
   latestAuditDetail: document.querySelector("#latest-audit-detail"),
+  instanceLink: document.querySelector("#instance-link"),
+  instanceLinkEmpty: document.querySelector("#instance-link-empty"),
   confidence: document.querySelector("#confidence"),
   description: document.querySelector("#description"),
   sourceAgent: document.querySelector("#source-agent"),
@@ -125,7 +127,10 @@ async function loadArtifacts() {
   renderFilterOptions(data.stats || []);
   renderStats(data.stats || []);
   renderList();
-  if (!state.selectedKey && state.artifacts.length > 0) {
+  const requestedArtifact = new URLSearchParams(window.location.search).get("artifact");
+  if (!state.selectedKey && requestedArtifact) {
+    await selectArtifact(requestedArtifact);
+  } else if (!state.selectedKey && state.artifacts.length > 0) {
     await selectArtifact(state.artifacts[0].canonical_key);
   }
 }
@@ -222,6 +227,7 @@ function renderArtifact(artifact) {
   renderEvidence(artifact.evidence || []);
   renderReviews(artifact.reviews || []);
   renderLatestAudit((artifact.reviews || [])[0]);
+  renderInstanceLink(artifact);
 }
 
 function renderEvidence(evidence) {
@@ -255,6 +261,26 @@ function renderLatestAudit(item) {
   els.latestAuditDecision.textContent = `${item.decision} by ${item.reviewer}`;
   els.latestAuditDetail.textContent =
     `${item.before_status} -> ${item.after_status} · v${item.before_version} -> v${item.after_version} · ${item.reason || "No reason"} · ${item.created_at || ""}`;
+}
+
+function renderInstanceLink(artifact) {
+  const key = artifact.canonical_key;
+  if (key === "object:employee") {
+    els.instanceLink.href = "/instances.html?type=Employee";
+    els.instanceLink.textContent = "Browse Employee instances";
+  } else if (key === "link:employee:1:n:order") {
+    els.instanceLink.href = "/instances.html?type=Employee&id=4";
+    els.instanceLink.textContent = "Open Employee #4 -> Orders";
+  } else if (key === "object:order") {
+    els.instanceLink.href = "/instances.html?type=Employee&id=4";
+    els.instanceLink.textContent = "View Orders through Employee #4";
+  } else {
+    els.instanceLink.classList.add("hidden");
+    els.instanceLinkEmpty.classList.remove("hidden");
+    return;
+  }
+  els.instanceLink.classList.remove("hidden");
+  els.instanceLinkEmpty.classList.add("hidden");
 }
 
 function renderReviews(reviews) {

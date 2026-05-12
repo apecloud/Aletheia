@@ -174,6 +174,8 @@ Open <http://127.0.0.1:8765>. The workbench uses `ALETHEIA_PG_URL` or `ALETHEIA_
 
 For a brand-new metadata database, run the artifact pipeline or start once with `--ensure-schema` before opening the page.
 
+The same local server also exposes the Instance Explorer MVP at <http://127.0.0.1:8765/instances.html>. The first MVP is intentionally narrow: approved `Employee -> Orders` 1-hop browsing only. It uses `ALETHEIA_MYSQL_URL` or `ALETHEIA_MYSQL_DB` for source rows and `ALETHEIA_PG_URL` or `ALETHEIA_PG_DB` for approved ontology artifacts.
+
 ---
 
 ## 🤝 Contributing

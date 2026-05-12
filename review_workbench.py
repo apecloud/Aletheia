@@ -19,6 +19,10 @@ DB_URL = os.environ.get(
     "ALETHEIA_PG_URL",
     f"postgresql+psycopg2://aletheia_pg_user:aletheia_pg_password@127.0.0.1:5432/{os.environ.get('ALETHEIA_PG_DB', 'aletheia_ontology')}",
 )
+SOURCE_DB_URL = os.environ.get(
+    "ALETHEIA_MYSQL_URL",
+    f"mysql+pymysql://aletheia_user:aletheia_password@127.0.0.1:3306/{os.environ.get('ALETHEIA_MYSQL_DB', 'aletheia_test_data')}",
+)
 STATIC_ROOT = Path(__file__).resolve().parent / "web" / "review_workbench"
 
 
@@ -38,6 +42,12 @@ def _load_json(value, default):
 
 def _json_dump(value):
     return json.dumps(value, ensure_ascii=False, sort_keys=True)
+
+
+def _jsonable(value):
+    if hasattr(value, "isoformat"):
+        return value.isoformat()
+    return value
 
 
 def _require_reason(action, reason):
@@ -348,8 +358,312 @@ class ReviewRepository:
         )
 
 
+class InstanceRepository:
+    def __init__(self, metadata_db_url, source_db_url):
+        self.metadata_engine = create_engine(metadata_db_url)
+        self.source_engine = create_engine(source_db_url)
+
+    def types(self):
+        artifacts = self._approved_artifacts(["object:employee", "object:order"])
+        types = []
+        if "object:employee" in artifacts:
+            types.append(
+                {
+                    "type": "Employee",
+                    "label": "Employee",
+                    "ontology_artifact": "object:employee",
+                }
+            )
+        if "object:order" in artifacts:
+            types.append(
+                {
+                    "type": "Order",
+                    "label": "Order",
+                    "ontology_artifact": "object:order",
+                }
+            )
+        return {"types": types}
+
+    def search(self, object_type, query, limit=25):
+        canonical_key = self._object_key(object_type)
+        artifacts = self._approved_artifacts([canonical_key])
+        if canonical_key not in artifacts:
+            return {"instances": [], "approved": False, "reason": f"{canonical_key} is not approved"}
+        if object_type.lower() != "employee":
+            return {"instances": [], "approved": True, "reason": "MVP search supports Employee only"}
+        sql = """
+            SELECT employeeID, firstName, lastName, title, city, reportsTo
+            FROM employees
+            WHERE (:query = ''
+               OR CAST(employeeID AS CHAR) = :query
+               OR firstName LIKE :like_query
+               OR lastName LIKE :like_query
+               OR CONCAT(firstName, ' ', lastName) LIKE :like_query)
+            ORDER BY employeeID
+            LIMIT :limit
+        """
+        with self.source_engine.connect() as conn:
+            rows = conn.execute(
+                text(sql),
+                {
+                    "query": query,
+                    "like_query": f"%{query}%",
+                    "limit": limit,
+                },
+            ).mappings().all()
+        return {
+            "instances": [
+                {
+                    "id": f"Employee:{row['employeeID']}",
+                    "type": "Employee",
+                    "label": self._employee_label(row),
+                    "summary": row["title"],
+                    "source_table": "employees",
+                    "source_pk": f"employeeID={row['employeeID']}",
+                    "ontology_artifact": "object:employee",
+                }
+                for row in rows
+            ],
+            "approved": True,
+        }
+
+    def detail(self, object_type, instance_id):
+        canonical_key = self._object_key(object_type)
+        artifacts = self._approved_artifacts([canonical_key])
+        if canonical_key not in artifacts:
+            return None
+        if object_type.lower() == "employee":
+            employee = self._fetch_employee(instance_id)
+            if not employee:
+                return None
+            order_count = self._order_count_for_employee(instance_id)
+            reports = self._employee_reports(instance_id)
+            return {
+                "id": f"Employee:{employee['employeeID']}",
+                "type": "Employee",
+                "label": self._employee_label(employee),
+                "source_table": "employees",
+                "source_pk": f"employeeID={employee['employeeID']}",
+                "source_row": self._row(employee),
+                "ontology_artifact": "object:employee",
+                "key_properties": {
+                    "employeeID": employee["employeeID"],
+                    "name": self._employee_label(employee),
+                    "title": employee.get("title"),
+                    "city": employee.get("city"),
+                    "reportsTo": employee.get("reportsTo"),
+                },
+                "relations_summary": {
+                    "handled_orders": order_count,
+                    "reports_to": reports.get("manager"),
+                    "direct_reports": reports.get("direct_reports", 0),
+                },
+            }
+        if object_type.lower() == "order":
+            order = self._fetch_order(instance_id)
+            if not order:
+                return None
+            return {
+                "id": f"Order:{order['orderID']}",
+                "type": "Order",
+                "label": f"Order #{order['orderID']}",
+                "source_table": "orders",
+                "source_pk": f"orderID={order['orderID']}",
+                "source_row": self._row(order),
+                "ontology_artifact": "object:order",
+                "key_properties": {
+                    "orderID": order["orderID"],
+                    "customerID": order.get("customerID"),
+                    "employeeID": order.get("employeeID"),
+                    "orderDate": _jsonable(order.get("orderDate")),
+                    "shipName": order.get("shipName"),
+                },
+            }
+        return None
+
+    def neighborhood(self, object_type, instance_id, depth=1, limit=200):
+        if object_type.lower() != "employee":
+            return None
+        artifacts = self._approved_artifacts(
+            ["object:employee", "object:order", "link:employee:1:n:order"]
+        )
+        missing = [
+            key
+            for key in ["object:employee", "object:order", "link:employee:1:n:order"]
+            if key not in artifacts
+        ]
+        if missing:
+            return {
+                "approved": False,
+                "missing_approved_artifacts": missing,
+                "center": None,
+                "nodes": [],
+                "edges": [],
+            }
+        employee = self._fetch_employee(instance_id)
+        if not employee:
+            return None
+        with self.source_engine.connect() as conn:
+            orders = conn.execute(
+                text(
+                    """
+                    SELECT orderID, customerID, employeeID, orderDate, requiredDate,
+                           shippedDate, shipName, freight
+                    FROM orders
+                    WHERE employeeID = :employee_id
+                    ORDER BY orderID
+                    LIMIT :limit
+                    """
+                ),
+                {"employee_id": instance_id, "limit": limit},
+            ).mappings().all()
+        center = self._employee_node(employee)
+        order_nodes = [self._order_node(row) for row in orders]
+        edges = [self._employee_order_edge(employee, row) for row in orders]
+        return {
+            "approved": True,
+            "depth": min(int(depth), 1),
+            "limit": limit,
+            "center": center,
+            "nodes": [center] + order_nodes,
+            "edges": edges,
+            "relations_summary": {
+                "handled_orders": self._order_count_for_employee(instance_id),
+                "returned_orders": len(orders),
+            },
+        }
+
+    def edge_detail(self, source, target):
+        if not source.startswith("Employee:") or not target.startswith("Order:"):
+            return None
+        artifacts = self._approved_artifacts(
+            ["object:employee", "object:order", "link:employee:1:n:order"]
+        )
+        if "link:employee:1:n:order" not in artifacts:
+            return None
+        employee_id = source.split(":", 1)[1]
+        order_id = target.split(":", 1)[1]
+        employee = self._fetch_employee(employee_id)
+        order = self._fetch_order(order_id)
+        if not employee or not order or str(order.get("employeeID")) != str(employee_id):
+            return None
+        return self._employee_order_edge(employee, order, include_rows=True)
+
+    def _approved_artifacts(self, keys):
+        with self.metadata_engine.connect() as conn:
+            rows = conn.execute(
+                text(
+                    """
+                    SELECT canonical_key, name, artifact_type, status, payload_json
+                    FROM aletheia_ontology_artifacts
+                    WHERE canonical_key = ANY(:keys) AND status = 'approved'
+                    """
+                ),
+                {"keys": list(keys)},
+            ).mappings().all()
+        return {row["canonical_key"]: dict(row) for row in rows}
+
+    def _object_key(self, object_type):
+        return f"object:{object_type}".lower()
+
+    def _fetch_employee(self, employee_id):
+        with self.source_engine.connect() as conn:
+            return conn.execute(
+                text("SELECT * FROM employees WHERE employeeID = :employee_id"),
+                {"employee_id": employee_id},
+            ).mappings().first()
+
+    def _fetch_order(self, order_id):
+        with self.source_engine.connect() as conn:
+            return conn.execute(
+                text("SELECT * FROM orders WHERE orderID = :order_id"),
+                {"order_id": order_id},
+            ).mappings().first()
+
+    def _order_count_for_employee(self, employee_id):
+        with self.source_engine.connect() as conn:
+            return conn.execute(
+                text("SELECT COUNT(*) FROM orders WHERE employeeID = :employee_id"),
+                {"employee_id": employee_id},
+            ).scalar()
+
+    def _employee_reports(self, employee_id):
+        with self.source_engine.connect() as conn:
+            manager = conn.execute(
+                text(
+                    """
+                    SELECT m.employeeID, m.firstName, m.lastName
+                    FROM employees e
+                    LEFT JOIN employees m ON e.reportsTo = m.employeeID
+                    WHERE e.employeeID = :employee_id
+                    """
+                ),
+                {"employee_id": employee_id},
+            ).mappings().first()
+            direct_reports = conn.execute(
+                text("SELECT COUNT(*) FROM employees WHERE reportsTo = :employee_id"),
+                {"employee_id": employee_id},
+            ).scalar()
+        manager_label = None
+        if manager and manager.get("employeeID"):
+            manager_label = self._employee_label(manager)
+        return {"manager": manager_label, "direct_reports": direct_reports}
+
+    def _employee_label(self, row):
+        return f"{row.get('firstName', '')} {row.get('lastName', '')}".strip()
+
+    def _employee_node(self, row):
+        return {
+            "id": f"Employee:{row['employeeID']}",
+            "type": "Employee",
+            "label": self._employee_label(row),
+            "summary": row.get("title"),
+            "source_table": "employees",
+            "source_pk": f"employeeID={row['employeeID']}",
+            "ontology_artifact": "object:employee",
+            "status": "approved",
+        }
+
+    def _order_node(self, row):
+        return {
+            "id": f"Order:{row['orderID']}",
+            "type": "Order",
+            "label": f"Order #{row['orderID']}",
+            "summary": f"Customer {row.get('customerID')} · {row.get('orderDate')}",
+            "source_table": "orders",
+            "source_pk": f"orderID={row['orderID']}",
+            "ontology_artifact": "object:order",
+            "status": "approved",
+        }
+
+    def _employee_order_edge(self, employee, order, include_rows=False):
+        edge = {
+            "id": f"Employee:{employee['employeeID']}->Order:{order['orderID']}",
+            "type": "EMPLOYEE_HANDLED_ORDER",
+            "source": f"Employee:{employee['employeeID']}",
+            "target": f"Order:{order['orderID']}",
+            "label": "handled order",
+            "source_ref": "orders.employeeID",
+            "join_condition": "orders.employeeID = employees.employeeID",
+            "ontology_link": "link:employee:1:n:order",
+            "evidence": "orders.employeeID matches employees.employeeID for this Employee-Order relationship.",
+            "source_field": "orders.employeeID",
+            "target_field": "employees.employeeID",
+        }
+        if include_rows:
+            edge["source_instance"] = self._employee_node(employee)
+            edge["target_instance"] = self._order_node(order)
+            edge["source_row"] = self._row(employee)
+            edge["target_row"] = self._row(order)
+        return edge
+
+    def _row(self, row):
+        return {key: _jsonable(value) for key, value in dict(row).items()}
+
+
 class ReviewWorkbenchHandler(BaseHTTPRequestHandler):
     repository = None
+    instance_repository = None
 
     def log_message(self, fmt, *args):
         sys.stderr.write("%s - %s\n" % (self.log_date_time_string(), fmt % args))
@@ -360,6 +674,47 @@ class ReviewWorkbenchHandler(BaseHTTPRequestHandler):
             filters = {key: values[0] for key, values in parse_qs(parsed.query).items() if values and values[0]}
             self._send_json(self.repository.list_artifacts(filters))
             return
+        if parsed.path == "/api/instances/types":
+            self._send_json(self.instance_repository.types())
+            return
+        if parsed.path == "/api/instances/search":
+            query = parse_qs(parsed.query)
+            object_type = query.get("type", ["Employee"])[0]
+            search = query.get("q", [""])[0]
+            limit = int(query.get("limit", ["25"])[0])
+            self._send_json(self.instance_repository.search(object_type, search, limit=limit))
+            return
+        if parsed.path == "/api/instances/edge":
+            query = parse_qs(parsed.query)
+            source = query.get("source", [""])[0]
+            target = query.get("target", [""])[0]
+            edge = self.instance_repository.edge_detail(source, target)
+            if edge is None:
+                self._send_error(HTTPStatus.NOT_FOUND, "Edge not found or not approved")
+                return
+            self._send_json(edge)
+            return
+        if parsed.path.startswith("/api/instances/"):
+            parts = parsed.path.removeprefix("/api/instances/").split("/")
+            if len(parts) == 2:
+                object_type, instance_id = unquote(parts[0]), unquote(parts[1])
+                detail = self.instance_repository.detail(object_type, instance_id)
+                if detail is None:
+                    self._send_error(HTTPStatus.NOT_FOUND, "Instance not found or object type is not approved")
+                    return
+                self._send_json(detail)
+                return
+            if len(parts) == 3 and parts[2] == "neighborhood":
+                object_type, instance_id = unquote(parts[0]), unquote(parts[1])
+                query = parse_qs(parsed.query)
+                depth = int(query.get("depth", ["1"])[0])
+                limit = int(query.get("limit", ["200"])[0])
+                graph = self.instance_repository.neighborhood(object_type, instance_id, depth=depth, limit=limit)
+                if graph is None:
+                    self._send_error(HTTPStatus.NOT_FOUND, "Neighborhood not found")
+                    return
+                self._send_json(graph)
+                return
         if parsed.path.startswith("/api/artifacts/"):
             canonical_key = unquote(parsed.path.removeprefix("/api/artifacts/"))
             artifact = self.repository.get_artifact(canonical_key)
@@ -457,10 +812,12 @@ def main():
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8765)
     parser.add_argument("--db-url", default=DB_URL)
+    parser.add_argument("--source-db-url", default=SOURCE_DB_URL)
     parser.add_argument("--ensure-schema", action="store_true", help="Create/migrate artifact tables before serving")
     args = parser.parse_args()
 
     ReviewWorkbenchHandler.repository = ReviewRepository(args.db_url, ensure_schema=args.ensure_schema)
+    ReviewWorkbenchHandler.instance_repository = InstanceRepository(args.db_url, args.source_db_url)
     server = LocalThreadingHTTPServer((args.host, args.port), ReviewWorkbenchHandler)
     print(f"Review Workbench: http://{args.host}:{args.port}", flush=True)
     try:
