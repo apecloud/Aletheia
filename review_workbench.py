@@ -1491,11 +1491,19 @@ class AgentGatewayRepository:
             ).mappings().all()
         return {
             "tenant": tenant.public_dict(),
-            "runtimes": [self._runtime_to_dict(row) for row in runtimes],
+            "runtimes": [self._runtime_with_readiness(tenant, row) for row in runtimes],
             "policies": [self._policy_to_dict(row) for row in policies],
             "runs": [self._run_to_dict(row) for row in runs],
             "secret_policy": {"storage": "credential_ref_only", "ui": "masked", "default": "deny"},
         }
+
+    def readiness(self, tenant, runtime_id):
+        self.ensure_defaults(tenant)
+        runtime = self._get_runtime(tenant, runtime_id)
+        if not runtime:
+            return None
+        readiness = self._readiness_for_runtime(tenant, self._runtime_to_dict(runtime))
+        return {"tenant": tenant.public_dict(), "readiness": readiness}
 
     def health_check(self, tenant, runtime_id):
         self.ensure_defaults(tenant)
@@ -1596,6 +1604,19 @@ class AgentGatewayRepository:
         )
         return {"tenant": tenant.public_dict(), "run": run}
 
+    def run_safe_demo(self, tenant, runtime_id, payload):
+        readiness_result = self.readiness(tenant, runtime_id)
+        if readiness_result is None:
+            return None
+        readiness = readiness_result["readiness"]
+        if readiness["demo_status"] != "demo_ready":
+            raise ValueError(f"Safe demo disabled: {readiness['demo_status']}")
+        body = dict(payload)
+        body.setdefault("policy_id", "default_cli_policy")
+        body.setdefault("task_type", "report")
+        body.setdefault("prompt", "Read the Aletheia README and produce a repository structure smoke report.")
+        return self.run_smoke(tenant, runtime_id, body)
+
     def _execute_runtime(self, runtime, policy, tenant, prompt, task_type):
         if runtime["command_template_id"] != "builtin_json_report_v1":
             output = {
@@ -1660,6 +1681,143 @@ print(json.dumps({
         if policy["secret_policy"] != "deny":
             return {"code": "secret_policy_not_supported_in_mvp", "detail": policy["secret_policy"]}
         return None
+
+    def _runtime_with_readiness(self, tenant, row):
+        runtime = self._runtime_to_dict(row)
+        runtime["readiness"] = self._readiness_for_runtime(tenant, runtime)
+        return runtime
+
+    def _readiness_for_runtime(self, tenant, runtime):
+        policy = self._get_policy(tenant, "default_cli_policy")
+        checks = []
+
+        if not runtime["enabled"]:
+            checks.append(self._check("runtime_enabled", "blocked", "Runtime profile is disabled.", "Enable the runtime profile before demo."))
+        else:
+            checks.append(self._check("runtime_enabled", "pass", "Runtime profile is enabled."))
+
+        if runtime["command_template_id"] == "builtin_json_report_v1":
+            binary_status = "pass"
+            binary_detail = f"{runtime['binary_ref']} available for builtin template."
+        else:
+            binary_found = bool(shutil.which(runtime["binary_ref"]))
+            binary_status = "pass" if binary_found else "fail"
+            binary_detail = f"{runtime['binary_ref']} found in service PATH." if binary_found else f"{runtime['binary_ref']} is not visible to the service PATH."
+        checks.append(
+            self._check(
+                "binary",
+                binary_status,
+                binary_detail,
+                f"Install {runtime['binary_ref']} and restart the service with a PATH that can resolve it." if binary_status == "fail" else "",
+            )
+        )
+
+        path_status = "pass" if runtime["command_template_id"] == "builtin_json_report_v1" or binary_status == "pass" else "fail"
+        checks.append(
+            self._check(
+                "path_visible",
+                path_status,
+                "Runtime binary is visible to the service process." if path_status == "pass" else "Runtime binary is not visible from the background service.",
+                f"Expose {runtime['binary_ref']} through the service PATH, not only the interactive shell." if path_status == "fail" else "",
+            )
+        )
+
+        if runtime["runtime_type"] == "generic_cli":
+            checks.append(self._check("auth", "pass", "No external auth required."))
+        elif binary_status == "fail":
+            checks.append(self._check("auth", "unknown", "Auth was not checked because the binary is unavailable.", f"Install and sign in to {runtime['binary_ref']} locally; credentials are not stored in Aletheia."))
+        else:
+            checks.append(self._check("auth", "unknown", "Auth state is not validated by MVP readiness.", f"Run the {runtime['binary_ref']} sign-in flow locally if this agent requires it; do not paste credentials into Settings."))
+
+        expected_template = self._expected_demo_template(runtime["runtime_type"])
+        template_ready = runtime["command_template_id"] == "builtin_json_report_v1"
+        checks.append(
+            self._check(
+                "template",
+                "pass" if template_ready else "fail",
+                f"{runtime['command_template_id']} is configured." if template_ready else f"{expected_template} is required for executable demo; current template is {runtime['command_template_id']}.",
+                f"Add an allowlisted {expected_template} runtime template before enabling safe demo." if not template_ready else "",
+            )
+        )
+
+        output_ready = runtime["command_template_id"] == "builtin_json_report_v1"
+        checks.append(
+            self._check(
+                "output_contract",
+                "pass" if output_ready else "fail",
+                "Structured JSON report output is supported." if output_ready else "No structured output parser is enabled for this placeholder profile.",
+                "Configure a JSON/report adapter that maps CLI output into draft artifacts only." if not output_ready else "",
+            )
+        )
+
+        if policy:
+            policy_ok = (
+                policy["secret_policy"] == "deny"
+                and "reports" in policy["allowed_paths"]
+                and set(self.BLOCKED_TOOLS).issubset(set(policy["blocked_tools"]))
+            )
+            checks.append(
+                self._check(
+                    "policy",
+                    "pass" if policy_ok else "fail",
+                    "Default CLI policy is deny-by-default with allowed paths and blocked actions." if policy_ok else "Default CLI policy is missing required safe-demo boundaries.",
+                    "Restore default_cli_policy with secret_policy=deny, reports allowed path, and blocked tools." if not policy_ok else "",
+                )
+            )
+        else:
+            checks.append(self._check("policy", "fail", "default_cli_policy not found.", "Create the default CLI policy before running demos."))
+
+        checks.append(self._check("working_dir", "pass", str(Path(__file__).resolve().parent)))
+        checks.append(
+            self._check(
+                "smoke_task",
+                "pass" if runtime["command_template_id"] == "builtin_json_report_v1" else "fail",
+                "Read-only repository summary safe demo." if runtime["command_template_id"] == "builtin_json_report_v1" else "Safe demo is blocked until an executable template exists.",
+                "Use generic_cli_builtin now, or add a controlled template for this CLI." if runtime["command_template_id"] != "builtin_json_report_v1" else "",
+            )
+        )
+
+        if any(check["status"] == "blocked" for check in checks):
+            demo_status = "disabled_by_policy"
+        elif any(check["name"] == "binary" and check["status"] == "fail" for check in checks):
+            demo_status = "not_installed"
+        elif any(check["name"] == "path_visible" and check["status"] == "fail" for check in checks):
+            demo_status = "path_not_visible"
+        elif any(check["name"] == "auth" and check["status"] == "fail" for check in checks):
+            demo_status = "auth_missing"
+        elif any(check["name"] in {"template", "output_contract"} and check["status"] == "fail" for check in checks):
+            demo_status = "output_contract_missing"
+        elif any(check["name"] == "policy" and check["status"] == "fail" for check in checks):
+            demo_status = "policy_not_ready"
+        elif all(check["status"] in {"pass"} for check in checks):
+            demo_status = "demo_ready"
+        else:
+            demo_status = "output_contract_missing"
+
+        return {
+            "runtime_id": runtime["runtime_id"],
+            "demo_status": demo_status,
+            "safe_demo_enabled": demo_status == "demo_ready",
+            "checks": checks,
+        }
+
+    def _check(self, name, status, detail, next_action=""):
+        return {
+            "name": name,
+            "status": status,
+            "detail": self._mask_secret_like(detail),
+            "next_action": self._mask_secret_like(next_action),
+        }
+
+    def _expected_demo_template(self, runtime_type):
+        return {
+            "claude_code_cli": "claude_code_json_report_v1",
+            "codex_cli": "codex_cli_json_report_v1",
+            "gemini_cli": "gemini_cli_json_report_v1",
+            "openclaw_cli": "openclaw_cli_json_report_v1",
+            "hermes_cli": "hermes_cli_json_report_v1",
+            "generic_cli": "builtin_json_report_v1",
+        }.get(runtime_type, f"{runtime_type}_json_report_v1")
 
     def _parse_cli_output(self, stdout):
         try:
@@ -1900,6 +2058,14 @@ class ReviewWorkbenchHandler(BaseHTTPRequestHandler):
         if parsed.path == "/api/agent-gateway/settings":
             self._send_json(self.agent_gateway_repository.list_settings(tenant))
             return
+        if parsed.path.startswith("/api/agent-gateway/runtimes/") and parsed.path.endswith("/readiness"):
+            runtime_id = unquote(parsed.path.removeprefix("/api/agent-gateway/runtimes/").removesuffix("/readiness").rstrip("/"))
+            result = self.agent_gateway_repository.readiness(tenant, runtime_id)
+            if result is None:
+                self._send_error(HTTPStatus.NOT_FOUND, f"Runtime not found: {runtime_id}")
+                return
+            self._send_json(result)
+            return
         if parsed.path == "/api/reasoning/tasks":
             self._send_json(self.reasoning_repository.list_tasks(tenant))
             return
@@ -1990,6 +2156,22 @@ class ReviewWorkbenchHandler(BaseHTTPRequestHandler):
                 body = self._read_json()
                 runtime_id = body.get("runtime_id") or "generic_cli_builtin"
                 result = self.agent_gateway_repository.run_smoke(tenant, runtime_id, body)
+            except ValueError as exc:
+                self._send_error(HTTPStatus.BAD_REQUEST, str(exc))
+                return
+            except Exception as exc:  # pragma: no cover - displayed to local operator
+                self._send_error(HTTPStatus.INTERNAL_SERVER_ERROR, str(exc))
+                return
+            if result is None:
+                self._send_error(HTTPStatus.NOT_FOUND, f"Runtime not found: {runtime_id}")
+                return
+            self._send_json(result)
+            return
+        if parsed.path == "/api/agent-gateway/safe-demo":
+            try:
+                body = self._read_json()
+                runtime_id = body.get("runtime_id") or "generic_cli_builtin"
+                result = self.agent_gateway_repository.run_safe_demo(tenant, runtime_id, body)
             except ValueError as exc:
                 self._send_error(HTTPStatus.BAD_REQUEST, str(exc))
                 return

@@ -77,9 +77,19 @@
             </dl>
             <div class="action-row">
               <button id="health-check" class="secondary-action" type="button">Run health check</button>
-              <button id="smoke-run" class="secondary-action" type="button">Run smoke</button>
+              <button id="readiness-check" class="secondary-action" type="button">Run readiness check</button>
+              <button id="smoke-run" class="secondary-action" type="button">Run safe demo</button>
               <button id="copy-policy" class="secondary-action" type="button">Copy policy</button>
             </div>
+          </article>
+
+          <article class="panel">
+            <div class="panel-header">
+              <h3>Demo Readiness</h3>
+              <span id="readiness-status" class="status-pill muted-pill">unknown</span>
+            </div>
+            <p id="readiness-summary" class="muted">Run readiness check to see demo prerequisites.</p>
+            <div id="readiness-detail" class="readiness-list"></div>
           </article>
 
           <article class="panel">

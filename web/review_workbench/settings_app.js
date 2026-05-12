@@ -26,11 +26,15 @@ const els = {
   runtimeBinary: document.querySelector("#runtime-binary"),
   runtimeTemplate: document.querySelector("#runtime-template"),
   runtimeEnabled: document.querySelector("#runtime-enabled"),
+  readinessStatus: document.querySelector("#readiness-status"),
+  readinessSummary: document.querySelector("#readiness-summary"),
+  readinessDetail: document.querySelector("#readiness-detail"),
   policyId: document.querySelector("#policy-id"),
   policyDetail: document.querySelector("#policy-detail"),
   runCount: document.querySelector("#run-count"),
   runList: document.querySelector("#run-list"),
   healthCheck: document.querySelector("#health-check"),
+  readinessCheck: document.querySelector("#readiness-check"),
   smokeRun: document.querySelector("#smoke-run"),
   copyPolicy: document.querySelector("#copy-policy"),
   toast: document.querySelector("#toast"),
@@ -109,11 +113,13 @@ async function loadSettings() {
 function renderRuntimes() {
   els.runtimeList.innerHTML = state.runtimes
     .map(
-      (runtime) => `
+      (runtime) => {
+        const demoStatus = runtime.readiness?.demo_status || "unknown";
+        return `
         <button class="artifact-item ${runtime.runtime_id === state.selectedRuntimeId ? "active" : ""}" type="button" data-runtime="${escapeHtml(runtime.runtime_id)}">
           <span class="artifact-item-title">
             <strong>${escapeHtml(runtime.runtime_type)}</strong>
-            <span class="status-pill ${runtime.health_status === "available" ? "status-approved" : "muted-pill"}">${escapeHtml(runtime.health_status)}</span>
+            <span class="status-pill ${statusClass(demoStatus)}">${escapeHtml(demoStatus)}</span>
           </span>
           <span class="key-text">${escapeHtml(runtime.runtime_id)}</span>
           <span class="artifact-item-meta">
@@ -121,7 +127,8 @@ function renderRuntimes() {
             <span>${escapeHtml(runtime.command_template_id)}</span>
           </span>
         </button>
-      `,
+      `;
+      },
     )
     .join("");
   els.runtimeList.querySelectorAll("[data-runtime]").forEach((item) => {
@@ -144,6 +151,46 @@ function renderSelectedRuntime() {
   els.runtimeBinary.textContent = runtime.binary_ref;
   els.runtimeTemplate.textContent = runtime.command_template_id;
   els.runtimeEnabled.textContent = runtime.enabled ? "enabled" : "disabled";
+  renderReadiness(runtime.readiness);
+}
+
+function statusClass(status) {
+  if (["available", "completed", "demo_ready", "pass"].includes(status)) return "status-approved";
+  if (["fail", "blocked", "disabled_by_policy", "not_installed", "auth_missing", "path_not_visible", "output_contract_missing", "policy_not_ready"].includes(status)) return "status-rejected";
+  return "muted-pill";
+}
+
+function renderReadiness(readiness) {
+  if (!readiness) {
+    els.readinessStatus.textContent = "unknown";
+    els.readinessStatus.className = "status-pill muted-pill";
+    els.readinessSummary.textContent = "Readiness has not been checked.";
+    els.readinessDetail.innerHTML = "";
+    els.smokeRun.disabled = true;
+    els.smokeRun.title = "Safe demo requires demo_ready.";
+    return;
+  }
+  els.readinessStatus.textContent = readiness.demo_status;
+  els.readinessStatus.className = `status-pill ${statusClass(readiness.demo_status)}`;
+  els.readinessSummary.textContent = readiness.safe_demo_enabled
+    ? "Safe demo is enabled. Output will be draft/report only."
+    : "Safe demo is disabled until all required prerequisites pass.";
+  els.smokeRun.disabled = !readiness.safe_demo_enabled;
+  els.smokeRun.title = readiness.safe_demo_enabled ? "Run safe demo" : `Safe demo disabled: ${readiness.demo_status}`;
+  els.readinessDetail.innerHTML = (readiness.checks || [])
+    .map(
+      (check) => `
+        <section class="readiness-item">
+          <div class="row-between">
+            <strong>${escapeHtml(check.name)}</strong>
+            <span class="status-pill ${statusClass(check.status)}">${escapeHtml(check.status)}</span>
+          </div>
+          <p>${escapeHtml(check.detail || "")}</p>
+          ${check.next_action ? `<p class="muted">Next action: ${escapeHtml(check.next_action)}</p>` : ""}
+        </section>
+      `,
+    )
+    .join("");
 }
 
 function renderPolicy() {
@@ -209,10 +256,24 @@ async function runHealthCheck() {
   showToast(`Health check completed for ${runtime.runtime_id}`);
 }
 
+async function runReadinessCheck() {
+  const runtime = selectedRuntime();
+  if (!runtime) return;
+  const result = await fetchJson(urlWithTenant(`/api/agent-gateway/runtimes/${encodeURIComponent(runtime.runtime_id)}/readiness`));
+  runtime.readiness = result.readiness;
+  renderRuntimes();
+  renderSelectedRuntime();
+  showToast(`Readiness ${result.readiness.demo_status} for ${runtime.runtime_id}`);
+}
+
 async function runSmoke() {
   const runtime = selectedRuntime();
   if (!runtime) return;
-  const result = await fetchJson(urlWithTenant("/api/agent-gateway/runs"), {
+  if (!runtime.readiness?.safe_demo_enabled) {
+    showToast(`Safe demo disabled: ${runtime.readiness?.demo_status || "unknown"}`);
+    return;
+  }
+  const result = await fetchJson(urlWithTenant("/api/agent-gateway/safe-demo"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -236,6 +297,7 @@ els.tenantSwitcher.addEventListener("change", async () => {
 });
 els.refresh.addEventListener("click", () => loadSettings().catch((error) => showToast(error.message)));
 els.healthCheck.addEventListener("click", () => runHealthCheck().catch((error) => showToast(error.message)));
+els.readinessCheck.addEventListener("click", () => runReadinessCheck().catch((error) => showToast(error.message)));
 els.smokeRun.addEventListener("click", () => runSmoke().catch((error) => showToast(error.message)));
 els.copyPolicy.addEventListener("click", async () => {
   await navigator.clipboard.writeText(json(state.policies[0] || {}));

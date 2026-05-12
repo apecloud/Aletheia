@@ -602,7 +602,7 @@ dd {
 
 .action-row {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 8px;
   margin: 10px 0;
 }
@@ -611,6 +611,11 @@ dd {
 .secondary-action {
   min-height: 36px;
   padding: 0 12px;
+}
+
+.secondary-action:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
 }
 
 .action.approve {
@@ -781,6 +786,26 @@ label {
 
 .compact-detail {
   padding: 0;
+}
+
+.readiness-list {
+  display: grid;
+  gap: 10px;
+}
+
+.readiness-item {
+  min-width: 0;
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  background: var(--panel-strong);
+  padding: 10px;
+}
+
+.readiness-item p {
+  margin: 6px 0 0;
+  color: var(--muted);
+  line-height: 1.45;
+  overflow-wrap: anywhere;
 }
 
 .toast {

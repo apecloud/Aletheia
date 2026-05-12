@@ -62,6 +62,16 @@ Added `settings.html` and `settings_app.js`:
 - Policy viewer.
 - Recent AgentRun audit list with violations and touched files.
 
+## Demo Readiness
+
+Added demo readiness support for tasks #62-#64:
+
+- `GET /api/agent-gateway/runtimes/<runtime_id>/readiness?tenant=<tenant>` returns `demo_status`, `safe_demo_enabled`, checklist items, and masked `next_action` text.
+- `POST /api/agent-gateway/safe-demo?tenant=<tenant>` performs server-side readiness gating; non-`demo_ready` runtimes are rejected before any AgentRun artifact can be produced.
+- Settings now shows a Demo Readiness panel with Binary / Auth / PATH / Working dir / Template / Policy / Output contract / Smoke task checks.
+- The Safe demo button is disabled unless readiness is `demo_ready`; this is only a UI guard, with the same rule enforced by the backend.
+- `generic_cli_builtin` is the only `demo_ready` runtime in MVP. Claude Code, Codex, Gemini, OpenClaw, and Hermes remain profile/health-check placeholders until controlled runtime templates exist.
+
 ## Smoke Evidence
 
 Validated on local server `127.0.0.1:8767`:
@@ -72,6 +82,9 @@ Validated on local server `127.0.0.1:8767`:
 - Non-JSON mock output returns `failed` with `non_json_output`.
 - Malicious mock output containing `approve_finding`, `commit`, `push`, and `/tmp/outside.txt` returns `blocked` with `blocked_tool_call`, `blocked_action_in_output`, and `path_not_allowed`.
 - Probe-only runtimes such as `codex_cli_default` return `blocked` with top-level `AgentRun.policy_violations=[runtime_probe_only]`; the violation is not hidden inside stdout.
+- Readiness checks are read-only: calling readiness does not create AgentRun records or output artifacts.
+- Direct safe-demo POST to a non-demo-ready runtime such as `claude_code_cli_default` returns HTTP 400 with `Safe demo disabled: output_contract_missing`.
+- `generic_cli_builtin` readiness returns `demo_ready` and safe demo returns a completed draft/report AgentRun through the same policy validator.
 
 ## Validation Commands
 
