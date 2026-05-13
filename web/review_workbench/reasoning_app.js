@@ -281,7 +281,7 @@ function renderTasks(tasks) {
             <strong>${escapeHtml(task.canonical_key)}</strong>
             <span class="status-pill status-approved">${escapeHtml(task.status)}</span>
           </span>
-          <span class="key-text">${escapeHtml(task.question)}</span>
+          <span class="key-text">${escapeHtml(taskQuestionLabel(task))}</span>
           <span class="artifact-item-meta">
             <span>${escapeHtml(scopeLabel(task))}</span>
             <span>${task.latest_run ? escapeHtml(task.latest_run.status) : "not run"}</span>
@@ -297,6 +297,15 @@ function renderTasks(tasks) {
       await loadTaskDetail();
     });
   });
+}
+
+function taskQuestionLabel(task) {
+  const question = String(task?.question || "");
+  const centerNode = task?.scope?.center_node || task?.scope?.evidence_paths?.[0]?.payload?.center_node || "";
+  if (centerNode.startsWith("Employee:") && /work snapshot|approved order relationships|loaded in the current evidence scope/i.test(question)) {
+    return `${centerNode} 员工画像分析`;
+  }
+  return question;
 }
 
 async function loadTaskDetail() {
@@ -464,23 +473,13 @@ function isGenericScopedFinding(finding) {
 
 function answerTitle(finding) {
   if (finding.structured_answer?.title) return finding.structured_answer.title;
-  const graph = state.graphContext;
-  if (graph?.approved !== false && graph?.center) {
-    const handled = graph.relations_summary?.handled_orders;
-    const returned = graph.relations_summary?.returned_orders ?? graph.edges?.length ?? 0;
-    return `${graph.center.id} work snapshot: ${graph.center.label || graph.center.id} has ${handled ?? returned} approved order relationship${(handled ?? returned) === 1 ? "" : "s"}`;
-  }
   return finding.title;
 }
 
 function answerConclusion(finding) {
   if (finding.structured_answer?.profile_summary) return finding.structured_answer.profile_summary;
-  const graph = state.graphContext;
-  if (graph?.approved !== false && graph?.center && isGenericScopedFinding(finding)) {
-    const handled = graph.relations_summary?.handled_orders;
-    const returned = graph.relations_summary?.returned_orders ?? graph.edges?.length ?? 0;
-    const title = graph.center.summary ? ` (${graph.center.summary})` : "";
-    return `For the question "${state.task?.question || "current scoped task"}", the approved graph shows ${graph.center.label || graph.center.id}${title} with ${handled ?? returned} handled order relationship${(handled ?? returned) === 1 ? "" : "s"}; ${returned} relationship${returned === 1 ? " is" : "s are"} loaded in the current evidence scope. This is a draft answer for review, not an approved operational conclusion.`;
+  if (isGenericScopedFinding(finding)) {
+    return "该历史推理结果缺少结构化画像，请重新执行推理以生成画像判断、关键事实、业务含义、证据边界和下一步验证。系统不会再把订单关系数量作为主结论展示。";
   }
   return finding.conclusion;
 }
@@ -653,6 +652,13 @@ function renderTrace() {
     return;
   }
   els.runTitle.textContent = state.run.run_key;
+  const traceOutput = state.selectedFinding?.structured_answer
+    ? {
+        draft_only: state.run.output?.draft_only,
+        finding_keys: state.run.output?.finding_keys || [],
+        structured_answer: state.selectedFinding.structured_answer,
+      }
+    : state.run.output;
   els.traceBody.innerHTML = `
     <section class="detail-section">
       <h3>Query plan</h3>
@@ -670,7 +676,7 @@ function renderTrace() {
     </section>
     <section class="detail-section">
       <h3>Output</h3>
-      <pre class="code-block">${escapeHtml(json(state.run.output))}</pre>
+      <pre class="code-block">${escapeHtml(json(traceOutput))}</pre>
     </section>
   `;
 }

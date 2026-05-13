@@ -1493,11 +1493,15 @@ class ReasoningRepository:
     def _is_legacy_scoped_finding(self, finding):
         title = (finding.get("title") or "").lower()
         conclusion = (finding.get("conclusion") or "").lower()
-        return "scoped graph reasoning remains draft-only" in title or "created from graph explorer evidence" in conclusion
+        return (
+            "scoped graph reasoning remains draft-only" in title
+            or "created from graph explorer evidence" in conclusion
+            or "work snapshot" in title
+            or "approved order relationships" in title
+            or "loaded in the current evidence scope" in conclusion
+        )
 
     def _normalize_scoped_finding_display(self, tenant, finding):
-        if not self._is_legacy_scoped_finding(finding):
-            return finding
         task = finding.get("task") or {}
         if not task:
             task = {
@@ -1505,9 +1509,56 @@ class ReasoningRepository:
                 "scope": finding.get("task_scope") or {},
             }
         scope = task.get("scope") or finding.get("task_scope") or {}
+        structured_answer = finding.get("structured_answer") or (finding.get("recommended_action") or {}).get("structured_answer")
+        if not structured_answer:
+            structured_answer = self._scoped_structured_answer(tenant, task, scope)
+            if structured_answer:
+                raw_recommended_action = finding.get("recommended_action") or {}
+                finding["recommended_action"] = {
+                    **raw_recommended_action,
+                    "structured_answer": structured_answer,
+                }
+                finding["structured_answer"] = structured_answer
+                for key in ("profile_summary", "key_facts", "business_interpretation", "evidence_limits", "next_questions"):
+                    finding[key] = structured_answer.get(key) or ([] if key != "profile_summary" else "")
+        if not structured_answer and not self._is_legacy_scoped_finding(finding):
+            return finding
         raw_title = finding.get("title")
         raw_conclusion = finding.get("conclusion")
-        title, conclusion = self._scoped_graph_finding_text(tenant, task, scope)
+        if structured_answer:
+            title = structured_answer.get("title") or raw_title
+            conclusion = structured_answer.get("profile_summary") or raw_conclusion
+            finding["confidence"] = max(float(finding.get("confidence") or 0), 0.78)
+            metrics = structured_answer.get("metrics") or {}
+            evidence_paths = list(finding.get("supporting_evidence") or [])
+            if not any(path.get("kind") == "controlled_aggregate" for path in evidence_paths):
+                evidence_paths.append(
+                    {
+                        "kind": "controlled_aggregate",
+                        "label": "Employee profile aggregate",
+                        "summary": (
+                            f"{metrics.get('name') or scope.get('center_node')} has "
+                            f"{metrics.get('order_count', 0)} orders across "
+                            f"{metrics.get('customer_count', 0)} customers; "
+                            f"order rank {metrics.get('order_rank')}/{metrics.get('employee_count')}."
+                        ),
+                        "url": f"/reasoning.html?tenant={tenant.tenant_id}&task={quote(task.get('canonical_key') or '')}",
+                        "source_ref": "employees + orders + order_details + customers",
+                        "payload": {
+                            "employee_id": metrics.get("employee_id"),
+                            "order_count": metrics.get("order_count"),
+                            "order_rank": metrics.get("order_rank"),
+                            "employee_count": metrics.get("employee_count"),
+                            "customer_count": metrics.get("customer_count"),
+                            "top_customer_id": metrics.get("top_customer_id"),
+                            "revenue": metrics.get("revenue"),
+                            "freight_sum": metrics.get("freight_sum"),
+                        },
+                    }
+                )
+                finding["supporting_evidence"] = evidence_paths
+        else:
+            title, conclusion = self._scoped_graph_finding_text(tenant, task, scope)
         finding["raw_title"] = raw_title
         finding["raw_conclusion"] = raw_conclusion
         finding["title"] = title
