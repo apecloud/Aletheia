@@ -122,7 +122,7 @@ function renderTasks() {
             <div><dt>Depth / limit</dt><dd>${escapeHtml(task.scope?.depth || 1)} / ${escapeHtml(task.scope?.node_limit || 200)}</dd></div>
           </dl>
           <div class="action-row">
-            <a class="panel-link" href="${escapeHtml(tenantUrl("/reasoning.html", { task: task.canonical_key }))}">Open run detail</a>
+            <a class="panel-link" href="${escapeHtml(tenantUrl("/reasoning.html", { task: task.canonical_key }))}">Open reasoning loop</a>
             <a class="panel-link" href="${escapeHtml(tenantUrl("/findings.html", { task: task.canonical_key }))}">Open findings</a>
           </div>
         </article>
@@ -142,7 +142,7 @@ function renderSelectedTask(task) {
     <strong>${escapeHtml(task.question)}</strong>
     <span class="key-text">${escapeHtml(task.canonical_key)}</span>
     <p>Scope: ${escapeHtml(scopeLabel(task.scope))}. Source: ${escapeHtml(task.scope?.source || "fixed_reasoning")}.</p>
-    <a class="panel-link" href="${escapeHtml(tenantUrl("/reasoning.html", { task: task.canonical_key }))}">Open reasoning run</a>
+    <a class="panel-link" href="${escapeHtml(tenantUrl("/reasoning.html", { task: task.canonical_key }))}">Open reasoning loop</a>
   `;
 }
 
@@ -183,10 +183,11 @@ async function createQuestion(event) {
   els.result.innerHTML = `
     <strong>Scoped question created</strong>
     <p>${escapeHtml(data.task.question)}</p>
-    <a class="panel-link" href="${escapeHtml(data.reasoning_url)}">Open reasoning task</a>
+    <a class="panel-link" href="${escapeHtml(data.reasoning_url)}">Open reasoning loop</a>
   `;
   await loadData();
   showToast("Scoped question created");
+  window.location.href = data.reasoning_url;
 }
 
 els.form.addEventListener("submit", (event) => createQuestion(event).catch((error) => showToast(error.message)));

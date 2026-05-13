@@ -3,14 +3,14 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Aletheia Reasoning Workbench</title>
+    <title>Aletheia Reasoning Loop</title>
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
     <header class="portal-shell" aria-label="Portal navigation">
       <div class="portal-brand">
         <p class="eyebrow">Aletheia Portal</p>
-        <strong>Reasoning Workbench</strong>
+        <strong>Reasoning Loop</strong>
       </div>
       <nav class="portal-nav" aria-label="Primary views">
         <a id="nav-workbench" class="portal-nav-item" href="/">Workbench</a>
@@ -34,8 +34,8 @@
       <aside class="sidebar reasoning-sidebar" aria-label="Reasoning task list">
         <header class="sidebar-header">
           <div>
-            <p class="eyebrow">Draft reasoning</p>
-            <h1>Agent Reasoning</h1>
+            <p class="eyebrow">History</p>
+            <h1>Reasoning Tasks</h1>
           </div>
           <button id="run-task" class="icon-button" type="button" title="Run fixed reasoning task">▶</button>
         </header>
@@ -56,20 +56,27 @@
           </dl>
         </section>
 
-        <section id="task-list" class="artifact-list" aria-label="Reasoning tasks"></section>
+        <details class="loop-collapsible history-collapsible" open>
+          <summary>
+            <span>Question History</span>
+            <span id="task-count" class="metric">0 tasks</span>
+          </summary>
+          <section id="task-list" class="artifact-list" aria-label="Reasoning tasks"></section>
+        </details>
       </aside>
 
-      <section class="reasoning-evidence" aria-label="Evidence path">
+      <section class="reasoning-evidence" aria-label="Unified reasoning loop">
         <header class="workspace-header">
           <div>
-            <p class="eyebrow">Evidence Path</p>
-            <h2 id="task-title">Employee #4 workload analysis</h2>
-            <p id="task-question" class="muted">Load the fixed reasoning task to inspect its scope.</p>
+            <p class="eyebrow">Question -> Answer -> Evidence</p>
+            <h2 id="task-title">Unified reasoning loop</h2>
+            <p id="task-question" class="muted">Ask, inspect the current answer, expand evidence, and review without leaving this page.</p>
           </div>
           <span id="run-status" class="status-pill muted-pill">idle</span>
         </header>
 
         <section id="reasoning-warning" class="empty-state hidden"></section>
+
         <section class="panel reasoning-answer-panel" aria-label="Current answer">
           <div class="panel-header">
             <div>
@@ -82,16 +89,70 @@
             <p class="muted">No conclusion has been generated yet. Run this reasoning task to produce a draft finding.</p>
           </div>
         </section>
-        <section id="evidence-paths" class="reasoning-paths"></section>
+        <details class="loop-collapsible question-context-panel">
+          <summary>
+            <span>Question & context</span>
+            <span id="task-source" class="status-pill muted-pill">scope</span>
+          </summary>
+          <section class="loop-question-panel" aria-label="Question and context">
+            <form id="loop-question-form" class="question-form">
+              <label>
+                Question
+                <textarea id="question-input" rows="3" placeholder="Why is Employee #4 workload unusual?"></textarea>
+              </label>
+              <div class="filter-row">
+                <label>
+                  Center node
+                  <input id="center-node" type="text" value="Employee:4" />
+                </label>
+                <label>
+                  Depth
+                  <input id="depth" type="number" min="1" max="2" value="1" />
+                </label>
+                <label>
+                  Limit
+                  <input id="limit" type="number" min="1" max="300" value="200" />
+                </label>
+              </div>
+              <div class="action-row loop-action-row">
+                <button class="secondary-action" type="submit">Create scoped question</button>
+                <button id="run-task-inline" class="secondary-action" type="button">Run reasoning</button>
+                <a id="graph-context-link" class="secondary-action answer-link" href="/graph.html">Open graph context</a>
+                <a id="question-history-link" class="secondary-action answer-link" href="/questions.html">Open question history</a>
+              </div>
+            </form>
+            <dl id="task-summary" class="compact-meta loop-task-summary"></dl>
+          </section>
+        </details>
+        <details id="evidence-chain-panel" class="loop-collapsible evidence-chain-panel" open>
+          <summary>
+            <span>Evidence Chain</span>
+            <span id="evidence-count" class="metric">0 items</span>
+          </summary>
+          <section id="evidence-paths" class="reasoning-paths"></section>
+        </details>
       </section>
 
       <aside class="detail-panel reasoning-trace" aria-label="Reasoning trace and review">
         <header class="sidebar-header">
           <div>
-            <p class="eyebrow">Trace</p>
-            <h1 id="run-title">No run selected</h1>
+            <p class="eyebrow">Actions</p>
+            <h1 id="run-title">Follow up & review</h1>
           </div>
         </header>
+        <section class="panel followup-panel">
+          <div class="panel-header">
+            <h3>Continue follow-up</h3>
+            <span class="hint">same scope</span>
+          </div>
+          <form id="followup-form" class="question-form">
+            <label>
+              Follow-up question
+              <textarea id="followup-input" rows="3" placeholder="What evidence would change this conclusion?"></textarea>
+            </label>
+            <button class="secondary-action" type="submit">Create follow-up</button>
+          </form>
+        </section>
         <section id="trace-body" class="detail-body">
           <p class="muted">The trace will show query plan, tool calls, eval, and proposed action.</p>
         </section>

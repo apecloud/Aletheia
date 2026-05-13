@@ -1323,6 +1323,90 @@ label {
   box-shadow: var(--shadow);
 }
 
+.question-context-panel,
+.evidence-chain-panel {
+  margin: 16px 16px 0;
+}
+
+.loop-question-panel {
+  padding: 14px;
+}
+
+.loop-question-panel .filter-row {
+  grid-template-columns: minmax(180px, 1fr) minmax(90px, 120px) minmax(100px, 140px);
+}
+
+.loop-action-row {
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+}
+
+.loop-task-summary {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin: 12px 0 0;
+}
+
+.loop-collapsible {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  box-shadow: var(--shadow);
+}
+
+.history-collapsible {
+  margin: 0 8px 16px;
+}
+
+.loop-collapsible > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 46px;
+  padding: 10px 14px;
+  border-radius: 8px;
+  cursor: pointer;
+  color: var(--text);
+  font-weight: 650;
+}
+
+.loop-collapsible[open] > summary {
+  border-bottom: 1px solid var(--line-soft);
+  border-bottom-right-radius: 0;
+  border-bottom-left-radius: 0;
+}
+
+.evidence-loop-grid {
+  display: grid;
+  gap: 12px;
+}
+
+.evidence-card-body {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+}
+
+.evidence-card-body p {
+  margin: 0;
+  line-height: 1.5;
+}
+
+.nested-detail {
+  border-top: 1px solid var(--line-soft);
+  padding-top: 8px;
+}
+
+.nested-detail > summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.followup-panel {
+  margin: 16px;
+  box-shadow: none;
+}
+
 .reasoning-answer-panel .panel-header {
   align-items: flex-start;
 }
@@ -1382,7 +1466,7 @@ label {
 }
 
 .answer-actions {
-  grid-template-columns: repeat(auto-fit, minmax(150px, max-content));
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   align-items: center;
 }
 
@@ -1531,7 +1615,9 @@ label {
 	  .answer-hero,
 	  .answer-support,
 	  .governance-note,
-	  .answer-secondary-grid {
+	  .answer-secondary-grid,
+	  .loop-question-panel .filter-row,
+	  .loop-task-summary {
 	    grid-template-columns: 1fr;
 	  }
 

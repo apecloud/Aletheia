@@ -25,16 +25,30 @@ const els = {
   navSettings: document.querySelector("#nav-settings") || document.querySelector("#nav-runtime"),
   breadcrumb: document.querySelector("#breadcrumb"),
   runTask: document.querySelector("#run-task"),
+  runTaskInline: document.querySelector("#run-task-inline"),
+  questionForm: document.querySelector("#loop-question-form"),
+  questionInput: document.querySelector("#question-input"),
+  centerNode: document.querySelector("#center-node"),
+  depth: document.querySelector("#depth"),
+  limit: document.querySelector("#limit"),
+  graphContextLink: document.querySelector("#graph-context-link"),
+  questionHistoryLink: document.querySelector("#question-history-link"),
+  taskSource: document.querySelector("#task-source"),
+  taskCount: document.querySelector("#task-count"),
+  taskSummary: document.querySelector("#task-summary"),
   taskList: document.querySelector("#task-list"),
   taskTitle: document.querySelector("#task-title"),
   taskQuestion: document.querySelector("#task-question"),
   runStatus: document.querySelector("#run-status"),
   warning: document.querySelector("#reasoning-warning"),
   evidencePaths: document.querySelector("#evidence-paths"),
+  evidenceCount: document.querySelector("#evidence-count"),
   findingStatus: document.querySelector("#finding-status"),
   findingDetail: document.querySelector("#finding-detail"),
   runTitle: document.querySelector("#run-title"),
   traceBody: document.querySelector("#trace-body"),
+  followupForm: document.querySelector("#followup-form"),
+  followupInput: document.querySelector("#followup-input"),
   reviewReason: document.querySelector("#review-reason"),
   approveFinding: document.querySelector("#approve-finding"),
   needsChangesFinding: document.querySelector("#needs-changes-finding"),
@@ -161,6 +175,33 @@ function currentFindingMatchesHandoff() {
   return evidenceSignature(expected) === evidenceSignature(actual);
 }
 
+function centerNodeParts(value) {
+  const node = value || "Employee:4";
+  return node.includes(":") ? node.split(":", 2) : ["Employee", "4"];
+}
+
+function updateGraphContextLink() {
+  if (!els.graphContextLink) return;
+  const [type, id] = centerNodeParts(els.centerNode?.value || state.task?.scope?.center_node || "Employee:4");
+  els.graphContextLink.href = urlWithTenant("/graph.html", {
+    type,
+    id,
+    depth: els.depth?.value || state.task?.scope?.depth || "1",
+    limit: els.limit?.value || state.task?.scope?.node_limit || "200",
+  });
+  if (els.questionHistoryLink) els.questionHistoryLink.href = urlWithTenant("/questions.html", { task: state.taskKey });
+}
+
+function hydrateQuestionFormFromTask() {
+  if (!state.task) return;
+  const scope = state.task.scope || {};
+  if (els.questionInput && !els.questionInput.matches(":focus")) els.questionInput.value = state.task.question || "";
+  if (els.centerNode && !els.centerNode.matches(":focus")) els.centerNode.value = scope.center_node || "Employee:4";
+  if (els.depth && !els.depth.matches(":focus")) els.depth.value = scope.depth || 1;
+  if (els.limit && !els.limit.matches(":focus")) els.limit.value = scope.node_limit || scope.edge_limit || 200;
+  updateGraphContextLink();
+}
+
 async function acceptGraphHandoffIfPresent() {
   const payload = graphHandoffPayload();
   if (!payload) return false;
@@ -201,6 +242,7 @@ async function loadTenants() {
   if (els.navReasoning) els.navReasoning.href = `/reasoning.html?tenant=${encodeURIComponent(state.tenant)}&task=${encodeURIComponent(state.taskKey)}`;
   els.navSettings.href = `/settings.html?tenant=${encodeURIComponent(state.tenant)}`;
   els.breadcrumb.textContent = `Reasoning / ${state.taskKey}`;
+  updateGraphContextLink();
 }
 
 async function loadTasks() {
@@ -212,6 +254,7 @@ async function loadTasks() {
 }
 
 function renderTasks(tasks) {
+  if (els.taskCount) els.taskCount.textContent = `${tasks.length} task${tasks.length === 1 ? "" : "s"}`;
   els.taskList.innerHTML = tasks
     .map(
       (task) => `
@@ -279,7 +322,10 @@ function renderTask() {
   els.taskQuestion.textContent = state.task?.question || "";
   els.runStatus.textContent = state.run?.status || "not run";
   els.runStatus.className = `status-pill ${state.run?.status === "completed" ? "status-approved" : "muted-pill"}`;
+  if (els.taskSource) els.taskSource.textContent = state.task?.scope?.source || "fixed_reasoning";
   els.breadcrumb.textContent = `Reasoning / ${scopeLabel()}`;
+  hydrateQuestionFormFromTask();
+  renderTaskSummary();
   if (state.run?.status === "blocked") {
     const missing = state.run.output?.missing_approved_artifacts || [];
     els.warning.classList.remove("hidden");
@@ -292,27 +338,83 @@ function renderTask() {
   renderTrace();
 }
 
+function renderTaskSummary() {
+  if (!els.taskSummary || !state.task) return;
+  const scope = state.task.scope || {};
+  const latest = state.run?.status || "not run";
+  els.taskSummary.innerHTML = `
+    <div><dt>Current task</dt><dd>${escapeHtml(state.task.canonical_key)}</dd></div>
+    <div><dt>Scope</dt><dd>${escapeHtml(scopeLabel())}</dd></div>
+    <div><dt>Source</dt><dd>${escapeHtml(scope.source || "fixed_reasoning")}</dd></div>
+    <div><dt>Latest run</dt><dd>${escapeHtml(latest)}</dd></div>
+    <div><dt>Review gate</dt><dd>${escapeHtml(scope.review_gate || "draft_only")}</dd></div>
+    <div><dt>Approved-only</dt><dd>${scope.approved_only === false ? "off" : "on"}</dd></div>
+  `;
+}
+
 function renderEvidence() {
-  const paths = state.selectedFinding?.supporting_evidence || state.run?.evidence_paths || [];
+  const supporting = state.selectedFinding?.supporting_evidence || state.run?.evidence_paths || [];
+  const counter = state.selectedFinding?.counter_evidence || [];
+  const paths = [...supporting, ...counter];
+  if (els.evidenceCount) els.evidenceCount.textContent = `${paths.length} item${paths.length === 1 ? "" : "s"}`;
   if (paths.length === 0) {
     els.evidencePaths.innerHTML = '<section class="empty-state">No evidence paths yet.</section>';
     return;
   }
-  els.evidencePaths.innerHTML = paths
-    .map(
-      (path) => `
-        <article class="panel evidence-path-card">
-          <div class="panel-header">
-            <h3>${escapeHtml(path.label)}</h3>
-            <span class="metric">${escapeHtml(path.kind)}</span>
-          </div>
-          <p>${escapeHtml(path.summary)}</p>
-          <p class="source-ref">${escapeHtml(path.source_ref)}</p>
-          <a class="panel-link" href="${escapeHtml(path.url)}">Open evidence</a>
-        </article>
-      `,
-    )
-    .join("");
+  const renderPath = (path, role, index) => {
+    const graphUrl = path.url || state.task?.scope?.graph_url || "";
+    const payload = path.payload ? `<pre class="code-block">${escapeHtml(json(path.payload))}</pre>` : '<p class="muted">No raw payload recorded.</p>';
+    return `
+      <details class="evidence-path-card loop-collapsible" ${index < 2 ? "open" : ""}>
+        <summary>
+          <span>${escapeHtml(path.label || path.kind || "Evidence")}</span>
+          <span class="metric">${escapeHtml(role)} · ${escapeHtml(path.kind || "evidence")}</span>
+        </summary>
+        <div class="evidence-card-body">
+          <p>${escapeHtml(path.summary || "No summary recorded.")}</p>
+          <dl class="compact-meta">
+            <div><dt>Role</dt><dd>${escapeHtml(role)}</dd></div>
+            <div><dt>Kind</dt><dd>${escapeHtml(path.kind || "-")}</dd></div>
+            <div><dt>Source ref</dt><dd>${escapeHtml(path.source_ref || "-")}</dd></div>
+            <div><dt>Source path</dt><dd>${graphUrl ? `<a class="panel-link" href="${escapeHtml(graphUrl)}">Open source context</a>` : "No graph context recorded."}</dd></div>
+          </dl>
+          <details class="nested-detail">
+            <summary>Raw evidence payload</summary>
+            ${payload}
+          </details>
+        </div>
+      </details>
+    `;
+  };
+  const graphUrl = supporting.find((item) => item.url)?.url || state.task?.scope?.graph_url || "";
+  els.evidencePaths.innerHTML = `
+    <section class="evidence-loop-grid">
+      <article class="detail-section">
+        <h3>Supporting evidence</h3>
+        ${(supporting.length ? supporting.map((path, index) => renderPath(path, "supporting", index)).join("") : '<p class="muted">No supporting evidence recorded.</p>')}
+      </article>
+      <article class="detail-section">
+        <h3>Counter evidence / conflicts</h3>
+        ${(counter.length ? counter.map((path, index) => renderPath(path, "counter", index)).join("") : '<p class="muted">No counter evidence or conflicts recorded for this draft.</p>')}
+      </article>
+      <details class="loop-collapsible" open>
+        <summary><span>Graph path</span><span class="metric">path</span></summary>
+        <div class="evidence-card-body">
+          <p>${escapeHtml(scopeLabel())}</p>
+          ${state.task?.scope?.center_edge ? `<p class="muted">${escapeHtml(state.task.scope.center_edge.source)} -> ${escapeHtml(state.task.scope.center_edge.target)}</p>` : ""}
+          ${graphUrl ? `<a class="panel-link" href="${escapeHtml(graphUrl)}">Open graph context</a>` : '<p class="muted">No graph context recorded.</p>'}
+        </div>
+      </details>
+      <details class="loop-collapsible">
+        <summary><span>Rule / Ontology basis</span><span class="metric">basis</span></summary>
+        <dl class="compact-meta evidence-card-body">
+          <div><dt>Ontology links</dt><dd>${escapeHtml((state.task?.scope?.allowed_link_keys || ["link:employee:1:n:order"]).join(", "))}</dd></div>
+          <div><dt>Approved-only</dt><dd>${state.task?.scope?.approved_only === false ? "off" : "on"}</dd></div>
+          <div><dt>Review gate</dt><dd>${escapeHtml(state.task?.scope?.review_gate || "draft_only")}</dd></div>
+        </dl>
+      </details>
+    </section>
+  `;
 }
 
 function statusClass(status) {
@@ -392,7 +494,7 @@ function renderFinding() {
   const displayTitle = answerTitle(finding);
   const displayConclusion = answerConclusion(finding);
   const findingUrl = `/findings.html?tenant=${encodeURIComponent(state.tenant)}&finding=${encodeURIComponent(finding.canonical_key)}`;
-  const evidenceUrl = `/evidence.html?tenant=${encodeURIComponent(state.tenant)}`;
+  const evidenceUrl = `#evidence-chain-panel`;
   const graphUrl = firstEvidence.url || state.task?.scope?.graph_url || "";
   const governanceStatus =
     finding.status === "approved"
@@ -439,6 +541,7 @@ function renderFinding() {
       <a class="secondary-action answer-link" href="${escapeHtml(evidenceUrl)}">Open evidence chain</a>
       ${graphUrl ? `<a class="secondary-action answer-link" href="${escapeHtml(graphUrl)}">Open graph context</a>` : ""}
       <button class="secondary-action" type="button" data-review-answer="1">Submit review</button>
+      <button class="secondary-action" type="button" data-followup-answer="1">Continue follow-up</button>
       <button class="secondary-action" type="button" data-needs-evidence="1">Request more evidence</button>
       <button class="secondary-action" type="button" data-rerun-answer="1">Rerun reasoning</button>
     </section>
@@ -455,6 +558,7 @@ function renderFinding() {
   `;
   els.findingDetail.querySelector("[data-rerun-answer]")?.addEventListener("click", () => runTask().catch((error) => showToast(error.message)));
   els.findingDetail.querySelector("[data-review-answer]")?.addEventListener("click", () => els.reviewReason.focus());
+  els.findingDetail.querySelector("[data-followup-answer]")?.addEventListener("click", () => els.followupInput.focus());
   els.findingDetail.querySelector("[data-needs-evidence]")?.addEventListener("click", () => {
     els.reviewReason.value = "Needs more evidence before this finding can be approved.";
     els.reviewReason.focus();
@@ -532,6 +636,59 @@ async function runTask() {
   showToast(result.approved === false ? "Reasoning blocked by approved-only gate" : "Draft finding proposed");
 }
 
+async function createScopedQuestion(question, overrides = {}) {
+  const centerNode = overrides.center_node || els.centerNode?.value || state.task?.scope?.center_node || "Employee:4";
+  const depth = Number(overrides.depth || els.depth?.value || state.task?.scope?.depth || 1);
+  const limit = Number(overrides.limit || els.limit?.value || state.task?.scope?.node_limit || 200);
+  updateGraphContextLink();
+  const payload = {
+    question,
+    scope: {
+      type: overrides.type || state.task?.scope?.type || "graph",
+      center_node: centerNode,
+      depth,
+      limit,
+      graph_url: els.graphContextLink?.getAttribute("href") || `/graph.html?tenant=${encodeURIComponent(state.tenant)}`,
+    },
+  };
+  const data = await fetchJson(urlWithTenant("/api/reasoning/questions"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  state.taskKey = data.task.canonical_key;
+  updateUrl();
+  await loadTasks();
+  showToast("Scoped question created in reasoning loop");
+  return data.task;
+}
+
+async function submitQuestion(event) {
+  event.preventDefault();
+  const question = els.questionInput.value.trim();
+  if (!question) {
+    showToast("Question is required");
+    return;
+  }
+  await createScopedQuestion(question);
+}
+
+async function submitFollowup(event) {
+  event.preventDefault();
+  const question = els.followupInput.value.trim();
+  if (!question) {
+    showToast("Question is required");
+    return;
+  }
+  await createScopedQuestion(question, {
+    center_node: state.task?.scope?.center_node,
+    depth: state.task?.scope?.depth,
+    limit: state.task?.scope?.node_limit || state.task?.scope?.edge_limit,
+    type: "follow_up",
+  });
+  els.followupInput.value = "";
+}
+
 async function reviewFinding(action) {
   if (!state.selectedFinding) {
     showToast("No finding selected");
@@ -559,6 +716,12 @@ els.tenantSwitcher.addEventListener("change", async () => {
   await loadTasks();
 });
 els.runTask.addEventListener("click", () => runTask().catch((error) => showToast(error.message)));
+els.runTaskInline?.addEventListener("click", () => runTask().catch((error) => showToast(error.message)));
+els.questionForm?.addEventListener("submit", (event) => submitQuestion(event).catch((error) => showToast(error.message)));
+els.followupForm?.addEventListener("submit", (event) => submitFollowup(event).catch((error) => showToast(error.message)));
+els.centerNode?.addEventListener("input", updateGraphContextLink);
+els.depth?.addEventListener("input", updateGraphContextLink);
+els.limit?.addEventListener("input", updateGraphContextLink);
 els.approveFinding.addEventListener("click", () => reviewFinding("approve").catch((error) => showToast(error.message)));
 els.needsChangesFinding.addEventListener("click", () => reviewFinding("needs-changes").catch((error) => showToast(error.message)));
 els.rejectFinding.addEventListener("click", () => reviewFinding("reject").catch((error) => showToast(error.message)));
