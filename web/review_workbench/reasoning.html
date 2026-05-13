@@ -70,16 +70,19 @@
         </header>
 
         <section id="reasoning-warning" class="empty-state hidden"></section>
-        <section id="evidence-paths" class="reasoning-paths"></section>
-        <section class="panel">
+        <section class="panel reasoning-answer-panel" aria-label="Current answer">
           <div class="panel-header">
-            <h3>Latest Finding</h3>
+            <div>
+              <p class="eyebrow">Current Answer</p>
+              <h3>Conclusion</h3>
+            </div>
             <span id="finding-status" class="status-pill muted-pill">draft</span>
           </div>
           <div id="finding-detail" class="detail-body">
-            <p class="muted">Run the task to propose a draft finding.</p>
+            <p class="muted">No conclusion has been generated yet. Run this reasoning task to produce a draft finding.</p>
           </div>
         </section>
+        <section id="evidence-paths" class="reasoning-paths"></section>
       </section>
 
       <aside class="detail-panel reasoning-trace" aria-label="Reasoning trace and review">

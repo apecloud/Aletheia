@@ -9,6 +9,7 @@ const state = {
   findings: [],
   selectedFinding: null,
   graphHandoff: null,
+  graphContext: null,
 };
 
 const els = {
@@ -243,6 +244,7 @@ async function loadTaskDetail() {
   state.run = data.latest_run;
   state.findings = data.findings || [];
   state.selectedFinding = state.findings[0] || null;
+  state.graphContext = await loadGraphContextForTask();
   if (state.graphHandoff && !currentFindingMatchesHandoff()) {
     state.selectedFinding = null;
   }
@@ -250,6 +252,25 @@ async function loadTaskDetail() {
   if (state.graphHandoff?.autorun && (!state.run || !currentRunMatchesHandoff())) {
     state.graphHandoff.autorun = false;
     await runTask();
+  }
+}
+
+async function loadGraphContextForTask() {
+  const scope = state.task?.scope || {};
+  const centerNode = scope.center_node || scope.evidence_paths?.[0]?.payload?.center_node;
+  if (!centerNode || !centerNode.includes(":")) return null;
+  const [type, id] = centerNode.split(":", 2);
+  try {
+    return await fetchJson(
+      urlWithTenant("/api/graph/context", {
+        type,
+        id,
+        depth: scope.depth || 1,
+        limit: scope.node_limit || scope.edge_limit || 200,
+      }),
+    );
+  } catch (_) {
+    return null;
   }
 }
 
@@ -294,31 +315,150 @@ function renderEvidence() {
     .join("");
 }
 
+function statusClass(status) {
+  if (status === "approved") return "status-approved";
+  if (status === "rejected" || status === "blocked") return "status-rejected";
+  if (status === "needs_changes" || status === "needs_review") return "status-needs_review";
+  if (status === "draft" || status === "proposed") return "status-draft";
+  return "muted-pill";
+}
+
+function findingEvidenceSummary(finding) {
+  const evidence = finding?.supporting_evidence || [];
+  const graph = state.graphContext;
+  if (graph?.approved !== false && graph?.center) {
+    const handled = graph.relations_summary?.handled_orders;
+    const returned = graph.relations_summary?.returned_orders ?? graph.edges?.length;
+    return `${graph.center.label || graph.center.id} is connected to ${returned ?? 0}${handled && handled !== returned ? ` of ${handled}` : ""} approved Order relationship${returned === 1 ? "" : "s"} through the Employee-Order ontology link.`;
+  }
+  if (!evidence.length) return "No supporting evidence is attached to this finding yet.";
+  const first = evidence[0];
+  return first.summary || first.label || first.source_ref || `${evidence.length} evidence item${evidence.length === 1 ? "" : "s"} attached.`;
+}
+
+function isGenericScopedFinding(finding) {
+  const title = String(finding?.title || "");
+  const conclusion = String(finding?.conclusion || "");
+  return title.includes("draft-only") || conclusion.includes("created from Graph Explorer evidence");
+}
+
+function answerTitle(finding) {
+  const graph = state.graphContext;
+  if (graph?.approved !== false && graph?.center) {
+    const handled = graph.relations_summary?.handled_orders;
+    const returned = graph.relations_summary?.returned_orders ?? graph.edges?.length ?? 0;
+    return `${graph.center.id} work snapshot: ${graph.center.label || graph.center.id} has ${handled ?? returned} approved order relationship${(handled ?? returned) === 1 ? "" : "s"}`;
+  }
+  return finding.title;
+}
+
+function answerConclusion(finding) {
+  const graph = state.graphContext;
+  if (graph?.approved !== false && graph?.center && isGenericScopedFinding(finding)) {
+    const handled = graph.relations_summary?.handled_orders;
+    const returned = graph.relations_summary?.returned_orders ?? graph.edges?.length ?? 0;
+    const title = graph.center.summary ? ` (${graph.center.summary})` : "";
+    return `For the question "${state.task?.question || "current scoped task"}", the approved graph shows ${graph.center.label || graph.center.id}${title} with ${handled ?? returned} handled order relationship${(handled ?? returned) === 1 ? "" : "s"}; ${returned} relationship${returned === 1 ? " is" : "s are"} loaded in the current evidence scope. This is a draft answer for review, not an approved operational conclusion.`;
+  }
+  return finding.conclusion;
+}
+
 function renderFinding() {
   const finding = state.selectedFinding;
   if (!finding) {
-    els.findingStatus.textContent = "draft";
+    const hasRun = Boolean(state.run);
+    els.findingStatus.textContent = hasRun ? "no finding" : "not run";
     els.findingStatus.className = "status-pill muted-pill";
-    els.findingDetail.innerHTML = '<p class="muted">No finding has been proposed for this tenant.</p>';
+    els.findingDetail.innerHTML = `
+      <section class="answer-empty">
+        <h3>${hasRun ? "尚未生成结论 / No finding generated" : "尚未运行推理 / Not run yet"}</h3>
+        <p class="muted">
+          ${
+            hasRun
+              ? "This run did not produce a finding for the current scope. Review the trace, then rerun if the scope still needs an answer."
+              : "Run this reasoning task to generate a draft answer with evidence and review status."
+          }
+        </p>
+        <button class="secondary-action" type="button" data-run-empty="1">${hasRun ? "Rerun reasoning" : "Run reasoning"}</button>
+      </section>
+    `;
+    els.findingDetail.querySelector("[data-run-empty]")?.addEventListener("click", () => runTask().catch((error) => showToast(error.message)));
     return;
   }
   els.findingStatus.textContent = `${finding.status} · v${finding.version}`;
-  els.findingStatus.className = `status-pill ${finding.status === "approved" ? "status-approved" : "muted-pill"}`;
+  els.findingStatus.className = `status-pill ${statusClass(finding.status)}`;
+  const evidence = finding.supporting_evidence || [];
+  const firstEvidence = evidence[0] || {};
+  const displayTitle = answerTitle(finding);
+  const displayConclusion = answerConclusion(finding);
+  const findingUrl = `/findings.html?tenant=${encodeURIComponent(state.tenant)}&finding=${encodeURIComponent(finding.canonical_key)}`;
+  const evidenceUrl = `/evidence.html?tenant=${encodeURIComponent(state.tenant)}`;
+  const graphUrl = firstEvidence.url || state.task?.scope?.graph_url || "";
+  const governanceStatus =
+    finding.status === "approved"
+      ? "Approved finding: this conclusion can be cited in the approved finding layer with task/run/evidence provenance. It still does not modify the canonical graph by itself."
+      : "草稿结论，待人工审核：this finding/action proposal is a reasoning artifact. It is not approved knowledge yet, is not written to canonical graph, and cannot drive business action.";
   els.findingDetail.innerHTML = `
-    <section class="detail-section">
-      <h3>${escapeHtml(finding.title)}</h3>
-      <p>${escapeHtml(finding.conclusion)}</p>
-      <p class="metric">confidence ${Number(finding.confidence || 0).toFixed(2)}</p>
+    <section class="answer-hero">
+      <div>
+        <p class="eyebrow">结论 / Answer</p>
+        <h3>${escapeHtml(displayTitle)}</h3>
+      </div>
+      <span class="metric">confidence ${Number(finding.confidence || 0).toFixed(2)}</span>
     </section>
-    <section class="detail-section">
-      <h3>Recommended action proposal</h3>
-      <pre class="code-block">${escapeHtml(json(finding.recommended_action))}</pre>
+    <section class="answer-conclusion">
+      <p>${escapeHtml(displayConclusion)}</p>
     </section>
-    <section class="detail-section">
-      <h3>Counter evidence / limits</h3>
-      <pre class="code-block">${escapeHtml(json(finding.counter_evidence))}</pre>
+    <section class="answer-support">
+      <div>
+        <span class="hint">关键依据 / Key basis</span>
+        <p>${escapeHtml(findingEvidenceSummary(finding))}</p>
+        ${firstEvidence.source_ref ? `<p class="source-ref">${escapeHtml(firstEvidence.source_ref)}</p>` : ""}
+      </div>
+      <div>
+        <span class="hint">下一步 / Next step</span>
+        <p>Review evidence, submit review, request more evidence, reject the draft, or rerun this scoped reasoning task.</p>
+      </div>
+    </section>
+    <section class="governance-note">
+      <div>
+        <span class="hint">状态 / Governance status</span>
+        <p>${escapeHtml(governanceStatus)}</p>
+      </div>
+      <div>
+        <span class="hint">审核后存放 / After review</span>
+        <p>Review decisions are stored in audit trail / review history with reviewer, time, reason, and status transition. Approved findings enter the approved knowledge/finding layer and remain linked to this task, run, evidence, and ontology basis.</p>
+      </div>
+      <div>
+        <span class="hint">Canonical boundary</span>
+        <p>Approving this finding does not automatically change canonical ontology or graph. Structural facts, links, properties, classifications, or rules require a separate canonical write proposal and a stronger approval gate.</p>
+      </div>
+    </section>
+    <section class="answer-actions">
+      <a class="secondary-action answer-link" href="${escapeHtml(findingUrl)}">Open explanation</a>
+      <a class="secondary-action answer-link" href="${escapeHtml(evidenceUrl)}">Open evidence chain</a>
+      ${graphUrl ? `<a class="secondary-action answer-link" href="${escapeHtml(graphUrl)}">Open graph context</a>` : ""}
+      <button class="secondary-action" type="button" data-review-answer="1">Submit review</button>
+      <button class="secondary-action" type="button" data-needs-evidence="1">Request more evidence</button>
+      <button class="secondary-action" type="button" data-rerun-answer="1">Rerun reasoning</button>
+    </section>
+    <section class="answer-secondary-grid">
+      <div class="detail-section">
+        <h3>Recommended action proposal</h3>
+        <pre class="code-block">${escapeHtml(json(finding.recommended_action))}</pre>
+      </div>
+      <div class="detail-section">
+        <h3>Counter evidence / limits</h3>
+        <pre class="code-block">${escapeHtml(json(finding.counter_evidence))}</pre>
+      </div>
     </section>
   `;
+  els.findingDetail.querySelector("[data-rerun-answer]")?.addEventListener("click", () => runTask().catch((error) => showToast(error.message)));
+  els.findingDetail.querySelector("[data-review-answer]")?.addEventListener("click", () => els.reviewReason.focus());
+  els.findingDetail.querySelector("[data-needs-evidence]")?.addEventListener("click", () => {
+    els.reviewReason.value = "Needs more evidence before this finding can be approved.";
+    els.reviewReason.focus();
+  });
 }
 
 function renderTrace() {

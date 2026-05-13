@@ -1317,6 +1317,91 @@ label {
   padding: 16px;
 }
 
+.reasoning-answer-panel {
+  margin: 16px 16px 0;
+  border-color: color-mix(in srgb, var(--status-info) 32%, var(--line));
+  box-shadow: var(--shadow);
+}
+
+.reasoning-answer-panel .panel-header {
+  align-items: flex-start;
+}
+
+.reasoning-answer-panel .panel-header h3 {
+  margin-top: 4px;
+  font-size: 18px;
+}
+
+.answer-hero,
+.answer-support,
+.answer-actions,
+.answer-secondary-grid,
+.governance-note {
+  display: grid;
+  gap: 12px;
+}
+
+.answer-hero {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+}
+
+.answer-hero h3 {
+  margin: 4px 0 0;
+  font-size: 20px;
+  line-height: 1.25;
+}
+
+.answer-conclusion {
+  border-left: 4px solid var(--status-info);
+  padding: 10px 12px;
+  background: var(--panel-alt);
+  color: var(--text);
+  line-height: 1.55;
+}
+
+.answer-conclusion p,
+.answer-support p,
+.answer-empty p {
+  margin: 0;
+}
+
+.answer-support {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.answer-support > div,
+.answer-empty,
+.governance-note > div {
+  display: grid;
+  gap: 8px;
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  background: var(--panel-alt);
+  padding: 12px;
+}
+
+.answer-actions {
+  grid-template-columns: repeat(auto-fit, minmax(150px, max-content));
+  align-items: center;
+}
+
+.governance-note {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.answer-link {
+  display: inline-grid;
+  place-items: center;
+  min-width: 0;
+  color: var(--text);
+  text-decoration: none;
+}
+
+.answer-secondary-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
 .evidence-path-card {
   box-shadow: none;
 }
@@ -1436,15 +1521,19 @@ label {
     text-align: left;
   }
 
-  .app-shell,
-  .detail-grid,
-  .instance-shell,
-  .reasoning-shell,
-  .settings-shell,
-  .graph-shell,
-  .edge-list {
-    grid-template-columns: 1fr;
-  }
+	  .app-shell,
+	  .detail-grid,
+	  .instance-shell,
+	  .reasoning-shell,
+	  .settings-shell,
+	  .graph-shell,
+	  .edge-list,
+	  .answer-hero,
+	  .answer-support,
+	  .governance-note,
+	  .answer-secondary-grid {
+	    grid-template-columns: 1fr;
+	  }
 
   .sidebar,
   .instance-search,
