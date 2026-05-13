@@ -71,9 +71,27 @@ function json(value) {
 }
 
 function showToast(message) {
-  els.toast.textContent = message;
+  els.toast.textContent = t(message);
   els.toast.classList.add("visible");
   window.setTimeout(() => els.toast.classList.remove("visible"), 3200);
+}
+
+function t(key, vars = {}) {
+  return window.AletheiaShell?.t ? window.AletheiaShell.t(key, vars) : key;
+}
+
+function isZh() {
+  return window.AletheiaShell?.lang?.() === "zh";
+}
+
+function confidenceText(value) {
+  const score = Number(value || 0).toFixed(2);
+  return isZh() ? `${t("Confidence")} ${score}` : `confidence ${score}`;
+}
+
+function statusText(status, version) {
+  const base = t(status || "draft");
+  return version ? `${base} · v${version}` : base;
 }
 
 async function fetchJson(url, options) {
@@ -91,8 +109,8 @@ function urlWithTenant(path, params = {}) {
 
 function scopeLabel(task = state.task) {
   const scope = task?.scope || {};
-  if (scope.center_node) return `Graph node ${scope.center_node}`;
-  if (scope.center_edge) return `Graph edge ${scope.center_edge.source} -> ${scope.center_edge.target}`;
+  if (scope.center_node) return `${isZh() ? "图谱节点" : "Graph node"} ${scope.center_node}`;
+  if (scope.center_edge) return `${isZh() ? "图谱关系" : "Graph edge"} ${scope.center_edge.source} -> ${scope.center_edge.target}`;
   return `${scope.object_type || "Employee"}:${scope.instance_id || "4"}`;
 }
 
@@ -329,7 +347,7 @@ function renderTask() {
   if (state.run?.status === "blocked") {
     const missing = state.run.output?.missing_approved_artifacts || [];
     els.warning.classList.remove("hidden");
-    els.warning.textContent = `Reasoning blocked by approved-only gate. Missing artifacts: ${missing.join(", ")}`;
+    els.warning.textContent = `${t("Reasoning blocked by approved-only gate. Missing artifacts:")} ${missing.join(", ")}`;
   } else {
     els.warning.classList.add("hidden");
   }
@@ -445,6 +463,7 @@ function isGenericScopedFinding(finding) {
 }
 
 function answerTitle(finding) {
+  if (finding.structured_answer?.title) return finding.structured_answer.title;
   const graph = state.graphContext;
   if (graph?.approved !== false && graph?.center) {
     const handled = graph.relations_summary?.handled_orders;
@@ -455,6 +474,7 @@ function answerTitle(finding) {
 }
 
 function answerConclusion(finding) {
+  if (finding.structured_answer?.profile_summary) return finding.structured_answer.profile_summary;
   const graph = state.graphContext;
   if (graph?.approved !== false && graph?.center && isGenericScopedFinding(finding)) {
     const handled = graph.relations_summary?.handled_orders;
@@ -465,6 +485,64 @@ function answerConclusion(finding) {
   return finding.conclusion;
 }
 
+function structuredAnswer(finding) {
+  return finding?.structured_answer || finding?.recommended_action?.structured_answer || null;
+}
+
+function renderKeyFacts(facts = []) {
+  if (!facts.length) return '<p class="muted">No key facts recorded.</p>';
+  return `
+    <dl class="compact-meta profile-facts">
+      ${facts
+        .map(
+          (fact) => `
+            <div>
+              <dt>${escapeHtml(fact.label || "Fact")}</dt>
+              <dd>
+                ${escapeHtml(fact.value || "-")}
+                ${fact.source_ref ? `<span class="source-ref">${escapeHtml(fact.source_ref)}</span>` : ""}
+              </dd>
+            </div>
+          `,
+        )
+        .join("")}
+    </dl>
+  `;
+}
+
+function renderBullets(items = [], emptyText = "No items recorded.") {
+  if (!items.length) return `<p class="muted">${escapeHtml(emptyText)}</p>`;
+  return `<ul class="profile-bullets">${items.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>`;
+}
+
+function renderStructuredAnswer(profile) {
+  if (!profile) return "";
+  return `
+    <section class="answer-profile-grid">
+      <article class="detail-section">
+        <h3>画像判断</h3>
+        <p>${escapeHtml(profile.profile_summary || "")}</p>
+      </article>
+      <article class="detail-section">
+        <h3>关键事实</h3>
+        ${renderKeyFacts(profile.key_facts || [])}
+      </article>
+      <article class="detail-section">
+        <h3>业务含义</h3>
+        ${renderBullets(profile.business_interpretation || [])}
+      </article>
+      <article class="detail-section">
+        <h3>证据边界</h3>
+        ${renderBullets(profile.evidence_limits || [])}
+      </article>
+      <article class="detail-section">
+        <h3>下一步验证</h3>
+        ${renderBullets(profile.next_questions || [])}
+      </article>
+    </section>
+  `;
+}
+
 function renderFinding() {
   const finding = state.selectedFinding;
   if (!finding) {
@@ -473,7 +551,7 @@ function renderFinding() {
     els.findingStatus.className = "status-pill muted-pill";
     els.findingDetail.innerHTML = `
       <section class="answer-empty">
-        <h3>${hasRun ? "尚未生成结论 / No finding generated" : "尚未运行推理 / Not run yet"}</h3>
+        <h3>${hasRun ? "No finding generated" : "Not run yet"}</h3>
         <p class="muted">
           ${
             hasRun
@@ -491,6 +569,7 @@ function renderFinding() {
   els.findingStatus.className = `status-pill ${statusClass(finding.status)}`;
   const evidence = finding.supporting_evidence || [];
   const firstEvidence = evidence[0] || {};
+  const profile = structuredAnswer(finding);
   const displayTitle = answerTitle(finding);
   const displayConclusion = answerConclusion(finding);
   const findingUrl = `/findings.html?tenant=${encodeURIComponent(state.tenant)}&finding=${encodeURIComponent(finding.canonical_key)}`;
@@ -499,36 +578,37 @@ function renderFinding() {
   const governanceStatus =
     finding.status === "approved"
       ? "Approved finding: this conclusion can be cited in the approved finding layer with task/run/evidence provenance. It still does not modify the canonical graph by itself."
-      : "草稿结论，待人工审核：this finding/action proposal is a reasoning artifact. It is not approved knowledge yet, is not written to canonical graph, and cannot drive business action.";
+      : "Draft finding pending human review: this reasoning artifact is not approved knowledge yet, is not written to the canonical graph, and cannot drive business action.";
   els.findingDetail.innerHTML = `
     <section class="answer-hero">
       <div>
-        <p class="eyebrow">结论 / Answer</p>
+        <p class="eyebrow">Current Answer</p>
         <h3>${escapeHtml(displayTitle)}</h3>
       </div>
-      <span class="metric">confidence ${Number(finding.confidence || 0).toFixed(2)}</span>
+      <span class="metric">${escapeHtml(confidenceText(finding.confidence))}</span>
     </section>
     <section class="answer-conclusion">
       <p>${escapeHtml(displayConclusion)}</p>
     </section>
+    ${renderStructuredAnswer(profile)}
     <section class="answer-support">
       <div>
-        <span class="hint">关键依据 / Key basis</span>
-        <p>${escapeHtml(findingEvidenceSummary(finding))}</p>
+        <span class="hint">Key basis</span>
+        <p>${escapeHtml(profile ? "结构化画像来自已批准图谱范围与受控 Northwind 聚合；关键事实列出 source_ref 以便追溯。" : findingEvidenceSummary(finding))}</p>
         ${firstEvidence.source_ref ? `<p class="source-ref">${escapeHtml(firstEvidence.source_ref)}</p>` : ""}
       </div>
       <div>
-        <span class="hint">下一步 / Next step</span>
-        <p>Review evidence, submit review, request more evidence, reject the draft, or rerun this scoped reasoning task.</p>
+        <span class="hint">Next step</span>
+        <p>${escapeHtml(profile?.next_questions?.[0] || "Review evidence, submit review, request more evidence, reject the draft, or rerun this scoped reasoning task.")}</p>
       </div>
     </section>
     <section class="governance-note">
       <div>
-        <span class="hint">状态 / Governance status</span>
+        <span class="hint">Governance status</span>
         <p>${escapeHtml(governanceStatus)}</p>
       </div>
       <div>
-        <span class="hint">审核后存放 / After review</span>
+        <span class="hint">After review</span>
         <p>Review decisions are stored in audit trail / review history with reviewer, time, reason, and status transition. Approved findings enter the approved knowledge/finding layer and remain linked to this task, run, evidence, and ontology basis.</p>
       </div>
       <div>
@@ -556,6 +636,7 @@ function renderFinding() {
       </div>
     </section>
   `;
+  els.findingStatus.textContent = statusText(finding.status, finding.version);
   els.findingDetail.querySelector("[data-rerun-answer]")?.addEventListener("click", () => runTask().catch((error) => showToast(error.message)));
   els.findingDetail.querySelector("[data-review-answer]")?.addEventListener("click", () => els.reviewReason.focus());
   els.findingDetail.querySelector("[data-followup-answer]")?.addEventListener("click", () => els.followupInput.focus());
@@ -659,7 +740,7 @@ async function createScopedQuestion(question, overrides = {}) {
   state.taskKey = data.task.canonical_key;
   updateUrl();
   await loadTasks();
-  showToast("Scoped question created in reasoning loop");
+  showToast("Scoped question created in reasoning process");
   return data.task;
 }
 

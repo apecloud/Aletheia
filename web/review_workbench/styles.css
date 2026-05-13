@@ -1450,6 +1450,34 @@ label {
   margin: 0;
 }
 
+.answer-profile-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.answer-profile-grid .detail-section:first-child {
+  grid-column: 1 / -1;
+}
+
+.profile-facts {
+  grid-template-columns: 1fr;
+  margin: 0;
+}
+
+.profile-facts dd {
+  display: grid;
+  gap: 4px;
+}
+
+.profile-bullets {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding-left: 18px;
+  line-height: 1.5;
+}
+
 .answer-support {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
@@ -1613,6 +1641,7 @@ label {
 	  .graph-shell,
 	  .edge-list,
 	  .answer-hero,
+	  .answer-profile-grid,
 	  .answer-support,
 	  .governance-note,
 	  .answer-secondary-grid,

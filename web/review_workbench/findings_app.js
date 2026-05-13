@@ -41,9 +41,27 @@ function escapeHtml(value) {
 }
 
 function showToast(message) {
-  els.toast.textContent = message;
+  els.toast.textContent = t(message);
   els.toast.classList.add("visible");
   window.setTimeout(() => els.toast.classList.remove("visible"), 3200);
+}
+
+function t(key, vars = {}) {
+  return window.AletheiaShell?.t ? window.AletheiaShell.t(key, vars) : key;
+}
+
+function isZh() {
+  return window.AletheiaShell?.lang?.() === "zh";
+}
+
+function statusText(status, version) {
+  const base = t(status || "draft");
+  return version ? `${base} · v${version}` : base;
+}
+
+function confidenceText(value) {
+  const score = Number(value || 0).toFixed(2);
+  return isZh() ? `${t("Confidence")} ${score}` : `confidence ${score}`;
 }
 
 async function fetchJson(url, options) {
@@ -116,11 +134,11 @@ function renderList() {
         <button class="artifact-item ${finding.canonical_key === state.selectedKey ? "active" : ""}" type="button" data-key="${escapeHtml(finding.canonical_key)}">
           <span class="artifact-item-title">
             <strong>${escapeHtml(finding.title)}</strong>
-            <span class="status-pill muted-pill">${escapeHtml(finding.status)}</span>
+            <span class="status-pill muted-pill">${escapeHtml(statusText(finding.status))}</span>
           </span>
           <span class="key-text">${escapeHtml(scopeLabel(finding.task_scope))}</span>
           <span class="artifact-item-meta">
-            <span>confidence ${Number(finding.confidence || 0).toFixed(2)}</span>
+            <span>${escapeHtml(confidenceText(finding.confidence))}</span>
             <span>${(finding.supporting_evidence || []).length} evidence</span>
           </span>
         </button>
@@ -148,11 +166,11 @@ function renderFinding(finding) {
   const run = finding.run || {};
   els.findingEmpty.classList.add("hidden");
   els.findingDetail.classList.remove("hidden");
-  els.findingKind.textContent = "Explainable conclusion";
+  els.findingKind.textContent = t("Explainable conclusion");
   els.findingTitle.textContent = finding.title;
   els.findingSummary.textContent = finding.conclusion;
-  els.findingStatus.textContent = `${finding.status} · v${finding.version}`;
-  els.confidence.textContent = `confidence ${Number(finding.confidence || 0).toFixed(2)}`;
+  els.findingStatus.textContent = statusText(finding.status, finding.version);
+  els.confidence.textContent = confidenceText(finding.confidence);
   els.conclusion.textContent = finding.conclusion;
   els.question.textContent = finding.task?.question || "-";
   els.scope.textContent = scopeLabel(scope);

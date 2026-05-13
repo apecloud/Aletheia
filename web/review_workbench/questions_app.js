@@ -32,9 +32,21 @@ function escapeHtml(value) {
 }
 
 function showToast(message) {
-  els.toast.textContent = message;
+  els.toast.textContent = t(message);
   els.toast.classList.add("visible");
   window.setTimeout(() => els.toast.classList.remove("visible"), 3200);
+}
+
+function t(key, vars = {}) {
+  return window.AletheiaShell?.t ? window.AletheiaShell.t(key, vars) : key;
+}
+
+function isZh() {
+  return window.AletheiaShell?.lang?.() === "zh";
+}
+
+function statusText(status) {
+  return t(status || "not run");
 }
 
 async function fetchJson(url, options) {
@@ -51,8 +63,8 @@ function tenantUrl(path, extra = {}) {
 }
 
 function scopeLabel(scope = {}) {
-  if (scope.center_node) return `graph node ${scope.center_node}`;
-  if (scope.center_edge) return `graph edge ${scope.center_edge.source} -> ${scope.center_edge.target}`;
+  if (scope.center_node) return `${isZh() ? "图谱节点" : "graph node"} ${scope.center_node}`;
+  if (scope.center_edge) return `${isZh() ? "图谱关系" : "graph edge"} ${scope.center_edge.source} -> ${scope.center_edge.target}`;
   return `${scope.object_type || "Employee"}:${scope.instance_id || "4"}`;
 }
 
@@ -111,8 +123,8 @@ function renderTasks() {
       (task) => `
         <article class="task-card" data-key="${escapeHtml(task.canonical_key)}">
           <div class="finding-card-top">
-            <span class="status-pill muted-pill">${escapeHtml(task.status)}</span>
-            <span class="metric">${task.latest_run ? escapeHtml(task.latest_run.status) : "not run"}</span>
+            <span class="status-pill muted-pill">${escapeHtml(statusText(task.status))}</span>
+            <span class="metric">${escapeHtml(task.latest_run ? statusText(task.latest_run.status) : statusText("not run"))}</span>
           </div>
           <h3>${escapeHtml(task.question)}</h3>
           <p class="key-text">${escapeHtml(task.canonical_key)}</p>
@@ -122,7 +134,7 @@ function renderTasks() {
             <div><dt>Depth / limit</dt><dd>${escapeHtml(task.scope?.depth || 1)} / ${escapeHtml(task.scope?.node_limit || 200)}</dd></div>
           </dl>
           <div class="action-row">
-            <a class="panel-link" href="${escapeHtml(tenantUrl("/reasoning.html", { task: task.canonical_key }))}">Open reasoning loop</a>
+            <a class="panel-link" href="${escapeHtml(tenantUrl("/reasoning.html", { task: task.canonical_key }))}">Open reasoning process</a>
             <a class="panel-link" href="${escapeHtml(tenantUrl("/findings.html", { task: task.canonical_key }))}">Open findings</a>
           </div>
         </article>
@@ -141,8 +153,8 @@ function renderSelectedTask(task) {
   els.result.innerHTML = `
     <strong>${escapeHtml(task.question)}</strong>
     <span class="key-text">${escapeHtml(task.canonical_key)}</span>
-    <p>Scope: ${escapeHtml(scopeLabel(task.scope))}. Source: ${escapeHtml(task.scope?.source || "fixed_reasoning")}.</p>
-    <a class="panel-link" href="${escapeHtml(tenantUrl("/reasoning.html", { task: task.canonical_key }))}">Open reasoning loop</a>
+    <p>${escapeHtml(t("Scope"))}: ${escapeHtml(scopeLabel(task.scope))}. ${escapeHtml(t("Source"))}: ${escapeHtml(task.scope?.source || "fixed_reasoning")}.</p>
+    <a class="panel-link" href="${escapeHtml(tenantUrl("/reasoning.html", { task: task.canonical_key }))}">Open reasoning process</a>
   `;
 }
 
@@ -183,7 +195,7 @@ async function createQuestion(event) {
   els.result.innerHTML = `
     <strong>Scoped question created</strong>
     <p>${escapeHtml(data.task.question)}</p>
-    <a class="panel-link" href="${escapeHtml(data.reasoning_url)}">Open reasoning loop</a>
+    <a class="panel-link" href="${escapeHtml(data.reasoning_url)}">Open reasoning process</a>
   `;
   await loadData();
   showToast("Scoped question created");

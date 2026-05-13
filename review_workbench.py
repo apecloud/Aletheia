@@ -1197,6 +1197,7 @@ class ReasoningRepository:
         edge = self.edge_lookup(tenant, "Employee:4", "Order:10250")
         artifact = self.artifact_lookup(tenant, "link:employee:1:n:order")
         workload = self._workload_stats(tenant, "4")
+        profile = self._employee_profile_summary(tenant, "4")
         evidence_paths = self._evidence_paths(tenant, employee, edge, artifact, workload)
         tool_calls.extend(
             [
@@ -1207,28 +1208,18 @@ class ReasoningRepository:
                 {"tool": "propose_action", "tenant_id": tenant.tenant_id, "write_scope": "draft_action_proposal", "status": "completed"},
             ]
         )
-        concentration_label = "moderate"
-        if workload["top_customer_share"] >= 0.35:
-            concentration_label = "high"
-        elif workload["top_customer_share"] < 0.2:
-            concentration_label = "low"
-        conclusion = (
-            f"Employee #4 handled {workload['order_count']} orders, "
-            f"{workload['employee_share_percent']:.1f}% of all Northwind orders in this tenant. "
-            f"The largest customer contributes {workload['top_customer_orders']} orders "
-            f"({workload['top_customer_share_percent']:.1f}% of Employee #4's workload), "
-            f"so customer concentration risk is {concentration_label}; the primary signal is workload volume."
-        )
+        conclusion = profile["profile_summary"]
         recommended_action = {
             "type": "review_workload",
             "title": "Review Employee #4 workload distribution",
             "description": "Validate whether this order volume reflects role specialization, historical assignment rules, or a workload imbalance before changing operations.",
             "execution_boundary": "proposal_only",
+            "structured_answer": profile,
         }
         finding_suffix = f"run-{int(time.time() * 1000)}"
         workload_finding = {
             "canonical_key": f"finding:employee-4-workload-concentration:{finding_suffix}",
-            "title": "Employee #4 carries a high order volume with bounded customer concentration",
+            "title": profile["title"],
             "conclusion": conclusion,
             "confidence": 0.82,
             "supporting_evidence": evidence_paths,
@@ -1320,7 +1311,7 @@ class ReasoningRepository:
             {"tool": "graph_query", "tenant_id": tenant.tenant_id, "approved_only": True, "status": "completed"},
             {"tool": "propose_finding", "tenant_id": tenant.tenant_id, "write_scope": "draft_reasoning_artifact", "status": "completed"},
         ]
-        evidence_paths = scope.get("evidence_paths") or []
+        evidence_paths = list(scope.get("evidence_paths") or [])
         title, conclusion = self._scoped_graph_finding_text(tenant, task, scope)
         if not evidence_paths:
             tool_calls[0]["status"] = "blocked"
@@ -1337,16 +1328,65 @@ class ReasoningRepository:
             }
             run = self._record_run(tenant, task, query_plan, tool_calls, [], output, eval_result, "blocked", started)
             return {"tenant": tenant.public_dict(), "task": task, "run": run, "findings": [], "approved": False}
+        structured_answer = self._scoped_structured_answer(tenant, task, scope)
+        if structured_answer:
+            query_plan = [
+                "Validate tenant-scoped Employee profile task and approved-only graph scope.",
+                "Read the selected Employee node evidence path from the approved graph.",
+                "Run controlled Northwind source aggregations for Employee profile facts.",
+                "Produce a draft structured profile finding with evidence limits and next validation questions.",
+            ]
+            tool_calls.insert(
+                1,
+                {
+                    "tool": "employee_profile_aggregate",
+                    "tenant_id": tenant.tenant_id,
+                    "approved_only": True,
+                    "write_scope": "read_only_source_aggregate",
+                    "status": "completed",
+                },
+            )
+            metrics = structured_answer.get("metrics") or {}
+            evidence_paths.append(
+                {
+                    "kind": "controlled_aggregate",
+                    "label": "Employee profile aggregate",
+                    "summary": (
+                        f"{metrics.get('name') or scope.get('center_node')} has "
+                        f"{metrics.get('order_count', 0)} orders across "
+                        f"{metrics.get('customer_count', 0)} customers; "
+                        f"order rank {metrics.get('order_rank')}/{metrics.get('employee_count')}."
+                    ),
+                    "url": f"/reasoning.html?tenant={tenant.tenant_id}&task={quote(task_key)}",
+                    "source_ref": "employees + orders + order_details + customers",
+                    "payload": {
+                        "employee_id": metrics.get("employee_id"),
+                        "order_count": metrics.get("order_count"),
+                        "order_rank": metrics.get("order_rank"),
+                        "employee_count": metrics.get("employee_count"),
+                        "customer_count": metrics.get("customer_count"),
+                        "top_customer_id": metrics.get("top_customer_id"),
+                        "revenue": metrics.get("revenue"),
+                        "freight_sum": metrics.get("freight_sum"),
+                    },
+                }
+            )
+            title = structured_answer["title"]
+            conclusion = structured_answer["profile_summary"]
         finding = {
             "canonical_key": f"finding:graph-scope:{task_key}:run-{int(time.time() * 1000)}",
             "title": title,
             "conclusion": conclusion,
-            "confidence": 0.72,
+            "confidence": 0.78 if structured_answer else 0.72,
             "supporting_evidence": evidence_paths,
             "counter_evidence": [
                 {
                     "kind": "scope_limit",
-                    "summary": "The task cannot expand beyond the selected approved graph scope without a new bounded graph request.",
+                    "summary": (
+                        "当前结论只能基于已批准图谱和受控聚合生成；未使用绩效目标、工时、利润率或客户满意度数据。"
+                        if structured_answer
+                        else "The task cannot expand beyond the selected approved graph scope without a new bounded graph request."
+                    ),
                 }
             ],
             "recommended_action": {
@@ -1354,6 +1394,7 @@ class ReasoningRepository:
                 "title": "Review scoped graph evidence before operational action",
                 "description": "Use this draft as a reviewer prompt; do not treat it as an approved finding until it passes the review gate.",
                 "execution_boundary": "proposal_only",
+                **({"structured_answer": structured_answer} if structured_answer else {}),
             },
         }
         output = {
@@ -1361,6 +1402,7 @@ class ReasoningRepository:
             "finding_keys": [finding["canonical_key"]],
             "unsupported_claims": [],
             "draft_only": True,
+            **({"structured_answer": structured_answer} if structured_answer else {}),
         }
         eval_result = {
             "passed": True,
@@ -1429,6 +1471,24 @@ class ReasoningRepository:
                 "This is a draft answer for review and does not change canonical ontology or graph."
             ),
         )
+
+    def _scoped_structured_answer(self, tenant, task, scope):
+        center_node = scope.get("center_node")
+        if not center_node or ":" not in center_node:
+            return None
+        object_type, instance_id = center_node.split(":", 1)
+        if object_type.lower() != "employee":
+            return None
+        graph = self.instance_repository.neighborhood(
+            tenant,
+            object_type,
+            instance_id,
+            depth=scope.get("depth") or 1,
+            limit=scope.get("node_limit") or 200,
+        )
+        if not graph or not graph.get("approved"):
+            return None
+        return self._employee_profile_summary(tenant, instance_id)
 
     def _is_legacy_scoped_finding(self, finding):
         title = (finding.get("title") or "").lower()
@@ -1632,6 +1692,9 @@ class ReasoningRepository:
         finding["reviews"] = [dict(review) for review in reviews]
         return finding
 
+    def _employee_label(self, row):
+        return f"{row.get('firstName', '')} {row.get('lastName', '')}".strip()
+
     def _workload_stats(self, tenant, employee_id):
         with self.source_engine_for(tenant).connect() as conn:
             order_count = conn.execute(
@@ -1664,6 +1727,245 @@ class ReasoningRepository:
             "top_customer_orders": top_customer_orders,
             "top_customer_share": top_customer_share,
             "top_customer_share_percent": top_customer_share * 100,
+        }
+
+    def _employee_profile_summary(self, tenant, employee_id):
+        with self.source_engine_for(tenant).connect() as conn:
+            employee = conn.execute(
+                text(
+                    """
+                    SELECT e.employeeID, e.firstName, e.lastName, e.title, e.city, e.region,
+                           e.country, e.reportsTo, m.firstName AS managerFirstName,
+                           m.lastName AS managerLastName, m.title AS managerTitle
+                    FROM employees e
+                    LEFT JOIN employees m ON e.reportsTo = m.employeeID
+                    WHERE e.employeeID = :employee_id
+                    """
+                ),
+                {"employee_id": employee_id},
+            ).mappings().first()
+            if not employee:
+                return {
+                    "title": f"Employee:{employee_id} 画像无法生成",
+                    "profile_summary": f"Employee:{employee_id} 不在当前受控数据源中，无法形成员工画像。",
+                    "key_facts": [],
+                    "business_interpretation": ["当前缺少员工基础记录，不能进行业务判断。"],
+                    "evidence_limits": ["缺少 employees 源表记录。"],
+                    "next_questions": ["确认员工 ID 是否存在于当前租户的数据源。"],
+                }
+            order_stats = conn.execute(
+                text(
+                    """
+                    SELECT COUNT(*) AS order_count,
+                           COUNT(DISTINCT customerID) AS customer_count,
+                           MIN(orderDate) AS first_order,
+                           MAX(orderDate) AS last_order,
+                           COALESCE(SUM(freight), 0) AS freight_sum,
+                           COALESCE(AVG(freight), 0) AS avg_freight
+                    FROM orders
+                    WHERE employeeID = :employee_id
+                    """
+                ),
+                {"employee_id": employee_id},
+            ).mappings().first()
+            total_orders = conn.execute(text("SELECT COUNT(*) FROM orders")).scalar()
+            total_revenue = conn.execute(
+                text(
+                    """
+                    SELECT COALESCE(SUM(od.unitPrice * od.quantity * (1 - od.discount)), 0)
+                    FROM order_details od
+                    """
+                )
+            ).scalar()
+            revenue = conn.execute(
+                text(
+                    """
+                    SELECT COALESCE(SUM(od.unitPrice * od.quantity * (1 - od.discount)), 0)
+                    FROM orders o
+                    JOIN order_details od ON od.orderID = o.orderID
+                    WHERE o.employeeID = :employee_id
+                    """
+                ),
+                {"employee_id": employee_id},
+            ).scalar()
+            rank_rows = conn.execute(
+                text(
+                    """
+                    SELECT employeeID, COUNT(*) AS order_count
+                    FROM orders
+                    GROUP BY employeeID
+                    ORDER BY order_count DESC, employeeID
+                    """
+                )
+            ).mappings().all()
+            top_customers = conn.execute(
+                text(
+                    """
+                    SELECT o.customerID, c.companyName, COUNT(DISTINCT o.orderID) AS order_count,
+                           COALESCE(SUM(od.unitPrice * od.quantity * (1 - od.discount)), 0) AS revenue
+                    FROM orders o
+                    LEFT JOIN customers c ON c.customerID = o.customerID
+                    LEFT JOIN order_details od ON od.orderID = o.orderID
+                    WHERE o.employeeID = :employee_id
+                    GROUP BY o.customerID, c.companyName
+                    ORDER BY order_count DESC, o.customerID
+                    LIMIT 5
+                    """
+                ),
+                {"employee_id": employee_id},
+            ).mappings().all()
+            yearly = conn.execute(
+                text(
+                    """
+                    SELECT YEAR(orderDate) AS year, COUNT(*) AS order_count
+                    FROM orders
+                    WHERE employeeID = :employee_id
+                    GROUP BY YEAR(orderDate)
+                    ORDER BY year
+                    """
+                ),
+                {"employee_id": employee_id},
+            ).mappings().all()
+            categories = conn.execute(
+                text(
+                    """
+                    SELECT c.categoryName, COUNT(DISTINCT o.orderID) AS order_count,
+                           COALESCE(SUM(od.unitPrice * od.quantity * (1 - od.discount)), 0) AS revenue
+                    FROM orders o
+                    JOIN order_details od ON od.orderID = o.orderID
+                    JOIN products p ON p.productID = od.productID
+                    JOIN categories c ON c.categoryID = p.categoryID
+                    WHERE o.employeeID = :employee_id
+                    GROUP BY c.categoryName
+                    ORDER BY revenue DESC, c.categoryName
+                    LIMIT 3
+                    """
+                ),
+                {"employee_id": employee_id},
+            ).mappings().all()
+        name = self._employee_label(employee)
+        order_count = int(order_stats["order_count"] or 0)
+        total_orders = int(total_orders or 0)
+        customer_count = int(order_stats["customer_count"] or 0)
+        revenue = float(revenue or 0)
+        total_revenue = float(total_revenue or 0)
+        freight_sum = float(order_stats["freight_sum"] or 0)
+        avg_freight = float(order_stats["avg_freight"] or 0)
+        order_share = order_count / total_orders if total_orders else 0
+        revenue_share = revenue / total_revenue if total_revenue else 0
+        rank = next((index + 1 for index, row in enumerate(rank_rows) if str(row["employeeID"]) == str(employee_id)), None)
+        employee_total = len(rank_rows)
+        rank_label = f"{rank}/{employee_total}" if rank else "-"
+        percentile = None
+        if rank and employee_total > 1:
+            percentile = 1 - ((rank - 1) / (employee_total - 1))
+        top_customer = dict(top_customers[0]) if top_customers else {}
+        top_customer_count = int(top_customer.get("order_count") or 0)
+        top_customer_share = top_customer_count / order_count if order_count else 0
+        concentration = "较分散"
+        if top_customer_share >= 0.25:
+            concentration = "偏集中"
+        elif top_customer_share >= 0.15:
+            concentration = "中等集中"
+        load_label = "低订单负载"
+        if percentile is not None and percentile >= 0.75:
+            load_label = "高订单负载"
+        elif percentile is not None and percentile >= 0.4:
+            load_label = "中等订单负载"
+        manager_name = " ".join(
+            part for part in [employee.get("managerFirstName"), employee.get("managerLastName")] if part
+        ) or None
+        location = ", ".join(part for part in [employee.get("city"), employee.get("region"), employee.get("country")] if part)
+        years = [
+            {"year": int(row["year"]), "order_count": int(row["order_count"])}
+            for row in yearly
+            if row.get("year") is not None
+        ]
+        peak_year = max(years, key=lambda item: item["order_count"]) if years else None
+        top_customer_text = (
+            f"{top_customer.get('companyName') or top_customer.get('customerID')}（{top_customer_count} 单，占该员工订单 {top_customer_share * 100:.1f}%）"
+            if top_customer
+            else "无客户订单记录"
+        )
+        profile_summary = (
+            f"{name} 是 {employee.get('title') or '未标注职位'}，位于 {location or '未知地区'}。"
+            f"在当前已批准 Northwind 图谱和受控聚合中，他呈现为{load_label}、客户覆盖{concentration}的员工："
+            f"共处理 {order_count} 单，占全体订单 {order_share * 100:.1f}%，订单量排名 {rank_label}；"
+            f"覆盖 {customer_count} 个客户，最大客户为 {top_customer_text}。"
+        )
+        if load_label == "低订单负载":
+            profile_summary += " 因此当前证据不支持把他判断为订单负载异常偏高。"
+        else:
+            profile_summary += " 是否异常仍需结合目标、工时、利润率和客户质量继续验证。"
+        key_facts = [
+            {"label": "员工基础信息", "value": f"{name} / {employee.get('title') or '-'} / {location or '-'}", "source_ref": f"employees.employeeID={employee_id}"},
+            {"label": "直属关系", "value": f"reportsTo={employee.get('reportsTo') or '-'}" + (f" / manager={manager_name}" if manager_name else ""), "source_ref": "employees.reportsTo"},
+            {"label": "订单负载", "value": f"{order_count} / {total_orders} 单，占比 {order_share * 100:.1f}%，排名 {rank_label}", "source_ref": "orders.employeeID"},
+            {"label": "时间范围", "value": f"{_jsonable(order_stats['first_order']) or '-'} 至 {_jsonable(order_stats['last_order']) or '-'}" + (f"，峰值年份 {peak_year['year']}（{peak_year['order_count']} 单）" if peak_year else ""), "source_ref": "orders.orderDate"},
+            {"label": "客户覆盖", "value": f"{customer_count} 个客户；Top 客户 {top_customer_text}", "source_ref": "orders.customerID"},
+            {"label": "订单规模", "value": f"订单明细金额 {revenue:.2f}（占全体 {revenue_share * 100:.1f}%）；运费合计 {freight_sum:.2f}，平均运费 {avg_freight:.2f}", "source_ref": "order_details + orders.freight"},
+        ]
+        if categories:
+            key_facts.append(
+                {
+                    "label": "主要品类",
+                    "value": "；".join(f"{row['categoryName']} {float(row['revenue'] or 0):.2f}" for row in categories),
+                    "source_ref": "order_details.productID -> products.categoryID",
+                }
+            )
+        business_interpretation = [
+            f"订单量排名 {rank_label}，说明该员工在样本内不是最高负载承接者；当前更像稳定覆盖型员工，而不是明显异常高负载员工。",
+            f"客户覆盖 {customer_count} 个客户，最大客户占比 {top_customer_share * 100:.1f}%，未显示单一客户强依赖；需要进一步按金额而非订单数复核集中度。",
+            f"职位为 {employee.get('title') or '-'}，因此订单承接量需要结合岗位职责解释；仅凭订单数不能判断绩效好坏或管理风险。",
+        ]
+        evidence_limits = [
+            "当前画像只使用已批准图谱范围、employees/orders/order_details/customers/products/categories 的受控聚合。",
+            "缺少绩效目标、工时、利润率、客户满意度和内部职责分工，不能直接判断绩效优劣或异常责任。",
+            "当前图谱主关系仍以 Employee-Order 为核心；Customer、OrderDetail、Product/Category 属于受控 SQL 聚合证据，不自动写入正式知识图谱。",
+        ]
+        next_questions = [
+            "按同职位或同地区员工对比订单量、金额和客户覆盖，判断 Steven Buchanan 是否真的偏离基线。",
+            "按月份查看订单波动，确认是否存在阶段性峰值或交接导致的集中承接。",
+            "按客户金额而非订单数计算 Top 客户依赖，识别是否存在大客户集中风险。",
+            "补充工时、销售目标、利润率或客户满意度后，再判断绩效或风险。",
+        ]
+        return {
+            "title": f"{name} 员工画像：{load_label}、客户覆盖{concentration}",
+            "profile_summary": profile_summary,
+            "key_facts": key_facts,
+            "business_interpretation": business_interpretation,
+            "evidence_limits": evidence_limits,
+            "next_questions": next_questions,
+            "metrics": {
+                "employee_id": int(employee_id),
+                "name": name,
+                "title": employee.get("title"),
+                "location": location,
+                "order_count": order_count,
+                "total_orders": total_orders,
+                "order_share_percent": order_share * 100,
+                "order_rank": rank,
+                "employee_count": employee_total,
+                "customer_count": customer_count,
+                "top_customer_id": top_customer.get("customerID"),
+                "top_customer_name": top_customer.get("companyName"),
+                "top_customer_order_count": top_customer_count,
+                "top_customer_share_percent": top_customer_share * 100,
+                "revenue": revenue,
+                "revenue_share_percent": revenue_share * 100,
+                "freight_sum": freight_sum,
+                "avg_freight": avg_freight,
+                "yearly_orders": years,
+                "top_customers": [
+                    {
+                        "customer_id": row["customerID"],
+                        "company_name": row["companyName"],
+                        "order_count": int(row["order_count"] or 0),
+                        "revenue": float(row["revenue"] or 0),
+                    }
+                    for row in top_customers
+                ],
+            },
         }
 
     def _evidence_paths(self, tenant, employee, edge, artifact, workload):
@@ -1813,7 +2115,9 @@ class ReasoningRepository:
         }
 
     def _finding_to_dict(self, row):
-        return {
+        recommended_action = _load_json(row["recommended_action_json"], {})
+        structured_answer = recommended_action.get("structured_answer") or {}
+        finding = {
             "id": row["id"],
             "run_id": row["run_id"],
             "tenant_id": row["project_id"],
@@ -1823,13 +2127,18 @@ class ReasoningRepository:
             "confidence": row["confidence"],
             "supporting_evidence": _load_json(row["supporting_evidence_json"], []),
             "counter_evidence": _load_json(row["counter_evidence_json"], []),
-            "recommended_action": _load_json(row["recommended_action_json"], {}),
+            "recommended_action": recommended_action,
             "status": row["status"],
             "version": row["version"],
             "source_agent": row["source_agent"],
             "created_at": str(row["created_at"]) if row["created_at"] else None,
             "updated_at": str(row["updated_at"]) if row["updated_at"] else None,
         }
+        if structured_answer:
+            finding["structured_answer"] = structured_answer
+            for key in ("profile_summary", "key_facts", "business_interpretation", "evidence_limits", "next_questions"):
+                finding[key] = structured_answer.get(key) or ([] if key != "profile_summary" else "")
+        return finding
 
 
 class AgentGatewayRepository:

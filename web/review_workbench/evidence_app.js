@@ -227,7 +227,7 @@ function renderBasis(item) {
 
 function renderLinkedFinding(item) {
   els.linkedFinding.innerHTML = `
-    <a class="quick-task" href="${escapeHtml(tenantUrl("/reasoning.html", { task: item.task_key }))}">Open reasoning loop</a>
+    <a class="quick-task" href="${escapeHtml(tenantUrl("/reasoning.html", { task: item.task_key }))}">Open reasoning process</a>
     <a class="quick-task" href="${escapeHtml(tenantUrl("/findings.html", { finding: item.finding_key }))}">Open explanation</a>
     <a class="quick-task" href="${escapeHtml(tenantUrl("/questions.html", { task: item.task_key }))}">Open question history</a>
     ${item.url ? `<a class="quick-task" href="${escapeHtml(item.url)}">Open graph context</a>` : ""}

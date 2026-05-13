@@ -1,0 +1,84 @@
+{
+  "task": 121,
+  "title": "Employee Profile Reasoning implementation",
+  "time": "2026-05-13 17:38:28 CST",
+  "base_commit": "c0221b9",
+  "status": "implementation_complete_waiting_validation",
+  "commit_or_push": false,
+  "changed_files": [
+    "review_workbench.py",
+    "web/review_workbench/reasoning_app.js",
+    "web/review_workbench/styles.css"
+  ],
+  "separate_existing_worktree_changes": [
+    "task 117 Chinese terminology changes",
+    "task 118 Saskue validation reports"
+  ],
+  "structured_payload": {
+    "fields": [
+      "profile_summary",
+      "key_facts",
+      "business_interpretation",
+      "evidence_limits",
+      "next_questions",
+      "metrics"
+    ],
+    "source": "approved graph scope plus controlled Northwind SQL aggregations",
+    "llm_free_text_generation": false,
+    "canonical_write": false,
+    "draft_only": true
+  },
+  "employee_5_api_result": {
+    "url": "http://127.0.0.1:8767/api/reasoning/tasks/reasoning%3Agraph-scope%3Adefault-question-center-question-scope-employee-5-d1-n200-e200-q0957854216?tenant=default",
+    "title": "Steven Buchanan 员工画像：低订单负载、客户覆盖较分散",
+    "structured_answer_present": true,
+    "key_facts_count": 7,
+    "business_interpretation_count": 3,
+    "evidence_limits_count": 3,
+    "next_questions_count": 4,
+    "supporting_evidence_kinds": [
+      "question_scope",
+      "controlled_aggregate"
+    ],
+    "profile_summary": "Steven Buchanan 是 Sales Manager，位于 London, UK。在当前已批准 Northwind 图谱和受控聚合中，他呈现为低订单负载、客户覆盖较分散的员工：共处理 42 单，占全体订单 5.1%，订单量排名 9/9；覆盖 29 个客户，最大客户为 Save-a-lot Markets（3 单，占该员工订单 7.1%）。 因此当前证据不支持把他判断为订单负载异常偏高。"
+  },
+  "browser_smoke": {
+    "url": "http://127.0.0.1:8767/reasoning.html?tenant=default&task=reasoning%3Agraph-scope%3Adefault-question-center-question-scope-employee-5-d1-n200-e200-q0957854216",
+    "required_terms_found": [
+      "画像判断",
+      "关键事实",
+      "业务含义",
+      "证据边界",
+      "下一步验证",
+      "低订单负载",
+      "客户覆盖较分散",
+      "订单量排名 9/9",
+      "Save-a-lot Markets",
+      "缺少绩效目标",
+      "不会写入正式知识图谱"
+    ],
+    "forbidden_count_summary_terms_absent": [
+      "has 42 approved order relationships",
+      "loaded in the current evidence scope"
+    ]
+  },
+  "validation": [
+    {
+      "command": "node --check web/review_workbench/reasoning_app.js && node --check web/review_workbench/questions_app.js && node --check web/review_workbench/evidence_app.js && node --check web/review_workbench/findings_app.js && node --check web/review_workbench/shell_app.js && node --check web/review_workbench/graph_app.js && git diff --check",
+      "result": "passed"
+    },
+    {
+      "command": "/Users/slc/code/Aletheia/.venv/bin/python -m compileall -q review_workbench.py agents query_artifacts.py evals tests",
+      "result": "passed"
+    },
+    {
+      "command": "/Users/slc/code/Aletheia/.venv/bin/python -m unittest tests/test_ontology_eval.py",
+      "result": "passed"
+    }
+  ],
+  "service": {
+    "url": "http://127.0.0.1:8767",
+    "status": "running",
+    "started_with": "screen -dmS aletheia8767"
+  }
+}
