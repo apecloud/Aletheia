@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Aletheia Evidence</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header class="portal-shell" aria-label="Portal navigation">
+      <div class="portal-brand">
+        <p class="eyebrow">Aletheia Portal</p>
+        <strong>Evidence Chain</strong>
+      </div>
+      <nav class="portal-nav" aria-label="Primary views">
+        <a id="nav-workbench" class="portal-nav-item" href="/">Workbench</a>
+        <a id="nav-questions" class="portal-nav-item" href="/questions.html">Questions</a>
+        <a id="nav-findings" class="portal-nav-item" href="/findings.html">Findings</a>
+        <a id="nav-evidence" class="portal-nav-item active" href="/evidence.html">Evidence</a>
+        <a id="nav-explore" class="portal-nav-item" href="/graph.html">Explore</a>
+        <a id="nav-quality" class="portal-nav-item" href="/quality.html">Quality</a>
+        <a id="nav-ontology" class="portal-nav-item" href="/ontology.html">Ontology</a>
+        <a id="nav-runtime" class="portal-nav-item" href="/settings.html">Runtime</a>
+        <a id="nav-audit" class="portal-nav-item" href="/ontology.html">Audit</a>
+      </nav>
+      <div class="portal-context" aria-label="Current tenant">
+        <span id="shell-tenant-label">Tenant -</span>
+        <span id="shell-tenant-meta">namespace - · graph -</span>
+      </div>
+      <div id="breadcrumb" class="breadcrumb">Evidence / source chain</div>
+    </header>
+
+    <main class="evidence-shell">
+      <section class="evidence-browser">
+        <header class="sidebar-header">
+          <div>
+            <p class="eyebrow">Evidence Chain</p>
+            <h1>Evidence Browser</h1>
+          </div>
+          <span id="evidence-total" class="status-pill muted-pill">0 items</span>
+        </header>
+        <section class="filters">
+          <label>
+            Kind
+            <select id="kind-filter" aria-label="Evidence kind">
+              <option value="">All evidence</option>
+              <option value="fact">Fact</option>
+              <option value="hypothesis">Hypothesis</option>
+              <option value="conflict">Conflict</option>
+              <option value="missing">Missing</option>
+            </select>
+          </label>
+        </section>
+        <section id="evidence-list" class="evidence-index"></section>
+      </section>
+
+      <section class="evidence-detail-workspace">
+        <header class="workspace-header">
+          <div>
+            <p id="evidence-kind" class="eyebrow">Evidence item</p>
+            <h2 id="evidence-title">Select evidence</h2>
+            <p id="evidence-summary" class="muted">Open a source, graph path, or conflict item to inspect how it supports or challenges a finding.</p>
+          </div>
+          <span id="evidence-status" class="status-pill muted-pill">idle</span>
+        </header>
+
+        <section id="evidence-empty" class="empty-state">Select evidence from the left panel.</section>
+        <section id="evidence-detail" class="evidence-detail-grid hidden">
+          <article class="panel wide-panel">
+            <div class="panel-header">
+              <h3>Evidence Summary</h3>
+              <span id="evidence-role" class="metric"></span>
+            </div>
+            <p id="selected-summary"></p>
+            <dl class="compact-meta">
+              <div><dt>Source</dt><dd id="selected-source">-</dd></div>
+              <div><dt>Finding</dt><dd id="selected-finding">-</dd></div>
+              <div><dt>Task</dt><dd id="selected-task">-</dd></div>
+            </dl>
+          </article>
+
+          <article class="panel">
+            <div class="panel-header">
+              <h3>Source / Path</h3>
+              <span class="metric">trace</span>
+            </div>
+            <div id="source-path"></div>
+          </article>
+
+          <article class="panel">
+            <div class="panel-header">
+              <h3>Rule / Ontology Basis</h3>
+              <span class="metric">basis</span>
+            </div>
+            <div id="basis"></div>
+          </article>
+
+          <article class="panel wide-panel">
+            <div class="panel-header">
+              <h3>Linked Explanation</h3>
+              <span class="metric">finding detail</span>
+            </div>
+            <div id="linked-finding" class="quick-task-grid"></div>
+          </article>
+        </section>
+      </section>
+    </main>
+
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+    <script src="/shell_app.js"></script>
+    <script src="/evidence_app.js"></script>
+  </body>
+</html>

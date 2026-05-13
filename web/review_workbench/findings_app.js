@@ -64,7 +64,7 @@ function setNavLinks() {
     "#nav-workbench": "/",
     "#nav-questions": "/questions.html",
     "#nav-findings": "/findings.html",
-    "#nav-evidence": "/findings.html",
+    "#nav-evidence": "/evidence.html",
     "#nav-explore": "/graph.html",
     "#nav-quality": "/quality.html",
     "#nav-ontology": "/ontology.html",
