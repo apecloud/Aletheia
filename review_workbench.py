@@ -860,6 +860,7 @@ class ReasoningRepository:
             finding["run_key"] = row["run_key"]
             finding["run_status"] = row["run_status"]
             finding["run_created_at"] = str(row["run_created_at"]) if row["run_created_at"] else None
+            self._normalize_scoped_finding_display(tenant, finding)
             findings.append(finding)
         return findings
 
@@ -911,6 +912,7 @@ class ReasoningRepository:
                 "created_at": row["run_created_at"],
             }
         )
+        self._normalize_scoped_finding_display(tenant, finding)
         return finding
 
     def list_runs_overview(self, tenant, limit=30):
@@ -986,11 +988,17 @@ class ReasoningRepository:
             task = self._get_task_row(tenant, task_key)
             if task is None:
                 return None
+        latest_run = self.latest_run(tenant, task_key)
+        findings = self.list_findings(tenant, task_key)
+        for finding in findings:
+            finding["task"] = task
+            finding["run"] = latest_run or {}
+            self._normalize_scoped_finding_display(tenant, finding)
         return {
             "tenant": tenant.public_dict(),
             "task": task,
-            "latest_run": self.latest_run(tenant, task_key),
-            "findings": self.list_findings(tenant, task_key),
+            "latest_run": latest_run,
+            "findings": findings,
         }
 
     def create_scoped_task_from_graph(self, tenant, payload):
@@ -1313,13 +1321,7 @@ class ReasoningRepository:
             {"tool": "propose_finding", "tenant_id": tenant.tenant_id, "write_scope": "draft_reasoning_artifact", "status": "completed"},
         ]
         evidence_paths = scope.get("evidence_paths") or []
-        center = scope.get("center_node") or scope.get("center_edge") or {}
-        title = f"Scoped graph reasoning remains draft-only for {center}"
-        conclusion = (
-            "This scoped graph task was created from Graph Explorer evidence. "
-            "It is constrained to approved Employee/Order nodes and the Employee-Order link, "
-            "and the output is a draft finding for review."
-        )
+        title, conclusion = self._scoped_graph_finding_text(tenant, task, scope)
         if not evidence_paths:
             tool_calls[0]["status"] = "blocked"
             output = {
@@ -1371,6 +1373,87 @@ class ReasoningRepository:
         run = self._record_run(tenant, task, query_plan, tool_calls, evidence_paths, output, eval_result, "completed", started)
         finding_row = self._record_finding(tenant, run, finding)
         return {"tenant": tenant.public_dict(), "task": task, "run": run, "findings": [finding_row], "approved": True}
+
+    def _scoped_graph_finding_text(self, tenant, task, scope):
+        center_node = scope.get("center_node")
+        center_edge = scope.get("center_edge") or {}
+        question = task.get("question") or "the scoped graph question"
+        if center_node and ":" in center_node:
+            object_type, instance_id = center_node.split(":", 1)
+            graph = self.instance_repository.neighborhood(
+                tenant,
+                object_type,
+                instance_id,
+                depth=scope.get("depth") or 1,
+                limit=scope.get("node_limit") or 200,
+            )
+            if graph and graph.get("approved"):
+                center = graph.get("center") or {}
+                relations = graph.get("relations_summary") or {}
+                handled_orders = relations.get("handled_orders", len(graph.get("edges") or []))
+                returned_orders = relations.get("returned_orders", len(graph.get("edges") or []))
+                title = f"{center_node} work snapshot: {center.get('label') or center_node} has {handled_orders} approved order relationships"
+                conclusion = (
+                    f'For the question "{question}", the approved graph shows '
+                    f"{center.get('label') or center_node}"
+                )
+                if center.get("summary"):
+                    conclusion += f" ({center.get('summary')})"
+                conclusion += (
+                    f" with {handled_orders} handled order relationships; "
+                    f"{returned_orders} relationships are loaded in the current evidence scope. "
+                    "This is a draft answer for review and does not change canonical ontology or graph."
+                )
+                return title, conclusion
+        if center_edge.get("source") and center_edge.get("target"):
+            source = center_edge["source"]
+            target = center_edge["target"]
+            edge = self.instance_repository.edge_detail(tenant, source, target)
+            title = f"{source} -> {target} is approved Employee-Order evidence"
+            conclusion = (
+                f'For the question "{question}", the approved graph contains the selected '
+                f"{source} -> {target} Employee-Order relationship. "
+            )
+            if edge:
+                conclusion += (
+                    f"The relationship is supported by {edge.get('source_ref') or 'source-row evidence'} "
+                    f"and ontology link {edge.get('ontology_link') or 'link:employee:1:n:order'}. "
+                )
+            conclusion += "This is a draft answer for review and does not change canonical ontology or graph."
+            return title, conclusion
+        center = center_node or f"{center_edge.get('source', 'scope')} -> {center_edge.get('target', 'scope')}"
+        return (
+            f"Scoped answer for {center}",
+            (
+                f'For the question "{question}", the run is constrained to the selected approved graph scope. '
+                "This is a draft answer for review and does not change canonical ontology or graph."
+            ),
+        )
+
+    def _is_legacy_scoped_finding(self, finding):
+        title = (finding.get("title") or "").lower()
+        conclusion = (finding.get("conclusion") or "").lower()
+        return "scoped graph reasoning remains draft-only" in title or "created from graph explorer evidence" in conclusion
+
+    def _normalize_scoped_finding_display(self, tenant, finding):
+        if not self._is_legacy_scoped_finding(finding):
+            return finding
+        task = finding.get("task") or {}
+        if not task:
+            task = {
+                "question": finding.get("question"),
+                "scope": finding.get("task_scope") or {},
+            }
+        scope = task.get("scope") or finding.get("task_scope") or {}
+        raw_title = finding.get("title")
+        raw_conclusion = finding.get("conclusion")
+        title, conclusion = self._scoped_graph_finding_text(tenant, task, scope)
+        finding["raw_title"] = raw_title
+        finding["raw_conclusion"] = raw_conclusion
+        finding["title"] = title
+        finding["conclusion"] = conclusion
+        finding["display_normalized"] = True
+        return finding
 
     def graph_query(self, tenant, object_type, instance_id):
         return self.instance_repository.neighborhood(tenant, object_type, instance_id, depth=1, limit=200)
@@ -1510,6 +1593,21 @@ class ReasoningRepository:
             ).mappings().first()
             if not row:
                 return None
+            context = conn.execute(
+                text(
+                    """
+                    SELECT t.canonical_key AS task_key, t.question, t.scope_json,
+                           r.id, r.project_id, r.run_key, r.agent_name, r.prompt_version,
+                           r.query_plan_json, r.tool_calls_json, r.evidence_paths_json,
+                           r.output_json, r.eval_result_json, r.status, r.latency_ms,
+                           r.cost_estimate, r.created_at
+                    FROM aletheia_reasoning_runs r
+                    JOIN aletheia_reasoning_tasks t ON r.task_id = t.id
+                    WHERE r.project_id = :tenant_id AND r.id = :run_id
+                    """
+                ),
+                {"tenant_id": tenant.tenant_id, "run_id": row["run_id"]},
+            ).mappings().first()
             reviews = conn.execute(
                 text(
                     """
@@ -1523,6 +1621,14 @@ class ReasoningRepository:
                 {"tenant_id": tenant.tenant_id, "canonical_key": canonical_key},
             ).mappings().all()
         finding = self._finding_to_dict(row)
+        if context:
+            finding["task"] = {
+                "canonical_key": context["task_key"],
+                "question": context["question"],
+                "scope": _load_json(context["scope_json"], {}),
+            }
+            finding["run"] = self._run_to_dict(context)
+            self._normalize_scoped_finding_display(tenant, finding)
         finding["reviews"] = [dict(review) for review in reviews]
         return finding
 
