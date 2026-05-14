@@ -14,14 +14,11 @@
       </div>
       <nav class="portal-nav" aria-label="Primary views">
         <a id="nav-workbench" class="portal-nav-item" href="/">Workbench</a>
-        <a id="nav-questions" class="portal-nav-item active" href="/questions.html">Questions</a>
-        <a id="nav-findings" class="portal-nav-item" href="/findings.html">Findings</a>
-        <a id="nav-evidence" class="portal-nav-item" href="/evidence.html">Evidence</a>
+        <a id="nav-ontology" class="portal-nav-item" href="/ontology.html">Ontology</a>
         <a id="nav-explore" class="portal-nav-item" href="/graph.html">Explore</a>
         <a id="nav-quality" class="portal-nav-item" href="/quality.html">Quality</a>
-        <a id="nav-ontology" class="portal-nav-item" href="/ontology.html">Ontology</a>
+        <a id="nav-history" class="portal-nav-item" href="/?view=history">History</a>
         <a id="nav-runtime" class="portal-nav-item" href="/settings.html">Runtime</a>
-        <a id="nav-audit" class="portal-nav-item" href="/ontology.html">Audit</a>
       </nav>
       <div class="portal-context" aria-label="Current tenant">
         <span id="shell-tenant-label">Tenant -</span>
@@ -31,41 +28,17 @@
     </header>
 
     <main class="reasoning-shell">
-      <aside class="sidebar reasoning-sidebar" aria-label="Reasoning task list">
-        <header class="sidebar-header">
+      <section id="history-view" class="history-view hidden" aria-label="Session history">
+        <header class="workspace-header">
           <div>
             <p class="eyebrow">History</p>
-            <h1>Reasoning Tasks</h1>
+            <h2 id="history-title">All sessions</h2>
           </div>
-          <button id="run-task" class="icon-button" type="button" title="Run fixed reasoning task">▶</button>
         </header>
+        <section id="history-list" class="history-list"></section>
+      </section>
 
-        <section class="gate-banner">
-          <strong>Write boundary</strong>
-          <span>Agent can only write draft findings and action proposals.</span>
-        </section>
-
-        <section class="tenant-panel" aria-label="Tenant context">
-          <label>
-            Tenant
-            <select id="tenant-switcher"></select>
-          </label>
-          <dl>
-            <div><dt>Namespace</dt><dd id="tenant-namespace">-</dd></div>
-            <div><dt>Graph database</dt><dd id="tenant-graph">-</dd></div>
-          </dl>
-        </section>
-
-        <details class="loop-collapsible history-collapsible" open>
-          <summary>
-            <span>Question History</span>
-            <span id="task-count" class="metric">0 tasks</span>
-          </summary>
-          <section id="task-list" class="artifact-list" aria-label="Reasoning tasks"></section>
-        </details>
-      </aside>
-
-      <section class="reasoning-evidence" aria-label="Unified reasoning process">
+      <section id="reasoning-view" class="reasoning-evidence" aria-label="Unified reasoning process">
         <header class="workspace-header">
           <div>
             <p class="eyebrow">Question -> Answer -> Evidence</p>
@@ -118,7 +91,6 @@
                 <button class="secondary-action" type="submit">Create scoped question</button>
                 <button id="run-task-inline" class="secondary-action" type="button">Run reasoning</button>
                 <a id="graph-context-link" class="secondary-action answer-link" href="/graph.html">Open graph context</a>
-                <a id="question-history-link" class="secondary-action answer-link" href="/questions.html">Open question history</a>
               </div>
             </form>
             <dl id="task-summary" class="compact-meta loop-task-summary"></dl>
@@ -129,11 +101,20 @@
             <span>Evidence Chain</span>
             <span id="evidence-count" class="metric">0 items</span>
           </summary>
+          <div class="filter-row evidence-filter-row">
+            <select id="evidence-filter" aria-label="Filter evidence by kind">
+              <option value="">All kinds</option>
+              <option value="fact">Fact</option>
+              <option value="hypothesis">Hypothesis</option>
+              <option value="conflict">Conflict</option>
+              <option value="missing">Missing</option>
+            </select>
+          </div>
           <section id="evidence-paths" class="reasoning-paths"></section>
         </details>
       </section>
 
-      <aside class="detail-panel reasoning-trace" aria-label="Reasoning trace and review">
+      <aside id="trace-view" class="detail-panel reasoning-trace" aria-label="Reasoning trace and review">
         <header class="sidebar-header">
           <div>
             <p class="eyebrow">Actions</p>
@@ -169,8 +150,17 @@
           </div>
           <button id="comment-finding" class="secondary-action" type="button">Add comment</button>
         </section>
+        <footer class="trace-footer">
+          <button id="run-task" class="secondary-action" type="button">Run reasoning</button>
+          <div class="trace-tenant">
+            <select id="tenant-switcher" aria-label="Tenant"></select>
+            <span id="tenant-namespace" class="trace-tenant-meta">-</span>
+            <span id="tenant-graph" class="trace-tenant-meta hidden">-</span>
+          </div>
+        </footer>
       </aside>
     </main>
+
 
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
     <script src="/shell_app.js"></script>

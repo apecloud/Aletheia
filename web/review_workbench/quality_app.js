@@ -50,14 +50,11 @@ function tenantUrl(path, extra = {}) {
 function setNavLinks() {
   const links = {
     "#nav-workbench": "/",
-    "#nav-questions": "/questions.html",
-    "#nav-findings": "/findings.html",
-    "#nav-evidence": "/evidence.html",
+    "#nav-ontology": "/ontology.html",
     "#nav-explore": "/graph.html",
     "#nav-quality": "/quality.html",
-    "#nav-ontology": "/ontology.html",
+    "#nav-history": "/?view=history",
     "#nav-runtime": "/settings.html",
-    "#nav-audit": "/ontology.html",
   };
   Object.entries(links).forEach(([selector, path]) => {
     const el = document.querySelector(selector);

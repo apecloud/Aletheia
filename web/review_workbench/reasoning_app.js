@@ -10,6 +10,10 @@ const state = {
   selectedFinding: null,
   graphHandoff: null,
   graphContext: null,
+  evidenceFilter: "",
+  allTasks: [],
+  artifacts: [],
+  selectedArtifacts: new Set(),
 };
 
 const els = {
@@ -21,9 +25,13 @@ const els = {
   navWorkbench: document.querySelector("#nav-workbench"),
   navInstances: document.querySelector("#nav-instances") || document.querySelector("#nav-explore"),
   navGraph: document.querySelector("#nav-graph") || document.querySelector("#nav-explore"),
-  navReasoning: document.querySelector("#nav-reasoning"),
   navSettings: document.querySelector("#nav-settings") || document.querySelector("#nav-runtime"),
   breadcrumb: document.querySelector("#breadcrumb"),
+  statusEntities: document.querySelector("#status-entities"),
+  statusRelations: document.querySelector("#status-relations"),
+  statusFindings: document.querySelector("#status-findings"),
+  statusState: document.querySelector("#status-state"),
+  statusUpdate: document.querySelector("#status-update"),
   runTask: document.querySelector("#run-task"),
   runTaskInline: document.querySelector("#run-task-inline"),
   questionForm: document.querySelector("#loop-question-form"),
@@ -32,19 +40,16 @@ const els = {
   depth: document.querySelector("#depth"),
   limit: document.querySelector("#limit"),
   graphContextLink: document.querySelector("#graph-context-link"),
-  questionHistoryLink: document.querySelector("#question-history-link"),
+  evidenceFilter: document.querySelector("#evidence-filter"),
   taskSource: document.querySelector("#task-source"),
-  taskCount: document.querySelector("#task-count"),
   taskSummary: document.querySelector("#task-summary"),
-  taskList: document.querySelector("#task-list"),
   taskTitle: document.querySelector("#task-title"),
-  taskQuestion: document.querySelector("#task-question"),
   runStatus: document.querySelector("#run-status"),
   warning: document.querySelector("#reasoning-warning"),
   evidencePaths: document.querySelector("#evidence-paths"),
   evidenceCount: document.querySelector("#evidence-count"),
   findingStatus: document.querySelector("#finding-status"),
-  findingDetail: document.querySelector("#finding-detail"),
+  findingDetail: document.querySelector("#finding-detail") || document.querySelector(".answer-body"),
   runTitle: document.querySelector("#run-title"),
   traceBody: document.querySelector("#trace-body"),
   followupForm: document.querySelector("#followup-form"),
@@ -55,6 +60,9 @@ const els = {
   rejectFinding: document.querySelector("#reject-finding"),
   commentFinding: document.querySelector("#comment-finding"),
   toast: document.querySelector("#toast"),
+  ontologyObjects: document.querySelector("#ontology-objects"),
+  ontologyLinks: document.querySelector("#ontology-links"),
+  scopeStatus: document.querySelector("#scope-status"),
 };
 
 function escapeHtml(value) {
@@ -119,6 +127,88 @@ function taskDisplayTitle(task = state.task) {
   if (scope.center_node) return `Scoped reasoning: ${scope.center_node}`;
   if (scope.center_edge) return `Scoped reasoning: ${scope.center_edge.source} -> ${scope.center_edge.target}`;
   return task?.canonical_key || "Reasoning task";
+}
+
+async function loadOverview() {
+  try {
+    const overview = await fetchJson(urlWithTenant("/api/portal/overview"));
+    const tenant = overview.tenant || {};
+    const status = overview.knowledge_status || {};
+    if (els.shellTenantLabel) els.shellTenantLabel.textContent = tenant.display_name || state.tenant;
+    if (els.shellTenantMeta) els.shellTenantMeta.textContent = `namespace ${tenant.namespace || "-"} · graph ${tenant.graph_database || "-"}`;
+    if (els.statusEntities) els.statusEntities.textContent = String(status.entity_count ?? 0);
+    if (els.statusRelations) els.statusRelations.textContent = String(status.relation_count ?? 0);
+    if (els.statusFindings) els.statusFindings.textContent = String(status.finding_count ?? 0);
+    if (els.statusState) els.statusState.textContent = `${status.system_state || "unknown"} · approved-only ${status.approved_only ? "on" : "off"}`;
+    if (els.statusUpdate) els.statusUpdate.textContent = status.latest_update || "No runs yet";
+  } catch (_) {}
+}
+
+async function loadArtifacts() {
+  try {
+    const data = await fetchJson(urlWithTenant("/api/artifacts"));
+    state.artifacts = data.artifacts || [];
+    state.selectedArtifacts = new Set(
+      state.artifacts.filter((a) => a.status === "approved").map((a) => a.canonical_key)
+    );
+    renderOntologyScope();
+  } catch (_) {
+    state.artifacts = [];
+    renderOntologyScope();
+  }
+}
+
+function renderOntologyScope() {
+  const objects = state.artifacts.filter((a) => a.artifact_type === "object");
+  const links = state.artifacts.filter((a) => a.artifact_type === "link");
+  function renderGroup(container, label, items) {
+    if (!container) return;
+    container.innerHTML =
+      `<p class="ontology-group-label">${escapeHtml(label)}</p>` +
+      (items.length === 0
+        ? `<p class="muted">No ${label.toLowerCase()} artifacts</p>`
+        : items
+            .map(
+              (a) =>
+                `<label class="ontology-item">
+                  <input type="checkbox" value="${escapeHtml(a.canonical_key)}" ${state.selectedArtifacts.has(a.canonical_key) ? "checked" : ""} />
+                  <span class="ontology-item-name">${escapeHtml(a.name || a.canonical_key)}</span>
+                  <span class="status-badge status-badge-${a.status}">${escapeHtml(a.status)}</span>
+                </label>`
+            )
+            .join(""));
+    container.querySelectorAll("input[type=checkbox]").forEach((cb) => {
+      cb.addEventListener("change", () => {
+        if (cb.checked) state.selectedArtifacts.add(cb.value);
+        else state.selectedArtifacts.delete(cb.value);
+        updateScopeStatus();
+      });
+    });
+  }
+  renderGroup(els.ontologyObjects, "Objects", objects);
+  renderGroup(els.ontologyLinks, "Links", links);
+  updateScopeStatus();
+}
+
+function updateScopeStatus() {
+  if (!els.scopeStatus) return;
+  const total = state.artifacts.length;
+  const selected = state.selectedArtifacts.size;
+  els.scopeStatus.textContent = `${selected} / ${total}`;
+  els.scopeStatus.className =
+    selected === 0 ? "status-pill muted-pill" : "status-pill status-approved";
+}
+
+function selectedNodeTypes() {
+  return state.artifacts
+    .filter((a) => a.artifact_type === "object" && state.selectedArtifacts.has(a.canonical_key))
+    .map((a) => a.name || a.canonical_key.replace("object:", ""));
+}
+
+function selectedLinkKeys() {
+  return state.artifacts
+    .filter((a) => a.artifact_type === "link" && state.selectedArtifacts.has(a.canonical_key))
+    .map((a) => a.canonical_key);
 }
 
 function graphHandoffPayload() {
@@ -207,7 +297,6 @@ function updateGraphContextLink() {
     depth: els.depth?.value || state.task?.scope?.depth || "1",
     limit: els.limit?.value || state.task?.scope?.node_limit || "200",
   });
-  if (els.questionHistoryLink) els.questionHistoryLink.href = urlWithTenant("/questions.html", { task: state.taskKey });
 }
 
 function hydrateQuestionFormFromTask() {
@@ -257,7 +346,6 @@ async function loadTenants() {
   els.navWorkbench.href = `/?tenant=${encodeURIComponent(state.tenant)}`;
   els.navInstances.href = `/instances.html?tenant=${encodeURIComponent(state.tenant)}&type=Employee&id=4`;
   els.navGraph.href = `/graph.html?tenant=${encodeURIComponent(state.tenant)}&type=Employee&id=4&depth=1`;
-  if (els.navReasoning) els.navReasoning.href = `/reasoning.html?tenant=${encodeURIComponent(state.tenant)}&task=${encodeURIComponent(state.taskKey)}`;
   els.navSettings.href = `/settings.html?tenant=${encodeURIComponent(state.tenant)}`;
   els.breadcrumb.textContent = `Reasoning / ${state.taskKey}`;
   updateGraphContextLink();
@@ -267,36 +355,109 @@ async function loadTasks() {
   const data = await fetchJson(urlWithTenant("/api/reasoning/tasks"));
   const tasks = data.tasks || [];
   state.task = tasks.find((task) => task.canonical_key === state.taskKey) || tasks[0];
-  renderTasks(tasks);
+  state.allTasks = tasks;
   await loadTaskDetail();
 }
 
-function renderTasks(tasks) {
-  if (els.taskCount) els.taskCount.textContent = `${tasks.length} task${tasks.length === 1 ? "" : "s"}`;
-  els.taskList.innerHTML = tasks
-    .map(
-      (task) => `
-        <button class="artifact-item ${task.canonical_key === state.taskKey ? "active" : ""}" type="button" data-key="${escapeHtml(task.canonical_key)}">
-          <span class="artifact-item-title">
-            <strong>${escapeHtml(task.canonical_key)}</strong>
-            <span class="status-pill status-approved">${escapeHtml(task.status)}</span>
-          </span>
-          <span class="key-text">${escapeHtml(taskQuestionLabel(task))}</span>
-          <span class="artifact-item-meta">
-            <span>${escapeHtml(scopeLabel(task))}</span>
-            <span>${task.latest_run ? escapeHtml(task.latest_run.status) : "not run"}</span>
-          </span>
-        </button>
-      `,
-    )
-    .join("");
-  els.taskList.querySelectorAll("[data-key]").forEach((item) => {
-    item.addEventListener("click", async () => {
+function sessionDateGroup(task) {
+  const updated = task.updated_at || task.created_at || "";
+  if (!updated) return "Earlier";
+  const date = new Date(updated);
+  const now = new Date();
+  const diffMs = now - date;
+  const diffDays = Math.floor(diffMs / 86400000);
+  if (diffDays < 1 && now.getDate() === date.getDate()) return isZh() ? "今天" : "Today";
+  if (diffDays < 2) return isZh() ? "昨天" : "Yesterday";
+  if (diffDays < 7) return isZh() ? "最近 7 天" : "Previous 7 days";
+  if (diffDays < 30) return isZh() ? "最近 30 天" : "Previous 30 days";
+  return isZh() ? "更早" : "Earlier";
+}
+
+function findingStatusForTask(task) {
+  const run = task.latest_run;
+  if (!run) return "";
+  if (run.finding_status) return run.finding_status;
+  return run.status === "completed" ? "draft" : "";
+}
+
+function bindSessionClicks(container, { afterSelect } = {}) {
+  container.querySelectorAll("[data-key]").forEach((item) => {
+    item.addEventListener("click", async (e) => {
+      if (e.target.closest("[data-run-key]")) return;
       state.taskKey = item.dataset.key;
       updateUrl();
+      if (afterSelect) afterSelect();
       await loadTaskDetail();
     });
   });
+  container.querySelectorAll("[data-run-key]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      state.taskKey = btn.dataset.runKey;
+      updateUrl();
+      if (afterSelect) afterSelect();
+      await loadTaskDetail();
+      await runTask();
+    });
+  });
+}
+
+function showHistoryView() {
+  const shell = document.querySelector(".reasoning-shell");
+  const historyView = document.querySelector("#history-view");
+  if (!shell || !historyView) return;
+
+  const tasks = state.allTasks || [];
+  const title = isZh() ? `全部会话 (${tasks.length})` : `All sessions (${tasks.length})`;
+  document.querySelector("#history-title").textContent = title;
+
+  const groups = new Map();
+  for (const task of tasks) {
+    const label = sessionDateGroup(task);
+    if (!groups.has(label)) groups.set(label, []);
+    groups.get(label).push(task);
+  }
+  let html = "";
+  if (!tasks.length) {
+    html = `<p class="muted">${isZh() ? "还没有推理会话" : "No reasoning sessions yet"}</p>`;
+  }
+  for (const [label, items] of groups) {
+    html += `<div class="history-group-label">${escapeHtml(label)}</div>`;
+    for (const task of items) {
+      const status = findingStatusForTask(task);
+      html += `
+        <button class="history-item" type="button" data-key="${escapeHtml(task.canonical_key)}">
+          ${status ? `<span class="history-item-status" data-status="${escapeHtml(status)}"></span>` : ""}
+          <span class="history-item-body">
+            <span class="history-item-title">${escapeHtml(taskQuestionLabel(task))}</span>
+            <span class="history-item-meta">${escapeHtml(scopeLabel(task))}</span>
+          </span>
+        </button>
+      `;
+    }
+  }
+  const list = document.querySelector("#history-list");
+  list.innerHTML = html;
+  bindSessionClicks(list, { afterSelect: showReasoningView });
+
+  shell.classList.add("show-history");
+  historyView.classList.remove("hidden");
+
+  const navHistory = document.querySelector("#nav-history");
+  const navWorkbench = document.querySelector("#nav-workbench");
+  navHistory?.classList.add("active");
+  navWorkbench?.classList.remove("active");
+}
+
+function showReasoningView() {
+  const shell = document.querySelector(".reasoning-shell");
+  const historyView = document.querySelector("#history-view");
+  shell?.classList.remove("show-history");
+  historyView?.classList.add("hidden");
+
+  const navHistory = document.querySelector("#nav-history");
+  const navWorkbench = document.querySelector("#nav-workbench");
+  navHistory?.classList.remove("active");
+  navWorkbench?.classList.add("active");
 }
 
 function taskQuestionLabel(task) {
@@ -346,7 +507,6 @@ async function loadGraphContextForTask() {
 
 function renderTask() {
   els.taskTitle.textContent = taskDisplayTitle();
-  els.taskQuestion.textContent = state.task?.question || "";
   els.runStatus.textContent = state.run?.status || "not run";
   els.runStatus.className = `status-pill ${state.run?.status === "completed" ? "status-approved" : "muted-pill"}`;
   if (els.taskSource) els.taskSource.textContent = state.task?.scope?.source || "fixed_reasoning";
@@ -380,8 +540,11 @@ function renderTaskSummary() {
 }
 
 function renderEvidence() {
-  const supporting = state.selectedFinding?.supporting_evidence || state.run?.evidence_paths || [];
-  const counter = state.selectedFinding?.counter_evidence || [];
+  const allSupporting = state.selectedFinding?.supporting_evidence || state.run?.evidence_paths || [];
+  const allCounter = state.selectedFinding?.counter_evidence || [];
+  const filter = state.evidenceFilter;
+  const supporting = filter ? allSupporting.filter((p) => p.kind === filter) : allSupporting;
+  const counter = filter ? allCounter.filter((p) => p.kind === filter) : allCounter;
   const paths = [...supporting, ...counter];
   if (els.evidenceCount) els.evidenceCount.textContent = `${paths.length} item${paths.length === 1 ? "" : "s"}`;
   if (paths.length === 0) {
@@ -516,27 +679,32 @@ function renderBullets(items = [], emptyText = "No items recorded.") {
 
 function renderStructuredAnswer(profile) {
   if (!profile) return "";
+  const facts = profile.key_facts || [];
+  const interpretation = profile.business_interpretation || [];
+  const limits = profile.evidence_limits || [];
+  const next = profile.next_questions || [];
   return `
-    <section class="answer-profile-grid">
-      <article class="detail-section">
+    <section class="answer-profile-section reasoning-explanation" aria-label="推理解释">
+      <article class="explanation-summary">
+        <p class="eyebrow">05 / 推理解释</p>
         <h3>画像判断</h3>
         <p>${escapeHtml(profile.profile_summary || "")}</p>
       </article>
-      <article class="detail-section">
-        <h3>关键事实</h3>
-        ${renderKeyFacts(profile.key_facts || [])}
+      <article class="explanation-card">
+        <div class="explanation-card-head"><span>关键事实</span><em>${facts.length} items</em></div>
+        ${renderKeyFacts(facts)}
       </article>
-      <article class="detail-section">
-        <h3>业务含义</h3>
-        ${renderBullets(profile.business_interpretation || [])}
+      <article class="explanation-card">
+        <div class="explanation-card-head"><span>业务含义</span><em>${interpretation.length} items</em></div>
+        ${renderBullets(interpretation)}
       </article>
-      <article class="detail-section">
-        <h3>证据边界</h3>
-        ${renderBullets(profile.evidence_limits || [])}
+      <article class="explanation-card">
+        <div class="explanation-card-head"><span>证据边界</span><em>${limits.length} items</em></div>
+        ${renderBullets(limits)}
       </article>
-      <article class="detail-section">
-        <h3>下一步验证</h3>
-        ${renderBullets(profile.next_questions || [])}
+      <article class="explanation-card">
+        <div class="explanation-card-head"><span>下一步建议</span><em>${next.length} items</em></div>
+        ${renderBullets(next)}
       </article>
     </section>
   `;
@@ -571,8 +739,7 @@ function renderFinding() {
   const profile = structuredAnswer(finding);
   const displayTitle = answerTitle(finding);
   const displayConclusion = answerConclusion(finding);
-  const findingUrl = `/findings.html?tenant=${encodeURIComponent(state.tenant)}&finding=${encodeURIComponent(finding.canonical_key)}`;
-  const evidenceUrl = `#evidence-chain-panel`;
+  const evidenceUrl = document.querySelector("#reasoning-process-stage") ? "#reasoning-process-stage" : "#evidence-chain-panel";
   const graphUrl = firstEvidence.url || state.task?.scope?.graph_url || "";
   const governanceStatus =
     finding.status === "approved"
@@ -581,7 +748,7 @@ function renderFinding() {
   els.findingDetail.innerHTML = `
     <section class="answer-hero">
       <div>
-        <p class="eyebrow">Current Answer</p>
+        <p class="eyebrow">04 / 推理结论</p>
         <h3>${escapeHtml(displayTitle)}</h3>
       </div>
       <span class="metric">${escapeHtml(confidenceText(finding.confidence))}</span>
@@ -616,7 +783,7 @@ function renderFinding() {
       </div>
     </section>
     <section class="answer-actions">
-      <a class="secondary-action answer-link" href="${escapeHtml(findingUrl)}">Open explanation</a>
+      <a class="secondary-action answer-link" href="#finding-detail">Open explanation</a>
       <a class="secondary-action answer-link" href="${escapeHtml(evidenceUrl)}">Open evidence chain</a>
       ${graphUrl ? `<a class="secondary-action answer-link" href="${escapeHtml(graphUrl)}">Open graph context</a>` : ""}
       <button class="secondary-action" type="button" data-review-answer="1">Submit review</button>
@@ -736,6 +903,9 @@ async function createScopedQuestion(question, overrides = {}) {
       depth,
       limit,
       graph_url: els.graphContextLink?.getAttribute("href") || `/graph.html?tenant=${encodeURIComponent(state.tenant)}`,
+      allowed_node_types: selectedNodeTypes(),
+      allowed_link_keys: selectedLinkKeys(),
+      approved_only: true,
     },
   };
   const data = await fetchJson(urlWithTenant("/api/reasoning/questions"), {
@@ -796,16 +966,34 @@ async function reviewFinding(action) {
   showToast(`${action} recorded for ${data.finding.canonical_key}`);
 }
 
-els.tenantSwitcher.addEventListener("change", async () => {
+
+const navHistory = document.querySelector("#nav-history");
+if (navHistory) {
+  navHistory.addEventListener("click", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    showHistoryView();
+  });
+  navHistory.removeAttribute("href");
+  navHistory.style.cursor = "pointer";
+}
+
+els.tenantSwitcher?.addEventListener("change", async () => {
   state.tenant = els.tenantSwitcher.value;
   updateUrl();
   await loadTenants();
+  await loadArtifacts();
   await loadTasks();
+  loadOverview();
 });
-els.runTask.addEventListener("click", () => runTask().catch((error) => showToast(error.message)));
+els.runTask?.addEventListener("click", () => runTask().catch((error) => showToast(error.message)));
 els.runTaskInline?.addEventListener("click", () => runTask().catch((error) => showToast(error.message)));
 els.questionForm?.addEventListener("submit", (event) => submitQuestion(event).catch((error) => showToast(error.message)));
 els.followupForm?.addEventListener("submit", (event) => submitFollowup(event).catch((error) => showToast(error.message)));
+els.evidenceFilter?.addEventListener("change", () => {
+  state.evidenceFilter = els.evidenceFilter.value;
+  renderEvidence();
+});
 els.centerNode?.addEventListener("input", updateGraphContextLink);
 els.depth?.addEventListener("input", updateGraphContextLink);
 els.limit?.addEventListener("input", updateGraphContextLink);
@@ -814,7 +1002,14 @@ els.needsChangesFinding.addEventListener("click", () => reviewFinding("needs-cha
 els.rejectFinding.addEventListener("click", () => reviewFinding("reject").catch((error) => showToast(error.message)));
 els.commentFinding.addEventListener("click", () => reviewFinding("comment").catch((error) => showToast(error.message)));
 
+if (params.get("view") === "history") showHistoryView();
+
+loadOverview();
 loadTenants()
+  .then(() => loadArtifacts())
   .then(() => acceptGraphHandoffIfPresent())
   .then(() => loadTasks())
+  .then(() => {
+    if (params.get("view") === "history") showHistoryView();
+  })
   .catch((error) => showToast(error.message));

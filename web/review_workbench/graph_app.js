@@ -22,10 +22,8 @@ const els = {
   shellTenantLabel: document.querySelector("#shell-tenant-label"),
   shellTenantMeta: document.querySelector("#shell-tenant-meta"),
   navWorkbench: document.querySelector("#nav-workbench"),
-  navQuestions: document.querySelector("#nav-questions"),
   navInstances: document.querySelector("#nav-instances") || document.querySelector("#nav-explore"),
   navGraph: document.querySelector("#nav-graph") || document.querySelector("#nav-explore"),
-  navReasoning: document.querySelector("#nav-reasoning"),
   navSettings: document.querySelector("#nav-settings") || document.querySelector("#nav-runtime"),
   breadcrumb: document.querySelector("#breadcrumb"),
   reloadGraph: document.querySelector("#reload-graph"),
@@ -112,10 +110,8 @@ async function loadTenants() {
     els.shellTenantMeta.textContent = `namespace ${current.namespace} · graph ${current.graph_database}`;
   }
   els.navWorkbench.href = `/?tenant=${encodeURIComponent(state.tenant)}`;
-  if (els.navQuestions) els.navQuestions.href = `/questions.html?tenant=${encodeURIComponent(state.tenant)}`;
   els.navInstances.href = `/instances.html?tenant=${encodeURIComponent(state.tenant)}&type=Employee&id=4`;
   els.navGraph.href = `/graph.html?tenant=${encodeURIComponent(state.tenant)}&type=Employee&id=4&depth=1`;
-  if (els.navReasoning) els.navReasoning.href = `/reasoning.html?tenant=${encodeURIComponent(state.tenant)}`;
   els.navSettings.href = `/settings.html?tenant=${encodeURIComponent(state.tenant)}`;
   updateReasoningHandoff();
 }
@@ -556,10 +552,7 @@ function reasoningHandoffUrl() {
   return `/reasoning.html?${next.toString()}`;
 }
 
-function updateReasoningHandoff() {
-  if (!els.navReasoning) return;
-  if (els.navReasoning) els.navReasoning.href = reasoningHandoffUrl();
-}
+function updateReasoningHandoff() {}
 
 async function createReasoningTask() {
   if (!state.selectedKind || !state.selectedDetail) {

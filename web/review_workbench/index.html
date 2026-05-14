@@ -14,83 +14,179 @@
       </div>
       <nav class="portal-nav" aria-label="Primary views">
         <a id="nav-workbench" class="portal-nav-item active" href="/">Workbench</a>
-        <a id="nav-questions" class="portal-nav-item" href="/questions.html">Questions</a>
-        <a id="nav-findings" class="portal-nav-item" href="/findings.html">Findings</a>
-        <a id="nav-evidence" class="portal-nav-item" href="/evidence.html">Evidence</a>
+        <a id="nav-ontology" class="portal-nav-item" href="/ontology.html">Ontology</a>
         <a id="nav-explore" class="portal-nav-item" href="/graph.html">Explore</a>
         <a id="nav-quality" class="portal-nav-item" href="/quality.html">Quality</a>
-        <a id="nav-ontology" class="portal-nav-item" href="/ontology.html">Ontology</a>
+        <a id="nav-history" class="portal-nav-item" href="/?view=history">History</a>
         <a id="nav-runtime" class="portal-nav-item" href="/settings.html">Runtime</a>
-        <a id="nav-audit" class="portal-nav-item" href="/ontology.html">Audit</a>
       </nav>
       <div class="portal-context" aria-label="Current tenant">
         <span id="shell-tenant-label">Tenant -</span>
         <span id="shell-tenant-meta">namespace - · graph -</span>
       </div>
-      <div id="breadcrumb" class="breadcrumb">Workbench / Reasoning situation</div>
+      <div id="breadcrumb" class="breadcrumb">Workbench / Reasoning</div>
     </header>
 
-    <main class="portal-home">
-      <section class="portal-hero" aria-label="Reasoning command center">
-        <div>
-          <p class="eyebrow">Knowledge reasoning workspace</p>
-          <h1>What matters now, why it matters, and what needs review.</h1>
-        </div>
-        <form id="ask-form" class="question-bar">
-          <input id="ask-input" type="search" placeholder="Ask: why is Employee #4 workload unusual?" />
-          <button class="secondary-action" type="submit">Ask</button>
-        </form>
+    <section class="knowledge-bar" aria-label="Knowledge status">
+      <span class="knowledge-bar-item"><em>Entities</em> <strong id="status-entities">-</strong></span>
+      <span class="knowledge-bar-item"><em>Relations</em> <strong id="status-relations">-</strong></span>
+      <span class="knowledge-bar-item"><em>Findings</em> <strong id="status-findings">-</strong></span>
+      <span class="knowledge-bar-item" id="status-state">-</span>
+      <span class="knowledge-bar-item muted" id="status-update">-</span>
+    </section>
+
+    <main class="reasoning-shell">
+      <section id="history-view" class="history-view hidden" aria-label="Session history">
+        <header class="workspace-header">
+          <div>
+            <p class="eyebrow">History</p>
+            <h2 id="history-title">All sessions</h2>
+          </div>
+        </header>
+        <section id="history-list" class="history-list"></section>
       </section>
 
-      <section class="knowledge-strip" aria-label="Knowledge status">
-        <article class="metric-card"><span>Knowledge space</span><strong id="status-space">-</strong><small id="status-graph">-</small></article>
-        <article class="metric-card"><span>Covered entities</span><strong id="status-entities">-</strong><small>approved graph scope</small></article>
-        <article class="metric-card"><span>Relations</span><strong id="status-relations">-</strong><small>returned graph edges</small></article>
-        <article class="metric-card"><span>Reasoning findings</span><strong id="status-findings">-</strong><small id="status-state">-</small></article>
-        <article class="metric-card"><span>Last update</span><strong id="status-update">-</strong><small>data / reasoning</small></article>
-      </section>
+      <section id="reasoning-view" class="reasoning-evidence reasoning-workspace-redesign" aria-label="Ontology-centered reasoning">
+        <section id="reasoning-warning" class="empty-state hidden"></section>
 
-      <section class="portal-grid">
-        <section class="portal-main-column">
-          <article class="panel">
-            <div class="panel-header">
-              <h2>Key Findings</h2>
-              <a class="panel-link" id="all-findings-link" href="/findings.html">All findings</a>
+        <section class="workflow-map" aria-label="Reasoning workflow">
+          <div class="workflow-title">
+            <p class="eyebrow">Reasoning Workspace</p>
+            <h1>本体驱动推理工作区</h1>
+          </div>
+          <ol class="workflow-steps">
+            <li><span>01</span><strong>本体选择</strong></li>
+            <li><span>02</span><strong>推理问题</strong></li>
+            <li><span>03</span><strong>推理过程</strong></li>
+            <li><span>04</span><strong>推理结论</strong></li>
+            <li><span>05</span><strong>推理解释</strong></li>
+          </ol>
+        </section>
+
+        <section class="reasoning-stage-grid">
+          <article class="stage-card ontology-stage" aria-label="Ontology scope">
+            <div class="stage-card-head">
+              <div>
+                <p class="eyebrow">01 / 本体选择</p>
+                <h2>限定可推理的业务语义</h2>
+              </div>
+              <span id="scope-status" class="status-pill muted-pill">-</span>
             </div>
-            <div id="key-findings" class="finding-card-list"></div>
+            <div class="scope-strip-head">
+              <select id="tenant-switcher" class="scope-tenant-select"></select>
+              <span id="tenant-namespace" class="scope-meta">-</span>
+              <span id="tenant-graph" class="scope-meta">-</span>
+            </div>
+            <div class="scope-artifacts">
+              <div id="ontology-objects" class="ontology-group"></div>
+              <div id="ontology-links" class="ontology-group"></div>
+            </div>
           </article>
 
-          <article class="panel">
-            <div class="panel-header">
-              <h2>Recent Changes</h2>
-              <span id="recent-count" class="metric">-</span>
+          <article class="stage-card question-stage" aria-label="Reasoning question">
+            <div class="stage-card-head">
+              <div>
+                <p class="eyebrow">02 / 推理问题</p>
+                <h2>把业务问题绑定到图谱范围</h2>
+              </div>
+              <span id="task-source" class="status-pill muted-pill">scope</span>
             </div>
-            <div id="recent-changes" class="timeline-list"></div>
+            <form id="loop-question-form" class="ask-form">
+              <textarea id="question-input" rows="4" placeholder="Why is Employee #4 workload unusual?"></textarea>
+              <div class="ask-params">
+                <input id="center-node" type="text" value="Employee:4" placeholder="Center node" />
+                <input id="depth" type="number" min="1" max="2" value="1" title="Depth" />
+                <input id="limit" type="number" min="1" max="300" value="200" title="Limit" />
+                <button id="run-task-inline" class="ask-run" type="button">执行推理</button>
+              </div>
+            </form>
+            <div class="ask-actions">
+              <span id="run-status" class="status-pill muted-pill">idle</span>
+              <a id="graph-context-link" class="ask-link" href="/graph.html">打开图谱上下文</a>
+            </div>
+            <dl id="task-summary" class="compact-meta answer-task-meta"></dl>
           </article>
         </section>
 
-        <aside class="portal-side-column">
-          <article class="panel">
-            <div class="panel-header">
-              <h2>Needs Attention</h2>
-              <a class="panel-link" id="quality-link" href="/quality.html">Quality panel</a>
+        <section id="reasoning-process-stage" class="stage-card process-stage" aria-label="Reasoning process">
+          <div class="stage-card-head">
+            <div>
+              <p class="eyebrow">03 / 推理过程</p>
+              <h2>证据链、查询计划与工具调用</h2>
             </div>
-            <div id="attention-items" class="attention-list"></div>
-          </article>
+            <span id="evidence-count" class="status-pill muted-pill">0 items</span>
+          </div>
+          <div class="process-toolbar">
+            <select id="evidence-filter" class="side-filter" aria-label="Filter evidence by kind">
+              <option value="">All kinds</option>
+              <option value="fact">Fact</option>
+              <option value="hypothesis">Hypothesis</option>
+              <option value="conflict">Conflict</option>
+              <option value="missing">Missing</option>
+            </select>
+          </div>
+          <div class="process-grid">
+            <section>
+              <h3>证据链</h3>
+              <section id="evidence-paths" class="reasoning-paths"></section>
+            </section>
+            <section>
+              <div class="trace-heading">
+                <h3>运行轨迹</h3>
+                <span id="run-title" class="side-count"></span>
+              </div>
+              <section id="trace-body" class="trace-body-embedded">
+                <p class="muted">Run a task to see the trace.</p>
+              </section>
+            </section>
+          </div>
+        </section>
 
-          <article class="panel">
-            <div class="panel-header">
-              <h2>Quick Tasks</h2>
-              <span class="metric">goal first</span>
+        <section class="stage-card answer-section conclusion-stage" aria-label="Current answer">
+          <div class="answer-section-head">
+            <div>
+              <p class="eyebrow">04 / 推理结论 + 05 / 推理解释</p>
+              <h2 id="task-title">Ontology-Reasoning</h2>
             </div>
-            <div id="quick-tasks" class="quick-task-grid"></div>
-          </article>
-        </aside>
+            <span id="finding-status" class="status-pill muted-pill">draft</span>
+          </div>
+          <div id="finding-detail" class="answer-body">
+            <p class="muted">Select ontology scope and run reasoning to produce a finding.</p>
+          </div>
+        </section>
       </section>
+
+      <aside id="trace-view" class="side-panel decision-panel" aria-label="Run controls and review">
+        <section class="decision-card">
+          <p class="eyebrow">Control</p>
+          <h2>运行与审核</h2>
+          <button id="run-task" class="secondary-action run-btn" type="button">执行推理</button>
+        </section>
+        <details class="side-disclosure" open>
+          <summary>Review Gate</summary>
+          <div class="side-disclosure-body review-body">
+            <textarea id="review-reason" rows="2" placeholder="Reviewer note"></textarea>
+            <div class="review-actions">
+              <button id="approve-finding" class="action approve" type="button">Approve</button>
+              <button id="needs-changes-finding" class="action changes" type="button">Needs changes</button>
+              <button id="reject-finding" class="action reject" type="button">Reject</button>
+              <button id="comment-finding" class="secondary-action" type="button">Comment</button>
+            </div>
+          </div>
+        </details>
+        <form id="followup-form" class="followup-inline">
+          <textarea id="followup-input" rows="2" placeholder="Follow-up question (same scope)"></textarea>
+          <button class="secondary-action" type="submit">Ask</button>
+        </form>
+        <section class="decision-card boundary-card">
+          <p class="eyebrow">Boundary</p>
+          <p>推理结果先进入草稿态 finding。批准结论不会直接改写本体或正式图谱，结构性事实需要单独的写入提案。</p>
+        </section>
+      </aside>
     </main>
 
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
     <script src="/shell_app.js"></script>
-    <script src="/portal_app.js"></script>
+    <script src="/reasoning_app.js"></script>
   </body>
 </html>

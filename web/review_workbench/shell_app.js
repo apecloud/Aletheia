@@ -4,28 +4,49 @@ const SHELL_STORAGE = {
   collapsed: "aletheia.portal.sidebar.collapsed",
 };
 
+const SVG_ATTR = 'viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"';
+
+const ICONS = {
+  home: `<svg ${SVG_ATTR}><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>`,
+  "help-circle": `<svg ${SVG_ATTR}><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>`,
+  diamond: `<svg ${SVG_ATTR}><path d="M12 2l10 10-10 10L2 12z"/></svg>`,
+  list: `<svg ${SVG_ATTR}><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>`,
+  target: `<svg ${SVG_ATTR}><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>`,
+  "alert-triangle": `<svg ${SVG_ATTR}><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>`,
+  hexagon: `<svg ${SVG_ATTR}><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg>`,
+  server: `<svg ${SVG_ATTR}><rect x="2" y="2" width="20" height="8" rx="2" ry="2"/><rect x="2" y="14" width="20" height="8" rx="2" ry="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/></svg>`,
+  "shield-check": `<svg ${SVG_ATTR}><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><polyline points="9 12 11 14 15 10"/></svg>`,
+  "sun-moon": `<svg ${SVG_ATTR}><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>`,
+  languages: `<svg ${SVG_ATTR}><path d="M5 8l6 10"/><path d="M4 14h8"/><path d="M2 5h12"/><path d="M7 2v3"/><path d="M22 22l-5-10-5 10"/><path d="M14 18h6"/></svg>`,
+  menu: `<svg ${SVG_ATTR}><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="18" x2="21" y2="18"/></svg>`,
+  "chevron-left": `<svg ${SVG_ATTR}><polyline points="15 18 9 12 15 6"/></svg>`,
+  "chevron-right": `<svg ${SVG_ATTR}><polyline points="9 18 15 12 9 6"/></svg>`,
+  "refresh-cw": `<svg ${SVG_ATTR}><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>`,
+  play: `<svg ${SVG_ATTR}><polygon points="5 3 19 12 5 21 5 3"/></svg>`,
+  edit: `<svg ${SVG_ATTR}><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>`,
+  clock: `<svg ${SVG_ATTR}><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>`,
+};
+
+function icon(name) {
+  return ICONS[name] || "";
+}
+
 const NAV_ITEMS = [
-  ["#nav-workbench", "workbench", "⌂"],
-  ["#nav-questions", "questions", "?"],
-  ["#nav-findings", "findings", "◆"],
-  ["#nav-evidence", "evidence", "≡"],
-  ["#nav-explore", "explore", "◎"],
-  ["#nav-quality", "quality", "!"],
-  ["#nav-ontology", "ontology", "◇"],
-  ["#nav-runtime", "runtime", "▣"],
-  ["#nav-audit", "audit", "☷"],
+  ["#nav-workbench", "workbench", "home"],
+  ["#nav-ontology", "ontology", "hexagon"],
+  ["#nav-explore", "explore", "target"],
+  ["#nav-quality", "quality", "alert-triangle"],
+  ["#nav-history", "history_sessions", "clock"],
+  ["#nav-runtime", "runtime", "server"],
 ];
 
 const NAV_PATHS = {
   "#nav-workbench": "/",
-  "#nav-questions": "/questions.html",
-  "#nav-findings": "/findings.html",
-  "#nav-evidence": "/evidence.html",
+  "#nav-ontology": "/ontology.html",
+  "#nav-history": "/?view=history",
   "#nav-explore": "/graph.html",
   "#nav-quality": "/quality.html",
-  "#nav-ontology": "/ontology.html",
   "#nav-runtime": "/settings.html",
-  "#nav-audit": "/ontology.html",
 };
 
 const I18N = {
@@ -43,14 +64,12 @@ const I18N = {
     english: "EN",
     chinese: "中文",
     workbench: "Workbench",
-    questions: "Questions",
-    findings: "Findings",
-    evidence: "Evidence",
+    new_session: "New session",
+    history_sessions: "History",
     explore: "Explore",
     quality: "Quality",
     ontology: "Ontology",
     runtime: "Runtime",
-    audit: "Audit",
     "Reasoning Workbench": "Reasoning Workbench",
     "Reasoning Process": "Reasoning Process",
     "Unified reasoning process": "Unified reasoning process",
@@ -268,14 +287,12 @@ const I18N = {
     english: "EN",
     chinese: "中文",
     workbench: "工作台",
-    questions: "问题中心",
-    findings: "推理结论",
-    evidence: "证据链",
+    new_session: "新建会话",
+    history_sessions: "历史会话",
     explore: "探索",
     quality: "质量与异常",
     ontology: "本体",
     runtime: "运行环境",
-    audit: "审计",
     "Reasoning Workbench": "推理工作台",
     "Reasoning Process": "推理过程",
     "Unified reasoning process": "统一推理过程",
@@ -490,6 +507,7 @@ const ATTR_TRANSLATIONS = [
   ["#search", "placeholder", "Search name, key, description"],
   ["#instance-query", "placeholder", "Search Employee by id or name"],
   ["#reason", "placeholder", "Reason, comment, or reviewer note"],
+  ["#review-reason", "placeholder", "Reason, comment, or reviewer note"],
 ];
 
 function currentLang() {
@@ -527,7 +545,7 @@ function setCollapsed(collapsed) {
   localStorage.setItem(SHELL_STORAGE.collapsed, collapsed ? "1" : "0");
   const button = document.querySelector("#shell-collapse");
   if (button) {
-    button.textContent = collapsed ? "›" : "‹";
+    button.innerHTML = collapsed ? icon("chevron-right") : icon("chevron-left");
     button.title = collapsed ? t("expand") : t("collapse");
     button.setAttribute("aria-label", collapsed ? t("expand") : t("collapse"));
   }
@@ -546,12 +564,12 @@ function buildShell() {
   document.body.classList.add("shell-enhanced");
 
   const nav = shell.querySelector(".portal-nav");
-  NAV_ITEMS.forEach(([selector, key, icon]) => {
+  NAV_ITEMS.forEach(([selector, key, iconName]) => {
     const item = shell.querySelector(selector);
     if (!item) return;
     item.dataset.i18nKey = key;
-    item.dataset.icon = icon;
-    item.innerHTML = `<span class="nav-icon" aria-hidden="true">${icon}</span><span class="nav-label">${t(key)}</span>`;
+    item.dataset.icon = iconName;
+    item.innerHTML = `<span class="nav-icon" aria-hidden="true">${icon(iconName)}</span><span class="nav-label">${t(key)}</span>`;
     item.addEventListener("click", () => setMobileOpen(false));
   });
 
@@ -559,12 +577,12 @@ function buildShell() {
   controls.className = "shell-controls";
   controls.innerHTML = `
     <button id="shell-theme-toggle" class="shell-control" type="button" aria-pressed="false">
-      <span aria-hidden="true">◐</span><span id="shell-theme-label">${t("light")}</span>
+      <span aria-hidden="true">${icon("sun-moon")}</span><span id="shell-theme-label">${t("light")}</span>
     </button>
     <button id="shell-lang-toggle" class="shell-control" type="button" aria-pressed="false">
-      <span aria-hidden="true">文</span><span id="shell-lang-label">${t("english")}</span>
+      <span aria-hidden="true">${icon("languages")}</span><span id="shell-lang-label">${t("english")}</span>
     </button>
-    <button id="shell-collapse" class="shell-collapse" type="button" aria-label="${t("collapse")}" title="${t("collapse")}">‹</button>
+    <button id="shell-collapse" class="shell-collapse" type="button" aria-label="${t("collapse")}" title="${t("collapse")}">${icon("chevron-left")}</button>
   `;
   shell.appendChild(controls);
 
@@ -572,7 +590,7 @@ function buildShell() {
   mobileButton.id = "shell-mobile-toggle";
   mobileButton.className = "shell-mobile-toggle";
   mobileButton.type = "button";
-  mobileButton.textContent = "☰";
+  mobileButton.innerHTML = icon("menu");
   mobileButton.setAttribute("aria-label", t("open_nav"));
   document.body.appendChild(mobileButton);
 
@@ -601,15 +619,15 @@ function applyTenantNavLinks() {
   Object.entries(NAV_PATHS).forEach(([selector, path]) => {
     const el = document.querySelector(selector);
     if (!el) return;
-    const query = new URLSearchParams();
-    query.set("tenant", tenant);
+    const url = new URL(path, window.location.origin);
+    url.searchParams.set("tenant", tenant);
     if (path === "/graph.html") {
-      query.set("type", "Employee");
-      query.set("id", "4");
-      query.set("depth", "1");
-      query.set("limit", "200");
+      url.searchParams.set("type", "Employee");
+      url.searchParams.set("id", "4");
+      url.searchParams.set("depth", "1");
+      url.searchParams.set("limit", "200");
     }
-    el.href = `${path}?${query.toString()}`;
+    el.href = url.pathname + "?" + url.searchParams.toString();
   });
 }
 
@@ -663,6 +681,7 @@ window.AletheiaShell = {
   t,
   lang: currentLang,
   translate: translateShell,
+  icon,
 };
 
 buildShell();

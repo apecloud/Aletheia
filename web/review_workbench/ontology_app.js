@@ -21,7 +21,6 @@ const els = {
   navWorkbench: document.querySelector("#nav-workbench"),
   navInstances: document.querySelector("#nav-instances") || document.querySelector("#nav-explore"),
   navGraph: document.querySelector("#nav-graph") || document.querySelector("#nav-explore"),
-  navReasoning: document.querySelector("#nav-reasoning"),
   navSettings: document.querySelector("#nav-settings") || document.querySelector("#nav-runtime"),
   breadcrumb: document.querySelector("#breadcrumb"),
   empty: document.querySelector("#empty-state"),
@@ -155,7 +154,6 @@ function renderTenant(tenant) {
   els.navWorkbench.href = `/?tenant=${encodeURIComponent(state.tenant)}`;
   els.navInstances.href = `/instances.html?tenant=${encodeURIComponent(state.tenant)}&type=Employee&id=4`;
   els.navGraph.href = `/graph.html?tenant=${encodeURIComponent(state.tenant)}&type=Employee&id=4&depth=1`;
-  if (els.navReasoning) els.navReasoning.href = `/reasoning.html?tenant=${encodeURIComponent(state.tenant)}`;
   els.navSettings.href = `/settings.html?tenant=${encodeURIComponent(state.tenant)}`;
 }
 
