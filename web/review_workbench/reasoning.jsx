@@ -688,6 +688,7 @@ function Reasoning({ tenant }) {
           )}
           {askMode ? (
             <AskHero
+              tenant={tenant}
               question={question} setQuestion={setQuestion}
               centerNode={centerNode} setCenterNode={setCenterNode}
               depth={depth} setDepth={setDepth}
@@ -1407,15 +1408,16 @@ Object.assign(window, { TraceLog, TraceEventBody });
 /* ---------------- AskHero ----------------
    The centered ask form shown when askMode is true, or as
    empty state. Question-first, scope-second. */
-function AskHero({ question, setQuestion, centerNode, setCenterNode, depth, setDepth, limit, setLimit, isMock, submitting, actionMsg, onDismissMsg, onCancel, onSubmit }) {
-  // ESC closes the ask hero
+function AskHero({ tenant, question, setQuestion, centerNode, setCenterNode, depth, setDepth, limit, setLimit, isMock, submitting, actionMsg, onDismissMsg, onCancel, onSubmit }) {
+  const tenantId = tenant ? tenant.id : "default";
+
   React.useEffect(() => {
     function onKey(e) { if (e.key === "Escape") onCancel && onCancel(); }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [onCancel]);
 
-  const NODE_RE = /\b(Employee|Customer|Order|Product|Category|Region|Supplier|Shipper|Territory)[:\s#]+(\d+|\*)\b/i;
+  const NODE_RE = /\b(Employee|Customer|Order|Product|Category|Region|Supplier|Shipper|Territory)[:\s#]+(\w+|\*)\b/i;
   function extractNode(text) {
     const m = text.match(NODE_RE);
     if (!m) return null;
@@ -1426,15 +1428,133 @@ function AskHero({ question, setQuestion, centerNode, setCenterNode, depth, setD
     const q = e.target.value;
     setQuestion(q);
     const node = extractNode(q);
-    if (node) setCenterNode(node);
+    if (node) {
+      setCenterNode(node);
+      const [t] = node.split(":");
+      if (t && t !== pickedType) setPickedType(t);
+    }
   }
 
-  const suggestions = [
-    { q: "Why is Employee #4 workload unusual?", node: "Employee:4" },
-    { q: "What is the effective span of control for Employee #9?", node: "Employee:9" },
-    { q: "Is Customer #88 a concentration risk?", node: "Customer:88" },
-    { q: "Does tenure correlate with order cycle time?", node: "Employee:*" },
-  ];
+  // --- entity type list ---
+  const [entityTypes, setEntityTypes] = React.useState([]);
+  React.useEffect(() => {
+    (async () => {
+      try {
+        const data = await window.AL_API.fetchJson("/api/instances/types?tenant=" + encodeURIComponent(tenantId));
+        setEntityTypes((data.types || []).map(t => t.type || t.label));
+      } catch (_) {}
+    })();
+  }, [tenantId]);
+
+  // --- picked type (derived from centerNode or first available) ---
+  const currentType = centerNode && centerNode.includes(":") ? centerNode.split(":")[0] : "";
+  const [pickedType, setPickedType] = React.useState(currentType || "");
+  React.useEffect(() => {
+    if (!pickedType && entityTypes.length > 0) setPickedType(entityTypes[0]);
+  }, [entityTypes]);
+
+  // --- entity search ---
+  const [entityQuery, setEntityQuery] = React.useState("");
+  const [entities, setEntities] = React.useState([]);
+  const [entitiesLoading, setEntitiesLoading] = React.useState(false);
+  const [showDropdown, setShowDropdown] = React.useState(false);
+  const debounceRef = React.useRef(null);
+  const dropdownRef = React.useRef(null);
+
+  function fetchEntities(type, q) {
+    if (!type) return;
+    setEntitiesLoading(true);
+    const qs = new URLSearchParams({ tenant: tenantId, type, q: q || "", limit: "10" });
+    window.AL_API.fetchJson("/api/instances/search?" + qs.toString())
+      .then(data => { setEntities(data.instances || []); setEntitiesLoading(false); })
+      .catch(() => { setEntities([]); setEntitiesLoading(false); });
+  }
+
+  React.useEffect(() => {
+    if (pickedType) fetchEntities(pickedType, "");
+  }, [pickedType, tenantId]);
+
+  function onEntityQueryChange(e) {
+    const q = e.target.value;
+    setEntityQuery(q);
+    setShowDropdown(true);
+    clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => fetchEntities(pickedType, q), 250);
+  }
+
+  function selectEntity(ent) {
+    setCenterNode(ent.id);
+    setEntityQuery(ent.label || ent.id);
+    setShowDropdown(false);
+  }
+
+  function onTypeChange(e) {
+    const t = e.target.value;
+    setPickedType(t);
+    setEntityQuery("");
+    setCenterNode("");
+  }
+
+  // close dropdown on outside click
+  React.useEffect(() => {
+    function handler(e) {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target)) setShowDropdown(false);
+    }
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  const suggestions = React.useMemo(() => {
+    const type = pickedType || "";
+    const hasEntity = centerNode && centerNode.includes(":");
+    const selectedEnt = hasEntity && entities.find(e => e.id === centerNode);
+    const label = selectedEnt ? selectedEnt.label : (hasEntity ? centerNode : "");
+    const q = (question || "").trim();
+
+    if (hasEntity && label) {
+      if (q) {
+        const mentionsEntity = q.toLowerCase().includes(label.toLowerCase())
+          || q.includes(centerNode);
+        const base = mentionsEntity ? q : `${q} — ${label}`;
+        return [
+          { q: base, node: centerNode },
+          { q: `${base}, compared to other ${type}s`, node: centerNode },
+          { q: `What evidence supports "${q}" for ${label}?`, node: centerNode },
+          { q: `Give a complete summary of ${label}`, node: centerNode },
+        ];
+      }
+      return [
+        { q: `Give a summary of ${label}`, node: centerNode },
+        { q: `What are the key relationships for ${label}?`, node: centerNode },
+        { q: `How does ${label} compare to other ${type}s?`, node: centerNode },
+        { q: `Are there any anomalies or risks related to ${label}?`, node: centerNode },
+      ];
+    }
+    if (type) {
+      const samples = entities.slice(0, 2);
+      if (q) {
+        const out = [
+          { q: `${q} — across all ${type}s`, node: `${type}:*` },
+        ];
+        for (const ent of samples) {
+          out.push({ q: `${q} — ${ent.label || ent.id}`, node: ent.id });
+        }
+        out.push({ q: `Are there anomalies among ${type}s?`, node: `${type}:*` });
+        return out;
+      }
+      const base = [
+        { q: `Which ${type}s have the highest activity?`, node: `${type}:*` },
+        { q: `Are there anomalies among ${type}s?`, node: `${type}:*` },
+      ];
+      for (const ent of samples) {
+        base.push({ q: `Give a summary of ${ent.label || ent.id}`, node: ent.id });
+      }
+      return base;
+    }
+    return [
+      { q: "Select a center node to see suggested questions", node: "" },
+    ];
+  }, [pickedType, centerNode, entities, question]);
   return (
     <div style={{ flex: 1, overflow: "auto", padding: "var(--pad-5) var(--pad-6)", position: "relative" }}>
       {/* close button — top right of the canvas */}
@@ -1507,8 +1627,51 @@ function AskHero({ question, setQuestion, centerNode, setCenterNode, depth, setD
             <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr", borderTop: "1px solid var(--line)" }}>
               <div style={{ padding: "var(--pad-3) var(--pad-4)", borderRight: "1px solid var(--line)" }}>
                 <div className="eyebrow" style={{ marginBottom: 4 }}>Center node</div>
-                <input className="input" value={centerNode} onChange={e => setCenterNode(e.target.value)}
-                       placeholder="Employee:4" />
+                <div style={{ display: "flex", gap: 6 }} ref={dropdownRef}>
+                  <select className="input" value={pickedType} onChange={onTypeChange}
+                          style={{ width: 110, flexShrink: 0, cursor: "pointer" }}>
+                    {entityTypes.map(t => <option key={t} value={t}>{t}</option>)}
+                  </select>
+                  <div style={{ flex: 1, position: "relative" }}>
+                    <input className="input" style={{ width: "100%" }}
+                           value={entityQuery}
+                           onChange={onEntityQueryChange}
+                           onFocus={() => setShowDropdown(true)}
+                           placeholder={entitiesLoading ? "Loading…" : entities.length ? entities[0].label || entities[0].id : "Search…"} />
+                    {showDropdown && entities.length > 0 && (
+                      <div style={{
+                        position: "absolute", top: "100%", left: 0, right: 0, zIndex: 20,
+                        maxHeight: 240, overflowY: "auto",
+                        background: "var(--bg-2)", border: "1px solid var(--line-strong)",
+                        boxShadow: "0 8px 24px rgba(0,0,0,0.35)",
+                      }}>
+                        {entities.map(ent => {
+                          const selected = centerNode === ent.id;
+                          return (
+                            <div key={ent.id}
+                                 onClick={() => selectEntity(ent)}
+                                 style={{
+                                   padding: "7px 10px", cursor: "pointer",
+                                   display: "flex", alignItems: "center", gap: 8,
+                                   background: selected ? "var(--bg-3)" : "transparent",
+                                   borderBottom: "1px solid var(--line)",
+                                 }}
+                                 onMouseEnter={e => e.currentTarget.style.background = "var(--bg-3)"}
+                                 onMouseLeave={e => { if (!selected) e.currentTarget.style.background = "transparent"; }}>
+                              <span style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--muted)", minWidth: 80 }}>{ent.id}</span>
+                              <span style={{ fontSize: 12, color: "var(--text)" }}>{ent.label}</span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                </div>
+                {centerNode && (
+                  <div style={{ marginTop: 4, fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--accent)", letterSpacing: "0.04em" }}>
+                    {centerNode}
+                  </div>
+                )}
               </div>
               <div style={{ padding: "var(--pad-3) var(--pad-4)", borderRight: "1px solid var(--line)" }}>
                 <div className="eyebrow" style={{ marginBottom: 4 }}>Depth</div>
@@ -1569,25 +1732,37 @@ function AskHero({ question, setQuestion, centerNode, setCenterNode, depth, setD
               return (
               <button key={i}
                       type="button"
-                      onClick={() => { setQuestion(s.q); setCenterNode(s.node); }}
+                      disabled={!s.node}
+                      onClick={() => {
+                        setQuestion(s.q);
+                        if (s.node) {
+                          setCenterNode(s.node);
+                          const [t] = s.node.split(":");
+                          if (t) setPickedType(t);
+                          const ent = entities.find(e => e.id === s.node);
+                          setEntityQuery(ent ? ent.label : "");
+                        }
+                      }}
                       style={{
                         textAlign: "left",
                         padding: "12px 14px",
                         border: "1px solid " + (active ? "var(--accent-line)" : "var(--line)"),
                         background: active ? "var(--bg-3)" : "var(--bg-2)",
-                        color: active ? "var(--text)" : "var(--text-dim)",
+                        color: !s.node ? "var(--dim)" : active ? "var(--text)" : "var(--text-dim)",
                         fontFamily: "var(--font-sans)",
                         fontSize: 13,
-                        cursor: "pointer",
+                        cursor: s.node ? "pointer" : "default",
                         lineHeight: 1.45,
                         transition: "border-color 100ms, color 100ms",
                       }}
                       onMouseEnter={e => { e.currentTarget.style.borderColor = "var(--accent-line)"; e.currentTarget.style.color = "var(--text)"; }}
                       onMouseLeave={e => { if (!active) { e.currentTarget.style.borderColor = "var(--line)"; e.currentTarget.style.color = "var(--text-dim)"; } }}>
                 <div>{s.q}</div>
+                {s.node && (
                 <div style={{ marginTop: 4, fontFamily: "var(--font-mono)", fontSize: 10, color: active ? "var(--accent)" : "var(--dim)", textTransform: "uppercase", letterSpacing: "0.08em" }}>
                   center · {s.node}
                 </div>
+                )}
               </button>);
             })}
           </div>
