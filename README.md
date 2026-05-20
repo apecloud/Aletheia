@@ -1,185 +1,144 @@
-# Aletheia (αλήθεια)
+# Aletheia
 
-> **"Unveiling the Semantic Truth Hidden Within Legacy Data."**
+> Unveiling the semantic truth hidden within legacy data.
 
-**Aletheia** is an AI-native, Multi-Agent orchestration framework designed to automate the transformation of traditional Relational Databases (RDBMS) into rich, object-centric **Business Ontologies**. 
+Aletheia is a multi-agent framework that transforms relational databases into business ontologies. It extracts latent semantics from legacy schemas, reconstructs them as typed objects and links in a knowledge graph, and reasons over the result.
 
-By leveraging the "unconcealment" philosophy, Aletheia bridges the gap between fragmented legacy data silos and the deterministic, semantic reasoning required by next-generation AI Agents.
+## Architecture
 
----
-
-## 🌟 The Vision
-
-Traditional databases are fossils of business logic—structured for storage, not for understanding. **Aletheia** acts as a "Digital Archeologist," using a collaborative swarm of specialized LLM agents to:
-1.  **Extract** latent business meaning from cryptic schemas.
-2.  **Reconstruct** data into real-world Objects and Links.
-3.  **Enable** safe, closed-loop Actions for AI-driven decision making.
-
----
-
-## 🏗 Multi-Agent Architecture
-
-Aletheia operates through a decentralized group of specialized agents, each focused on a specific layer of the transformation lifecycle:
-
-### 1. Knowledge Extraction Group (The Archeologists)
-* **Metadata Scraper Agent**: Scans DDLs, constraints, and comments to build the physical foundation.
-* **Data Profiler Agent**: Analyzes data distributions and samples to validate semantic hypotheses.
-* **Business Context Agent**: Ingests external documentation (PDFs, APIs) to align technical tables with business terminology.
-
-### 2. Design & Modeling Group (The Architects)
-* **Object Modeler Agent**: Collapses normalized tables into cohesive, high-level Business Objects.
-* **Link Weaver Agent**: Discovers explicit and implicit relationships (Links) across the enterprise graph.
-* **Action Synthesizer Agent**: Maps stored procedures and triggers to executable, safe business Actions.
-
-### 3. Validation & Testing Group (The Guardians)
-* **Semantic Consistency Agent**: Ensures the generated ontology is logically sound and free of contradictions.
-* **Ontology Reasoning Agent**: Performs deep, multi-hop graph reasoning to solve complex business queries directly on the semantic map.
-
----
-
-## 🚀 Key Features
-
-* **Zero-ETL Transition**: Create a semantic "Digital Twin" overlay without moving your data.
-* **LLM-Ready Tooling**: Automatically exports the ontology into a format compatible with Palantir AIP-style tool-calling for LLMs.
-* **Actionable Governance**: Encapsulates database writes into audited "Actions," preventing AI hallucinations from corrupting production systems.
-* **PostGIS Ontology Storage**: Stores the semantic map natively in PostgreSQL with PostGIS capabilities.
-
----
-
-## 🛠 Deployment and Testing Guide
-
-The Aletheia project is implemented as a pipeline of Python-based LLM Agents (powered by `litellm` and `instructor`), prioritizing the **Gemini 3.1 Pro Preview** model.
-
-## 🌈 Multi-Tenant & Multi-Database Architecture
-
-Aletheia natively supports fully isolated, dynamic multi-tenant environments. You can target different Source Databases, Metadata Databases (PostGIS), and Graph Spaces (Nebula Graph) simultaneously by simply injecting environment variables before running the agents:
-
-```bash
-# Example: Running the pipeline for Tenant B
-export ALETHEIA_MYSQL_DB="tenant_b_raw_data"
-export ALETHEIA_PG_DB="tenant_b_ontology"
-export ALETHEIA_GRAPH_SPACE="tenant_b_graph_space"
-
-./scripts/load_complex_ecommerce_dataset.sh all
+```
+Source DB (MySQL)  -->  Agent Pipeline  -->  Ontology (PostGIS)  -->  Graph (Nebula)
+                                                                        |
+                                                                  Reasoning Workspace
 ```
 
-The agents and graph clients will dynamically pick up the credentials, create the isolated schemas/spaces, and ensure absolute data segmentation.
+### Agents
 
-### 1. Prerequisites
-* Python 3.11+
-* **MySQL**: Source database for legacy/raw data (`aletheia_test_data` at `127.0.0.1:3306`).
-* **PostgreSQL + PostGIS**: Target database for the semantic ontology (`aletheia_ontology` at `127.0.0.1:5432`).
-* **API Key**: Export your Gemini API Key:
-  ```bash
-  export GEMINI_API_KEY="your-api-key"
-  ```
+The pipeline is a sequence of Python agents powered by `litellm` + `instructor` (default model: `gemini/gemini-3.1-pro-preview`).
 
-### 2. Environment Setup
-Clone the repository and install the dependencies:
+| Phase | Agent | What it does |
+|-------|-------|-------------|
+| Extract | `metadata_scraper_agent` | Scans DDLs, constraints, comments into PostGIS |
+| Extract | `data_profiler_agent` | Profiles distributions to infer semantic types |
+| Extract | `business_context_agent` | Aligns tables with business terminology from `./docs/` |
+| Extract | `data_scraper_agent` | Ingests CSV/JSON/JSONL from URLs or local paths |
+| Model | `object_modeler_agent` | Collapses normalized tables into business objects |
+| Model | `link_weaver_agent` | Discovers explicit and implicit relationships |
+| Model | `action_synthesizer_agent` | Maps stored procedures/triggers to safe actions |
+| Validate | `semantic_consistency_agent` | Checks for contradictions, orphans, missing links |
+| Reason | `ontology_reasoning_agent` | Multi-hop graph reasoning over live subgraphs |
+
+Supporting modules: `graph_db_client` (Nebula client), `ontology_artifacts` (artifact schema), `tenant_registry` (multi-tenant routing), `hf_dataset_scraper` (HuggingFace dataset loader).
+
+## Quick Start
+
+### Prerequisites
+
+- Python 3.11+
+- Docker (for databases)
+- Gemini API key
+
+### 1. Start infrastructure
+
 ```bash
-git clone https://github.com/your-username/aletheia.git
-cd aletheia
-python -m venv .venv
-source .venv/bin/activate
+docker compose -f docker/docker-compose.yml up -d
+export GEMINI_API_KEY="your-key"
+```
+
+This starts MySQL 8.0 (source data), PostGIS 15 (ontology store), and Nebula Graph 3.6 (knowledge graph).
+
+### 2. Install dependencies
+
+```bash
+python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-Ensure your database users (`aletheia_user` for MySQL, `aletheia_pg_user` for PostgreSQL) and schemas are created and accessible.
+### 3. Run the pipeline
 
-### 3. Step-by-Step Execution Pipeline
-
-Aletheia provides a set of shell scripts in the `scripts/` directory to run the agents in the correct sequence.
-
-#### Phase 0: Load Test Data
-Load a complex, normalized E-commerce dataset (TPC-H style/Northwind) into the raw MySQL database to act as our legacy system.
 ```bash
+# Load test data (Northwind/TPC-H style)
 ./scripts/load_complex_ecommerce_dataset.sh
-```
 
-*(Note: The `Data Scraper Agent` now natively supports ingesting raw `CSV`, `JSON`, and `JSONL` formats from both remote URLs and local file paths, automatically flattening nested JSON structures to align with SQL columns).*
-
-#### Phase 1: Knowledge Extraction
-Extract the physical schema and align it with external business context.
-```bash
-# 1. Scrape raw metadata (tables, columns, types) into PostGIS
+# Extract
 ./scripts/run_metadata_scraper.sh
-
-# 2. Profile the data to infer semantic types
 ./scripts/run_data_profiler.sh
-
-# 3. Align technical tables with human-readable business context 
-# (Reads from ./docs/ if external documentation exists)
 ./scripts/run_business_context.sh
-```
 
-#### Phase 2: Design & Modeling
-Let the AI Architects reconstruct the fragmented tables into a cohesive business graph and extract executable actions.
-```bash
-# 1. Collapse tables into Business Objects and discover Links
+# Model
 ./scripts/run_design_modeling.sh
-
-# 2. Extract and sanitize stored procedures/triggers into Business Actions
 ./scripts/run_action_synthesizer.sh
-```
 
-#### Phase 3: Graph Ingestion
-Load the generated objects and links into Nebula Graph to establish the true Business Ontology. This step finalizes the knowledge graph, enabling deterministic reasoning.
-```bash
-# Ingest only Relationship Edges (Phase 2)
-./scripts/run_graph_ingestion.sh 2
-
-# Ingest both Object Nodes and Relationship Edges (Phase All)
+# Ingest into graph
 ./scripts/run_graph_ingestion.sh all
-```
 
-#### Phase 4: Semantic Validation
-Ensure the generated ontology is logically sound and free of contradictions.
-```bash
-# Check for logical contradictions, missing links, or orphaned objects
+# Validate
 ./scripts/run_semantic_consistency.sh
-```
 
-#### Phase 5: Deep Ontology Graph Reasoning
-Leverage the complete ontology network (Metadata + Semantic Profiles) alongside **LIVE data dynamically fetched** from Nebula Graph to perform complex multi-hop business deductions.
-```bash
-# Execute analytical Graph Reasoning cases on real Subgraphs (e.g. dynamic LTV calculation, Supply Chain Risk)
+# Reason
 ./scripts/run_ontology_reasoning.sh
 ```
 
-### 4. Inspecting the Ontology & Reasoning Results
-Once the pipeline is complete, you can review the profound business insights generated by the Graph Reasoning Agent. The dynamic runtime outputs are saved to `run_reasoning_result.md`.
-
-You can also check out our pre-computed [EXAMPLE_REASONING_RESULT.md](./EXAMPLE_REASONING_RESULT.md) on GitHub to see the depth of analysis Aletheia provides.
+### 4. Inspect results
 
 ```bash
-# View the Deep Ontology Graph Reasoning Results from your current run
-cat run_reasoning_result.md
+cat run_reasoning_result.md                 # reasoning output
+.venv/bin/python query_metadata.py --all    # ontology in PostGIS
+.venv/bin/python query_artifacts.py         # artifact status
+.venv/bin/python query_graph.py             # graph queries
 ```
 
-You can also use the unified query tool to explore the AI-generated Semantic Map stored in PostGIS.
+See [EXAMPLE_REASONING_RESULT.md](./EXAMPLE_REASONING_RESULT.md) for a pre-computed sample.
+
+## Multi-Tenant Support
+
+Aletheia isolates tenants across source databases, ontology schemas, and graph spaces. Configure tenants in `config/tenants.example.json` or override per-run with environment variables:
 
 ```bash
-# View everything (Tables, Columns, Objects, Links, Actions)
-.venv/bin/python query_metadata.py --all
+export ALETHEIA_MYSQL_DB="tenant_b_raw_data"
+export ALETHEIA_PG_DB="tenant_b_ontology"
+export ALETHEIA_GRAPH_SPACE="tenant_b_graph_space"
 ```
 
-### 5. Review Workbench
-The Review Workbench is a local, browser-based front end for the artifact review gate. It keeps the P1 scope focused on human review rather than a marketing page: artifact list, evidence detail, approve/reject/needs-changes/comment/edit actions, audit history, and approved-only publishing status.
+## Review Workbench
+
+A browser-based workspace for ontology review and reasoning.
 
 ```bash
 .venv/bin/python review_workbench.py --host 127.0.0.1 --port 8765
 ```
 
-Open <http://127.0.0.1:8765>. The workbench uses `ALETHEIA_PG_URL` or `ALETHEIA_PG_DB` the same way the existing CLI tools do. Review actions record audit events in `aletheia_artifact_reviews`; only `approved` artifacts are eligible for default graph ingestion.
+Open <http://127.0.0.1:8765>. The workbench connects to PostGIS via `ALETHEIA_PG_URL` or `ALETHEIA_PG_DB` and to the source database via `ALETHEIA_MYSQL_URL` or `ALETHEIA_MYSQL_DB`.
 
-For a brand-new metadata database, run the artifact pipeline or start once with `--ensure-schema` before opening the page.
+Views:
 
-The same local server also exposes the Instance Explorer MVP at <http://127.0.0.1:8765/instances.html>. The first MVP is intentionally narrow: approved `Employee -> Orders` 1-hop browsing only. It uses `ALETHEIA_MYSQL_URL` or `ALETHEIA_MYSQL_DB` for source rows and `ALETHEIA_PG_URL` or `ALETHEIA_PG_DB` for approved ontology artifacts.
+| Path | Purpose |
+|------|---------|
+| `/` | Reasoning workspace -- ontology-driven question/evidence/conclusion workflow |
+| `/ontology.html` | Browse and review ontology artifacts (objects, links, actions) |
+| `/instances.html` | Explore live instance data through approved ontology |
+| `/graph.html` | Interactive graph explorer with subgraph navigation |
+| `/quality.html` | Data quality and consistency checks |
+| `/reasoning.html` | Standalone reasoning session view |
+| `/settings.html` | Runtime configuration and tenant management |
 
----
+For a fresh database, start once with `--ensure-schema` to create the required tables.
 
-## 🤝 Contributing
-We welcome contributions to Aletheia! Whether it's adding a new database connector or improving the reasoning logic of our agents, please check out our `CONTRIBUTING.md`.
+## Project Layout
 
-## 📄 License
-This project is licensed under the Apache 2.0 License - see the `LICENSE` file for details.
+```
+agents/          LLM agent implementations
+config/          Tenant configuration
+datasets/        Sample/test datasets
+docker/          docker-compose for MySQL, PostGIS, Nebula
+docs/            Business context documents for agents
+evals/           Ontology evaluation suite
+reports/         Generated reports
+scripts/         Pipeline runner scripts
+tests/           Test suite
+web/             Review workbench frontend
+```
+
+## License
+
+Apache 2.0 -- see `LICENSE`.
