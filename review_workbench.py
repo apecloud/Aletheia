@@ -1191,15 +1191,15 @@ class ReasoningRepository:
     def delete_task(self, tenant, task_key):
         with self.metadata_engine_for(tenant).begin() as conn:
             task_row = conn.execute(
-                text("SELECT id FROM aletheia_reasoning_tasks WHERE project_id = :tid AND canonical_key = :key AND status = 'closed'"),
+                text("SELECT id FROM aletheia_reasoning_tasks WHERE project_id = :tid AND canonical_key = :key"),
                 {"tid": tenant.tenant_id, "key": task_key},
             ).mappings().first()
             if not task_row:
                 return None
-            wh = "t.project_id = :tid AND t.canonical_key = :key AND t.status = 'closed'"
+            wh = "t.project_id = :tid AND t.canonical_key = :key"
             params = {"tid": tenant.tenant_id, "key": task_key}
             self._delete_task_cascade(conn, wh, params)
-            conn.execute(text("DELETE FROM aletheia_reasoning_tasks WHERE project_id = :tid AND canonical_key = :key AND status = 'closed'"), params)
+            conn.execute(text("DELETE FROM aletheia_reasoning_tasks WHERE project_id = :tid AND canonical_key = :key"), params)
         return {"deleted": True, "canonical_key": task_key}
 
     def _delete_task_cascade(self, conn, where_clause, params):
@@ -3640,7 +3640,7 @@ class ReviewWorkbenchHandler(BaseHTTPRequestHandler):
             task_key = unquote(parsed.path.removeprefix("/api/reasoning/tasks/").removesuffix("/delete").rstrip("/"))
             result = self.reasoning_repository.delete_task(tenant, task_key)
             if result is None:
-                self._send_error(HTTPStatus.NOT_FOUND, f"Task not found or not closed: {task_key}")
+                self._send_error(HTTPStatus.NOT_FOUND, f"Task not found: {task_key}")
                 return
             self._send_json(result)
             return

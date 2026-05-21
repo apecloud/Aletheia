@@ -554,7 +554,122 @@ class ReasoningEngine:
         )
 
     # ------------------------------------------------------------------
-    # Compose narrative
+    # Narrative builder
+    # ------------------------------------------------------------------
+
+    def _build_narrative(self, label, object_type, entity_desc, props, self_refs,
+                         rankings, link_stats, value_aggs, neighbors_by_type, question):
+        """Synthesize computed data into an analytical paragraph."""
+        sentences = []
+
+        # Identity sentence — role/title + context
+        title_prop = next((p for p in props if p["col"].lower() in ("title", "contacttitle", "jobtitle", "role")), None)
+        identity = f"{label}"
+        if title_prop:
+            identity += f" ({title_prop['value']})"
+        if self_refs:
+            ref = list(self_refs.values())[0]
+            identity += f", reporting to {ref['label']}"
+
+        # Activity level sentence
+        if rankings:
+            r = rankings[0]
+            ratio = r["my_count"] / r["avg"] if r["avg"] > 0 else 1
+            if r["level"] == "high":
+                sentences.append(
+                    f"{identity} is a high-activity {object_type} with {r['my_count']} {r['target_type']}(s), "
+                    f"ranking #{r['rank']} out of {r['total_peers']} peers — "
+                    f"{ratio:.1f}x the average of {r['avg']}."
+                )
+            elif r["level"] == "low":
+                sentences.append(
+                    f"{identity} shows below-average activity with {r['my_count']} {r['target_type']}(s), "
+                    f"ranking #{r['rank']} out of {r['total_peers']} peers "
+                    f"(avg {r['avg']}, max {r['max']})."
+                )
+            else:
+                sentences.append(
+                    f"{identity} has {r['my_count']} {r['target_type']}(s), "
+                    f"ranking #{r['rank']} out of {r['total_peers']} peers — "
+                    f"near the average of {r['avg']}."
+                )
+        else:
+            sentences.append(f"{identity} is present in the approved graph with {sum(len(v) for v in neighbors_by_type.values())} related entities.")
+
+        # Value contribution sentence
+        for va in value_aggs:
+            share_pct = round(va["value_share"] * 100, 1)
+            sentences.append(
+                f"Revenue contribution is {_fmt_number(va['my_value'])} "
+                f"({share_pct}% of the {_fmt_number(va['total_value'])} total)"
+                + (f", ranked #{va['value_rank']}/{va['value_total_peers']} by value" if va.get("value_rank") else "")
+                + "."
+            )
+            # Category concentration
+            cats = va.get("category_breakdown", [])
+            if cats:
+                top_cat = cats[0]
+                top_share = round(top_cat["value"] / va["my_value"] * 100) if va["my_value"] > 0 else 0
+                if top_share > 30:
+                    sentences.append(
+                        f"Revenue is concentrated in {top_cat['label']} ({top_share}% of total), "
+                        f"followed by {cats[1]['label']}" + (f" and {cats[2]['label']}" if len(cats) > 2 else "") + "."
+                    )
+                elif len(cats) >= 3:
+                    sentences.append(
+                        f"Revenue is diversified across {cats[0]['label']}, {cats[1]['label']}, and {cats[2]['label']}."
+                    )
+
+        # Trend sentence
+        for i, r in enumerate(rankings):
+            stats = link_stats[i] if i < len(link_stats) else {}
+            yearly = stats.get("yearly", [])
+            if len(yearly) >= 2:
+                first_yr, last_yr = yearly[0], yearly[-1]
+                peak = max(yearly, key=lambda y: y["count"])
+                if last_yr["count"] > first_yr["count"] * 1.3:
+                    sentences.append(
+                        f"Activity grew from {first_yr['count']} ({first_yr['year']}) to {last_yr['count']} ({last_yr['year']})"
+                        + (f", peaking at {peak['count']} in {peak['year']}" if peak != last_yr else "")
+                        + " — an upward trajectory."
+                    )
+                elif first_yr["count"] > last_yr["count"] * 1.3:
+                    sentences.append(
+                        f"Activity declined from {first_yr['count']} ({first_yr['year']}) to {last_yr['count']} ({last_yr['year']})"
+                        + (f" after peaking at {peak['count']} in {peak['year']}" if peak != first_yr else "")
+                        + " — a downward trend worth investigating."
+                    )
+                else:
+                    sentences.append(
+                        f"Activity has been stable across {len(yearly)} years "
+                        f"({first_yr['count']}–{last_yr['count']} {r['target_type']}(s) per year)."
+                    )
+
+        # Counterparty concentration
+        for i, r in enumerate(rankings):
+            stats = link_stats[i] if i < len(link_stats) else {}
+            distinct = stats.get("distinct_counterparties", {})
+            top_cps = stats.get("top_counterparties", {})
+            for cp_type, cp_data in top_cps.items():
+                items = cp_data.get("items", [])
+                total_distinct = distinct.get(cp_type, 0)
+                if items and total_distinct > 0 and r["my_count"] > 0:
+                    top_share = round(items[0]["count"] / r["my_count"] * 100)
+                    if top_share > 20:
+                        sentences.append(
+                            f"Top {cp_type} {items[0]['label']} accounts for {top_share}% of activity "
+                            f"across {total_distinct} distinct {cp_type}(s) — moderate concentration risk."
+                        )
+                    else:
+                        sentences.append(
+                            f"Activity is spread across {total_distinct} distinct {cp_type}(s), "
+                            f"with no single {cp_type} exceeding {top_share}% — well diversified."
+                        )
+
+        return " ".join(sentences)
+
+    # ------------------------------------------------------------------
+    # Compose structured output
     # ------------------------------------------------------------------
 
     def _compose(self, *, center_node, object_type, instance_id, label, cfg,
@@ -710,26 +825,19 @@ class ReasoningEngine:
         if not interpretations:
             interpretations.append(f"{label} has {len(edges)} direct relationships in the approved graph.")
 
-        # --- Profile summary ---
+        # --- Profile summary (analytical narrative) ---
+        profile_summary = self._build_narrative(
+            label, object_type, entity_desc, props, self_refs,
+            rankings, link_stats, value_aggs, neighbors_by_type, question,
+        )
+
+        # --- Title ---
         ranking_highlights = []
         for r in rankings:
             ranking_highlights.append(f"{r['my_count']} {r['target_type']}(s) (#{r['rank']}/{r['total_peers']}, {r['level']})")
         value_highlights = []
         for va in value_aggs:
             value_highlights.append(f"value {_fmt_number(va['my_value'])} ({round(va['value_share'] * 100, 1)}% share)")
-
-        summary_parts = []
-        if ranking_highlights:
-            summary_parts.append(", ".join(ranking_highlights))
-        if value_highlights:
-            summary_parts.append(", ".join(value_highlights))
-        if props:
-            notable = [p for p in props if p["col"] not in ("photo", "notes", "homePhone", "extension", "photoPath")][:3]
-            summary_parts.append("; ".join(f"{p['col']}: {p['value']}" for p in notable))
-
-        profile_summary = f"{label}: " + ". ".join(summary_parts) + "." if summary_parts else f"{label} entity profile."
-
-        # --- Title ---
         title_parts = ranking_highlights[:2]
         if value_highlights and len(title_parts) < 2:
             title_parts.extend(value_highlights[:1])

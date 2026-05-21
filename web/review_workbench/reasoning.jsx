@@ -120,6 +120,17 @@ function Reasoning({ tenant }) {
   const [running, setRunning] = useStateRX(false);
   const [askMode, setAskMode] = useStateRX(false);
   const [submitting, setSubmitting] = useStateRX(false);
+
+  const NODE_RE = /\b(Employee|Customer|Order|Product|Category|Region|Supplier|Shipper|Territory)[:\s#]+(\w+|\*)\b/i;
+  function onQuestionChangeWithExtract(e) {
+    const q = e.target.value;
+    setQuestion(q);
+    const m = q.match(NODE_RE);
+    if (m) {
+      const type = m[1].charAt(0).toUpperCase() + m[1].slice(1).toLowerCase();
+      setCenterNode(type + ":" + m[2]);
+    }
+  }
   const [evidenceFilter, setEvidenceFilter] = useStateRX("all");
   const [localTasks, setLocalTasks] = useStateRX([]);  // mock-mode submitted tasks
   // live SSE trace, keyed by canonical_key so it persists when user switches tasks
@@ -534,8 +545,9 @@ function Reasoning({ tenant }) {
   }
 
   async function deleteTask(taskKey) {
-    if (!confirm("Delete this closed task? This cannot be undone.")) return;
+    if (!confirm("Delete this task? This cannot be undone.")) return;
     try {
+      try { await window.AL_API.closeTask(taskKey, tenant.id); } catch (_) {}
       await window.AL_API.deleteTask(taskKey, tenant.id);
       setLocalTasks(prev => prev.filter(t => t.canonical_key !== taskKey));
       if (selectedKey === taskKey) setSelectedKey(null);
@@ -634,7 +646,7 @@ function Reasoning({ tenant }) {
                     <div className="ar-top">
                       <span className="type">TASK</span>
                       <span>·</span>
-                      <span className="key">{t.canonical_key}</span>
+                      <span className="key" style={{ color: "var(--text)" }}>{t.question || t.name || t.canonical_key}</span>
                       {ts.isRunning && !ts.isStale && (
                         <span style={{ marginLeft: "auto", color: "var(--accent)", display: "inline-flex", alignItems: "center", gap: 4 }}>
                           <span style={{ width: 6, height: 6, background: "var(--accent)", display: "inline-block", animation: "pulse 1s ease-in-out infinite" }} />
@@ -647,22 +659,42 @@ function Reasoning({ tenant }) {
                         </span>
                       )}
                     </div>
-                    <div className="ar-title">{t.name || t.question || t.canonical_key}</div>
                     <div className="ar-meta">
                       <span>{t.center_node || "—"}</span>
                       {t.id != null && <span>#{t.id}</span>}
                       <span>{fmtTime(t.created_at)}</span>
                     </div>
                   </div>
-                  <div className="ar-right" style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                    {t.status}
-                    {(t.status || "").toLowerCase() === "closed" && (
-                      <button className="btn xs ghost" title="Delete this closed task"
-                              onClick={e => { e.stopPropagation(); deleteTask(t.canonical_key); }}
-                              style={{ padding: "2px 5px", fontSize: 9, color: "var(--rejected)", border: "1px solid var(--line)" }}>
-                        ✕
-                      </button>
-                    )}
+                  <div className="ar-right" style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 4 }}>
+                    <Pill kind={statusToPill[t.status] || "proposed"}>{t.status}</Pill>
+                    <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                      {ts.isRunning && !ts.isStale && (
+                        <button className="btn xs ghost" title="Stop task"
+                                onClick={e => { e.stopPropagation(); setSelectedKey(t.canonical_key); stopAndClose(); }}
+                                style={{ padding: "4px 7px", fontSize: 12, color: "var(--rejected)", border: "1px solid oklch(0.66 0.18 25 / 0.3)", lineHeight: 1, borderRadius: 4 }}>
+                          ■
+                        </button>
+                      )}
+                      {!ts.isRunning && (
+                        <React.Fragment>
+                          <button className="btn xs ghost" title="Rerun (new task)"
+                                  onClick={e => { e.stopPropagation(); setSelectedKey(t.canonical_key); setTimeout(runTask, 50); }}
+                                  style={{ padding: "4px 7px", color: "var(--accent)", border: "1px solid var(--line)", lineHeight: 1, borderRadius: 4 }}>
+                            <span style={{ display: "inline-flex", width: 16, height: 16 }} dangerouslySetInnerHTML={{ __html: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 8a5.5 5.5 0 0 1 9.3-4"/><path d="M13.5 8a5.5 5.5 0 0 1-9.3 4"/><path d="M11.8 1.5V4h-2.5"/><path d="M4.2 14.5V12h2.5"/></svg>' }} />
+                          </button>
+                          <button className="btn xs ghost" title="Delete task"
+                                  onClick={e => { e.stopPropagation(); deleteTask(t.canonical_key); }}
+                                  style={{ padding: "4px 7px", color: "var(--muted)", border: "1px solid var(--line)", lineHeight: 1, borderRadius: 4 }}>
+                            <span style={{ display: "inline-flex", width: 16, height: 16 }} dangerouslySetInnerHTML={{ __html: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M3 4h10M5.5 4V3a1 1 0 0 1 1-1h3a1 1 0 0 1 1 1v1M4.5 4l.7 9.1a1 1 0 0 0 1 .9h3.6a1 1 0 0 0 1-.9L11.5 4"/></svg>' }} />
+                          </button>
+                        </React.Fragment>
+                      )}
+                      {t.confidence != null && (
+                        <span style={{ fontFamily: "var(--font-mono)", fontSize: 9, color: "var(--accent)", letterSpacing: "0.04em" }}>
+                          {Math.round((t.confidence || 0) * 100)}%
+                        </span>
+                      )}
+                    </div>
                   </div>
                 </div>
                 );
@@ -729,8 +761,6 @@ function Reasoning({ tenant }) {
                         {isTaskRunning ? "Polling · " + pollTick : "Running…"}
                       </span>
                     )}
-                    <Pill kind={statusToPill[task.status] || "proposed"}>{task.status}</Pill>
-                    {task.confidence != null && <Pill kind="accent">conf {Math.round((task.confidence||0) * 100)}%</Pill>}
                   </span>
                 </div>
                 <h1>{task.name || task.question || "Untitled reasoning task"}</h1>
@@ -1008,13 +1038,10 @@ function Reasoning({ tenant }) {
               <form onSubmit={submitQuestion} style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                 <div>
                   <div className="eyebrow" style={{ marginBottom: 4 }}>Question</div>
-                  <textarea className="textarea" rows={3} value={question} onChange={e => setQuestion(e.target.value)}
+                  <textarea className="textarea" rows={3} value={question} onChange={onQuestionChangeWithExtract}
                             placeholder="Why is Employee #4 workload unusual?" />
                 </div>
-                <div>
-                  <div className="eyebrow" style={{ marginBottom: 4 }}>Center node</div>
-                  <input className="input" value={centerNode} onChange={e => setCenterNode(e.target.value)} />
-                </div>
+                <EntityPicker tenant={tenant} centerNode={centerNode} setCenterNode={setCenterNode} question={question} setQuestion={setQuestion} compact />
                 <div style={{ display: "flex", gap: 6 }}>
                   <div style={{ flex: 1 }}>
                     <div className="eyebrow" style={{ marginBottom: 4 }}>Depth</div>
@@ -1782,4 +1809,190 @@ function AskHero({ tenant, question, setQuestion, centerNode, setCenterNode, dep
   );
 }
 
-Object.assign(window, { AskHero });
+/* ---------------- EntityPicker ----------------
+   Reusable entity type + search picker. Used in both AskHero and sidebar "Ask with scope". */
+function EntityPicker({ tenant, centerNode, setCenterNode, question, setQuestion, compact }) {
+  const tenantId = tenant ? tenant.id : "default";
+
+  const [entityTypes, setEntityTypes] = React.useState([]);
+  React.useEffect(() => {
+    (async () => {
+      try {
+        const data = await window.AL_API.fetchJson("/api/instances/types?tenant=" + encodeURIComponent(tenantId));
+        setEntityTypes((data.types || []).map(t => t.type || t.label));
+      } catch (_) {}
+    })();
+  }, [tenantId]);
+
+  const currentType = centerNode && centerNode.includes(":") ? centerNode.split(":")[0] : "";
+  const [pickedType, setPickedType] = React.useState(currentType || "");
+  React.useEffect(() => {
+    if (!pickedType && entityTypes.length > 0) setPickedType(entityTypes[0]);
+  }, [entityTypes]);
+  React.useEffect(() => {
+    if (currentType && currentType !== pickedType) setPickedType(currentType);
+  }, [centerNode]);
+
+  const [entityQuery, setEntityQuery] = React.useState("");
+  const [entities, setEntities] = React.useState([]);
+  const [entitiesLoading, setEntitiesLoading] = React.useState(false);
+  const [showDropdown, setShowDropdown] = React.useState(false);
+  const debounceRef = React.useRef(null);
+  const dropdownRef = React.useRef(null);
+  const prevLabelRef = React.useRef("");
+  const questionRef = React.useRef(question || "");
+  React.useEffect(() => { questionRef.current = question || ""; }, [question]);
+
+  function fetchEntities(type, q) {
+    if (!type) return;
+    setEntitiesLoading(true);
+    const qs = new URLSearchParams({ tenant: tenantId, type, q: q || "", limit: "10" });
+    window.AL_API.fetchJson("/api/instances/search?" + qs.toString())
+      .then(data => {
+        setEntities(data.instances || []);
+        setEntitiesLoading(false);
+        if (!prevLabelRef.current && centerNode) {
+          const match = (data.instances || []).find(e => e.id === centerNode);
+          if (match) prevLabelRef.current = match.label || match.id;
+        }
+      })
+      .catch(() => { setEntities([]); setEntitiesLoading(false); });
+  }
+
+  React.useEffect(() => {
+    if (pickedType) fetchEntities(pickedType, "");
+  }, [pickedType, tenantId]);
+
+  function onEntityQueryChange(e) {
+    const q = e.target.value;
+    setEntityQuery(q);
+    setShowDropdown(true);
+    clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => fetchEntities(pickedType, q), 250);
+  }
+
+  function selectEntity(ent) {
+    setCenterNode(ent.id);
+    const newLabel = ent.label || ent.id;
+    setEntityQuery(newLabel);
+    setShowDropdown(false);
+    if (setQuestion) {
+      let prev = prevLabelRef.current;
+      const q = questionRef.current.trim();
+      if (!prev || prev.length <= 1) {
+        for (const e of entities) {
+          if (e.id !== ent.id && e.label && q.includes(e.label)) {
+            prev = e.label; break;
+          }
+        }
+      }
+      if (!q) {
+        setQuestion(`Give a summary of ${newLabel}`);
+      } else if (prev && prev.length > 1 && q.includes(prev)) {
+        setQuestion(q.split(prev).join(newLabel));
+      }
+    }
+    prevLabelRef.current = newLabel;
+  }
+
+  function onTypeChange(e) {
+    const t = e.target.value;
+    setPickedType(t);
+    setEntityQuery("");
+    setCenterNode("");
+  }
+
+  React.useEffect(() => {
+    function handler(e) {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target)) setShowDropdown(false);
+    }
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  return (
+    <div>
+      <div className="eyebrow" style={{ marginBottom: 4 }}>Center node</div>
+      <div style={{ display: "flex", gap: 6 }} ref={dropdownRef}>
+        <select className="input" value={pickedType} onChange={onTypeChange}
+                style={{ width: compact ? 90 : 110, flexShrink: 0, cursor: "pointer" }}>
+          {entityTypes.map(t => <option key={t} value={t}>{t}</option>)}
+        </select>
+        <div style={{ flex: 1, position: "relative" }}>
+          <input className="input" style={{ width: "100%" }}
+                 value={entityQuery}
+                 onChange={onEntityQueryChange}
+                 onFocus={() => setShowDropdown(true)}
+                 placeholder={entitiesLoading ? "Loading…" : entities.length ? entities[0].label || entities[0].id : "Search…"} />
+          {showDropdown && entities.length > 0 && (
+            <div style={{
+              position: "absolute", top: "100%", left: 0, right: 0, zIndex: 20,
+              maxHeight: 200, overflowY: "auto",
+              background: "var(--bg-2)", border: "1px solid var(--line-strong)",
+              boxShadow: "0 8px 24px rgba(0,0,0,0.35)",
+            }}>
+              {entities.map(ent => {
+                const selected = centerNode === ent.id;
+                return (
+                  <div key={ent.id}
+                       onClick={() => selectEntity(ent)}
+                       style={{
+                         padding: "7px 10px", cursor: "pointer",
+                         display: "flex", alignItems: "center", gap: 8,
+                         background: selected ? "var(--bg-3)" : "transparent",
+                         borderBottom: "1px solid var(--line)",
+                       }}
+                       onMouseEnter={e => e.currentTarget.style.background = "var(--bg-3)"}
+                       onMouseLeave={e => { if (!selected) e.currentTarget.style.background = "transparent"; }}>
+                    <span style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--muted)", minWidth: 60 }}>{ent.id}</span>
+                    <span style={{ fontSize: 12, color: "var(--text)" }}>{ent.label}</span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+      {centerNode && (
+        <div style={{ marginTop: 4, fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--accent)", letterSpacing: "0.04em" }}>
+          {centerNode}
+        </div>
+      )}
+      {setQuestion && (() => {
+        const type = pickedType || "";
+        const hasEntity = centerNode && centerNode.includes(":");
+        const selectedEnt = hasEntity && entities.find(e => e.id === centerNode);
+        const label = selectedEnt ? selectedEnt.label : (hasEntity ? centerNode : "");
+        const q = (question || "").trim();
+        let items = [];
+        if (hasEntity && label) {
+          items = q ? [] : [
+            `Give a summary of ${label}`,
+            `What are the key relationships for ${label}?`,
+            `How does ${label} compare to other ${type}s?`,
+            `Are there any anomalies or risks related to ${label}?`,
+          ];
+        } else if (type && !q) {
+          items = [
+            `Which ${type}s have the highest activity?`,
+            `Are there anomalies among ${type}s?`,
+          ];
+        }
+        if (!items.length) return null;
+        return (
+          <div style={{ marginTop: 6, display: "flex", flexWrap: "wrap", gap: 4 }}>
+            {items.map((s, i) => (
+              <button key={i} type="button" className="btn xs ghost"
+                      style={{ fontSize: 10, padding: "3px 8px", color: "var(--accent)", border: "1px solid var(--line)", borderRadius: 3, textAlign: "left" }}
+                      onClick={() => setQuestion(s)}>
+                {s}
+              </button>
+            ))}
+          </div>
+        );
+      })()}
+    </div>
+  );
+}
+
+Object.assign(window, { AskHero, EntityPicker });
