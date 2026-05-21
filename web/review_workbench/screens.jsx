@@ -9,6 +9,8 @@ function Ontology({ data, tenant }) {
   const [search, setSearch] = useStateXS("");
   const [detailMode, setDetailMode] = useStateXS("source");
   const [statusView, setStatusView] = useStateXS("approved");
+  const [reviewReason, setReviewReason] = useStateXS("");
+  const [reviewMsg, setReviewMsg] = useStateXS(null);
 
   const listQ = useApiData("artifacts", [tenant ? tenant.id : "default", {}], { fallback: data.ARTIFACTS });
   const artifacts = listQ.data || [];
@@ -81,6 +83,30 @@ function Ontology({ data, tenant }) {
     const qs = new URLSearchParams({ screen: "reasoning", tenant: tenantId });
     if (key) qs.set("ontology_basis", key);
     return "/?" + qs.toString();
+  }
+
+  async function reviewArtifact(action) {
+    if (!canonicalKey) return;
+    const reason = reviewReason.trim();
+    if ((action === "approve" || action === "reject") && !reason) {
+      setReviewMsg({ kind: "err", msg: "Decision rationale is required for approve / reject." });
+      return;
+    }
+    try {
+      await window.AL_API.reviewAction(
+        canonicalKey,
+        action,
+        { reason, reviewer: "M. Aoki" },
+        tenantId,
+      );
+      setReviewReason("");
+      setReviewMsg({ kind: "ok", msg: `Ontology artifact ${action} recorded.` });
+      setDetailMode("review");
+      if (action === "approve") setStatusView("all");
+      window.dispatchEvent(new CustomEvent("aletheia:retry"));
+    } catch (e) {
+      setReviewMsg({ kind: "err", msg: e.message || String(e) });
+    }
   }
 
   return (
@@ -199,6 +225,13 @@ function Ontology({ data, tenant }) {
                     </span>
                   </div>
                 </div>
+                <OntologyReviewControls
+                  selected={selected}
+                  reason={reviewReason}
+                  setReason={setReviewReason}
+                  msg={reviewMsg}
+                  onAction={reviewArtifact}
+                />
               </div>
 
               <div className="subbar" style={{ background: "var(--bg-1)" }}>
@@ -324,6 +357,59 @@ function MiniMetric({ label, value, tone }) {
     <div style={{ border: "1px solid var(--line)", padding: "6px 8px", background: "var(--bg-1)" }}>
       <div style={{ fontFamily: "var(--font-mono)", fontSize: 9, color: "var(--dim)", textTransform: "uppercase", letterSpacing: "0.08em" }}>{label}</div>
       <div style={{ marginTop: 2, fontFamily: "var(--font-mono)", fontSize: 15, color: tone ? `var(--${tone})` : "var(--text)" }}>{value}</div>
+    </div>
+  );
+}
+
+function OntologyReviewControls({ selected, reason, setReason, msg, onAction }) {
+  if (!selected) return null;
+  const status = (selected.status || "").toLowerCase();
+  const isCanonical = status === "approved";
+  const canDecide = ["proposed", "changes", "draft"].includes(status);
+  return (
+    <div style={{
+      marginTop: 12,
+      padding: 12,
+      border: "1px solid var(--line)",
+      background: isCanonical ? "var(--bg-1)" : "var(--accent-bg)",
+      display: "grid",
+      gap: 10,
+    }}>
+      <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+        <div>
+          <div className="eyebrow" style={{ marginBottom: 4 }}>Ontology review gate</div>
+          <div style={{ fontSize: 12, color: "var(--muted)", lineHeight: 1.45 }}>
+            {canDecide
+              ? "Review proposed ontology artifacts here before they become eligible for canonical graph use."
+              : isCanonical
+              ? "This artifact is canonical. Record a comment here if the review rationale needs more context."
+              : "This artifact is not in an active review state. Record a comment here; reopen decisions should happen through a new proposal."}
+          </div>
+        </div>
+        <span style={{ marginLeft: "auto" }}><Pill kind={selected.status}>{selected.status}</Pill></span>
+      </div>
+      <input
+        className="reason-input"
+        value={reason}
+        onChange={e => setReason(e.target.value)}
+        placeholder="Decision rationale (required for approve / reject)..."
+      />
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+        <button className="btn approve" onClick={() => onAction("approve")} disabled={!canDecide}>Approve artifact</button>
+        <button className="btn changes" onClick={() => onAction("needs-changes")} disabled={!canDecide}>Needs changes</button>
+        <button className="btn reject" onClick={() => onAction("reject")} disabled={!canDecide}>Reject</button>
+        <button className="btn ghost" onClick={() => onAction("comment")}>Comment</button>
+        {msg && (
+          <span style={{
+            marginLeft: "auto",
+            fontFamily: "var(--font-mono)",
+            fontSize: 11,
+            color: msg.kind === "ok" ? "var(--approved)" : "var(--rejected)",
+          }}>
+            {msg.msg}
+          </span>
+        )}
+      </div>
     </div>
   );
 }
