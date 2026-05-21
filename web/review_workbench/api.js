@@ -17,7 +17,7 @@
       const v = localStorage.getItem(LS_KEY);
       if (v) return v.replace(/\/$/, "");
     } catch {}
-    return "http://localhost:8765";
+    return (window.location && window.location.origin) || "http://localhost:8765";
   }
   function setBaseUrl(v) {
     try { localStorage.setItem(LS_KEY, (v || "").replace(/\/$/, "")); } catch {}
@@ -166,6 +166,9 @@
       updated: a.updated_at || a.created_at || "",
       created: a.created_at || "",
       payload: a.payload || {},
+      sourceSchema: a.source_schema || null,
+      canonical: a.canonical || null,
+      usedBy: a.used_by || [],
       evidence: (a.evidence || []).map(normalizeEvidence),
       audit:    (a.reviews  || []).map(normalizeAudit),
       sourceRefs: a.source_refs || [],
@@ -174,11 +177,15 @@
   }
   function normalizeEvidence(e) {
     const kindMap = { fact: "fact", hypothesis: "hypothesis", conflict: "conflict", missing: "missing" };
+    const rawKind = e.kind || e.evidence_type || e.type;
     return {
-      kind: kindMap[e.kind] || e.kind || "fact",
+      kind: kindMap[rawKind] || rawKind || "fact",
       title: e.title || e.summary || e.description || "(unlabeled evidence)",
       src: e.source_ref || e.source || e.path || "",
       conf: typeof e.confidence === "number" ? e.confidence : null,
+      contentHash: e.content_hash || null,
+      rawPayload: e.raw_payload || e.raw_payload_json || null,
+      created: e.created_at || "",
       _raw: e,
     };
   }
@@ -187,15 +194,21 @@
       approved: "approved", approve: "approved",
       rejected: "rejected", reject: "rejected",
       needs_changes: "changes",
+      edit: "changes",
       comment: "comment", commented: "comment",
       proposed: "proposed", drafted: "draft", draft: "draft",
     };
     const ts = r.created_at || r.timestamp || r.at || "";
     return {
       ts: typeof ts === "string" ? ts.slice(11, 16) || ts.slice(0, 10) : "—",
-      act: actMap[r.action] || actMap[r.status] || r.action || "comment",
+      act: actMap[r.decision] || actMap[r.action] || actMap[r.status] || r.decision || r.action || "comment",
       who: r.reviewer || r.actor || r.source_agent || "system",
       detail: r.reason || r.note || r.comment || "",
+      beforeStatus: r.before_status || null,
+      afterStatus: r.after_status || null,
+      beforeVersion: r.before_version || null,
+      afterVersion: r.after_version || null,
+      created: r.created_at || "",
       _raw: r,
     };
   }

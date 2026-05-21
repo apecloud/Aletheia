@@ -927,22 +927,33 @@ function Reasoning({ tenant }) {
                   ) : (
                     <div className="evidence-list">
                       {evidence.filter(e => evidenceFilter === "all" || (e.kind || "fact") === evidenceFilter).map((e, i) => {
+                        const raw = e._raw || e;
                         const ev = e._raw ? e : {
                           kind: e.kind || "fact",
                           title: e.title || e.summary || e.description || "—",
                           src: e.src || e.source_ref || e.source || "",
                           conf: e.conf != null ? e.conf : (typeof e.confidence === "number" ? e.confidence : null),
                         };
+                        const ontologyKey = ontologyBasisKey(raw, ev);
                         return (
                           <div key={i} className={"evidence-item " + ev.kind}>
                             <div className="v-bar" />
-                            <div className="kind">{ev.kind}</div>
+                            <div className="kind">{ontologyKey ? "ontology basis" : ev.kind}</div>
                             <div className="body-x">
                               <div className="title">{ev.title}</div>
-                              <div className="src">{ev.src}</div>
+                              <div className="src">
+                                {ontologyKey
+                                  ? `${ontologyKey} · compact basis only`
+                                  : ev.src}
+                              </div>
                             </div>
                             <div className="conf-side">
-                              {ev.conf != null ? <><span style={{ color: "var(--text)" }}>{Math.round(ev.conf * 100)}%</span><span style={{ color: "var(--dim)", fontSize: 9, marginTop: 2 }}>confidence</span></> : <span className="faint">—</span>}
+                              {ontologyKey ? (
+                                <a className="btn xs" href={`/?screen=ontology&tenant=${encodeURIComponent(tenant ? tenant.id : "default")}&artifact=${encodeURIComponent(ontologyKey)}`}
+                                 title="Open full ontology governance details in Ontology.">
+                                  View in Ontology
+                                </a>
+                              ) : ev.conf != null ? <><span style={{ color: "var(--text)" }}>{Math.round(ev.conf * 100)}%</span><span style={{ color: "var(--dim)", fontSize: 9, marginTop: 2 }}>confidence</span></> : <span className="faint">—</span>}
                             </div>
                           </div>
                         );
@@ -1018,6 +1029,8 @@ function Reasoning({ tenant }) {
               }} disabled={!followup.trim() || !task}>Create follow-up</button>
             </div>
           </div>
+
+          <OntologyBasisPanel task={task} tenant={tenant} />
 
           <div className="section">
             <div className="section-head"><span>Write boundary</span></div>
@@ -1216,6 +1229,62 @@ function CleanupModal({ open, onClose, allTasks, taskState, tenant, onDone }) {
 }
 
 Object.assign(window, { Reasoning, CleanupModal });
+
+function ontologyBasisKey(raw, normalized) {
+  const src = (normalized && normalized.src) || raw.source_ref || raw.source || "";
+  const payload = raw.payload || {};
+  const direct = raw.ontology_artifact || raw.ontology_link || payload.ontology_artifact || payload.ontology_link;
+  if (direct) return direct;
+  if ((raw.kind || raw.evidence_type) === "ontology_artifact" && src.startsWith("artifact:")) {
+    return src.slice("artifact:".length);
+  }
+  if (src.startsWith("artifact:")) return src.slice("artifact:".length);
+  return null;
+}
+
+function ontologyBasisLabel(key) {
+  const labels = {
+    "link:employee:1:n:order": "Employee 1:N Order",
+    "object:employee": "Employee",
+    "object:order": "Order",
+  };
+  return labels[key] || key;
+}
+
+function OntologyBasisPanel({ task, tenant }) {
+  if (!task) return null;
+  const scope = task.scope || {};
+  const keys = new Set();
+  (scope.allowed_link_keys || []).forEach(k => keys.add(k));
+  (scope.allowed_node_types || []).forEach(t => keys.add("object:" + String(t).toLowerCase()));
+  ((task.evidence_paths || [])).forEach(e => {
+    const key = ontologyBasisKey(e, { src: e.source_ref || e.source || "" });
+    if (key) keys.add(key);
+  });
+  const list = [...keys].filter(Boolean);
+  if (!list.length) return null;
+  const tenantId = tenant ? tenant.id : "default";
+  return (
+    <div className="section">
+      <div className="section-head"><span>Ontology basis</span><span className="ct">{list.length}</span></div>
+      <div className="section-body" style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+        {list.map(key => (
+          <a key={key}
+             className="btn ghost"
+             href={`/?screen=ontology&tenant=${encodeURIComponent(tenantId)}&artifact=${encodeURIComponent(key)}`}
+             style={{ justifyContent: "space-between", gap: 10 }}
+             title="Open full ontology governance details in Ontology.">
+            <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{ontologyBasisLabel(key)}</span>
+            <span style={{ color: "var(--accent)", flexShrink: 0 }}>View in Ontology</span>
+          </a>
+        ))}
+        <div style={{ fontSize: 11, color: "var(--muted)", lineHeight: 1.55 }}>
+          Compact basis only. Detailed source mapping, approval audit, canonical state, and graph eligibility live in Ontology.
+        </div>
+      </div>
+    </div>
+  );
+}
 
 /* ---------------- TraceLog ---------------- 
    Renders the live SSE trace stream as a styled timeline. Each event type

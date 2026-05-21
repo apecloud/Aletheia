@@ -64,6 +64,31 @@ def _jsonable(value):
     return value
 
 
+def _field_property_from_row(row, table_name):
+    key = row.get("COLUMN_KEY") or ""
+    primary_key = True if key == "PRI" else None if not key else False
+    foreign_key = True if key == "MUL" else None if not key else False
+    return {
+        "name": row.get("COLUMN_NAME"),
+        "source_table": table_name,
+        "qualified_name": f"{table_name}.{row.get('COLUMN_NAME')}",
+        "data_type": row.get("DATA_TYPE"),
+        "column_type": row.get("COLUMN_TYPE") or row.get("DATA_TYPE"),
+        "nullable": row.get("IS_NULLABLE") == "YES",
+        "primary_key": primary_key,
+        "foreign_key": foreign_key,
+        "key_role": "primary_key" if key == "PRI" else "foreign_key" if key == "MUL" else "unknown",
+        "default": row.get("COLUMN_DEFAULT"),
+        "extra": row.get("EXTRA") or "",
+        "comment": row.get("COLUMN_COMMENT") or "",
+        "max_length": row.get("CHARACTER_MAXIMUM_LENGTH"),
+        "numeric_precision": row.get("NUMERIC_PRECISION"),
+        "numeric_scale": row.get("NUMERIC_SCALE"),
+        "ordinal_position": row.get("ORDINAL_POSITION"),
+        "maps_to_property": row.get("COLUMN_NAME"),
+    }
+
+
 def _require_reason(action, reason):
     if action in {"reject", "rejected", "needs_changes", "comment"} and not reason.strip():
         raise ValueError(f"reason is required for {action}")
@@ -89,11 +114,187 @@ def _artifact_to_dict(row):
     }
 
 
+SOURCE_TABLE_SCHEMAS = {
+    "employee": {
+        "table": "employees",
+        "primary_key": "employeeID",
+        "columns": [
+            "employeeID", "lastName", "firstName", "title", "titleOfCourtesy",
+            "birthDate", "hireDate", "address", "city", "region", "postalCode",
+            "country", "homePhone", "extension", "photo", "notes", "reportsTo", "photoPath",
+        ],
+    },
+    "order": {
+        "table": "orders",
+        "primary_key": "orderID",
+        "columns": [
+            "orderID", "customerID", "employeeID", "orderDate", "requiredDate",
+            "shippedDate", "shipVia", "freight", "shipName", "shipAddress",
+            "shipCity", "shipRegion", "shipPostalCode", "shipCountry",
+        ],
+    },
+    "customer": {
+        "table": "customers",
+        "primary_key": "customerID",
+        "columns": [
+            "customerID", "companyName", "contactName", "contactTitle", "address",
+            "city", "region", "postalCode", "country", "phone", "fax",
+        ],
+    },
+    "product": {
+        "table": "products",
+        "primary_key": "productID",
+        "columns": [
+            "productID", "productName", "supplierID", "categoryID", "quantityPerUnit",
+            "unitPrice", "unitsInStock", "unitsOnOrder", "reorderLevel", "discontinued",
+        ],
+    },
+    "category": {
+        "table": "categories",
+        "primary_key": "categoryID",
+        "columns": ["categoryID", "categoryName", "description", "picture"],
+    },
+}
+
+
+SOURCE_LINK_SCHEMAS = {
+    "link:employee:1:n:order": {
+        "source_table": "employees",
+        "source_field": "employees.employeeID",
+        "target_table": "orders",
+        "target_field": "orders.employeeID",
+        "join_condition": "orders.employeeID = employees.employeeID",
+        "cardinality": "1:N",
+        "graph_edge": "Employee -> Order",
+        "source_ref": "orders.employeeID",
+    },
+    "link:customer:1:n:order": {
+        "source_table": "customers",
+        "source_field": "customers.customerID",
+        "target_table": "orders",
+        "target_field": "orders.customerID",
+        "join_condition": "orders.customerID = customers.customerID",
+        "cardinality": "1:N",
+        "graph_edge": "Customer -> Order",
+        "source_ref": "orders.customerID",
+    },
+    "link:category:1:n:product": {
+        "source_table": "categories",
+        "source_field": "categories.categoryID",
+        "target_table": "products",
+        "target_field": "products.categoryID",
+        "join_condition": "products.categoryID = categories.categoryID",
+        "cardinality": "1:N",
+        "graph_edge": "Category -> Product",
+        "source_ref": "products.categoryID",
+    },
+}
+
+
+SOURCE_TABLE_HINTS_BY_TABLE = {schema["table"]: schema for schema in SOURCE_TABLE_SCHEMAS.values()}
+
+
+def _fallback_fields(table_schema):
+    fields = []
+    table = table_schema.get("table")
+    primary_key = table_schema.get("primary_key")
+    for idx, column in enumerate(table_schema.get("columns") or [], start=1):
+        fields.append(
+            {
+                "name": column,
+                "source_table": table,
+                "qualified_name": f"{table}.{column}",
+                "data_type": None,
+                "column_type": None,
+                "nullable": None,
+                "primary_key": column == primary_key,
+                "foreign_key": False,
+                "key_role": "primary_key" if column == primary_key else "attribute",
+                "default": None,
+                "extra": "",
+                "comment": "",
+                "max_length": None,
+                "numeric_precision": None,
+                "numeric_scale": None,
+                "ordinal_position": idx,
+                "maps_to_property": column,
+            }
+        )
+    return fields
+
+
+def _field_by_qualified_name(fields):
+    return {f"{field.get('source_table')}.{field.get('name')}": field for field in fields}
+
+
+def _apply_table_hints(table_schema, fields):
+    primary_key = table_schema.get("primary_key") if table_schema else None
+    for field in fields:
+        if field.get("name") == primary_key:
+            field["declared_primary_key_hint"] = True
+            if field.get("key_role") == "unknown":
+                field["key_role_hint"] = "declared_primary_key"
+        elif field.get("key_role") == "unknown" and field.get("foreign_key") is None:
+            field["key_role"] = "unknown"
+    return fields
+
+
+def _ontology_source_schema(artifact, table_fields=None):
+    canonical_key = artifact.get("canonical_key") or ""
+    payload = artifact.get("payload") or {}
+    artifact_type = artifact.get("artifact_type")
+    if canonical_key in SOURCE_LINK_SCHEMAS:
+        schema = dict(SOURCE_LINK_SCHEMAS[canonical_key])
+        table_fields = table_fields or {}
+        field_map = _field_by_qualified_name(
+            table_fields.get(schema["source_table"], {}).get("fields", [])
+            + table_fields.get(schema["target_table"], {}).get("fields", [])
+        )
+        schema["kind"] = "relationship_source_schema"
+        schema["schema_source"] = "live" if all(
+            table_fields.get(t, {}).get("schema_source") == "live"
+            for t in (schema["source_table"], schema["target_table"])
+        ) else "fallback"
+        schema["source_object"] = payload.get("source_object_name")
+        schema["target_object"] = payload.get("target_object_name")
+        schema["link_type"] = payload.get("link_type") or schema.get("cardinality")
+        source_prop = dict(field_map.get(schema["source_field"], {}))
+        target_prop = dict(field_map.get(schema["target_field"], {}))
+        if source_prop:
+            source_prop["relationship_role"] = "source_identity_field"
+        if target_prop:
+            target_prop["relationship_role"] = "target_reference_field"
+            if target_prop.get("foreign_key") is None:
+                target_prop["foreign_key"] = "unknown"
+            if target_prop.get("key_role") == "unknown":
+                target_prop["key_role"] = "relationship_reference"
+        schema["source_field_property"] = source_prop
+        schema["target_field_property"] = target_prop
+        schema["field_properties"] = [
+            f for f in [schema["source_field_property"], schema["target_field_property"]] if f
+        ]
+        return schema
+    if artifact_type == "object":
+        object_name = str(payload.get("object_name") or artifact.get("name") or canonical_key.removeprefix("object:")).lower()
+        table_schema = SOURCE_TABLE_SCHEMAS.get(object_name)
+        if table_schema:
+            schema = dict(table_schema)
+            live = (table_fields or {}).get(schema["table"])
+            schema["columns"] = live.get("columns") if live else schema.get("columns", [])
+            schema["fields"] = _apply_table_hints(schema, live.get("fields")) if live else _fallback_fields(schema)
+            schema["schema_source"] = live.get("schema_source") if live else "fallback"
+            schema["kind"] = "object_source_schema"
+            schema["object_name"] = artifact.get("name")
+            return schema
+    return {"kind": "unmapped", "source_refs": artifact.get("source_refs", [])}
+
+
 class ReviewRepository:
     def __init__(self, tenant_registry, ensure_schema=False):
         self.tenant_registry = tenant_registry
         self.ensure_schema = ensure_schema
         self.engines = {}
+        self.source_engines = {}
 
     def tenant(self, tenant_id=None):
         return self.tenant_registry.get(tenant_id)
@@ -107,6 +308,61 @@ class ReviewRepository:
                 ensure_artifact_schema(engine)
             self.tenant_registry.ensure_metadata(engine)
         return engine
+
+    def source_engine_for(self, tenant):
+        engine = self.source_engines.get(tenant.source_db_url)
+        if engine is None:
+            engine = create_engine(tenant.source_db_url)
+            self.source_engines[tenant.source_db_url] = engine
+        return engine
+
+    def source_table_schema(self, tenant, table_name):
+        try:
+            with self.source_engine_for(tenant).connect() as conn:
+                rows = conn.execute(
+                    text(
+                        """
+                        SELECT COLUMN_NAME, DATA_TYPE, COLUMN_TYPE, IS_NULLABLE, COLUMN_KEY,
+                               COLUMN_DEFAULT, EXTRA, CHARACTER_MAXIMUM_LENGTH,
+                               NUMERIC_PRECISION, NUMERIC_SCALE, ORDINAL_POSITION, COLUMN_COMMENT
+                        FROM information_schema.COLUMNS
+                        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = :table_name
+                        ORDER BY ORDINAL_POSITION
+                        """
+                    ),
+                    {"table_name": table_name},
+                ).mappings().all()
+            fields = [_field_property_from_row(row, table_name) for row in rows]
+            return {
+                "table": table_name,
+                "schema_source": "live" if fields else "fallback",
+                "columns": [field["name"] for field in fields],
+                "fields": fields,
+            }
+        except Exception:
+            return {"table": table_name, "schema_source": "fallback", "columns": [], "fields": []}
+
+    def source_schemas_for_artifact(self, tenant, artifact):
+        canonical_key = artifact.get("canonical_key") or ""
+        payload = artifact.get("payload") or {}
+        artifact_type = artifact.get("artifact_type")
+        table_names = set()
+        if canonical_key in SOURCE_LINK_SCHEMAS:
+            link_schema = SOURCE_LINK_SCHEMAS[canonical_key]
+            table_names.add(link_schema["source_table"])
+            table_names.add(link_schema["target_table"])
+        elif artifact_type == "object":
+            object_name = str(payload.get("object_name") or artifact.get("name") or canonical_key.removeprefix("object:")).lower()
+            if object_name in SOURCE_TABLE_SCHEMAS:
+                table_names.add(SOURCE_TABLE_SCHEMAS[object_name]["table"])
+        schemas = {}
+        for table in table_names:
+            schema = self.source_table_schema(tenant, table)
+            hint = SOURCE_TABLE_HINTS_BY_TABLE.get(table)
+            if hint and schema.get("fields"):
+                schema["fields"] = _apply_table_hints(hint, schema["fields"])
+            schemas[table] = schema
+        return schemas
 
     def list_artifacts(self, tenant, filters):
         conditions = ["project_id = :tenant_id"]
@@ -207,6 +463,15 @@ class ReviewRepository:
             ).mappings().all()
         result = _artifact_to_dict(artifact)
         result["tenant"] = tenant.public_dict()
+        result["source_schema"] = _ontology_source_schema(result, self.source_schemas_for_artifact(tenant, result))
+        result["canonical"] = {
+            "status": result["status"],
+            "version": result["version"],
+            "graph_ingestion_eligible": result["status"] == "approved",
+            "tenant_id": tenant.tenant_id,
+            "namespace": tenant.namespace,
+            "graph_database": tenant.graph_database,
+        }
         result["evidence"] = [
             {
                 "evidence_type": row["evidence_type"],
@@ -232,7 +497,46 @@ class ReviewRepository:
             }
             for row in reviews
         ]
+        result["used_by"] = self.used_by(tenant, result)
         return result
+
+    def used_by(self, tenant, artifact):
+        canonical_key = artifact.get("canonical_key")
+        used_by = []
+        if canonical_key == "link:employee:1:n:order":
+            used_by.extend(
+                [
+                    {
+                        "kind": "graph_path",
+                        "label": "Employee -> Order approved graph paths",
+                        "href": f"/?screen=graph&tenant={quote(tenant.tenant_id)}&type=Employee&id=4&depth=1&limit=200",
+                        "summary": "Employee order neighborhoods use orders.employeeID = employees.employeeID.",
+                    },
+                    {
+                        "kind": "reasoning",
+                        "label": "Employee workload and profile reasoning",
+                        "href": f"/?screen=reasoning&tenant={quote(tenant.tenant_id)}&ontology_basis=link%3Aemployee%3A1%3An%3Aorder",
+                        "summary": "Scoped Employee reasoning cites this relationship as ontology basis.",
+                    },
+                    {
+                        "kind": "instance",
+                        "label": "Employee instance explorer",
+                        "href": f"/?screen=graph&tenant={quote(tenant.tenant_id)}&type=Employee&id=4",
+                        "summary": "Instance edge provenance is backed by this canonical link.",
+                    },
+                ]
+            )
+        elif canonical_key and canonical_key.startswith("object:"):
+            object_type = canonical_key.removeprefix("object:").capitalize()
+            used_by.append(
+                {
+                    "kind": "graph_scope",
+                    "label": f"{object_type} graph scopes",
+                    "href": f"/?screen=graph&tenant={quote(tenant.tenant_id)}&type={quote(object_type)}",
+                    "summary": "Approved object types are eligible for graph and instance views.",
+                }
+            )
+        return used_by
 
     def review_status(self, tenant, canonical_key, status, reviewer, reason):
         _require_reason(status, reason or "")
@@ -3381,6 +3685,35 @@ class ReviewWorkbenchHandler(BaseHTTPRequestHandler):
             filters = {key: values[0] for key, values in parse_qs(parsed.query).items() if values and values[0]}
             filters.pop("tenant", None)
             self._send_json(self.repository.list_artifacts(tenant, filters))
+            return
+        if parsed.path == "/api/ontology/catalog":
+            filters = {key: values[0] for key, values in parse_qs(parsed.query).items() if values and values[0]}
+            filters.pop("tenant", None)
+            if "kind" in filters and "artifact_type" not in filters:
+                filters["artifact_type"] = filters.pop("kind")
+            if "q" in filters and "search" not in filters:
+                filters["search"] = filters.pop("q")
+            self._send_json(self.repository.list_artifacts(tenant, filters))
+            return
+        if parsed.path.startswith("/api/ontology/"):
+            canonical_key = unquote(parsed.path.removeprefix("/api/ontology/"))
+            artifact = self.repository.get_artifact(tenant, canonical_key)
+            if artifact is None:
+                self._send_error(HTTPStatus.NOT_FOUND, f"Ontology artifact not found: {canonical_key}")
+                return
+            self._send_json(
+                {
+                    "tenant": tenant.public_dict(),
+                    "artifact": artifact,
+                    "definition": artifact.get("payload", {}),
+                    "source_schema": artifact.get("source_schema", {}),
+                    "evidence": artifact.get("evidence", []),
+                    "reviews": artifact.get("reviews", []),
+                    "canonical": artifact.get("canonical", {}),
+                    "used_by": artifact.get("used_by", []),
+                    "issues": [],
+                }
+            )
             return
         if parsed.path == "/api/portal/overview":
             self._send_json(self._portal_overview(tenant))

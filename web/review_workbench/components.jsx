@@ -5,7 +5,7 @@ const { useState, useEffect, useRef, useMemo } = React;
 /* ---------- TopBar ---------- */
 function TopBar({ screen, tenant, role, onTenant, onRole, onConn }) {
   const labelByScreen = {
-    workbench: { kicker: "Review",  now: "Workbench" },
+    workbench: { kicker: "Case",  now: "Workspace" },
     reasoning: { kicker: "Process", now: "Reasoning" },
     ontology:  { kicker: "Catalog", now: "Ontology" },
     graph:     { kicker: "Explore", now: "Graph" },
@@ -22,14 +22,6 @@ function TopBar({ screen, tenant, role, onTenant, onRole, onConn }) {
         <span className="kicker">{b.kicker}</span>
         <span className="sep">/</span>
         <span className="now">{b.now}</span>
-        {screen === "workbench" && (
-          <>
-            <span className="sep">/</span>
-            <span>LT-RPT-014</span>
-            <span className="sep">·</span>
-            <span>Employee reports-to Employee</span>
-          </>
-        )}
       </div>
       <div></div>
       <div className="right">

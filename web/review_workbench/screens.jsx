@@ -1,15 +1,83 @@
 /* Aletheia — Ontology browse, Quality dashboard, Runtime */
 
-const { useState: useStateXS } = React;
+const { useState: useStateXS, useMemo: useMemoXS, useEffect: useEffectXS } = React;
 
 /* ---------------- ONTOLOGY ---------------- */
-function Ontology({ data }) {
+function Ontology({ data, tenant }) {
   const [active, setActive] = useStateXS("ObjectType");
-  const grouped = {
-    ObjectType: data.ARTIFACTS.filter(a => a.type === "ObjectType"),
-    LinkType:   data.ARTIFACTS.filter(a => a.type === "LinkType"),
-    Property:   data.ARTIFACTS.filter(a => a.type === "Property"),
+  const [selectedId, setSelectedId] = useStateXS(null);
+  const [search, setSearch] = useStateXS("");
+  const [detailMode, setDetailMode] = useStateXS("schema");
+  const [statusView, setStatusView] = useStateXS("approved");
+
+  const listQ = useApiData("artifacts", [tenant ? tenant.id : "default", {}], { fallback: data.ARTIFACTS });
+  const artifacts = listQ.data || [];
+  const isMock = listQ.source === "mock";
+  const isStale = listQ.source === "live-stale";
+
+  const grouped = useMemoXS(() => ({
+    ObjectType: artifacts.filter(a => a.type === "ObjectType"),
+    LinkType:   artifacts.filter(a => a.type === "LinkType"),
+    Property:   artifacts.filter(a => a.type === "Property"),
+    Action:     artifacts.filter(a => a.type === "Action"),
+  }), [artifacts]);
+
+  const filtered = useMemoXS(() => {
+    const q = search.trim().toLowerCase();
+    return (grouped[active] || [])
+      .filter(a => statusView === "all" || a.status === statusView)
+      .filter(a => !q
+        || (a.title || "").toLowerCase().includes(q)
+        || (a.key || "").toLowerCase().includes(q)
+        || (a.canonical_key || a.id || "").toLowerCase().includes(q)
+        || (a.desc || "").toLowerCase().includes(q));
+  }, [grouped, active, statusView, search]);
+
+  useEffectXS(() => {
+    if (filtered.length === 0) { setSelectedId(null); return; }
+    if (!selectedId || !filtered.some(a => (a.id === selectedId || a.canonical_key === selectedId))) {
+      setSelectedId(filtered[0].id || filtered[0].canonical_key);
+    }
+  }, [active, statusView, filtered.map(a => a.id || a.canonical_key).join("|")]);
+
+  const detailQ = useApiData("artifact", [selectedId, tenant ? tenant.id : "default"], { enabled: !!selectedId });
+  const fromList = artifacts.find(a => (a.id === selectedId || a.canonical_key === selectedId)) || filtered[0] || null;
+  const selected = detailQ.data || fromList;
+  const sourceRefs = (selected && selected.sourceRefs) || [];
+  const evidence = (selected && selected.evidence) || [];
+  const audit = (selected && selected.audit) || [];
+  const canonicalKey = selected && (selected.canonical_key || selected.id);
+  const tenantId = tenant ? tenant.id : "default";
+
+  const stats = {
+    total: artifacts.length,
+    approved: artifacts.filter(a => a.status === "approved").length,
+    proposed: artifacts.filter(a => a.status === "proposed").length,
+    changes: artifacts.filter(a => a.status === "changes").length,
+    rejected: artifacts.filter(a => a.status === "rejected").length,
   };
+
+  useEffectXS(() => {
+    try {
+      const key = new URLSearchParams(location.search).get("artifact");
+      if (!key || !artifacts.length) return;
+      const match = artifacts.find(a => (a.canonical_key || a.id) === key);
+      if (!match) return;
+      setActive(match.type || "ObjectType");
+      setStatusView("all");
+      setSelectedId(match.canonical_key || match.id);
+    } catch {}
+  }, [artifacts.map(a => a.canonical_key || a.id).join("|")]);
+
+  function ontologyHref(key) {
+    return `/?screen=ontology&tenant=${encodeURIComponent(tenantId)}&artifact=${encodeURIComponent(key || "")}`;
+  }
+
+  function reasoningHref(key) {
+    const qs = new URLSearchParams({ screen: "reasoning", tenant: tenantId });
+    if (key) qs.set("ontology_basis", key);
+    return "/?" + qs.toString();
+  }
 
   return (
     <div className="canvas">
@@ -18,82 +86,241 @@ function Ontology({ data }) {
           <div className={"tab" + (active === "ObjectType" ? " active" : "")} onClick={() => setActive("ObjectType")}>Object Types <span className="ct">{grouped.ObjectType.length}</span></div>
           <div className={"tab" + (active === "LinkType" ? " active" : "")} onClick={() => setActive("LinkType")}>Link Types <span className="ct">{grouped.LinkType.length}</span></div>
           <div className={"tab" + (active === "Property" ? " active" : "")} onClick={() => setActive("Property")}>Properties <span className="ct">{grouped.Property.length}</span></div>
+          {grouped.Action.length > 0 && <div className={"tab" + (active === "Action" ? " active" : "")} onClick={() => setActive("Action")}>Actions <span className="ct">{grouped.Action.length}</span></div>}
         </div>
         <div className="spacer" />
+        {isMock  && <span className="pill changes" style={{ marginRight: 8 }}><span className="dot" />Mock fallback</span>}
+        {isStale && <span className="pill changes" style={{ marginRight: 8 }}><span className="dot" />Stale · last fetch failed</span>}
+        {listQ.loading && listQ.data && <span className="pill"><span className="dot" />Refreshing…</span>}
+        <button className="tool" onClick={() => window.dispatchEvent(new CustomEvent("aletheia:retry"))}>⟲ Refresh</button>
         <button className="tool">⤓ Export schema</button>
-        <button className="tool primary">+ Propose type</button>
       </div>
 
       <div className="ontology-cols" style={{ flex: 1, minHeight: 0 }}>
-        {/* tree */}
+        {/* catalog */}
         <div style={{ display: "flex", flexDirection: "column", minHeight: 0 }}>
           <div style={{ padding: "var(--pad-3) var(--pad-4)", borderBottom: "1px solid var(--line)", background: "var(--bg-2)" }}>
-            <div className="eyebrow accent">Catalog · {active}s</div>
-            <input className="input" placeholder="filter by name or key" style={{ marginTop: 8 }} />
+            <div className="eyebrow accent">Ontology Catalog · {active}s</div>
+            <input className="input" value={search} onChange={e => setSearch(e.target.value)}
+                   placeholder="filter by name, key, source…" style={{ marginTop: 8 }} />
+            <div className="chip-row" style={{ marginTop: 10 }}>
+              <Chip active={statusView === "approved"} onClick={() => setStatusView("approved")} count={stats.approved}>Canonical</Chip>
+              <Chip active={statusView === "proposed"} onClick={() => setStatusView("proposed")} count={stats.proposed}>Proposed</Chip>
+              <Chip active={statusView === "changes"} onClick={() => setStatusView("changes")} count={stats.changes}>Changes</Chip>
+              <Chip active={statusView === "rejected"} onClick={() => setStatusView("rejected")} count={stats.rejected}>Rejected</Chip>
+              <Chip active={statusView === "all"} onClick={() => setStatusView("all")} count={stats.total}>All</Chip>
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, marginTop: 10 }}>
+              <MiniMetric label="Total" value={stats.total} />
+              <MiniMetric label="Canonical" value={stats.approved} tone="approved" />
+              <MiniMetric label="Review" value={stats.proposed + stats.changes} tone="changes" />
+              <MiniMetric label="Rejected" value={stats.rejected} tone="rejected" />
+            </div>
           </div>
           <div style={{ flex: 1, overflow: "auto" }}>
+            <ApiStatus q={listQ} what="ontology artifacts" />
             <div className="artifact-list">
-              {grouped[active].map(a => (
-                <div key={a.id} className={"artifact-row " + a.status + (a.id === "LT-RPT-014" ? " selected" : "")}>
+              {filtered.length === 0 && (
+                <div style={{ padding: 24, fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--muted)", textAlign: "center" }}>
+                  No ontology artifacts match this filter.
+                </div>
+              )}
+              {filtered.map(a => {
+                const aid = a.id || a.canonical_key;
+                return (
+                <div key={aid}
+                     className={"artifact-row " + a.status + (aid === selectedId ? " selected" : "")}
+                     onClick={() => { setSelectedId(aid); setDetailMode("schema"); }}>
                   <div className="ar-bar" />
                   <div className="ar-main">
                     <div className="ar-top">
-                      <span className="type">{a.type === "ObjectType" ? "OBJ" : a.type === "LinkType" ? "LINK" : "PROP"}</span>
+                      <span className="type">{typeShort(a.type)}</span>
                       <span>·</span>
-                      <span className="key">{a.id}</span>
+                      <span className="key">{aid}</span>
                     </div>
                     <div className="ar-title">{a.title}</div>
                     <div className="ar-meta">
                       <span>v{a.version}</span>
                       <span>{a.agent}</span>
-                      <span>conf {Math.round(a.confidence * 100)}%</span>
+                      <span>conf {Math.round((a.confidence || 0) * 100)}%</span>
                     </div>
                   </div>
                   <div className="ar-right">{a.status}</div>
                 </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         </div>
 
-        {/* schema diagram */}
+        {/* schema + governance detail */}
         <div style={{ display: "flex", flexDirection: "column", minHeight: 0 }}>
-          <div style={{ padding: "var(--pad-3) var(--pad-4)", borderBottom: "1px solid var(--line)", background: "var(--bg-2)" }}>
-            <div className="eyebrow accent">Schema diagram</div>
-            <div style={{ marginTop: 4, fontSize: 13, color: "var(--text)" }}>Approved + proposed types (tenant scope)</div>
-          </div>
-          <div style={{ flex: 1, padding: 20, overflow: "auto" }}>
-            <SchemaDiagram />
-          </div>
+          {!selected ? (
+            <div style={{ flex: 1, display: "grid", placeItems: "center", color: "var(--muted)", fontFamily: "var(--font-mono)", fontSize: 12 }}>
+              Select an ontology object to inspect schema, source, review, and usage.
+            </div>
+          ) : (
+            <>
+              <div className="art-header">
+                <div className="crumb">
+                  <span className="type">{selected.type}</span>
+                  <span className="sep">/</span>
+                  <span>{canonicalKey}</span>
+                  <span className="sep">/</span>
+                  <span>v{selected.version}</span>
+                  <span style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
+                    <Pill kind={selected.status}>{selected.status}</Pill>
+                    <Pill kind="accent">conf {Math.round((selected.confidence || 0) * 100)}%</Pill>
+                  </span>
+                </div>
+                <h1>{selected.title}</h1>
+                <p className="desc">{selected.desc || "No description recorded."}</p>
+                <div className="row">
+                  <div className="stat">
+                    <span className="label">Source agent</span>
+                    <span className="val mono">{selected.agent || "unknown"}</span>
+                  </div>
+                  <div className="stat">
+                    <span className="label">Raw sources</span>
+                    <span className="val mono">{sourceRefs.length + evidence.length}</span>
+                  </div>
+                  <div className="stat">
+                    <span className="label">Review events</span>
+                    <span className="val mono">{audit.length}</span>
+                  </div>
+                  <div className="stat">
+                    <span className="label">Canonical graph use</span>
+                    <span className="val" style={{ color: selected.status === "approved" ? "var(--approved)" : "var(--changes)" }}>
+                      {selected.status === "approved" ? "eligible" : "blocked"}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="subbar" style={{ background: "var(--bg-1)" }}>
+                <div className="tabs">
+                  <div className={"tab" + (detailMode === "schema" ? " active" : "")} onClick={() => setDetailMode("schema")}>Schema</div>
+                  <div className={"tab" + (detailMode === "sources" ? " active" : "")} onClick={() => setDetailMode("sources")}>Raw sources <span className="ct">{sourceRefs.length + evidence.length}</span></div>
+                  <div className={"tab" + (detailMode === "review" ? " active" : "")} onClick={() => setDetailMode("review")}>Review <span className="ct">{audit.length}</span></div>
+                  <div className={"tab" + (detailMode === "usage" ? " active" : "")} onClick={() => setDetailMode("usage")}>Used by</div>
+                </div>
+                <div className="spacer" />
+                <a className="tool" href={ontologyHref(canonicalKey)}>Permalink</a>
+              </div>
+
+              <div style={{ flex: 1, overflow: "auto", padding: "var(--pad-4) var(--pad-5)" }}>
+                {detailMode === "schema" && (
+                  <>
+                    <div style={{ display: "grid", gridTemplateColumns: "1.15fr 0.85fr", gap: 16, marginBottom: 16 }}>
+                      <Panel eyebrow="Canonical schema" title="Definition payload" count={`v${selected.version}`}>
+                        <JsonView data={selected.payload || {}} />
+                      </Panel>
+                      <Panel eyebrow="Source schema" title="Raw schema / mapping" count={selected.sourceSchema?.kind || "schema"}>
+                        <FieldPropertiesTable schema={selected.sourceSchema || {}} />
+                        <JsonView data={selected.sourceSchema || {}} />
+                      </Panel>
+                    </div>
+                    <Panel eyebrow="Canonical readiness" title="Graph ingestion eligibility" style={{ marginBottom: 16 }}>
+                      <dl className="kv">
+                        <dt>Status</dt><dd>{selected.canonical?.status || selected.status}</dd>
+                        <dt>Version</dt><dd>v{selected.canonical?.version || selected.version}</dd>
+                        <dt>Tenant</dt><dd>{selected.canonical?.tenant_id || tenantId}</dd>
+                        <dt>Graph database</dt><dd>{selected.canonical?.graph_database || tenant?.graph || "—"}</dd>
+                        <dt>Ingestion</dt><dd style={{ color: selected.status === "approved" ? "var(--approved)" : "var(--changes)" }}>{selected.status === "approved" ? "eligible for canonical graph" : "blocked until approved"}</dd>
+                      </dl>
+                    </Panel>
+                    <Panel eyebrow="Schema map" title="Tenant ontology structure">
+                      <SchemaDiagram artifacts={artifacts} selectedKey={canonicalKey} onSelect={setSelectedId} />
+                    </Panel>
+                  </>
+                )}
+
+                {detailMode === "sources" && (
+                  <Panel eyebrow="Source lineage" title="Raw data sources and evidence" count={`${sourceRefs.length + evidence.length} refs`} nopad>
+                    <SourceList sourceRefs={sourceRefs} evidence={evidence} />
+                  </Panel>
+                )}
+
+                {detailMode === "review" && (
+                  <Panel eyebrow="Governance" title="Review process" count={`${audit.length} events`} nopad>
+                    <ReviewTimeline audit={audit} selected={selected} />
+                  </Panel>
+                )}
+
+                {detailMode === "usage" && (
+                  <Panel eyebrow="Impact" title="Reasoning and graph usage" count={(selected.usedBy || []).length || (canonicalKey ? "basis" : null)}>
+                    <div style={{ display: "grid", gap: 12 }}>
+                      <div style={{ fontSize: 13, color: "var(--text-dim)", lineHeight: 1.55 }}>
+                        This ontology object is the governed structural basis. Reasoning pages should cite it as a compact basis and link here for schema, raw source, review, and canonical state.
+                      </div>
+                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                        <a className="btn" href={reasoningHref(canonicalKey)}>Open reasoning cases using this basis</a>
+                        {canonicalKey && canonicalKey.startsWith("object:") && (
+                          <a className="btn ghost" href={`/?screen=graph&tenant=${encodeURIComponent(tenantId)}&artifact=${encodeURIComponent(canonicalKey)}`}>Open graph context</a>
+                        )}
+                      </div>
+                      {(selected.usedBy || []).length > 0 && (
+                        <div className="evidence-list">
+                          {(selected.usedBy || []).map((u, i) => (
+                            <div key={i} className="evidence-item fact">
+                              <div className="v-bar" />
+                              <div className="kind">{u.kind}</div>
+                              <div className="body-x">
+                                <div className="title">{u.label}</div>
+                                <div className="src">{u.summary}</div>
+                              </div>
+                              <div className="conf-side">
+                                <a className="btn xs" href={u.href || reasoningHref(canonicalKey)}>Open</a>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      <dl className="kv">
+                        <dt>Canonical key</dt><dd>{canonicalKey}</dd>
+                        <dt>Status</dt><dd>{selected.status}</dd>
+                        <dt>Version</dt><dd>v{selected.version}</dd>
+                        <dt>Review gate</dt><dd>{selected.status === "approved" ? "approved for canonical use" : "not canonical until approved"}</dd>
+                      </dl>
+                    </div>
+                  </Panel>
+                )}
+              </div>
+            </>
+          )}
         </div>
 
-        {/* coverage table */}
+        {/* governance summary */}
         <div style={{ display: "flex", flexDirection: "column", minHeight: 0 }}>
           <div style={{ padding: "var(--pad-3) var(--pad-4)", borderBottom: "1px solid var(--line)", background: "var(--bg-2)" }}>
-            <div className="eyebrow accent">Coverage</div>
-            <div style={{ marginTop: 4, fontSize: 13, color: "var(--text)" }}>Where each type is referenced</div>
+            <div className="eyebrow accent">Canonical governance</div>
+            <div style={{ marginTop: 4, fontSize: 13, color: "var(--text)" }}>Source, schema, review, and usage belong here</div>
           </div>
           <div style={{ padding: "var(--pad-3) var(--pad-4)", overflow: "auto" }}>
-            <div className="eyebrow" style={{ marginBottom: 8 }}>Reasoning templates referencing Employee</div>
-            <div className="hbar"><span className="lbl">workload-bal</span><span className="track"><i style={{ width: "94%" }} /></span><span className="num">94</span></div>
-            <div className="hbar"><span className="lbl">concentration</span><span className="track"><i style={{ width: "88%" }} /></span><span className="num">88</span></div>
-            <div className="hbar"><span className="lbl">tenure-bands</span><span className="track"><i style={{ width: "62%" }} /></span><span className="num">62</span></div>
-            <div className="hbar"><span className="lbl">span-of-ctrl</span><span className="track"><i style={{ width: "44%" }} /></span><span className="num">44</span></div>
-            <div className="hbar"><span className="lbl">attrition-risk</span><span className="track"><i style={{ width: "31%" }} /></span><span className="num">31</span></div>
+            <div className="eyebrow" style={{ marginBottom: 8 }}>Status distribution</div>
+            <div className="hbar"><span className="lbl">approved</span><span className="track"><i style={{ width: pct(stats.approved, stats.total) + "%" }} /></span><span className="num">{stats.approved}</span></div>
+            <div className="hbar"><span className="lbl">proposed</span><span className="track"><i style={{ width: pct(stats.proposed, stats.total) + "%" }} /></span><span className="num">{stats.proposed}</span></div>
+            <div className="hbar"><span className="lbl">needs changes</span><span className="track"><i style={{ width: pct(stats.changes, stats.total) + "%" }} /></span><span className="num">{stats.changes}</span></div>
+            <div className="hbar"><span className="lbl">rejected</span><span className="track"><i style={{ width: pct(stats.rejected, stats.total) + "%" }} /></span><span className="num">{stats.rejected}</span></div>
 
-            <div className="eyebrow" style={{ marginBottom: 8, marginTop: 18 }}>Source tables</div>
-            <dl className="kv">
-              <dt>hr.employees</dt><dd>218 rows · daily</dd>
-              <dt>hr.orgchart</dt><dd>14 rows · weekly</dd>
-              <dt>cal.events</dt><dd>9.4k rows · streaming</dd>
-              <dt>sf.opportunities</dt><dd>1.2k rows · hourly</dd>
-            </dl>
+            <div className="eyebrow" style={{ marginBottom: 8, marginTop: 18 }}>Selected lineage</div>
+            {selected ? (
+              <dl className="kv">
+                <dt>Canonical key</dt><dd>{canonicalKey}</dd>
+                <dt>Type</dt><dd>{selected.type}</dd>
+                <dt>Source refs</dt><dd>{sourceRefs.length}</dd>
+                <dt>Evidence rows</dt><dd>{evidence.length}</dd>
+                <dt>Review events</dt><dd>{audit.length}</dd>
+              </dl>
+            ) : (
+              <div style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--muted)" }}>No artifact selected.</div>
+            )}
 
-            <div className="eyebrow" style={{ marginBottom: 8, marginTop: 18 }}>Issues</div>
+            <div className="eyebrow" style={{ marginBottom: 8, marginTop: 18 }}>Boundary checks</div>
             <div style={{ display: "flex", flexDirection: "column", gap: 6, fontFamily: "var(--font-mono)", fontSize: 11 }}>
-              <div style={{ display: "flex", gap: 8, color: "var(--changes)" }}><span>●</span><span>2 properties below 0.65 confidence</span></div>
-              <div style={{ display: "flex", gap: 8, color: "var(--rejected)" }}><span>●</span><span>1 unresolved conflict in ReportsTo</span></div>
-              <div style={{ display: "flex", gap: 8, color: "var(--proposed)" }}><span>●</span><span>3 proposed types awaiting review</span></div>
+              <div style={{ display: "flex", gap: 8, color: "var(--approved)" }}><span>●</span><span>Ontology owns source/schema/review/canonical state</span></div>
+              <div style={{ display: "flex", gap: 8, color: "var(--changes)" }}><span>●</span><span>Reasoning may cite this page as basis only</span></div>
+              <div style={{ display: "flex", gap: 8, color: "var(--muted)" }}><span>●</span><span>Workspace remains a lightweight Case inbox</span></div>
             </div>
           </div>
         </div>
@@ -102,20 +329,145 @@ function Ontology({ data }) {
   );
 }
 
-function SchemaDiagram() {
-  // simple ER-style boxes
-  const boxes = [
-    { id: "Employee", x: 200, y: 60,  w: 200, h: 130, status: "approved", props: ["employee_id","first_name","last_name","title","manager_id","tenure_band"] },
-    { id: "Order",    x: 540, y: 60,  w: 200, h: 130, status: "approved", props: ["order_id","value","status","value_band"] },
-    { id: "Customer", x: 540, y: 270, w: 200, h: 110, status: "proposed", props: ["customer_id","name","segment"] },
-    { id: "Region",   x: 200, y: 280, w: 200, h: 90,  status: "rejected", props: ["code","name"] },
+function typeShort(type) {
+  return type === "ObjectType" ? "OBJ" : type === "LinkType" ? "LINK" : type === "Property" ? "PROP" : "ACT";
+}
+
+function pct(n, total) {
+  if (!total) return 0;
+  return Math.max(4, Math.round((n / total) * 100));
+}
+
+function MiniMetric({ label, value, tone }) {
+  return (
+    <div style={{ border: "1px solid var(--line)", padding: "6px 8px", background: "var(--bg-1)" }}>
+      <div style={{ fontFamily: "var(--font-mono)", fontSize: 9, color: "var(--dim)", textTransform: "uppercase", letterSpacing: "0.08em" }}>{label}</div>
+      <div style={{ marginTop: 2, fontFamily: "var(--font-mono)", fontSize: 15, color: tone ? `var(--${tone})` : "var(--text)" }}>{value}</div>
+    </div>
+  );
+}
+
+function SourceList({ sourceRefs, evidence }) {
+  const rows = [
+    ...sourceRefs.map(src => ({ kind: "source_ref", title: src, src, conf: null, rawPayload: null })),
+    ...evidence.map(e => ({ kind: e.kind, title: e.title, src: e.src, conf: e.conf, rawPayload: e.rawPayload, contentHash: e.contentHash })),
   ];
-  const links = [
-    { from: "Employee", to: "Employee", label: "ReportsTo", curve: "self", status: "proposed" },
-    { from: "Order",    to: "Employee", label: "OwnedBy",   status: "approved" },
-    { from: "Order",    to: "Customer", label: "PlacedBy",  status: "proposed" },
-    { from: "Customer", to: "Region",   label: "InRegion",  status: "rejected" },
+  if (rows.length === 0) {
+    return <div style={{ padding: 24, fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--muted)" }}>No source references or evidence recorded.</div>;
+  }
+  return (
+    <div className="evidence-list">
+      {rows.map((e, i) => (
+        <div key={i} className={"evidence-item " + (e.kind || "fact")}>
+          <div className="v-bar" />
+          <div className="kind">{e.kind || "source"}</div>
+          <div className="body-x">
+            <div className="title">{e.title}</div>
+            <div className="src">{e.src}{e.contentHash ? " · " + e.contentHash : ""}</div>
+            {e.rawPayload && Object.keys(e.rawPayload || {}).length > 0 && <JsonView data={e.rawPayload} />}
+          </div>
+          <div className="conf-side">
+            {e.conf != null ? <><span style={{ color: "var(--text)" }}>{Math.round(e.conf * 100)}%</span><span style={{ color: "var(--dim)", fontSize: 9, marginTop: 2 }}>confidence</span></> : <span className="faint">—</span>}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function FieldPropertiesTable({ schema }) {
+  const fields =
+    schema.field_properties ||
+    schema.fields ||
+    [];
+  if (!fields.length) {
+    return (
+      <div style={{ padding: "0 0 10px", fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--muted)" }}>
+        No field properties available for this source schema.
+      </div>
+    );
+  }
+  return (
+    <div style={{ overflow: "auto", marginBottom: 12, border: "1px solid var(--line-soft)" }}>
+      <table style={{ width: "100%", borderCollapse: "collapse", fontFamily: "var(--font-mono)", fontSize: 11 }}>
+        <thead>
+          <tr style={{ background: "var(--bg-2)", color: "var(--muted)", textAlign: "left" }}>
+            {["field", "type", "nullable", "key role", "default", "comment", "source"].map(h => (
+              <th key={h} style={{ padding: "7px 8px", borderBottom: "1px solid var(--line-soft)", fontWeight: 500 }}>{h}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {fields.map((f, i) => (
+            <tr key={(f.qualified_name || f.name || i)} style={{ borderTop: i ? "1px solid var(--line-soft)" : 0 }}>
+              <td style={{ padding: "7px 8px", color: "var(--text)" }}>{f.qualified_name || f.name}</td>
+              <td style={{ padding: "7px 8px", color: "var(--text-dim)" }}>{f.column_type || f.data_type || "unknown"}</td>
+              <td style={{ padding: "7px 8px", color: f.nullable === false ? "var(--approved)" : "var(--muted)" }}>{String(f.nullable)}</td>
+              <td style={{ padding: "7px 8px", color: f.key_role === "primary_key" ? "var(--approved)" : f.key_role === "relationship_reference" ? "var(--changes)" : "var(--text-dim)" }}>{f.key_role || "unknown"}</td>
+              <td style={{ padding: "7px 8px", color: "var(--text-dim)" }}>{f.default == null ? "null" : String(f.default)}</td>
+              <td style={{ padding: "7px 8px", color: "var(--text-dim)" }}>{f.comment || "unknown"}</td>
+              <td style={{ padding: "7px 8px", color: "var(--muted)" }}>{schema.schema_source || "unknown"}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function ReviewTimeline({ audit, selected }) {
+  if (!audit.length) {
+    return (
+      <div style={{ padding: 24, fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--muted)", lineHeight: 1.6 }}>
+        No review events recorded. Current status: {selected.status} · v{selected.version}.
+      </div>
+    );
+  }
+  return (
+    <div className="audit-list">
+      {audit.map((a, i) => (
+        <div key={i} className="audit-item">
+          <span className="ts">{a.created || a.ts}</span>
+          <span className={"act " + a.act}>{a.act}</span>
+          <span className="det">
+            <span className="who">{a.who}</span>
+            {a.beforeStatus || a.afterStatus ? ` · ${a.beforeStatus || "—"} -> ${a.afterStatus || "—"}` : ""}
+            {a.beforeVersion || a.afterVersion ? ` · v${a.beforeVersion || "—"} -> v${a.afterVersion || "—"}` : ""}
+            {a.detail ? ` · ${a.detail}` : ""}
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function SchemaDiagram({ artifacts = [], selectedKey, onSelect }) {
+  const objects = artifacts.filter(a => a.type === "ObjectType").slice(0, 8);
+  const links = artifacts.filter(a => a.type === "LinkType").slice(0, 12);
+  const boxes = objects.length ? objects.map((a, i) => ({
+    id: a.title || a.key || a.canonical_key,
+    canonical_key: a.canonical_key || a.id,
+    x: 80 + (i % 3) * 280,
+    y: 50 + Math.floor(i / 3) * 150,
+    w: 210,
+    h: 104,
+    status: a.status,
+    props: schemaProps(a),
+  })) : [
+    { id: "Employee", canonical_key: "object:employee", x: 200, y: 60,  w: 200, h: 104, status: "approved", props: ["employeeID","firstName","lastName"] },
+    { id: "Order", canonical_key: "object:order", x: 540, y: 60,  w: 200, h: 104, status: "approved", props: ["orderID","employeeID","customerID"] },
   ];
+  const boxByName = Object.fromEntries(boxes.map(b => [b.id.toLowerCase(), b]));
+  const diagramLinks = links.map(a => {
+    const p = a.payload || {};
+    return {
+      canonical_key: a.canonical_key || a.id,
+      from: String(p.source_object_name || p.source || "").toLowerCase(),
+      to: String(p.target_object_name || p.target || "").toLowerCase(),
+      label: a.title || a.key || a.canonical_key,
+      status: a.status,
+    };
+  }).filter(l => boxByName[l.from] && boxByName[l.to]);
 
   const statusColor = {
     approved: "var(--approved)",
@@ -123,7 +475,7 @@ function SchemaDiagram() {
     rejected: "var(--rejected)",
     changes:  "var(--changes)",
   };
-  const m = Object.fromEntries(boxes.map(b => [b.id, b]));
+  const m = Object.fromEntries(boxes.map(b => [b.id.toLowerCase(), b]));
 
   function anchor(a, b) {
     // centers
@@ -159,7 +511,7 @@ function SchemaDiagram() {
       <rect width="940" height="420" fill="url(#grid-bg)" />
 
       {/* links */}
-      {links.map((l, i) => {
+      {diagramLinks.map((l, i) => {
         if (l.curve === "self") {
           const b = m[l.from];
           const cx = b.x + b.w + 30;
@@ -186,10 +538,10 @@ function SchemaDiagram() {
                   strokeDasharray={l.status === "proposed" ? "4 3" : l.status === "rejected" ? "2 4" : ""}
                   strokeWidth="1.4" markerEnd="url(#er-arrow)" />
             <rect x={mx - 38} y={my - 9} width="76" height="18" fill="var(--bg-1)" stroke={statusColor[l.status]} />
-            <text x={mx} y={my + 4} textAnchor="middle" fontSize="10" fontFamily="var(--font-mono)"
+              <text x={mx} y={my + 4} textAnchor="middle" fontSize="10" fontFamily="var(--font-mono)"
                   fill={statusColor[l.status]}
                   style={{ textTransform: "uppercase", letterSpacing: "0.08em" }}>
-              {l.label}
+              {String(l.label || "").slice(0, 18)}
             </text>
           </g>
         );
@@ -197,9 +549,9 @@ function SchemaDiagram() {
 
       {/* boxes */}
       {boxes.map(b => (
-        <g key={b.id}>
+        <g key={b.id} onClick={() => onSelect && onSelect(b.canonical_key)} style={{ cursor: onSelect ? "pointer" : "default" }}>
           <rect x={b.x} y={b.y} width={b.w} height={b.h}
-                fill="var(--bg-2)" stroke={statusColor[b.status]} strokeWidth="1.5" />
+                fill="var(--bg-2)" stroke={selectedKey === b.canonical_key ? "var(--accent)" : statusColor[b.status]} strokeWidth={selectedKey === b.canonical_key ? "2.5" : "1.5"} />
           <rect x={b.x} y={b.y} width={b.w} height={26} fill="var(--bg-3)" stroke={statusColor[b.status]} strokeWidth="1.5" />
           <text x={b.x + 10} y={b.y + 17} fontSize="12" fontFamily="var(--font-sans)" fill="var(--text)" fontWeight="600">{b.id}</text>
           <text x={b.x + b.w - 10} y={b.y + 17} textAnchor="end" fontSize="9" fontFamily="var(--font-mono)"
@@ -217,6 +569,13 @@ function SchemaDiagram() {
       ))}
     </svg>
   );
+}
+
+function schemaProps(a) {
+  const p = a.payload || {};
+  const raw = p.properties || p.keys || p.columns || [];
+  if (Array.isArray(raw) && raw.length) return raw.slice(0, 5).map(x => typeof x === "string" ? x : (x.name || x.key || JSON.stringify(x)));
+  return Object.keys(p).filter(k => !["description", "source_object_name", "target_object_name", "link_type"].includes(k)).slice(0, 5);
 }
 
 /* ---------------- QUALITY ---------------- */
