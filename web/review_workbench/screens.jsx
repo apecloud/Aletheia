@@ -210,15 +210,13 @@ function Ontology({ data, tenant }) {
               <div style={{ flex: 1, overflow: "auto", padding: "var(--pad-4) var(--pad-5)" }}>
                 {detailMode === "source" && (
                   <>
-                    <div style={{ display: "grid", gridTemplateColumns: "1.15fr 0.85fr", gap: 16, marginBottom: 16 }}>
-                      <Panel eyebrow="Canonical schema" title="Definition payload" count={`v${selected.version}`}>
-                        <JsonView data={selected.payload || {}} />
-                      </Panel>
-                      <Panel eyebrow="Source schema" title="Field properties and mapping" count={selected.sourceSchema?.schema_source || "schema"}>
-                        <FieldPropertiesTable schema={selected.sourceSchema || {}} />
-                        <JsonView data={selected.sourceSchema || {}} />
-                      </Panel>
-                    </div>
+                    <Panel eyebrow="Canonical schema" title="Definition payload" count={`v${selected.version}`} style={{ marginBottom: 16 }}>
+                      <JsonView data={selected.payload || {}} />
+                    </Panel>
+                    <Panel eyebrow="Source schema" title="Field properties and mapping" count={selected.sourceSchema?.schema_source || "schema"} style={{ marginBottom: 16 }}>
+                      <FieldPropertiesTable schema={selected.sourceSchema || {}} />
+                      <JsonView data={selected.sourceSchema || {}} />
+                    </Panel>
                     <Panel eyebrow="Raw source" title="Source refs and evidence" count={`${sourceRefs.length + evidence.length} refs`} nopad style={{ marginBottom: 16 }}>
                       <SourceList sourceRefs={sourceRefs} evidence={evidence} />
                     </Panel>

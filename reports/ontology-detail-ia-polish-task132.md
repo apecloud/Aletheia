@@ -10,6 +10,7 @@ Polish the Ontology detail information architecture without changing the #128 li
 Changes:
 
 - Merged `Schema` and `Raw sources` into `Source & Schema`.
+- Ordered `Source & Schema` as canonical schema first, source schema and raw source evidence below it.
 - Kept field properties, source refs/evidence, source table, join mapping, and `schema_source=live/fallback` in the same view.
 - Renamed `Review` to `Review history` and kept review decisions separate.
 - Replaced the previous large canonical readiness block with `Governance & Impact`.
@@ -43,6 +44,7 @@ Rendered root contains:
 - `live`
 - `Canonical state`
 - `Graph use`
+- `Definition payload` appears before `Field properties and mapping`
 
 Relationship detail:
 
@@ -65,6 +67,7 @@ Rendered root contains:
 - `live`
 - `Canonical state`
 - `Graph use`
+- `Definition payload` appears before `Field properties and mapping`
 
 Negative DOM checks:
 
@@ -78,6 +81,7 @@ Passed:
 
 - Chrome rendered DOM smoke for `object:employee`
 - Chrome rendered DOM smoke for `link:employee:1:n:order`
+- Browser order check: canonical definition appears above source schema for both object and link details
 - `node --check web/review_workbench/api.js`
 - `.venv/bin/python -m py_compile review_workbench.py`
 - `git diff --check`
