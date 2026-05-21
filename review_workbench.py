@@ -18,6 +18,8 @@ from urllib.parse import parse_qs, quote, unquote, urlparse
 
 from sqlalchemy import create_engine, text
 
+from reasoning_engine import ReasoningEngine
+
 sys.path.append(str(Path(__file__).resolve().parent / "agents"))
 from ontology_artifacts import ensure_artifact_schema  # noqa: E402
 from tenant_registry import TenantRegistry  # noqa: E402
@@ -1576,7 +1578,6 @@ class ReasoningRepository:
             {"tool": "propose_finding", "tenant_id": tenant.tenant_id, "write_scope": "draft_reasoning_artifact", "status": "completed"},
         ]
         evidence_paths = list(scope.get("evidence_paths") or [])
-        title, conclusion = self._scoped_graph_finding_text(tenant, task, scope)
         yield {"event": "step", "data": {"tool": "graph_query", "status": "completed" if evidence_paths else "blocked", "step": 1, "total": 3}}
         if not evidence_paths:
             tool_calls[0]["status"] = "blocked"
@@ -1585,28 +1586,38 @@ class ReasoningRepository:
             run = self._record_run(tenant, task, query_plan, tool_calls, [], output, eval_result, "blocked", started)
             yield {"event": "run_complete", "data": {"tenant": tenant.public_dict(), "task": task, "run": run, "findings": [], "approved": False}}
             return
-        structured_answer = self._scoped_structured_answer(tenant, task, scope)
+        center_node = scope.get("center_node")
+        engine = ReasoningEngine(self.instance_repository)
+        structured_answer = engine.analyze(tenant, center_node, task.get("question"))
         if structured_answer:
             query_plan = [
-                "Validate tenant-scoped Employee profile task and approved-only graph scope.",
-                "Read the selected Employee node evidence path from the approved graph.",
-                "Run controlled Northwind source aggregations for Employee profile facts.",
+                "Validate tenant-scoped entity profile task and approved-only graph scope.",
+                "Read the selected entity node evidence path from the approved graph.",
+                "Run controlled source aggregations for entity profile facts.",
                 "Produce a draft structured profile finding with evidence limits and next validation questions.",
             ]
             yield {"event": "plan", "data": {"query_plan": query_plan, "task": task}}
-            tool_calls.insert(1, {"tool": "employee_profile_aggregate", "tenant_id": tenant.tenant_id, "approved_only": True, "write_scope": "read_only_source_aggregate", "status": "completed"})
+            tool_calls.insert(1, {"tool": "entity_profile_aggregate", "tenant_id": tenant.tenant_id, "approved_only": True, "write_scope": "read_only_source_aggregate", "status": "completed"})
             metrics = structured_answer.get("metrics") or {}
+            rankings = metrics.get("rankings") or []
+            label = metrics.get("label") or center_node
+            ranking_summary = "; ".join(
+                f"{r['my_count']} {r['target_type']}(s) (#{r['rank']}/{r['total_peers']}, {r['level']})"
+                for r in rankings if r.get("my_count", 0) > 0
+            ) or "no ranked relationships"
             evidence_paths.append({
                 "kind": "controlled_aggregate",
-                "label": "Employee profile aggregate",
-                "summary": f"{metrics.get('name') or scope.get('center_node')} has {metrics.get('order_count', 0)} orders across {metrics.get('customer_count', 0)} customers; order rank {metrics.get('order_rank')}/{metrics.get('employee_count')}.",
+                "label": f"{label} Business Profile",
+                "summary": f"{label}: {ranking_summary}",
                 "url": f"/reasoning.html?tenant={tenant.tenant_id}&task={quote(task_key)}",
-                "source_ref": "employees + orders + order_details + customers",
-                "payload": {k: metrics.get(k) for k in ("employee_id", "order_count", "order_rank", "employee_count", "customer_count", "top_customer_id", "revenue", "freight_sum")},
+                "source_ref": f"{metrics.get('object_type', 'entity')} + peer ranking + value aggregation",
+                "payload": metrics,
             })
-            yield {"event": "step", "data": {"tool": "employee_profile_aggregate", "status": "completed", "step": 2, "total": 3}}
+            yield {"event": "step", "data": {"tool": "entity_profile_aggregate", "status": "completed", "step": 2, "total": 3}}
             title = structured_answer["title"]
             conclusion = structured_answer["profile_summary"]
+        else:
+            title, conclusion = self._edge_or_fallback_finding_text(tenant, task, scope)
         yield {"event": "evidence", "data": {"evidence_paths": evidence_paths}}
         finding = {
             "canonical_key": f"finding:graph-scope:{task_key}:run-{int(time.time() * 1000)}",
@@ -1652,7 +1663,6 @@ class ReasoningRepository:
             {"tool": "propose_finding", "tenant_id": tenant.tenant_id, "write_scope": "draft_reasoning_artifact", "status": "completed"},
         ]
         evidence_paths = list(scope.get("evidence_paths") or [])
-        title, conclusion = self._scoped_graph_finding_text(tenant, task, scope)
         if not evidence_paths:
             tool_calls[0]["status"] = "blocked"
             output = {
@@ -1668,18 +1678,20 @@ class ReasoningRepository:
             }
             run = self._record_run(tenant, task, query_plan, tool_calls, [], output, eval_result, "blocked", started)
             return {"tenant": tenant.public_dict(), "task": task, "run": run, "findings": [], "approved": False}
-        structured_answer = self._scoped_structured_answer(tenant, task, scope)
+        center_node = scope.get("center_node")
+        engine = ReasoningEngine(self.instance_repository)
+        structured_answer = engine.analyze(tenant, center_node, task.get("question"))
         if structured_answer:
             query_plan = [
-                "Validate tenant-scoped Employee profile task and approved-only graph scope.",
-                "Read the selected Employee node evidence path from the approved graph.",
-                "Run controlled Northwind source aggregations for Employee profile facts.",
+                "Validate tenant-scoped entity profile task and approved-only graph scope.",
+                "Read the selected entity node evidence path from the approved graph.",
+                "Run controlled source aggregations for entity profile facts.",
                 "Produce a draft structured profile finding with evidence limits and next validation questions.",
             ]
             tool_calls.insert(
                 1,
                 {
-                    "tool": "employee_profile_aggregate",
+                    "tool": "entity_profile_aggregate",
                     "tenant_id": tenant.tenant_id,
                     "approved_only": True,
                     "write_scope": "read_only_source_aggregate",
@@ -1687,32 +1699,26 @@ class ReasoningRepository:
                 },
             )
             metrics = structured_answer.get("metrics") or {}
+            rankings = metrics.get("rankings") or []
+            label = metrics.get("label") or center_node
+            ranking_summary = "; ".join(
+                f"{r['my_count']} {r['target_type']}(s) (#{r['rank']}/{r['total_peers']}, {r['level']})"
+                for r in rankings if r.get("my_count", 0) > 0
+            ) or "no ranked relationships"
             evidence_paths.append(
                 {
                     "kind": "controlled_aggregate",
-                    "label": "Employee profile aggregate",
-                    "summary": (
-                        f"{metrics.get('name') or scope.get('center_node')} has "
-                        f"{metrics.get('order_count', 0)} orders across "
-                        f"{metrics.get('customer_count', 0)} customers; "
-                        f"order rank {metrics.get('order_rank')}/{metrics.get('employee_count')}."
-                    ),
+                    "label": f"{label} Business Profile",
+                    "summary": f"{label}: {ranking_summary}",
                     "url": f"/reasoning.html?tenant={tenant.tenant_id}&task={quote(task_key)}",
-                    "source_ref": "employees + orders + order_details + customers",
-                    "payload": {
-                        "employee_id": metrics.get("employee_id"),
-                        "order_count": metrics.get("order_count"),
-                        "order_rank": metrics.get("order_rank"),
-                        "employee_count": metrics.get("employee_count"),
-                        "customer_count": metrics.get("customer_count"),
-                        "top_customer_id": metrics.get("top_customer_id"),
-                        "revenue": metrics.get("revenue"),
-                        "freight_sum": metrics.get("freight_sum"),
-                    },
+                    "source_ref": f"{metrics.get('object_type', 'entity')} + peer ranking + value aggregation",
+                    "payload": metrics,
                 }
             )
             title = structured_answer["title"]
             conclusion = structured_answer["profile_summary"]
+        else:
+            title, conclusion = self._edge_or_fallback_finding_text(tenant, task, scope)
         finding = {
             "canonical_key": f"finding:graph-scope:{task_key}:run-{int(time.time() * 1000)}",
             "title": title,
@@ -1756,55 +1762,9 @@ class ReasoningRepository:
         finding_row = self._record_finding(tenant, run, finding)
         return {"tenant": tenant.public_dict(), "task": task, "run": run, "findings": [finding_row], "approved": True}
 
-    def _scoped_graph_finding_text(self, tenant, task, scope):
-        center_node = scope.get("center_node")
+    def _edge_or_fallback_finding_text(self, tenant, task, scope):
         center_edge = scope.get("center_edge") or {}
         question = task.get("question") or "the scoped graph question"
-        if center_node and ":" in center_node:
-            object_type, instance_id = center_node.split(":", 1)
-            graph = self.instance_repository.neighborhood(
-                tenant,
-                object_type,
-                instance_id,
-                depth=scope.get("depth") or 1,
-                limit=scope.get("node_limit") or 200,
-            )
-            if graph and graph.get("approved"):
-                center = graph.get("center") or {}
-                label = center.get("label") or center_node
-                cfg = self.instance_repository.ENTITY_CONFIG.get(object_type.lower()) or {}
-                desc_keys = [cfg.get("artifact", f"object:{object_type}")]
-                for lc in self.instance_repository.LINK_CONFIG:
-                    if lc["from"] == object_type.lower():
-                        desc_keys.append(lc["link"])
-                descriptions = self._artifact_descriptions(tenant, desc_keys)
-                entity_desc = descriptions.get(cfg.get("artifact", ""), "")
-                rankings = self._peer_rankings(tenant, object_type, instance_id)
-                ranking_parts = []
-                for r in rankings:
-                    if r["my_count"] > 0:
-                        ranking_parts.append(
-                            f"{r['my_count']} {r['target_type']}(s) (#{r['rank']}/{r['total_peers']}, {r['level']})"
-                        )
-                title = f"{label} Business Profile"
-                if ranking_parts:
-                    title += ": " + ", ".join(ranking_parts[:2])
-                conclusion_parts = []
-                if entity_desc:
-                    conclusion_parts.append(f"{object_type} definition: {entity_desc.split('.')[0]}.")
-                for r in rankings:
-                    link_desc = descriptions.get(r["link"], "")
-                    role = link_desc.split(".")[0].strip() if link_desc else ""
-                    conclusion_parts.append(
-                        f"{label} has {r['my_count']} related {r['target_type']}(s), "
-                        f"ranked #{r['rank']} among {r['total_peers']} {object_type}(s) "
-                        f"(avg {r['avg']}, max {r['max']}), {r['level']}."
-                        + (f" {role}." if role else "")
-                    )
-                if not conclusion_parts:
-                    conclusion_parts.append(f"Business relationship profile for {label} in the approved graph.")
-                conclusion = " ".join(conclusion_parts)
-                return title, conclusion
         if center_edge.get("source") and center_edge.get("target"):
             source = center_edge["source"]
             target = center_edge["target"]
@@ -1821,7 +1781,7 @@ class ReasoningRepository:
                 )
             conclusion += "This is a draft answer for review and does not change canonical ontology or graph."
             return title, conclusion
-        center = center_node or f"{center_edge.get('source', 'scope')} -> {center_edge.get('target', 'scope')}"
+        center = scope.get("center_node") or f"{center_edge.get('source', 'scope')} -> {center_edge.get('target', 'scope')}"
         return (
             f"Scoped answer for {center}",
             (
@@ -1829,255 +1789,6 @@ class ReasoningRepository:
                 "This is a draft answer for review and does not change canonical ontology or graph."
             ),
         )
-
-    def _peer_rankings(self, tenant, object_type, instance_id):
-        """For each LINK_CONFIG where this entity type is the 'from' side,
-        compute rank/percentile/avg/max among all peers of the same type."""
-        cfg = self.instance_repository.ENTITY_CONFIG.get(object_type.lower())
-        if not cfg:
-            return []
-        rankings = []
-        with self.instance_repository.source_engine_for(tenant).connect() as conn:
-            for lc in self.instance_repository.LINK_CONFIG:
-                if lc["from"] != object_type.lower():
-                    continue
-                if lc.get("reverse"):
-                    continue
-                fk_table = lc["fk_table"]
-                fk_col = lc["fk_col"]
-                target_type = lc["to"]
-                try:
-                    rows = conn.execute(text(
-                        f"SELECT {fk_col} AS fk, COUNT(*) AS cnt "
-                        f"FROM {fk_table} WHERE {fk_col} IS NOT NULL "
-                        f"GROUP BY {fk_col} ORDER BY cnt DESC"
-                    )).mappings().all()
-                except Exception:
-                    continue
-                if not rows:
-                    continue
-                counts = {str(r["fk"]): int(r["cnt"]) for r in rows}
-                total_peers = len(counts)
-                my_count = counts.get(str(instance_id), 0)
-                sorted_counts = sorted(counts.values(), reverse=True)
-                rank = sorted_counts.index(my_count) + 1 if my_count in sorted_counts else total_peers
-                avg_count = sum(sorted_counts) / total_peers if total_peers else 0
-                max_count = sorted_counts[0] if sorted_counts else 0
-                percentile = round((total_peers - rank) / max(total_peers - 1, 1) * 100) if total_peers > 1 else 100
-                if percentile >= 75:
-                    level = "high"
-                elif percentile >= 40:
-                    level = "average"
-                else:
-                    level = "low"
-                rankings.append({
-                    "link": lc["link"],
-                    "target_type": target_type,
-                    "fk_table": fk_table,
-                    "my_count": my_count,
-                    "rank": rank,
-                    "total_peers": total_peers,
-                    "percentile": percentile,
-                    "avg": round(avg_count, 1),
-                    "max": max_count,
-                    "level": level,
-                })
-        return rankings
-
-    def _artifact_descriptions(self, tenant, keys):
-        """Fetch artifact descriptions keyed by canonical_key."""
-        arts = self.instance_repository._approved_artifacts(tenant, keys)
-        return {k: v.get("description") or "" for k, v in arts.items()}
-
-    def _format_properties(self, row, cfg, object_type):
-        """Format entity properties, skipping PK/FK/binary, formatting dates."""
-        pk_col = cfg.get("pk", "id")
-        fk_cols = set()
-        for lc in self.instance_repository.LINK_CONFIG:
-            if lc["fk_table"] == cfg.get("table"):
-                fk_cols.add(lc["fk_col"])
-                if lc.get("target_fk"):
-                    fk_cols.add(lc["target_fk"])
-        skip_cols = {pk_col} | fk_cols
-        props = []
-        for k, v in row.items():
-            if k in skip_cols or v is None:
-                continue
-            v_val = _jsonable(v)
-            v_str = str(v_val)
-            if not v_str.strip() or len(v_str) > 200:
-                continue
-            if hasattr(v, "strftime"):
-                v_str = v.strftime("%Y-%m-%d")
-            elif isinstance(v_val, str) and len(v_val) >= 10:
-                for fmt in ("%Y-%m-%d %H:%M:%S.%f", "%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S"):
-                    try:
-                        from datetime import datetime as _dt
-                        v_str = _dt.strptime(v_val[:19], fmt[:len(fmt)]).strftime("%Y-%m-%d")
-                        break
-                    except (ValueError, TypeError):
-                        continue
-            props.append({"col": k, "value": v_str})
-        return props
-
-    def _scoped_structured_answer(self, tenant, task, scope):
-        center_node = scope.get("center_node")
-        if not center_node or ":" not in center_node:
-            return None
-        object_type, instance_id = center_node.split(":", 1)
-        row = self.instance_repository._fetch_entity(tenant, object_type, instance_id)
-        if not row:
-            return {
-                "title": f"{center_node} profile unavailable",
-                "profile_summary": f"{center_node} not found in the controlled data source.",
-                "key_facts": [],
-                "business_interpretation": ["Entity record missing — cannot perform analysis."],
-                "evidence_limits": [f"Missing {object_type} source table record."],
-                "next_questions": ["Verify entity ID exists in the current tenant data source."],
-            }
-        graph = self.instance_repository.neighborhood(
-            tenant, object_type, instance_id,
-            depth=scope.get("depth") or 1,
-            limit=scope.get("node_limit") or 200,
-        )
-        if not graph or not graph.get("approved"):
-            return None
-        center = graph.get("center") or {}
-        label = center.get("label") or center_node
-        nodes = graph.get("nodes") or []
-        edges = graph.get("edges") or []
-        cfg = self.instance_repository.ENTITY_CONFIG.get(object_type.lower()) or {}
-        source_table = cfg.get("table", object_type)
-        pk_col = cfg.get("pk", "id")
-
-        neighbors_by_type = {}
-        for node in nodes:
-            if node.get("id") == center.get("id"):
-                continue
-            ntype = node.get("type", "unknown")
-            neighbors_by_type.setdefault(ntype, []).append(node)
-
-        # --- artifact descriptions as business context ---
-        desc_keys = [cfg.get("artifact", f"object:{object_type}")]
-        for lc in self.instance_repository.LINK_CONFIG:
-            if lc["from"] == object_type.lower() or lc["to"] == object_type.lower():
-                desc_keys.append(lc["link"])
-        descriptions = self._artifact_descriptions(tenant, desc_keys)
-        entity_desc = descriptions.get(cfg.get("artifact", ""), "")
-
-        # --- peer rankings ---
-        rankings = self._peer_rankings(tenant, object_type, instance_id)
-
-        # --- formatted properties ---
-        props = self._format_properties(row, cfg, object_type)
-
-        # --- build key_facts ---
-        key_facts = []
-        if props:
-            prop_text = "; ".join(f"{p['col']}: {p['value']}" for p in props[:12])
-            key_facts.append({
-                "label": f"{label} attributes",
-                "value": prop_text,
-                "source_ref": f"{source_table}.{pk_col}={instance_id}",
-            })
-        for r in rankings:
-            link_desc = descriptions.get(r["link"], "")
-            role_text = link_desc.split(".")[0].strip() if link_desc else f"related {r['target_type']}"
-            top_pct = 100 - r['percentile'] if r['percentile'] < 100 else 1
-            key_facts.append({
-                "label": f"{r['target_type']} ranking",
-                "value": (
-                    f"{r['my_count']} {r['target_type']}(s), "
-                    f"ranked #{r['rank']}/{r['total_peers']} (top {top_pct}%), "
-                    f"avg {r['avg']}, max {r['max']}, {r['level']}"
-                ),
-                "source_ref": f"{r['fk_table']} GROUP BY {object_type}",
-                "context": role_text,
-            })
-        for ntype, nlist in sorted(neighbors_by_type.items()):
-            if any(r["target_type"] == ntype.lower() for r in rankings):
-                continue
-            samples = ", ".join(n.get("label", n["id"]) for n in nlist[:5])
-            suffix = f" and {len(nlist) - 5} more" if len(nlist) > 5 else ""
-            key_facts.append({
-                "label": f"related {ntype}",
-                "value": f"{len(nlist)}: {samples}{suffix}",
-                "source_ref": "graph edges",
-            })
-
-        # --- business interpretation ---
-        interpretations = []
-        if entity_desc:
-            interpretations.append(f"[{object_type} definition] {entity_desc}")
-        for r in rankings:
-            link_desc = descriptions.get(r["link"], "")
-            if r["my_count"] == 0:
-                interpretations.append(f"{label} has no directly related {r['target_type']}(s).")
-            elif r["level"] == "high":
-                interpretations.append(
-                    f"{label}'s {r['target_type']} count ({r['my_count']}) ranks #{r['rank']}/{r['total_peers']}, "
-                    f"significantly above avg {r['avg']} — high activity entity."
-                    + (f" Context: {link_desc.split('.')[0]}." if link_desc else "")
-                )
-            elif r["level"] == "low":
-                interpretations.append(
-                    f"{label}'s {r['target_type']} count ({r['my_count']}) ranks #{r['rank']}/{r['total_peers']}, "
-                    f"below avg {r['avg']} — review activity level or data completeness."
-                )
-            else:
-                interpretations.append(
-                    f"{label}'s {r['target_type']} count ({r['my_count']}) ranks #{r['rank']}/{r['total_peers']}, "
-                    f"near avg {r['avg']} — average level."
-                )
-        if not interpretations:
-            interpretations.append(f"{label} has {len(edges)} direct relationships in the approved graph.")
-
-        # --- profile summary ---
-        ranking_highlights = []
-        for r in rankings:
-            ranking_highlights.append(
-                f"{r['my_count']} {r['target_type']}(s) (#{r['rank']}/{r['total_peers']}, {r['level']})"
-            )
-        if ranking_highlights:
-            profile_summary = f"{label}: " + ", ".join(ranking_highlights) + "."
-        else:
-            relation_parts = [f"{len(v)} {k}" for k, v in sorted(neighbors_by_type.items())]
-            profile_summary = f"{label}: " + ", ".join(relation_parts) + "." if relation_parts else f"{label} has no direct relationships."
-        if props:
-            notable = [p for p in props if p["col"] not in ("photo", "notes", "homePhone", "extension", "photoPath")][:4]
-            profile_summary += " " + "; ".join(f"{p['col']}: {p['value']}" for p in notable) + "."
-
-        # --- title ---
-        if ranking_highlights:
-            title = f"{label} Business Profile: " + ", ".join(ranking_highlights[:2])
-        else:
-            title = f"{label} Entity Profile"
-
-        return {
-            "title": title,
-            "profile_summary": profile_summary,
-            "key_facts": key_facts,
-            "business_interpretation": interpretations,
-            "evidence_limits": [
-                f"Profile based on {source_table} source table and approved graph controlled aggregation.",
-                "Rankings reflect a current snapshot — no time-series trends or external benchmarks.",
-            ],
-            "next_questions": [
-                f"How do {label}'s relationship patterns change over time?",
-                f"How does {label} compare to typical {object_type}(s)?",
-                "Are there anomalous patterns or potential risks?",
-            ],
-            "metrics": {
-                "center_node": center_node,
-                "object_type": object_type,
-                "instance_id": instance_id,
-                "label": label,
-                "neighbor_count": len(nodes) - 1,
-                "edge_count": len(edges),
-                "neighbor_types": {k: len(v) for k, v in neighbors_by_type.items()},
-                "rankings": rankings,
-            },
-        }
 
     def _is_legacy_scoped_finding(self, finding):
         title = (finding.get("title") or "").lower()
@@ -2100,7 +1811,9 @@ class ReasoningRepository:
         scope = task.get("scope") or finding.get("task_scope") or {}
         structured_answer = finding.get("structured_answer") or (finding.get("recommended_action") or {}).get("structured_answer")
         if not structured_answer:
-            structured_answer = self._scoped_structured_answer(tenant, task, scope)
+            center_node = scope.get("center_node")
+            engine = ReasoningEngine(self.instance_repository)
+            structured_answer = engine.analyze(tenant, center_node, task.get("question"))
             if structured_answer:
                 raw_recommended_action = finding.get("recommended_action") or {}
                 finding["recommended_action"] = {
@@ -2145,7 +1858,7 @@ class ReasoningRepository:
                 )
                 finding["supporting_evidence"] = evidence_paths
         else:
-            title, conclusion = self._scoped_graph_finding_text(tenant, task, scope)
+            title, conclusion = self._edge_or_fallback_finding_text(tenant, task, scope)
         finding["raw_title"] = raw_title
         finding["raw_conclusion"] = raw_conclusion
         finding["title"] = title
