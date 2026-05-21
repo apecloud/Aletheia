@@ -7,7 +7,7 @@ function Ontology({ data, tenant }) {
   const [active, setActive] = useStateXS("ObjectType");
   const [selectedId, setSelectedId] = useStateXS(null);
   const [search, setSearch] = useStateXS("");
-  const [detailMode, setDetailMode] = useStateXS("schema");
+  const [detailMode, setDetailMode] = useStateXS("source");
   const [statusView, setStatusView] = useStateXS("approved");
 
   const listQ = useApiData("artifacts", [tenant ? tenant.id : "default", {}], { fallback: data.ARTIFACTS });
@@ -130,7 +130,7 @@ function Ontology({ data, tenant }) {
                 return (
                 <div key={aid}
                      className={"artifact-row " + a.status + (aid === selectedId ? " selected" : "")}
-                     onClick={() => { setSelectedId(aid); setDetailMode("schema"); }}>
+                     onClick={() => { setSelectedId(aid); setDetailMode("source"); }}>
                   <div className="ar-bar" />
                   <div className="ar-main">
                     <div className="ar-top">
@@ -181,7 +181,7 @@ function Ontology({ data, tenant }) {
                     <span className="val mono">{selected.agent || "unknown"}</span>
                   </div>
                   <div className="stat">
-                    <span className="label">Raw sources</span>
+                    <span className="label">Source evidence</span>
                     <span className="val mono">{sourceRefs.length + evidence.length}</span>
                   </div>
                   <div className="stat">
@@ -199,35 +199,28 @@ function Ontology({ data, tenant }) {
 
               <div className="subbar" style={{ background: "var(--bg-1)" }}>
                 <div className="tabs">
-                  <div className={"tab" + (detailMode === "schema" ? " active" : "")} onClick={() => setDetailMode("schema")}>Schema</div>
-                  <div className={"tab" + (detailMode === "sources" ? " active" : "")} onClick={() => setDetailMode("sources")}>Raw sources <span className="ct">{sourceRefs.length + evidence.length}</span></div>
-                  <div className={"tab" + (detailMode === "review" ? " active" : "")} onClick={() => setDetailMode("review")}>Review <span className="ct">{audit.length}</span></div>
-                  <div className={"tab" + (detailMode === "usage" ? " active" : "")} onClick={() => setDetailMode("usage")}>Used by</div>
+                  <div className={"tab" + (detailMode === "source" ? " active" : "")} onClick={() => setDetailMode("source")}>Source &amp; Schema <span className="ct">{sourceRefs.length + evidence.length}</span></div>
+                  <div className={"tab" + (detailMode === "review" ? " active" : "")} onClick={() => setDetailMode("review")}>Review history <span className="ct">{audit.length}</span></div>
+                  <div className={"tab" + (detailMode === "governance" ? " active" : "")} onClick={() => setDetailMode("governance")}>Governance &amp; Impact</div>
                 </div>
                 <div className="spacer" />
                 <a className="tool" href={ontologyHref(canonicalKey)}>Permalink</a>
               </div>
 
               <div style={{ flex: 1, overflow: "auto", padding: "var(--pad-4) var(--pad-5)" }}>
-                {detailMode === "schema" && (
+                {detailMode === "source" && (
                   <>
                     <div style={{ display: "grid", gridTemplateColumns: "1.15fr 0.85fr", gap: 16, marginBottom: 16 }}>
                       <Panel eyebrow="Canonical schema" title="Definition payload" count={`v${selected.version}`}>
                         <JsonView data={selected.payload || {}} />
                       </Panel>
-                      <Panel eyebrow="Source schema" title="Raw schema / mapping" count={selected.sourceSchema?.kind || "schema"}>
+                      <Panel eyebrow="Source schema" title="Field properties and mapping" count={selected.sourceSchema?.schema_source || "schema"}>
                         <FieldPropertiesTable schema={selected.sourceSchema || {}} />
                         <JsonView data={selected.sourceSchema || {}} />
                       </Panel>
                     </div>
-                    <Panel eyebrow="Canonical readiness" title="Graph ingestion eligibility" style={{ marginBottom: 16 }}>
-                      <dl className="kv">
-                        <dt>Status</dt><dd>{selected.canonical?.status || selected.status}</dd>
-                        <dt>Version</dt><dd>v{selected.canonical?.version || selected.version}</dd>
-                        <dt>Tenant</dt><dd>{selected.canonical?.tenant_id || tenantId}</dd>
-                        <dt>Graph database</dt><dd>{selected.canonical?.graph_database || tenant?.graph || "—"}</dd>
-                        <dt>Ingestion</dt><dd style={{ color: selected.status === "approved" ? "var(--approved)" : "var(--changes)" }}>{selected.status === "approved" ? "eligible for canonical graph" : "blocked until approved"}</dd>
-                      </dl>
+                    <Panel eyebrow="Raw source" title="Source refs and evidence" count={`${sourceRefs.length + evidence.length} refs`} nopad style={{ marginBottom: 16 }}>
+                      <SourceList sourceRefs={sourceRefs} evidence={evidence} />
                     </Panel>
                     <Panel eyebrow="Schema map" title="Tenant ontology structure">
                       <SchemaDiagram artifacts={artifacts} selectedKey={canonicalKey} onSelect={setSelectedId} />
@@ -235,24 +228,16 @@ function Ontology({ data, tenant }) {
                   </>
                 )}
 
-                {detailMode === "sources" && (
-                  <Panel eyebrow="Source lineage" title="Raw data sources and evidence" count={`${sourceRefs.length + evidence.length} refs`} nopad>
-                    <SourceList sourceRefs={sourceRefs} evidence={evidence} />
-                  </Panel>
-                )}
-
                 {detailMode === "review" && (
-                  <Panel eyebrow="Governance" title="Review process" count={`${audit.length} events`} nopad>
+                  <Panel eyebrow="Review history" title="Decisions and rationale" count={`${audit.length} events`} nopad>
                     <ReviewTimeline audit={audit} selected={selected} />
                   </Panel>
                 )}
 
-                {detailMode === "usage" && (
-                  <Panel eyebrow="Impact" title="Reasoning and graph usage" count={(selected.usedBy || []).length || (canonicalKey ? "basis" : null)}>
+                {detailMode === "governance" && (
+                  <Panel eyebrow="Governance & Impact" title="Canonical readiness and downstream usage" count={(selected.usedBy || []).length || (canonicalKey ? "basis" : null)}>
                     <div style={{ display: "grid", gap: 12 }}>
-                      <div style={{ fontSize: 13, color: "var(--text-dim)", lineHeight: 1.55 }}>
-                        This ontology object is the governed structural basis. Reasoning pages should cite it as a compact basis and link here for schema, raw source, review, and canonical state.
-                      </div>
+                      <GovernanceSummary selected={selected} tenant={tenant} tenantId={tenantId} />
                       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                         <a className="btn" href={reasoningHref(canonicalKey)}>Open reasoning cases using this basis</a>
                         {canonicalKey && canonicalKey.startsWith("object:") && (
@@ -278,9 +263,9 @@ function Ontology({ data, tenant }) {
                       )}
                       <dl className="kv">
                         <dt>Canonical key</dt><dd>{canonicalKey}</dd>
-                        <dt>Status</dt><dd>{selected.status}</dd>
-                        <dt>Version</dt><dd>v{selected.version}</dd>
-                        <dt>Review gate</dt><dd>{selected.status === "approved" ? "approved for canonical use" : "not canonical until approved"}</dd>
+                        <dt>Last decision</dt><dd>{audit[0]?.act || audit[0]?.decision || "none"}</dd>
+                        <dt>Blocking issue</dt><dd>{selected.status === "approved" ? "none" : "approval required before canonical graph use"}</dd>
+                        <dt>Canonical write boundary</dt><dd>Only approved ontology artifacts can change canonical graph schema.</dd>
                       </dl>
                     </div>
                   </Panel>
@@ -293,8 +278,8 @@ function Ontology({ data, tenant }) {
         {/* governance summary */}
         <div style={{ display: "flex", flexDirection: "column", minHeight: 0 }}>
           <div style={{ padding: "var(--pad-3) var(--pad-4)", borderBottom: "1px solid var(--line)", background: "var(--bg-2)" }}>
-            <div className="eyebrow accent">Canonical governance</div>
-            <div style={{ marginTop: 4, fontSize: 13, color: "var(--text)" }}>Source, schema, review, and usage belong here</div>
+            <div className="eyebrow accent">Governance & Impact</div>
+            <div style={{ marginTop: 4, fontSize: 13, color: "var(--text)" }}>Canonical state and downstream usage</div>
           </div>
           <div style={{ padding: "var(--pad-3) var(--pad-4)", overflow: "auto" }}>
             <div className="eyebrow" style={{ marginBottom: 8 }}>Status distribution</div>
@@ -303,15 +288,9 @@ function Ontology({ data, tenant }) {
             <div className="hbar"><span className="lbl">needs changes</span><span className="track"><i style={{ width: pct(stats.changes, stats.total) + "%" }} /></span><span className="num">{stats.changes}</span></div>
             <div className="hbar"><span className="lbl">rejected</span><span className="track"><i style={{ width: pct(stats.rejected, stats.total) + "%" }} /></span><span className="num">{stats.rejected}</span></div>
 
-            <div className="eyebrow" style={{ marginBottom: 8, marginTop: 18 }}>Selected lineage</div>
+            <div className="eyebrow" style={{ marginBottom: 8, marginTop: 18 }}>Selected readiness</div>
             {selected ? (
-              <dl className="kv">
-                <dt>Canonical key</dt><dd>{canonicalKey}</dd>
-                <dt>Type</dt><dd>{selected.type}</dd>
-                <dt>Source refs</dt><dd>{sourceRefs.length}</dd>
-                <dt>Evidence rows</dt><dd>{evidence.length}</dd>
-                <dt>Review events</dt><dd>{audit.length}</dd>
-              </dl>
+              <GovernanceSummary selected={selected} tenant={tenant} tenantId={tenantId} compact />
             ) : (
               <div style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--muted)" }}>No artifact selected.</div>
             )}
@@ -411,6 +390,37 @@ function FieldPropertiesTable({ schema }) {
           ))}
         </tbody>
       </table>
+    </div>
+  );
+}
+
+function GovernanceSummary({ selected, tenant, tenantId, compact }) {
+  const status = selected.canonical?.status || selected.status;
+  const version = selected.canonical?.version || selected.version;
+  const eligible = selected.canonical?.graph_ingestion_eligible ?? selected.status === "approved";
+  const usedBy = (selected.usedBy || []).length;
+  const items = [
+    { label: "Canonical state", value: `${status || "unknown"} v${version || "?"}`, tone: status === "approved" ? "approved" : "changes" },
+    { label: "Graph use", value: eligible ? "eligible" : "blocked", tone: eligible ? "approved" : "changes" },
+    { label: "Used by", value: `${usedBy} flows`, tone: usedBy ? "accent" : null },
+  ];
+  return (
+    <div style={{ display: "grid", gap: compact ? 8 : 12 }}>
+      <div style={{ display: "grid", gridTemplateColumns: compact ? "1fr" : "repeat(3, minmax(0, 1fr))", gap: 8 }}>
+        {items.map(item => (
+          <div key={item.label} style={{ border: "1px solid var(--line-soft)", background: "var(--bg-2)", padding: "10px 12px" }}>
+            <div className="eyebrow" style={{ marginBottom: 4 }}>{item.label}</div>
+            <div style={{ fontFamily: "var(--font-mono)", fontSize: 13, color: item.tone ? `var(--${item.tone})` : "var(--text)" }}>{item.value}</div>
+          </div>
+        ))}
+      </div>
+      {!compact && (
+        <dl className="kv">
+          <dt>Tenant</dt><dd>{selected.canonical?.tenant_id || tenantId}</dd>
+          <dt>Graph database</dt><dd>{selected.canonical?.graph_database || tenant?.graph || "—"}</dd>
+          <dt>Blocking reason</dt><dd>{eligible ? "none" : "not approved for canonical graph ingestion"}</dd>
+        </dl>
+      )}
     </div>
   );
 }
