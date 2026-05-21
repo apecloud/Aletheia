@@ -1142,6 +1142,7 @@ class ReasoningRepository:
         self.ensure_schema = ensure_schema
         self.metadata_engines = {}
         self.source_engines = {}
+        self._autopilot_schema_ready = set()
 
     def tenant(self, tenant_id=None):
         return self.tenant_registry.get(tenant_id)
@@ -1162,6 +1163,338 @@ class ReasoningRepository:
             engine = create_engine(tenant.source_db_url)
             self.source_engines[tenant.source_db_url] = engine
         return engine
+
+    def ensure_autopilot_schema(self, tenant):
+        key = tenant.metadata_db_url
+        if key in self._autopilot_schema_ready:
+            return
+        with self.metadata_engine_for(tenant).begin() as conn:
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS aletheia_autopilot_sessions (
+                    id SERIAL PRIMARY KEY,
+                    project_id VARCHAR(255) NOT NULL,
+                    session_key VARCHAR(255) NOT NULL,
+                    objective TEXT NOT NULL,
+                    scope_json TEXT NOT NULL DEFAULT '{}',
+                    budget_json TEXT NOT NULL DEFAULT '{}',
+                    safety_profile_json TEXT NOT NULL DEFAULT '{}',
+                    status VARCHAR(50) NOT NULL DEFAULT 'draft',
+                    created_by VARCHAR(255) NOT NULL DEFAULT 'Autopilot',
+                    created_at TIMESTAMP DEFAULT NOW(),
+                    updated_at TIMESTAMP DEFAULT NOW()
+                )
+            """))
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS aletheia_autopilot_hypotheses (
+                    id SERIAL PRIMARY KEY,
+                    session_id INTEGER NOT NULL REFERENCES aletheia_autopilot_sessions(id) ON DELETE CASCADE,
+                    project_id VARCHAR(255) NOT NULL,
+                    hypothesis_key VARCHAR(255) NOT NULL,
+                    title TEXT NOT NULL,
+                    rationale TEXT,
+                    status VARCHAR(50) NOT NULL DEFAULT 'queued',
+                    priority INTEGER NOT NULL DEFAULT 100,
+                    evidence_plan_json TEXT NOT NULL DEFAULT '[]',
+                    reasoning_task_keys_json TEXT NOT NULL DEFAULT '[]',
+                    pruned_reason TEXT,
+                    created_at TIMESTAMP DEFAULT NOW(),
+                    updated_at TIMESTAMP DEFAULT NOW()
+                )
+            """))
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS aletheia_autopilot_candidate_findings (
+                    id SERIAL PRIMARY KEY,
+                    session_id INTEGER NOT NULL REFERENCES aletheia_autopilot_sessions(id) ON DELETE CASCADE,
+                    hypothesis_id INTEGER REFERENCES aletheia_autopilot_hypotheses(id) ON DELETE SET NULL,
+                    project_id VARCHAR(255) NOT NULL,
+                    canonical_key VARCHAR(255) NOT NULL,
+                    title TEXT NOT NULL,
+                    conclusion TEXT NOT NULL,
+                    value_score FLOAT NOT NULL DEFAULT 0,
+                    confidence FLOAT NOT NULL DEFAULT 0,
+                    novelty_score FLOAT NOT NULL DEFAULT 0,
+                    impact_score FLOAT NOT NULL DEFAULT 0,
+                    evidence_chain_json TEXT NOT NULL DEFAULT '[]',
+                    evidence_limits_json TEXT NOT NULL DEFAULT '[]',
+                    suggested_action_json TEXT NOT NULL DEFAULT '{}',
+                    status VARCHAR(50) NOT NULL DEFAULT 'draft',
+                    created_at TIMESTAMP DEFAULT NOW(),
+                    updated_at TIMESTAMP DEFAULT NOW()
+                )
+            """))
+            conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_autopilot_sessions_project_key ON aletheia_autopilot_sessions (project_id, session_key)"))
+            conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_autopilot_hypotheses_project_key ON aletheia_autopilot_hypotheses (project_id, hypothesis_key)"))
+            conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_autopilot_candidate_findings_project_key ON aletheia_autopilot_candidate_findings (project_id, canonical_key)"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_autopilot_hypotheses_session ON aletheia_autopilot_hypotheses (session_id, priority, id)"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_autopilot_candidate_findings_session ON aletheia_autopilot_candidate_findings (session_id, value_score DESC, id)"))
+        self._autopilot_schema_ready.add(key)
+
+    def _autopilot_budget(self, raw):
+        raw = raw or {}
+        return {
+            "max_hypotheses": max(1, min(int(raw.get("max_hypotheses") or 8), 25)),
+            "max_reasoning_tasks": max(1, min(int(raw.get("max_reasoning_tasks") or raw.get("max_runs") or 5), 20)),
+            "max_tool_calls": max(1, min(int(raw.get("max_tool_calls") or raw.get("max_queries") or 20), 80)),
+            "max_runtime_seconds": max(5, min(int(raw.get("max_runtime_seconds") or 120), 600)),
+            "sample_strategy": raw.get("sample_strategy") or "deterministic_full_table_aggregates",
+        }
+
+    def _autopilot_safety_profile(self, raw):
+        raw = raw or {}
+        profile = {
+            "approved_only": raw.get("approved_only", True) is not False,
+            "safe_views_only": raw.get("safe_views_only", True) is not False,
+            "allow_sensitive_fields": False,
+            "masked_fields_only": True,
+            "write_scope": "draft_only",
+            "canonical_writes": "disabled",
+            "auto_approve_findings": False,
+        }
+        blocked = raw.get("blocked_fields") or ["cardCVV", "enteredCVV"]
+        profile["blocked_fields"] = list(dict.fromkeys(blocked))
+        return profile
+
+    def create_autopilot_session(self, tenant, payload):
+        objective = (payload.get("objective") or "").strip()
+        if not objective:
+            raise ValueError("objective is required")
+        self.ensure_autopilot_schema(tenant)
+        scope = payload.get("scope") or {}
+        budget = self._autopilot_budget(payload.get("budget") or {})
+        safety = self._autopilot_safety_profile(payload.get("safety_profile") or payload.get("safety") or {})
+        nonce = payload.get("nonce") or int(time.time() * 1000)
+        session_key = payload.get("session_key") or f"autopilot:{tenant.tenant_id}:{_slug(objective)}:{nonce}"
+        created_by = payload.get("created_by") or "Autopilot"
+        with self.metadata_engine_for(tenant).begin() as conn:
+            conn.execute(
+                text("""
+                    INSERT INTO aletheia_autopilot_sessions
+                    (project_id, session_key, objective, scope_json, budget_json, safety_profile_json,
+                     status, created_by, created_at, updated_at)
+                    VALUES
+                    (:tenant_id, :session_key, :objective, :scope_json, :budget_json, :safety_profile_json,
+                     'draft', :created_by, NOW(), NOW())
+                    ON CONFLICT (project_id, session_key) DO UPDATE SET
+                      objective = EXCLUDED.objective,
+                      scope_json = EXCLUDED.scope_json,
+                      budget_json = EXCLUDED.budget_json,
+                      safety_profile_json = EXCLUDED.safety_profile_json,
+                      status = aletheia_autopilot_sessions.status,
+                      updated_at = NOW()
+                    RETURNING id, project_id, session_key, objective, scope_json, budget_json,
+                              safety_profile_json, status, created_by, created_at, updated_at
+                """),
+                {
+                    "tenant_id": tenant.tenant_id,
+                    "session_key": session_key,
+                    "objective": objective,
+                    "scope_json": _json_dump(scope),
+                    "budget_json": _json_dump(budget),
+                    "safety_profile_json": _json_dump(safety),
+                    "created_by": created_by,
+                },
+            ).mappings().first()
+        for item in payload.get("hypotheses") or []:
+            self.add_autopilot_hypothesis(tenant, session_key, item)
+        for item in payload.get("candidate_findings") or []:
+            self.add_autopilot_candidate_finding(tenant, session_key, item)
+        return self.get_autopilot_session(tenant, session_key)
+
+    def list_autopilot_sessions(self, tenant, status=None, limit=50):
+        self.ensure_autopilot_schema(tenant)
+        conditions = ["project_id = :tenant_id"]
+        params = {"tenant_id": tenant.tenant_id, "limit": max(1, min(int(limit or 50), 100))}
+        if status:
+            conditions.append("status = :status")
+            params["status"] = status
+        where = " AND ".join(conditions)
+        with self.metadata_engine_for(tenant).connect() as conn:
+            rows = conn.execute(
+                text(f"""
+                    SELECT id, project_id, session_key, objective, scope_json, budget_json,
+                           safety_profile_json, status, created_by, created_at, updated_at
+                    FROM aletheia_autopilot_sessions
+                    WHERE {where}
+                    ORDER BY updated_at DESC, id DESC
+                    LIMIT :limit
+                """),
+                params,
+            ).mappings().all()
+        return {"tenant": tenant.public_dict(), "sessions": [self._autopilot_session_to_dict(row) for row in rows]}
+
+    def get_autopilot_session(self, tenant, session_key):
+        self.ensure_autopilot_schema(tenant)
+        with self.metadata_engine_for(tenant).connect() as conn:
+            session = conn.execute(
+                text("""
+                    SELECT id, project_id, session_key, objective, scope_json, budget_json,
+                           safety_profile_json, status, created_by, created_at, updated_at
+                    FROM aletheia_autopilot_sessions
+                    WHERE project_id = :tenant_id AND session_key = :session_key
+                """),
+                {"tenant_id": tenant.tenant_id, "session_key": session_key},
+            ).mappings().first()
+            if not session:
+                return None
+            hypotheses = conn.execute(
+                text("""
+                    SELECT id, session_id, project_id, hypothesis_key, title, rationale, status,
+                           priority, evidence_plan_json, reasoning_task_keys_json, pruned_reason,
+                           created_at, updated_at
+                    FROM aletheia_autopilot_hypotheses
+                    WHERE project_id = :tenant_id AND session_id = :session_id
+                    ORDER BY priority ASC, id ASC
+                """),
+                {"tenant_id": tenant.tenant_id, "session_id": session["id"]},
+            ).mappings().all()
+            candidates = conn.execute(
+                text("""
+                    SELECT id, session_id, hypothesis_id, project_id, canonical_key, title, conclusion,
+                           value_score, confidence, novelty_score, impact_score, evidence_chain_json,
+                           evidence_limits_json, suggested_action_json, status, created_at, updated_at
+                    FROM aletheia_autopilot_candidate_findings
+                    WHERE project_id = :tenant_id AND session_id = :session_id
+                    ORDER BY value_score DESC, confidence DESC, id ASC
+                """),
+                {"tenant_id": tenant.tenant_id, "session_id": session["id"]},
+            ).mappings().all()
+        return {
+            "tenant": tenant.public_dict(),
+            "session": self._autopilot_session_to_dict(session),
+            "hypotheses": [self._autopilot_hypothesis_to_dict(row) for row in hypotheses],
+            "candidate_findings": [self._autopilot_candidate_to_dict(row) for row in candidates],
+        }
+
+    def add_autopilot_hypothesis(self, tenant, session_key, payload):
+        self.ensure_autopilot_schema(tenant)
+        session = self._autopilot_session_row(tenant, session_key)
+        if not session:
+            raise KeyError(session_key)
+        title = (payload.get("title") or "").strip()
+        if not title:
+            raise ValueError("hypothesis title is required")
+        hypothesis_key = payload.get("hypothesis_key") or f"{session_key}:hypothesis:{_slug(title)}"
+        status = payload.get("status") or "queued"
+        if status not in {"queued", "running", "completed", "pruned"}:
+            raise ValueError("hypothesis status must be queued, running, completed, or pruned")
+        with self.metadata_engine_for(tenant).begin() as conn:
+            row = conn.execute(
+                text("""
+                    INSERT INTO aletheia_autopilot_hypotheses
+                    (session_id, project_id, hypothesis_key, title, rationale, status, priority,
+                     evidence_plan_json, reasoning_task_keys_json, pruned_reason, created_at, updated_at)
+                    VALUES
+                    (:session_id, :tenant_id, :hypothesis_key, :title, :rationale, :status, :priority,
+                     :evidence_plan_json, :reasoning_task_keys_json, :pruned_reason, NOW(), NOW())
+                    ON CONFLICT (project_id, hypothesis_key) DO UPDATE SET
+                      title = EXCLUDED.title,
+                      rationale = EXCLUDED.rationale,
+                      status = EXCLUDED.status,
+                      priority = EXCLUDED.priority,
+                      evidence_plan_json = EXCLUDED.evidence_plan_json,
+                      reasoning_task_keys_json = EXCLUDED.reasoning_task_keys_json,
+                      pruned_reason = EXCLUDED.pruned_reason,
+                      updated_at = NOW()
+                    RETURNING id, session_id, project_id, hypothesis_key, title, rationale, status,
+                              priority, evidence_plan_json, reasoning_task_keys_json, pruned_reason,
+                              created_at, updated_at
+                """),
+                {
+                    "session_id": session["id"],
+                    "tenant_id": tenant.tenant_id,
+                    "hypothesis_key": hypothesis_key,
+                    "title": title,
+                    "rationale": payload.get("rationale"),
+                    "status": status,
+                    "priority": int(payload.get("priority") or 100),
+                    "evidence_plan_json": _json_dump(payload.get("evidence_plan") or []),
+                    "reasoning_task_keys_json": _json_dump(payload.get("reasoning_task_keys") or []),
+                    "pruned_reason": payload.get("pruned_reason"),
+                },
+            ).mappings().first()
+        return {"tenant": tenant.public_dict(), "hypothesis": self._autopilot_hypothesis_to_dict(row)}
+
+    def add_autopilot_candidate_finding(self, tenant, session_key, payload):
+        self.ensure_autopilot_schema(tenant)
+        session = self._autopilot_session_row(tenant, session_key)
+        if not session:
+            raise KeyError(session_key)
+        title = (payload.get("title") or "").strip()
+        conclusion = (payload.get("conclusion") or "").strip()
+        if not title or not conclusion:
+            raise ValueError("candidate finding title and conclusion are required")
+        canonical_key = payload.get("canonical_key") or f"candidate:autopilot:{_slug(session_key)}:{_slug(title)}"
+        status = payload.get("status") or "draft"
+        if status not in {"draft", "needs_more_evidence", "rejected", "promoted"}:
+            raise ValueError("candidate finding status must be draft, needs_more_evidence, rejected, or promoted")
+        if status == "promoted":
+            raise ValueError("candidate findings cannot be auto-promoted by the Autopilot API")
+        hypothesis_id = payload.get("hypothesis_id")
+        hypothesis_key = payload.get("hypothesis_key")
+        if hypothesis_key and not hypothesis_id:
+            hypothesis = self._autopilot_hypothesis_row(tenant, hypothesis_key)
+            hypothesis_id = hypothesis["id"] if hypothesis else None
+        with self.metadata_engine_for(tenant).begin() as conn:
+            row = conn.execute(
+                text("""
+                    INSERT INTO aletheia_autopilot_candidate_findings
+                    (session_id, hypothesis_id, project_id, canonical_key, title, conclusion,
+                     value_score, confidence, novelty_score, impact_score, evidence_chain_json,
+                     evidence_limits_json, suggested_action_json, status, created_at, updated_at)
+                    VALUES
+                    (:session_id, :hypothesis_id, :tenant_id, :canonical_key, :title, :conclusion,
+                     :value_score, :confidence, :novelty_score, :impact_score, :evidence_chain_json,
+                     :evidence_limits_json, :suggested_action_json, :status, NOW(), NOW())
+                    ON CONFLICT (project_id, canonical_key) DO UPDATE SET
+                      hypothesis_id = EXCLUDED.hypothesis_id,
+                      title = EXCLUDED.title,
+                      conclusion = EXCLUDED.conclusion,
+                      value_score = EXCLUDED.value_score,
+                      confidence = EXCLUDED.confidence,
+                      novelty_score = EXCLUDED.novelty_score,
+                      impact_score = EXCLUDED.impact_score,
+                      evidence_chain_json = EXCLUDED.evidence_chain_json,
+                      evidence_limits_json = EXCLUDED.evidence_limits_json,
+                      suggested_action_json = EXCLUDED.suggested_action_json,
+                      status = EXCLUDED.status,
+                      updated_at = NOW()
+                    RETURNING id, session_id, hypothesis_id, project_id, canonical_key, title,
+                              conclusion, value_score, confidence, novelty_score, impact_score,
+                              evidence_chain_json, evidence_limits_json, suggested_action_json,
+                              status, created_at, updated_at
+                """),
+                {
+                    "session_id": session["id"],
+                    "hypothesis_id": hypothesis_id,
+                    "tenant_id": tenant.tenant_id,
+                    "canonical_key": canonical_key,
+                    "title": title,
+                    "conclusion": conclusion,
+                    "value_score": float(payload.get("value_score") or 0),
+                    "confidence": float(payload.get("confidence") or 0),
+                    "novelty_score": float(payload.get("novelty_score") or 0),
+                    "impact_score": float(payload.get("impact_score") or 0),
+                    "evidence_chain_json": _json_dump(payload.get("evidence_chain") or []),
+                    "evidence_limits_json": _json_dump(payload.get("evidence_limits") or []),
+                    "suggested_action_json": _json_dump(payload.get("suggested_action") or {}),
+                    "status": status,
+                },
+            ).mappings().first()
+        return {"tenant": tenant.public_dict(), "candidate_finding": self._autopilot_candidate_to_dict(row)}
+
+    def _autopilot_session_row(self, tenant, session_key):
+        with self.metadata_engine_for(tenant).connect() as conn:
+            return conn.execute(
+                text("SELECT * FROM aletheia_autopilot_sessions WHERE project_id = :tenant_id AND session_key = :session_key"),
+                {"tenant_id": tenant.tenant_id, "session_key": session_key},
+            ).mappings().first()
+
+    def _autopilot_hypothesis_row(self, tenant, hypothesis_key):
+        with self.metadata_engine_for(tenant).connect() as conn:
+            return conn.execute(
+                text("SELECT * FROM aletheia_autopilot_hypotheses WHERE project_id = :tenant_id AND hypothesis_key = :hypothesis_key"),
+                {"tenant_id": tenant.tenant_id, "hypothesis_key": hypothesis_key},
+            ).mappings().first()
 
     def list_tasks(self, tenant, status_filter=None):
         conditions = ["project_id = :tenant_id"]
@@ -2844,6 +3177,59 @@ class ReasoningRepository:
                 finding[key] = structured_answer.get(key) or ([] if key != "profile_summary" else "")
         return finding
 
+    def _autopilot_session_to_dict(self, row):
+        return {
+            "id": row["id"],
+            "tenant_id": row["project_id"],
+            "session_key": row["session_key"],
+            "objective": row["objective"],
+            "scope": _load_json(row["scope_json"], {}),
+            "budget": _load_json(row["budget_json"], {}),
+            "safety_profile": _load_json(row["safety_profile_json"], {}),
+            "status": row["status"],
+            "created_by": row["created_by"],
+            "created_at": str(row["created_at"]) if row["created_at"] else None,
+            "updated_at": str(row["updated_at"]) if row["updated_at"] else None,
+        }
+
+    def _autopilot_hypothesis_to_dict(self, row):
+        return {
+            "id": row["id"],
+            "session_id": row["session_id"],
+            "tenant_id": row["project_id"],
+            "hypothesis_key": row["hypothesis_key"],
+            "title": row["title"],
+            "rationale": row["rationale"],
+            "status": row["status"],
+            "priority": row["priority"],
+            "evidence_plan": _load_json(row["evidence_plan_json"], []),
+            "reasoning_task_keys": _load_json(row["reasoning_task_keys_json"], []),
+            "pruned_reason": row["pruned_reason"],
+            "created_at": str(row["created_at"]) if row["created_at"] else None,
+            "updated_at": str(row["updated_at"]) if row["updated_at"] else None,
+        }
+
+    def _autopilot_candidate_to_dict(self, row):
+        return {
+            "id": row["id"],
+            "session_id": row["session_id"],
+            "hypothesis_id": row["hypothesis_id"],
+            "tenant_id": row["project_id"],
+            "canonical_key": row["canonical_key"],
+            "title": row["title"],
+            "conclusion": row["conclusion"],
+            "value_score": row["value_score"],
+            "confidence": row["confidence"],
+            "novelty_score": row["novelty_score"],
+            "impact_score": row["impact_score"],
+            "evidence_chain": _load_json(row["evidence_chain_json"], []),
+            "evidence_limits": _load_json(row["evidence_limits_json"], []),
+            "suggested_action": _load_json(row["suggested_action_json"], {}),
+            "status": row["status"],
+            "created_at": str(row["created_at"]) if row["created_at"] else None,
+            "updated_at": str(row["updated_at"]) if row["updated_at"] else None,
+        }
+
 
 class AgentGatewayRepository:
     BLOCKED_TOOLS = {
@@ -3742,6 +4128,28 @@ class ReviewWorkbenchHandler(BaseHTTPRequestHandler):
                 return
             self._send_json(result)
             return
+        if parsed.path == "/api/reasoning/autopilot/sessions":
+            query = parse_qs(parsed.query)
+            status_filter = query.get("status", [None])[0]
+            try:
+                limit = int(query.get("limit", ["50"])[0])
+                result = self.reasoning_repository.list_autopilot_sessions(tenant, status=status_filter, limit=limit)
+            except ValueError as exc:
+                self._send_error(HTTPStatus.BAD_REQUEST, str(exc))
+                return
+            except Exception as exc:  # pragma: no cover - displayed to local operator
+                self._send_error(HTTPStatus.INTERNAL_SERVER_ERROR, str(exc))
+                return
+            self._send_json(result)
+            return
+        if parsed.path.startswith("/api/reasoning/autopilot/sessions/"):
+            session_key = unquote(parsed.path.removeprefix("/api/reasoning/autopilot/sessions/").rstrip("/"))
+            result = self.reasoning_repository.get_autopilot_session(tenant, session_key)
+            if result is None:
+                self._send_error(HTTPStatus.NOT_FOUND, f"Autopilot session not found: {session_key}")
+                return
+            self._send_json(result)
+            return
         if parsed.path == "/api/reasoning/tasks":
             query = parse_qs(parsed.query)
             status_filter = query.get("status", [None])[0]
@@ -3929,6 +4337,50 @@ class ReviewWorkbenchHandler(BaseHTTPRequestHandler):
                 self._send_error(HTTPStatus.NOT_FOUND, "Graph expansion not found")
                 return
             self._send_json(graph)
+            return
+        if parsed.path == "/api/reasoning/autopilot/sessions":
+            try:
+                body = self._read_json()
+                result = self.reasoning_repository.create_autopilot_session(tenant, body)
+            except ValueError as exc:
+                self._send_error(HTTPStatus.BAD_REQUEST, str(exc))
+                return
+            except Exception as exc:  # pragma: no cover - displayed to local operator
+                self._send_error(HTTPStatus.INTERNAL_SERVER_ERROR, str(exc))
+                return
+            self._send_json(result)
+            return
+        if parsed.path.startswith("/api/reasoning/autopilot/sessions/") and parsed.path.endswith("/hypotheses"):
+            session_key = unquote(parsed.path.removeprefix("/api/reasoning/autopilot/sessions/").removesuffix("/hypotheses").rstrip("/"))
+            try:
+                body = self._read_json()
+                result = self.reasoning_repository.add_autopilot_hypothesis(tenant, session_key, body)
+            except KeyError:
+                self._send_error(HTTPStatus.NOT_FOUND, f"Autopilot session not found: {session_key}")
+                return
+            except ValueError as exc:
+                self._send_error(HTTPStatus.BAD_REQUEST, str(exc))
+                return
+            except Exception as exc:  # pragma: no cover - displayed to local operator
+                self._send_error(HTTPStatus.INTERNAL_SERVER_ERROR, str(exc))
+                return
+            self._send_json(result)
+            return
+        if parsed.path.startswith("/api/reasoning/autopilot/sessions/") and parsed.path.endswith("/candidate-findings"):
+            session_key = unquote(parsed.path.removeprefix("/api/reasoning/autopilot/sessions/").removesuffix("/candidate-findings").rstrip("/"))
+            try:
+                body = self._read_json()
+                result = self.reasoning_repository.add_autopilot_candidate_finding(tenant, session_key, body)
+            except KeyError:
+                self._send_error(HTTPStatus.NOT_FOUND, f"Autopilot session not found: {session_key}")
+                return
+            except ValueError as exc:
+                self._send_error(HTTPStatus.BAD_REQUEST, str(exc))
+                return
+            except Exception as exc:  # pragma: no cover - displayed to local operator
+                self._send_error(HTTPStatus.INTERNAL_SERVER_ERROR, str(exc))
+                return
+            self._send_json(result)
             return
         if parsed.path == "/api/reasoning/tasks/from-graph":
             try:
