@@ -23,6 +23,7 @@ function Ontology({ data, tenant }) {
     Property:   artifacts.filter(a => a.type === "Property"),
     Action:     artifacts.filter(a => a.type === "Action"),
   }), [artifacts]);
+  const activeArtifacts = grouped[active] || [];
 
   const filtered = useMemoXS(() => {
     const q = search.trim().toLowerCase();
@@ -56,6 +57,13 @@ function Ontology({ data, tenant }) {
   const tenantId = tenant ? tenant.id : "default";
 
   const stats = {
+    total: activeArtifacts.length,
+    approved: activeArtifacts.filter(a => a.status === "approved").length,
+    proposed: activeArtifacts.filter(a => a.status === "proposed").length,
+    changes: activeArtifacts.filter(a => a.status === "changes").length,
+    rejected: activeArtifacts.filter(a => a.status === "rejected").length,
+  };
+  const catalogStats = {
     total: artifacts.length,
     approved: artifacts.filter(a => a.status === "approved").length,
     proposed: artifacts.filter(a => a.status === "proposed").length,
@@ -318,10 +326,10 @@ function Ontology({ data, tenant }) {
           </div>
           <div style={{ padding: "var(--pad-3) var(--pad-4)", overflow: "auto" }}>
             <div className="eyebrow" style={{ marginBottom: 8 }}>Status distribution</div>
-            <div className="hbar"><span className="lbl">approved</span><span className="track"><i style={{ width: pct(stats.approved, stats.total) + "%" }} /></span><span className="num">{stats.approved}</span></div>
-            <div className="hbar"><span className="lbl">proposed</span><span className="track"><i style={{ width: pct(stats.proposed, stats.total) + "%" }} /></span><span className="num">{stats.proposed}</span></div>
-            <div className="hbar"><span className="lbl">needs changes</span><span className="track"><i style={{ width: pct(stats.changes, stats.total) + "%" }} /></span><span className="num">{stats.changes}</span></div>
-            <div className="hbar"><span className="lbl">rejected</span><span className="track"><i style={{ width: pct(stats.rejected, stats.total) + "%" }} /></span><span className="num">{stats.rejected}</span></div>
+            <div className="hbar"><span className="lbl">approved</span><span className="track"><i style={{ width: pct(catalogStats.approved, catalogStats.total) + "%" }} /></span><span className="num">{catalogStats.approved}</span></div>
+            <div className="hbar"><span className="lbl">proposed</span><span className="track"><i style={{ width: pct(catalogStats.proposed, catalogStats.total) + "%" }} /></span><span className="num">{catalogStats.proposed}</span></div>
+            <div className="hbar"><span className="lbl">needs changes</span><span className="track"><i style={{ width: pct(catalogStats.changes, catalogStats.total) + "%" }} /></span><span className="num">{catalogStats.changes}</span></div>
+            <div className="hbar"><span className="lbl">rejected</span><span className="track"><i style={{ width: pct(catalogStats.rejected, catalogStats.total) + "%" }} /></span><span className="num">{catalogStats.rejected}</span></div>
 
             <div className="eyebrow" style={{ marginBottom: 8, marginTop: 18 }}>Selected readiness</div>
             {selected ? (

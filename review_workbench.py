@@ -370,8 +370,13 @@ class ReviewRepository:
         for field in ("artifact_type", "status", "source_agent"):
             value = filters.get(field)
             if value:
-                conditions.append(f"{field} = :{field}")
-                params[field] = value
+                if field == "status" and value == "proposed":
+                    conditions.append("status IN (:status, :draft_status)")
+                    params["status"] = value
+                    params["draft_status"] = "draft"
+                else:
+                    conditions.append(f"{field} = :{field}")
+                    params[field] = value
         search = filters.get("search")
         if search:
             conditions.append(
