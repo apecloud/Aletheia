@@ -855,7 +855,6 @@ class ReasoningRepository:
         return engine
 
     def list_tasks(self, tenant, status_filter=None):
-        self.ensure_default_task(tenant)
         conditions = ["project_id = :tenant_id"]
         params = {"tenant_id": tenant.tenant_id}
         if status_filter:
@@ -1041,11 +1040,9 @@ class ReasoningRepository:
         )
 
     def get_task(self, tenant, task_key):
-        task = self.ensure_default_task(tenant)
-        if task_key != self.TASK_KEY:
-            task = self._get_task_row(tenant, task_key)
-            if task is None:
-                return None
+        task = self._get_task_row(tenant, task_key)
+        if task is None:
+            return None
         latest_run = self.latest_run(tenant, task_key)
         findings = self.list_findings(tenant, task_key)
         for finding in findings:
@@ -1303,7 +1300,9 @@ class ReasoningRepository:
         if task_key != self.TASK_KEY:
             return self.run_scoped_graph_task(tenant, task_key)
         started = time.monotonic()
-        task = self.ensure_default_task(tenant)
+        task = self._get_task_row(tenant, self.TASK_KEY)
+        if task is None:
+            raise ValueError("Default task not found — it may have been deleted")
         if task.get("status") == "closed":
             raise ValueError("Cannot run a closed task")
         if task.get("status") == "completed":
@@ -1453,7 +1452,10 @@ class ReasoningRepository:
             yield from self.run_scoped_graph_task_streaming(tenant, task_key)
             return
         started = time.monotonic()
-        task = self.ensure_default_task(tenant)
+        task = self._get_task_row(tenant, self.TASK_KEY)
+        if task is None:
+            yield {"event": "error", "data": {"message": "Default task not found — it may have been deleted"}}
+            return
         if task.get("status") == "closed":
             yield {"event": "error", "data": {"message": "Cannot run a closed task"}}
             return

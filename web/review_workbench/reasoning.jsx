@@ -107,6 +107,9 @@ function fmtTime(raw) {
   return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
+const RUNNING_STATES = new Set(["active", "running", "in_progress", "pending", "queued", "started"]);
+const STALE_THRESHOLD_MS = 5 * 60 * 1000;
+
 function Reasoning({ tenant }) {
   const [selectedKey, setSelectedKey] = useStateRX(null);
   const [activeTab, setActiveTab] = useStateRX("mine");  // mine | all | graph
@@ -230,8 +233,6 @@ function Reasoning({ tenant }) {
   // When the selected task is in a running-ish state, poll detail every 2.5s
   // until it lands on a terminal state. This is how an async backend's
   // POST /run becomes visible: it just flips status → we keep refreshing.
-  const RUNNING_STATES = new Set(["active", "running", "in_progress", "pending", "queued", "started"]);
-  const STALE_THRESHOLD_MS = 5 * 60 * 1000;  // 5 min — beyond this, "active" is suspicious
 
   function ageMs(t) {
     const raw = t && (t.updated_at || t.created_at || t.started_at);
@@ -277,38 +278,8 @@ function Reasoning({ tenant }) {
   const selectedState = task ? taskState(task) : null;
   const isStaleActive = selectedState && selectedState.isStale;
 
-  // ----- stale cleanup -----
-  const staleTasks = useMemoRX(() => tasks.filter(t => taskState(t).isStale), [tasks]);
+  // ----- cleanup -----
   const [cleanupModal, setCleanupModal] = useStateRX(false);
-  const [cleanupProgress, setCleanupProgress] = useStateRX(null);
-
-  async function cleanupStale() {
-    if (!staleTasks.length) return;
-    setCleanupProgress({ done: 0, total: staleTasks.length, results: [], running: true, mode: "bulk" });
-    const keys = staleTasks.map(t => t.canonical_key);
-    try {
-      // single bulk request — much faster than N individual calls
-      await window.AL_API.bulkCloseTasks(tenant.id, { keys });
-      const results = keys.map(k => ({ key: k, ok: true, endpoint: "POST /api/reasoning/tasks/bulk-close", method: "POST" }));
-      setCleanupProgress({ done: keys.length, total: keys.length, results, running: false, mode: "bulk" });
-    } catch (e) {
-      // bulk failed — fall back to per-task close so partial success is still visible
-      let done = 0;
-      const results = [];
-      for (const t of staleTasks) {
-        try {
-          await window.AL_API.closeTask(t.canonical_key, tenant.id);
-          results.push({ key: t.canonical_key, ok: true, endpoint: "POST .../close", method: "POST" });
-        } catch (err) {
-          results.push({ key: t.canonical_key, ok: false, error: err.message || String(err) });
-        }
-        done += 1;
-        setCleanupProgress({ done, total: staleTasks.length, results: [...results], running: done < staleTasks.length, mode: "per-task", bulkError: e.message });
-      }
-      setCleanupProgress({ done, total: staleTasks.length, results, running: false, mode: "per-task", bulkError: e.message });
-    }
-    window.dispatchEvent(new CustomEvent("aletheia:retry"));
-  }
   const [pollTick, setPollTick] = useStateRX(0);
   // when the task is stale-active, stop polling — it isn't going to change
   useEffectRX(() => {
@@ -569,13 +540,7 @@ function Reasoning({ tenant }) {
           <div className={"tab" + (activeTab === "graph"   ? " active" : "")} onClick={() => setActiveTab("graph")}>From Graph <span className="ct">{counts.graph}</span></div>
         </div>
         <div className="spacer" />
-        {staleTasks.length > 0 && (
-          <button className="tool" style={{ borderColor: "oklch(0.66 0.18 25 / 0.5)", color: "var(--rejected)" }}
-                  onClick={() => setCleanupModal(true)}
-                  title={`${staleTasks.length} task(s) stuck in active for >5min`}>
-            ⚠ Clean up {staleTasks.length} stale
-          </button>
-        )}
+        <button className="tool" onClick={() => setCleanupModal(true)}>Clean up</button>
         {isMock  && <span className="pill changes" style={{ marginRight: 8 }}><span className="dot" />Mock fallback</span>}
         {isStale && <span className="pill changes" style={{ marginRight: 8 }}><span className="dot" />Stale · last fetch failed</span>}
         {tasksQ.loading && tasksQ.data && <span className="pill"><span className="dot" />Refreshing…</span>}
@@ -606,24 +571,6 @@ function Reasoning({ tenant }) {
             <div className="eyebrow accent">Question → Answer → Evidence</div>
             <div style={{ marginTop: 4, fontSize: 13, color: "var(--text)" }}>Reasoning tasks</div>
             <button className="btn primary" style={{ width: "100%", marginTop: 10 }} onClick={() => setAskMode(true)}>+ Ask a new question</button>
-            {tasks.filter(t => (t.status || "").toLowerCase() === "closed").length > 0 && (
-              <button className="btn ghost" style={{ width: "100%", marginTop: 6, fontSize: 10, color: "var(--rejected)" }}
-                      onClick={async () => {
-                        const n = tasks.filter(t => (t.status || "").toLowerCase() === "closed").length;
-                        if (!confirm(`Delete all ${n} closed task(s)? This cannot be undone.`)) return;
-                        try {
-                          const res = await window.AL_API.bulkDeleteClosed(tenant.id);
-                          setLocalTasks(prev => prev.filter(t => (t.status || "").toLowerCase() !== "closed"));
-                          if (task && (task.status || "").toLowerCase() === "closed") setSelectedKey(null);
-                          setActionMsg({ kind: "ok", msg: `Deleted ${res.deleted_count} closed task(s).` });
-                          window.dispatchEvent(new CustomEvent("aletheia:retry"));
-                        } catch (e) {
-                          setActionMsg({ kind: "err", msg: e.message || String(e) });
-                        }
-                      }}>
-                ✕ Delete all closed tasks
-              </button>
-            )}
           </div>
           <div style={{ flex: 1, overflow: "auto" }}>
             <ApiStatus q={tasksQ} what="reasoning tasks" />
@@ -1092,20 +1039,70 @@ function Reasoning({ tenant }) {
         </div>
       </div>
 
-      <CleanupStaleModal open={cleanupModal} onClose={() => { setCleanupModal(false); setCleanupProgress(null); }}
-                         staleTasks={staleTasks} progress={cleanupProgress}
-                         taskState={taskState} onRun={cleanupStale} />
+      <CleanupModal open={cleanupModal} onClose={() => setCleanupModal(false)}
+                    allTasks={allTasks} taskState={taskState} tenant={tenant}
+                    onDone={() => { window.dispatchEvent(new CustomEvent("aletheia:retry")); setSelectedKey(null); }} />
     </div>
   );
 }
 
-/* ---------------- CleanupStaleModal ---------------- */
-function CleanupStaleModal({ open, onClose, staleTasks, progress, taskState, onRun }) {
+/* ---------------- CleanupModal ---------------- */
+function CleanupModal({ open, onClose, allTasks, taskState, tenant, onDone }) {
   if (!open) return null;
-  const summary = progress ? {
-    ok:  progress.results.filter(r => r.ok).length,
-    bad: progress.results.filter(r => !r.ok).length,
-  } : null;
+  const CATEGORIES = [
+    { key: "active",    label: "Active",    color: "var(--changes)",  match: t => { const s = (t.status||"").toLowerCase(); return RUNNING_STATES.has(s) && !taskState(t).isStale; } },
+    { key: "stale",     label: "Stale",     color: "var(--rejected)", match: t => taskState(t).isStale },
+    { key: "completed", label: "Completed", color: "var(--approved)", match: t => { const s = (t.status||"").toLowerCase(); return s === "completed" || s === "approved"; } },
+    { key: "closed",    label: "Closed",    color: "var(--muted)",    match: t => (t.status||"").toLowerCase() === "closed" },
+  ];
+  const [checked, setChecked] = React.useState(new Set());
+  const [progress, setProgress] = React.useState(null);
+
+  const counts = {};
+  const buckets = {};
+  for (const cat of CATEGORIES) {
+    const list = allTasks.filter(cat.match);
+    counts[cat.key] = list.length;
+    buckets[cat.key] = list;
+  }
+
+  const filtered = React.useMemo(() => {
+    if (!checked.size) return [];
+    const set = new Set();
+    for (const k of checked) {
+      for (const t of (buckets[k] || [])) set.add(t);
+    }
+    return [...set];
+  }, [checked, allTasks]);
+
+  function toggle(key) {
+    setChecked(prev => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key); else next.add(key);
+      return next;
+    });
+  }
+
+  async function runCleanup() {
+    if (!filtered.length) return;
+    const total = filtered.length;
+    setProgress({ done: 0, total, ok: 0, fail: 0, running: true });
+    let done = 0, ok = 0, fail = 0;
+    for (const t of filtered) {
+      try {
+        try { await window.AL_API.closeTask(t.canonical_key, tenant.id); } catch (_) {}
+        await window.AL_API.deleteTask(t.canonical_key, tenant.id);
+        ok++;
+      } catch (_) { fail++; }
+      done++;
+      setProgress({ done, total, ok, fail, running: done < total });
+    }
+    setProgress({ done, total, ok, fail, running: false });
+    if (onDone) onDone();
+  }
+
+  const summary = progress;
+
   return (
     <div style={{
       position: "fixed", inset: 0,
@@ -1123,57 +1120,66 @@ function CleanupStaleModal({ open, onClose, staleTasks, progress, taskState, onR
         boxShadow: "0 30px 80px rgba(0,0,0,0.55)",
       }}>
         <div style={{ padding: "14px 20px", borderBottom: "1px solid var(--line)", background: "var(--bg-3)", display: "flex", alignItems: "center" }}>
-          <div className="eyebrow" style={{ color: "var(--rejected)" }}>⚠ Cleanup</div>
-          <div style={{ marginLeft: 10, fontSize: 16, color: "var(--text)" }}>Stale reasoning tasks</div>
+          <div className="eyebrow" style={{ color: "var(--rejected)" }}>Cleanup</div>
+          <div style={{ marginLeft: 10, fontSize: 16, color: "var(--text)" }}>Task cleanup</div>
           <button onClick={onClose} style={{ marginLeft: "auto", background: "transparent", color: "var(--muted)", border: "1px solid var(--line)", padding: "3px 8px", fontFamily: "var(--font-mono)", fontSize: 10, cursor: "pointer" }}>ESC</button>
         </div>
 
         <div style={{ padding: 20, overflow: "auto", flex: 1 }}>
           <p style={{ color: "var(--muted)", fontSize: 13, lineHeight: 1.55, margin: "0 0 16px 0" }}>
-            These tasks have <span style={{ color: "var(--text)" }}>active</span> status but haven't updated for over 5 minutes — almost certainly orphaned (worker crash or service restart). Cleaning them up will call <code style={{ fontFamily: "var(--font-mono)", color: "var(--text-dim)" }}>POST /api/reasoning/tasks/bulk-close</code> with the selected keys, falling back to per-task <code style={{ fontFamily: "var(--font-mono)", color: "var(--text-dim)" }}>/close</code> if the bulk call fails.
+            Select which task statuses to delete. Tasks will be closed then permanently deleted.
           </p>
 
-          <div style={{ border: "1px solid var(--line)", marginBottom: 16 }}>
-            {staleTasks.length === 0 ? (
+          <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 16 }}>
+            {CATEGORIES.map(cat => (
+              <label key={cat.key} style={{
+                display: "flex", alignItems: "center", gap: 6, cursor: "pointer",
+                padding: "6px 12px",
+                border: "1px solid " + (checked.has(cat.key) ? cat.color : "var(--line)"),
+                background: checked.has(cat.key) ? "var(--bg-3)" : "transparent",
+                fontSize: 12,
+              }}>
+                <input type="checkbox" checked={checked.has(cat.key)} onChange={() => toggle(cat.key)}
+                       style={{ accentColor: cat.color }} />
+                <span style={{ color: cat.color }}>{cat.label}</span>
+                <span style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--muted)" }}>({counts[cat.key]})</span>
+              </label>
+            ))}
+          </div>
+
+          <div style={{ border: "1px solid var(--line)", marginBottom: 16, maxHeight: 300, overflowY: "auto" }}>
+            {filtered.length === 0 ? (
               <div style={{ padding: 24, fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--muted)", textAlign: "center" }}>
-                No stale tasks. Nothing to clean up.
+                {checked.size ? "No tasks match the selected filters." : "Select a status to see matching tasks."}
               </div>
-            ) : staleTasks.map(t => {
+            ) : filtered.map(t => {
               const ts = taskState(t);
-              const r = progress && progress.results.find(x => x.key === t.canonical_key);
+              const statusLabel = ts.isStale ? "stale" : (t.status || "—").toLowerCase();
+              const cat = CATEGORIES.find(c => c.match(t));
               return (
                 <div key={t.canonical_key} style={{
-                  display: "grid",
-                  gridTemplateColumns: "3px 1fr auto",
+                  display: "flex", alignItems: "center", gap: 10,
+                  padding: "8px 14px",
                   borderBottom: "1px solid var(--line-soft)",
                 }}>
-                  <div style={{ background: r ? (r.ok ? "var(--approved)" : "var(--rejected)") : "var(--rejected)" }} />
-                  <div style={{ padding: "10px 14px", minWidth: 0 }}>
-                    <div style={{ display: "flex", gap: 8, fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.08em" }}>
-                      <span style={{ color: "var(--accent)" }}>{t.canonical_key}</span>
-                      <span>·</span>
-                      <span>{t.center_node || "—"}</span>
-                      <span>·</span>
-                      <span style={{ color: "var(--rejected)" }}>stale {ts.ageLbl}</span>
+                  <div style={{ width: 3, alignSelf: "stretch", background: cat ? cat.color : "var(--line)" }} />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ color: "var(--text)", fontSize: 13, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                      {t.question || t.name || t.canonical_key}
                     </div>
-                    <div style={{ marginTop: 3, color: "var(--text)", fontSize: 13, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                      {t.name || t.question || t.canonical_key}
+                    <div style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--muted)", marginTop: 2 }}>
+                      {t.center_node || "—"}
                     </div>
-                    {r && (
-                      <div style={{ marginTop: 4, fontFamily: "var(--font-mono)", fontSize: 10, color: r.ok ? "var(--approved)" : "var(--rejected)" }}>
-                        {r.ok ? `✓ cancelled via ${r.method} ${r.endpoint}` : `✕ ${r.error}`}
-                      </div>
-                    )}
                   </div>
-                  <div style={{ padding: "10px 14px", display: "flex", alignItems: "center", fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--muted)" }}>
-                    {r ? (r.ok ? "DONE" : "FAILED") : progress && progress.running ? "…" : "pending"}
-                  </div>
+                  <span style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: cat ? cat.color : "var(--muted)", flexShrink: 0 }}>
+                    {statusLabel}
+                  </span>
                 </div>
               );
             })}
           </div>
 
-          {progress && (
+          {summary && (
             <div style={{
               padding: "10px 14px",
               border: "1px solid var(--line)",
@@ -1182,11 +1188,11 @@ function CleanupStaleModal({ open, onClose, staleTasks, progress, taskState, onR
               marginBottom: 16,
             }}>
               <div style={{ display: "flex", gap: 14 }}>
-                <span><span style={{ color: "var(--dim)" }}>PROGRESS</span> <span style={{ color: "var(--text)" }}>{progress.done}/{progress.total}</span></span>
+                <span><span style={{ color: "var(--dim)" }}>PROGRESS</span> <span style={{ color: "var(--text)" }}>{summary.done}/{summary.total}</span></span>
                 <span><span style={{ color: "var(--dim)" }}>OK</span> <span style={{ color: "var(--approved)" }}>{summary.ok}</span></span>
-                <span><span style={{ color: "var(--dim)" }}>FAILED</span> <span style={{ color: "var(--rejected)" }}>{summary.bad}</span></span>
-                <span style={{ marginLeft: "auto", color: progress.running ? "var(--changes)" : "var(--approved)" }}>
-                  {progress.running ? "● running" : "● complete"}
+                <span><span style={{ color: "var(--dim)" }}>FAILED</span> <span style={{ color: "var(--rejected)" }}>{summary.fail}</span></span>
+                <span style={{ marginLeft: "auto", color: summary.running ? "var(--changes)" : "var(--approved)" }}>
+                  {summary.running ? "● running" : "● complete"}
                 </span>
               </div>
             </div>
@@ -1194,16 +1200,14 @@ function CleanupStaleModal({ open, onClose, staleTasks, progress, taskState, onR
 
           <div style={{ display: "flex", gap: 8 }}>
             <button className="btn primary"
-                    onClick={onRun}
-                    disabled={!staleTasks.length || (progress && progress.running)}>
-              {progress && !progress.running ? "↻ Re-run cleanup" : `⚠ Close ${staleTasks.length} stale task${staleTasks.length === 1 ? "" : "s"}`}
+                    style={{ color: filtered.length ? undefined : "var(--muted)" }}
+                    onClick={runCleanup}
+                    disabled={!filtered.length || (progress && progress.running)}>
+              {progress && !progress.running
+                ? `Done — deleted ${progress.ok} task(s)`
+                : `Delete ${filtered.length} task${filtered.length === 1 ? "" : "s"}`}
             </button>
             <button className="btn ghost" onClick={onClose}>Close</button>
-            {progress && progress.bulkError && (
-              <span style={{ marginLeft: "auto", fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--changes)", alignSelf: "center" }}>
-                ⚠ bulk-close failed, fell back to per-task: {progress.bulkError}
-              </span>
-            )}
           </div>
         </div>
       </div>
@@ -1211,7 +1215,7 @@ function CleanupStaleModal({ open, onClose, staleTasks, progress, taskState, onR
   );
 }
 
-Object.assign(window, { Reasoning, CleanupStaleModal });
+Object.assign(window, { Reasoning, CleanupModal });
 
 /* ---------------- TraceLog ---------------- 
    Renders the live SSE trace stream as a styled timeline. Each event type
@@ -1509,10 +1513,50 @@ function AskHero({ tenant, question, setQuestion, centerNode, setCenterNode, dep
     debounceRef.current = setTimeout(() => fetchEntities(pickedType, q), 250);
   }
 
+  const prevLabelRef = React.useRef("");
+  const questionRef = React.useRef(question || "");
+  React.useEffect(() => { questionRef.current = question || ""; }, [question]);
+  React.useEffect(() => {
+    if (!prevLabelRef.current && centerNode && entities.length) {
+      const match = entities.find(e => e.id === centerNode);
+      if (match) prevLabelRef.current = match.label || match.id;
+    }
+  }, [centerNode, entities]);
+
   function selectEntity(ent) {
+    const oldCenterNode = centerNode || "";
     setCenterNode(ent.id);
-    setEntityQuery(ent.label || ent.id);
+    const newLabel = ent.label || ent.id;
+    setEntityQuery(newLabel);
     setShowDropdown(false);
+    let prev = prevLabelRef.current;
+    const q = questionRef.current.trim();
+    if (!q) {
+      setQuestion(`Give a summary of ${newLabel}`);
+    } else if (prev && prev.length > 1 && q.includes(prev)) {
+      setQuestion(q.split(prev).join(newLabel));
+    } else {
+      // try matching entity labels from the list
+      let found = false;
+      for (const e of entities) {
+        if (e.id !== ent.id && e.label && e.label.length > 1 && q.includes(e.label)) {
+          setQuestion(q.split(e.label).join(newLabel));
+          found = true; break;
+        }
+      }
+      // try matching the old center node ID pattern (e.g. "#4" or "Employee:4")
+      if (!found && oldCenterNode) {
+        const oldId = oldCenterNode.includes(":") ? oldCenterNode.split(":")[1] : oldCenterNode;
+        const patterns = [oldCenterNode, `#${oldId}`, ` ${oldId} `];
+        for (const pat of patterns) {
+          if (q.includes(pat)) {
+            setQuestion(q.split(pat).join(newLabel));
+            found = true; break;
+          }
+        }
+      }
+    }
+    prevLabelRef.current = newLabel;
   }
 
   function onTypeChange(e) {
@@ -1767,7 +1811,9 @@ function AskHero({ tenant, question, setQuestion, centerNode, setCenterNode, dep
                           const [t] = s.node.split(":");
                           if (t) setPickedType(t);
                           const ent = entities.find(e => e.id === s.node);
-                          setEntityQuery(ent ? ent.label : "");
+                          const lbl = ent ? ent.label : "";
+                          setEntityQuery(lbl);
+                          if (lbl) prevLabelRef.current = lbl;
                         }
                       }}
                       style={{
@@ -1872,24 +1918,36 @@ function EntityPicker({ tenant, centerNode, setCenterNode, question, setQuestion
   }
 
   function selectEntity(ent) {
+    const oldCenterNode = centerNode || "";
     setCenterNode(ent.id);
     const newLabel = ent.label || ent.id;
     setEntityQuery(newLabel);
     setShowDropdown(false);
     if (setQuestion) {
-      let prev = prevLabelRef.current;
+      const prev = prevLabelRef.current;
       const q = questionRef.current.trim();
-      if (!prev || prev.length <= 1) {
-        for (const e of entities) {
-          if (e.id !== ent.id && e.label && q.includes(e.label)) {
-            prev = e.label; break;
-          }
-        }
-      }
       if (!q) {
         setQuestion(`Give a summary of ${newLabel}`);
       } else if (prev && prev.length > 1 && q.includes(prev)) {
         setQuestion(q.split(prev).join(newLabel));
+      } else {
+        let found = false;
+        for (const e of entities) {
+          if (e.id !== ent.id && e.label && e.label.length > 1 && q.includes(e.label)) {
+            setQuestion(q.split(e.label).join(newLabel));
+            found = true; break;
+          }
+        }
+        if (!found && oldCenterNode) {
+          const oldId = oldCenterNode.includes(":") ? oldCenterNode.split(":")[1] : oldCenterNode;
+          const patterns = [oldCenterNode, `#${oldId}`, ` ${oldId} `];
+          for (const pat of patterns) {
+            if (q.includes(pat)) {
+              setQuestion(q.split(pat).join(newLabel));
+              found = true; break;
+            }
+          }
+        }
       }
     }
     prevLabelRef.current = newLabel;
