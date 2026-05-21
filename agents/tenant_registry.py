@@ -3,7 +3,7 @@ import os
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
-from sqlalchemy import text
+from sqlalchemy import create_engine, text
 
 
 def default_metadata_db_url() -> str:
@@ -71,6 +71,7 @@ class TenantRegistry:
                 )
                 for item in config.get("tenants", [])
             ]
+            tenants = cls._merge_metadata_tenants(tenants, metadata_url, source_url, graph_database)
             return cls(tenants, config.get("default_tenant") or os.environ.get("ALETHEIA_TENANT"))
 
         default_id = os.environ.get("ALETHEIA_TENANT", "default")
@@ -92,7 +93,8 @@ class TenantRegistry:
             metadata_db_url=metadata_url,
             source_db_url=source_url,
         )
-        return cls([default_tenant, sandbox_tenant], default_id)
+        tenants = cls._merge_metadata_tenants([default_tenant, sandbox_tenant], metadata_url, source_url, graph_database)
+        return cls(tenants, default_id)
 
     @staticmethod
     def _load_raw_config(config_path: str | None) -> dict | None:
@@ -106,6 +108,44 @@ class TenantRegistry:
         if default_path.is_file():
             return json.loads(default_path.read_text(encoding="utf-8"))
         return None
+
+    @staticmethod
+    def _merge_metadata_tenants(
+        tenants: list[TenantConfig],
+        metadata_url: str,
+        source_url: str,
+        graph_database: str,
+    ) -> list[TenantConfig]:
+        merged = {tenant.tenant_id: tenant for tenant in tenants}
+        try:
+            engine = create_engine(metadata_url)
+            with engine.connect() as conn:
+                rows = conn.execute(
+                    text(
+                        """
+                        SELECT tenant_id, namespace, display_name, graph_database, status
+                        FROM aletheia_tenants
+                        WHERE status = 'active'
+                        ORDER BY tenant_id
+                        """
+                    )
+                ).mappings().all()
+        except Exception:
+            return tenants
+        for row in rows:
+            tenant_id = row["tenant_id"]
+            if tenant_id in merged:
+                continue
+            merged[tenant_id] = TenantConfig(
+                tenant_id=tenant_id,
+                namespace=row.get("namespace") or tenant_id,
+                display_name=row.get("display_name") or tenant_id,
+                graph_database=row.get("graph_database") or graph_database,
+                metadata_db_url=metadata_url,
+                source_db_url=source_url,
+                status=row.get("status") or "active",
+            )
+        return list(merged.values())
 
     def get(self, tenant_id: str | None) -> TenantConfig:
         resolved = tenant_id or self.default_tenant_id

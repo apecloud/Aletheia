@@ -41,8 +41,11 @@ function App() {
   // ?screen= for variations canvas embedding
   useEffectApp(() => {
     try {
-      const s = new URLSearchParams(location.search).get("screen");
+      const params = new URLSearchParams(location.search);
+      const s = params.get("screen");
+      const t = params.get("tenant");
       if (s) setScreen(s);
+      if (t) setTenantId(t);
     } catch {}
   }, []);
 

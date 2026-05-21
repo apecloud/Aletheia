@@ -34,6 +34,10 @@ function Ontology({ data, tenant }) {
   }, [grouped, active, statusView, search]);
 
   useEffectXS(() => {
+    if (statusView === "approved" && !search.trim() && (grouped[active] || []).length > 0 && filtered.length === 0) {
+      setStatusView("all");
+      return;
+    }
     if (filtered.length === 0) { setSelectedId(null); return; }
     if (!selectedId || !filtered.some(a => (a.id === selectedId || a.canonical_key === selectedId))) {
       setSelectedId(filtered[0].id || filtered[0].canonical_key);

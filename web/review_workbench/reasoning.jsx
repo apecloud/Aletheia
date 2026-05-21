@@ -108,6 +108,106 @@ function fmtTime(raw) {
 }
 
 const RUNNING_STATES = new Set(["active", "running", "in_progress", "pending", "queued", "started"]);
+
+function asNumberRX(value) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+function pctRX(value, digits = 2) {
+  const n = asNumberRX(value);
+  return n == null ? "—" : `${(n * 100).toFixed(digits)}%`;
+}
+
+function moneyRX(value) {
+  const n = asNumberRX(value);
+  return n == null ? "—" : `$${n.toFixed(2)}`;
+}
+
+function firstAggregatePayload(finding) {
+  const evidence = (finding && finding.supporting_evidence) || [];
+  const aggregate = evidence.find(e => e && e.payload && (
+    e.payload.counts || e.payload.flags || e.payload.high_risk_examples
+  ));
+  return aggregate ? aggregate.payload : null;
+}
+
+function MetricTile({ label, value, sub, tone }) {
+  return (
+    <div style={{ border: "1px solid var(--line)", background: "var(--bg-1)", padding: 10, minWidth: 0 }}>
+      <div className="eyebrow" style={{ marginBottom: 6 }}>{label}</div>
+      <div style={{ fontFamily: "var(--font-mono)", fontSize: 16, color: tone || "var(--text)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+        {value}
+      </div>
+      {sub && (
+        <div style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--muted)", marginTop: 4, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+          {sub}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function FraudFindingSummary({ finding }) {
+  const payload = firstAggregatePayload(finding);
+  if (!payload) return null;
+  const counts = payload.counts || {};
+  const amounts = payload.amounts || {};
+  const flags = payload.flags || {};
+  const posMissing = (payload.pos_entry || []).find(p => p.posEntryMode == null);
+  const categories = (payload.category_top || []).slice(0, 4);
+  const examples = (payload.high_risk_examples || []).slice(0, 3);
+  return (
+    <div style={{ paddingTop: 12, borderTop: "1px solid var(--line)", display: "flex", flexDirection: "column", gap: 12 }}>
+      <div className="eyebrow">Fraud risk summary</div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 8 }}>
+        <MetricTile label="Rows" value={counts.rows_total != null ? Number(counts.rows_total).toLocaleString() : "—"} />
+        <MetricTile label="Fraud rate" value={pctRX(counts.fraud_rate)} tone="var(--rejected)" />
+        <MetricTile label="Fraud tx" value={counts.fraud_count != null ? Number(counts.fraud_count).toLocaleString() : "—"} />
+        <MetricTile label="Fraud avg amount" value={moneyRX(amounts.avg_fraud_amount)} />
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 8 }}>
+        <MetricTile label="Card-not-present" value={pctRX(flags.fraud_cnp)} sub={`${Number(flags.cnp_count || 0).toLocaleString()} tx`} />
+        <MetricTile label="cvvMatch=false" value={pctRX(flags.fraud_cvv_mismatch)} sub={`${Number(flags.cvv_mismatch_count || 0).toLocaleString()} tx`} />
+        <MetricTile label="POS entry missing" value={pctRX(posMissing && posMissing.fraud_rate)} sub={`${Number(posMissing && posMissing.cnt || 0).toLocaleString()} tx`} />
+        <MetricTile label="Duplicate samples" value={(payload.duplicate_pattern || []).length ? String((payload.duplicate_pattern || []).length) : "—"} sub="same account/merchant/amount/day" />
+      </div>
+      {categories.length > 0 && (
+        <div>
+          <div className="eyebrow" style={{ marginBottom: 8 }}>High-risk merchant categories</div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            {categories.map(cat => (
+              <span key={cat.category} className="pill" style={{ borderColor: "var(--accent-line)", background: "var(--accent-bg)" }}>
+                {cat.category} · {pctRX(cat.fraud_rate)}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+      {examples.length > 0 && (
+        <div>
+          <div className="eyebrow" style={{ marginBottom: 8 }}>High-risk examples</div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 8 }}>
+            {examples.map(ex => (
+              <div key={ex.transaction_id} style={{ border: "1px solid var(--line)", background: "var(--bg-1)", padding: 10, minWidth: 0 }}>
+                <div style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text)" }}>tx {ex.transaction_id}</div>
+                <div style={{ fontSize: 12, color: "var(--text-dim)", marginTop: 4, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                  {ex.merchantName} · {ex.merchantCategoryCode}
+                </div>
+                <div style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--muted)", marginTop: 6 }}>
+                  {moneyRX(ex.transactionAmount)} · cardPresent={String(Boolean(Number(ex.cardPresent)))} · cvvMatch={String(Boolean(Number(ex.cvvMatch)))}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+      <div style={{ fontSize: 11, color: "var(--muted)", lineHeight: 1.5 }}>
+        Evidence boundary: deterministic SQL aggregates over the safe transaction view; raw CVV values are not required for this reasoning surface.
+      </div>
+    </div>
+  );
+}
 const STALE_THRESHOLD_MS = 5 * 60 * 1000;
 
 function Reasoning({ tenant }) {
@@ -184,6 +284,14 @@ function Reasoning({ tenant }) {
   };
 
   const pendingKeyRef = useRefRX(null);
+  useEffectRX(() => {
+    try {
+      const key = new URLSearchParams(location.search).get("task");
+      if (!key) return;
+      pendingKeyRef.current = key;
+      setSelectedKey(key);
+    } catch {}
+  }, [tenant ? tenant.id : "default"]);
   useEffectRX(() => {
     if (!tasks.length) { setSelectedKey(null); return; }
     if (tasks.some(t => t.canonical_key === selectedKey)) {
@@ -837,6 +945,7 @@ function Reasoning({ tenant }) {
                       <div style={{ fontSize: 15, color: "var(--text)", lineHeight: 1.55 }}>
                         {finding.conclusion}
                       </div>
+                      <FraudFindingSummary finding={finding} />
                       {finding.action_proposal && (
                         <div style={{ paddingTop: 12, borderTop: "1px solid var(--line)" }}>
                           <div className="eyebrow" style={{ marginBottom: 6 }}>Proposed action</div>
