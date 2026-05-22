@@ -250,9 +250,15 @@ function Reasoning({ tenant }) {
 
   const tasksQ = useApiData("reasoningTasks", [tenant ? tenant.id : "default"], { fallback: MOCK_TASKS });
   const autopilotSessionsQ = useApiData("autopilotSessions", [tenant ? tenant.id : "default"], { fallback: [] });
+  const approvedFindingsQ = useApiData(
+    "reasoningFindings",
+    [tenant ? tenant.id : "default", { status: "approved", context: "active", limit: 12 }],
+    { fallback: { findings: [] } }
+  );
   const isStale = tasksQ.source === "live-stale";
   const isMock  = tasksQ.source === "mock";
   const autopilotSessions = autopilotSessionsQ.data || [];
+  const approvedFindingsRegistry = (approvedFindingsQ.data && approvedFindingsQ.data.findings) || [];
   const autopilotDetailQ = useApiData(
     "autopilotSession",
     [autopilotSelectedKey, tenant ? tenant.id : "default"],
@@ -305,6 +311,7 @@ function Reasoning({ tenant }) {
     mine:    allTasks.filter(t => t.source === "manual").length,
     graph:   allTasks.filter(t => t.source === "graph").length,
     autopilot: autopilotSessions.length,
+    approved: approvedFindingsRegistry.length,
   };
 
   const pendingKeyRef = useRefRX(null);
@@ -629,8 +636,8 @@ function Reasoning({ tenant }) {
 
   async function reviewFinding(action) {
     if (!finding || !task) return;
-    if ((action === "approve" || action === "reject") && !reviewReason.trim()) {
-      setActionMsg({ kind: "err", msg: "Reason required for approve / reject." }); return;
+    if ((action === "approve" || action === "reject" || action === "needs-evidence" || action === "mark-stale" || action === "supersede" || action === "reaffirm" || action === "comment") && !reviewReason.trim()) {
+      setActionMsg({ kind: "err", msg: "Reason required for finding review." }); return;
     }
     try {
       await window.AL_API.reviewFinding(
@@ -694,31 +701,17 @@ function Reasoning({ tenant }) {
 
   async function reviewAutopilotCandidate(candidate, status) {
     if (!candidate || !autopilotDetail?.session) return;
-    if ((status === "rejected" || status === "needs_more_evidence") && !autopilotReviewReason.trim()) {
+    if ((status === "approved" || status === "rejected" || status === "needs_more_evidence") && !autopilotReviewReason.trim()) {
       setActionMsg({ kind: "err", msg: "Reason required for candidate review." });
       return;
     }
     try {
-      const evidenceLimits = [...(candidate.evidence_limits || [])];
-      if (autopilotReviewReason.trim()) {
-        evidenceLimits.push(`Reviewer note: ${autopilotReviewReason.trim()}`);
-      }
-      await window.AL_API.addAutopilotCandidateFinding(
+      const action = status === "needs_more_evidence" ? "needs-evidence" : status === "approved" ? "approve" : "reject";
+      await window.AL_API.reviewAutopilotCandidate(
+        candidate.canonical_key,
+        action,
+        { reason: autopilotReviewReason.trim(), reviewer: "M. Aoki" },
         tenant ? tenant.id : "default",
-        autopilotDetail.session.session_key,
-        {
-          canonical_key: candidate.canonical_key,
-          title: candidate.title,
-          conclusion: candidate.conclusion,
-          value_score: candidate.value_score || 0,
-          confidence: candidate.confidence || 0,
-          novelty_score: candidate.novelty_score || 0,
-          impact_score: candidate.impact_score || 0,
-          evidence_chain: candidate.evidence_chain || [],
-          evidence_limits: evidenceLimits,
-          suggested_action: candidate.suggested_action || {},
-          status,
-        }
       );
       setAutopilotReviewReason("");
       setActionMsg({ kind: "ok", msg: `Candidate marked ${status}.` });
@@ -1271,11 +1264,14 @@ function Reasoning({ tenant }) {
                 )}
                 <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
                   <input className="reason-input" value={reviewReason} onChange={e => setReviewReason(e.target.value)}
-                         placeholder="Decision rationale (required for approve / reject)…" />
+                         placeholder="Decision rationale (required for approve / reject / lifecycle changes)…" />
                   <div style={{ display: "flex", gap: 6 }}>
                     <button className="btn approve" onClick={() => reviewFinding("approve")} disabled={!finding}>✓ Approve finding</button>
-                    <button className="btn changes" onClick={() => reviewFinding("needs-changes")} disabled={!finding}>↻ Needs changes</button>
+                    <button className="btn changes" onClick={() => reviewFinding("needs-evidence")} disabled={!finding}>↻ Needs evidence</button>
                     <button className="btn reject"  onClick={() => reviewFinding("reject")} disabled={!finding}>✕ Reject</button>
+                    <button className="btn ghost"   onClick={() => reviewFinding("reaffirm")} disabled={!finding}>Reaffirm</button>
+                    <button className="btn ghost"   onClick={() => reviewFinding("mark-stale")} disabled={!finding}>Mark stale</button>
+                    <button className="btn ghost"   onClick={() => reviewFinding("supersede")} disabled={!finding}>Supersede</button>
                     <button className="btn ghost"   onClick={() => reviewFinding("comment")} disabled={!finding}>Comment</button>
                   </div>
                 </div>
@@ -1346,6 +1342,8 @@ function Reasoning({ tenant }) {
           </div>
 
           <OntologyBasisPanel task={task} tenant={tenant} />
+
+          <ApprovedFindingRegistry findings={approvedFindingsRegistry} query={approvedFindingsQ} tenant={tenant} />
 
           <div className="section">
             <div className="section-head"><span>Write boundary</span></div>
@@ -1537,10 +1535,11 @@ function AutopilotWorkspace({ tenant, detailQ, detail, selectedKey, reviewReason
                         </div>
                       )}
                       <div style={{ marginTop: 12, borderTop: "1px solid var(--line)", paddingTop: 10, display: "flex", gap: 8, alignItems: "center" }}>
+                        <button className="btn approve" onClick={() => onReviewCandidate(c, "approved")}>Approve as finding</button>
                         <button className="btn changes" onClick={() => onReviewCandidate(c, "needs_more_evidence")}>Needs more evidence</button>
                         <button className="btn reject" onClick={() => onReviewCandidate(c, "rejected")}>Reject candidate</button>
                         <span style={{ marginLeft: "auto", color: "var(--changes)", fontSize: 11 }}>
-                          Draft candidate only · promote is blocked by API
+                          Human review gate only · Autopilot auto-promote remains blocked
                         </span>
                       </div>
                     </div>
@@ -1549,11 +1548,11 @@ function AutopilotWorkspace({ tenant, detailQ, detail, selectedKey, reviewReason
               )}
             </Panel>
 
-            <Panel eyebrow="Review gate" title="Candidate review note" count="no promote action">
+            <Panel eyebrow="Review gate" title="Candidate review note" count="human approval required">
               <textarea className="textarea" rows={3} value={reviewReason} onChange={e => setReviewReason(e.target.value)}
-                        placeholder="Reason required for reject / needs more evidence. Formal finding approval must use a separate review gate." />
+                        placeholder="Reason required for approve / reject / needs more evidence." />
               <div style={{ marginTop: 8, color: "var(--muted)", fontSize: 11, lineHeight: 1.5 }}>
-                This inbox intentionally has no approve/promote button. Candidate findings remain draft outputs from Autopilot until a separate human review path turns them into formal findings.
+                Candidate approval creates a reviewed Finding Registry entry. It can be reused as prior_finding context and can draft next actions/proposals, but does not write canonical ontology or graph.
               </div>
             </Panel>
           </React.Fragment>
@@ -1891,6 +1890,37 @@ function OntologyBasisPanel({ task, tenant }) {
         <div style={{ fontSize: 11, color: "var(--muted)", lineHeight: 1.55 }}>
           Compact basis only. Detailed source mapping, approval audit, canonical state, and graph eligibility live in Ontology.
         </div>
+      </div>
+    </div>
+  );
+}
+
+function ApprovedFindingRegistry({ findings, query, tenant }) {
+  const list = findings || [];
+  const tenantId = tenant ? tenant.id : "default";
+  return (
+    <div className="section">
+      <div className="section-head"><span>Approved Finding Registry</span><span className="ct">{list.length}</span></div>
+      <div className="section-body" style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        <ApiStatus q={query} what="approved findings" />
+        {list.length === 0 ? (
+          <div style={{ fontSize: 11, color: "var(--muted)", lineHeight: 1.55 }}>
+            No active approved findings yet. Approved findings will enter future reasoning as prior_finding / reviewed_inference context.
+          </div>
+        ) : list.slice(0, 5).map(f => (
+          <a key={f.canonical_key}
+             className="btn ghost"
+             href={`/?screen=reasoning&tenant=${encodeURIComponent(tenantId)}&task=${encodeURIComponent(f.task_key || (f.task && f.task.canonical_key) || "")}`}
+             style={{ flexDirection: "column", alignItems: "flex-start", gap: 4 }}>
+            <span style={{ fontSize: 11, color: "var(--approved)", fontFamily: "var(--font-mono)" }}>
+              prior_finding · reviewed_inference
+            </span>
+            <strong style={{ fontSize: 12, color: "var(--text)" }}>{f.title}</strong>
+            <span style={{ fontSize: 11, color: "var(--muted)", lineHeight: 1.4 }}>
+              Active context only · no canonical ontology/graph write
+            </span>
+          </a>
+        ))}
       </div>
     </div>
   );

@@ -90,7 +90,18 @@ def _field_property_from_row(row, table_name):
 
 
 def _require_reason(action, reason):
-    if action in {"reject", "rejected", "needs_changes", "comment"} and not reason.strip():
+    if action in {
+        "approve",
+        "approved",
+        "reject",
+        "rejected",
+        "needs_changes",
+        "needs_more_evidence",
+        "stale",
+        "superseded",
+        "reaffirmed",
+        "comment",
+    } and not reason.strip():
         raise ValueError(f"reason is required for {action}")
 
 
@@ -1583,6 +1594,307 @@ class ReasoningRepository:
             ).mappings().first()
         return {"tenant": tenant.public_dict(), "candidate_finding": self._autopilot_candidate_to_dict(row)}
 
+    def review_autopilot_candidate(self, tenant, candidate_key, action, reviewer, reason):
+        self.ensure_autopilot_schema(tenant)
+        decision_aliases = {
+            "approve": "approved",
+            "reject": "rejected",
+            "needs-evidence": "needs_more_evidence",
+            "needs-more-evidence": "needs_more_evidence",
+            "needs_more_evidence": "needs_more_evidence",
+            "comment": "comment",
+        }
+        decision = decision_aliases.get(action, action)
+        if decision not in {"approved", "rejected", "needs_more_evidence", "comment"}:
+            raise ValueError(f"Unsupported candidate review action: {action}")
+        _require_reason(decision, reason or "")
+        with self.metadata_engine_for(tenant).begin() as conn:
+            candidate = conn.execute(
+                text(
+                    """
+                    SELECT c.*, s.session_key, s.objective, h.hypothesis_key
+                    FROM aletheia_autopilot_candidate_findings c
+                    JOIN aletheia_autopilot_sessions s ON c.session_id = s.id
+                    LEFT JOIN aletheia_autopilot_hypotheses h ON c.hypothesis_id = h.id
+                    WHERE c.project_id = :tenant_id AND c.canonical_key = :candidate_key
+                    FOR UPDATE OF c
+                    """
+                ),
+                {"tenant_id": tenant.tenant_id, "candidate_key": candidate_key},
+            ).mappings().first()
+            if not candidate:
+                raise KeyError(candidate_key)
+            candidate_dict = self._autopilot_candidate_to_dict(candidate)
+            before_status = candidate_dict["status"]
+            if decision == "comment":
+                evidence_limits = list(candidate_dict.get("evidence_limits") or [])
+                evidence_limits.append(f"Reviewer note by {reviewer}: {reason.strip()}")
+                conn.execute(
+                    text(
+                        """
+                        UPDATE aletheia_autopilot_candidate_findings
+                        SET evidence_limits_json = :evidence_limits_json, updated_at = NOW()
+                        WHERE project_id = :tenant_id AND canonical_key = :candidate_key
+                        """
+                    ),
+                    {
+                        "tenant_id": tenant.tenant_id,
+                        "candidate_key": candidate_key,
+                        "evidence_limits_json": _json_dump(evidence_limits),
+                    },
+                )
+                return {
+                    "tenant": tenant.public_dict(),
+                    "candidate_finding": self._autopilot_candidate_to_dict({
+                        **candidate,
+                        "evidence_limits_json": _json_dump(evidence_limits),
+                    }),
+                    "review": {"decision": decision, "reviewer": reviewer, "reason": reason},
+                    "canonical_boundary": self._finding_canonical_boundary(),
+                }
+            conn.execute(
+                text(
+                    """
+                    UPDATE aletheia_autopilot_candidate_findings
+                    SET status = :status, updated_at = NOW()
+                    WHERE project_id = :tenant_id AND canonical_key = :candidate_key
+                    """
+                ),
+                {"tenant_id": tenant.tenant_id, "candidate_key": candidate_key, "status": decision},
+            )
+            if decision != "approved":
+                return {
+                    "tenant": tenant.public_dict(),
+                    "candidate_finding": self._autopilot_candidate_to_dict({**candidate, "status": decision}),
+                    "review": {
+                        "decision": decision,
+                        "reviewer": reviewer,
+                        "reason": reason,
+                        "before_status": before_status,
+                        "after_status": decision,
+                    },
+                    "canonical_boundary": self._finding_canonical_boundary(),
+                }
+            evidence_chain = candidate_dict.get("evidence_chain") or []
+            if not evidence_chain:
+                raise ValueError("approved candidate requires evidence_chain")
+            formal_key = f"finding:approved:{_slug(candidate_key)}"
+            task_key = f"reasoning:approved-finding:{_slug(candidate_key)}"
+            run_key = f"{task_key}:run:{int(time.time() * 1000)}"
+            now_scope = {
+                "source": "autopilot_candidate_review_gate",
+                "tenant_id": tenant.tenant_id,
+                "candidate_key": candidate_key,
+                "autopilot_session_key": candidate["session_key"],
+                "hypothesis_key": candidate.get("hypothesis_key"),
+                "approved_only": True,
+                "review_gate": "human_finding_approval",
+                "canonical_writes": False,
+                "graph_writes": False,
+            }
+            conn.execute(
+                text(
+                    """
+                    INSERT INTO aletheia_reasoning_tasks
+                    (project_id, canonical_key, question, scope_json, allowed_tools_json, status, created_at, updated_at)
+                    VALUES (:tenant_id, :task_key, :question, :scope_json, :allowed_tools_json, 'completed', NOW(), NOW())
+                    ON CONFLICT (project_id, canonical_key) DO UPDATE SET
+                      question = EXCLUDED.question,
+                      scope_json = EXCLUDED.scope_json,
+                      allowed_tools_json = EXCLUDED.allowed_tools_json,
+                      status = 'completed',
+                      updated_at = NOW()
+                    RETURNING id
+                    """
+                ),
+                {
+                    "tenant_id": tenant.tenant_id,
+                    "task_key": task_key,
+                    "question": f"Human-approved Autopilot finding: {candidate_dict['title']}",
+                    "scope_json": _json_dump(now_scope),
+                    "allowed_tools_json": _json_dump(["prior_finding_registry", "propose_action", "propose_change_proposal"]),
+                },
+            )
+            task = conn.execute(
+                text("SELECT id FROM aletheia_reasoning_tasks WHERE project_id = :tenant_id AND canonical_key = :task_key"),
+                {"tenant_id": tenant.tenant_id, "task_key": task_key},
+            ).mappings().first()
+            run = conn.execute(
+                text(
+                    """
+                    INSERT INTO aletheia_reasoning_runs
+                    (task_id, project_id, run_key, agent_name, prompt_version,
+                     query_plan_json, tool_calls_json, evidence_paths_json,
+                     output_json, eval_result_json, status, latency_ms, cost_estimate, created_at)
+                    VALUES
+                    (:task_id, :tenant_id, :run_key, 'FindingApprovalReviewGate', 'finding-approval-v1',
+                     :query_plan_json, :tool_calls_json, :evidence_paths_json,
+                     :output_json, :eval_result_json, 'completed', 0, 0.0, NOW())
+                    RETURNING id, project_id, run_key, agent_name, prompt_version,
+                              query_plan_json, tool_calls_json, evidence_paths_json,
+                              output_json, eval_result_json, status, latency_ms, cost_estimate, created_at
+                    """
+                ),
+                {
+                    "task_id": task["id"],
+                    "tenant_id": tenant.tenant_id,
+                    "run_key": run_key,
+                    "query_plan_json": _json_dump([
+                        {"step": "review_candidate", "boundary": "human review gate"},
+                        {"step": "register_approved_finding", "writes_canonical": False},
+                    ]),
+                    "tool_calls_json": _json_dump([
+                        {"tool": "autopilot_candidate_read", "source_ref": candidate_key, "safe_view_only": True},
+                        {"tool": "finding_registry_write", "status": "approved", "canonical_write": False},
+                    ]),
+                    "evidence_paths_json": _json_dump([
+                        *evidence_chain,
+                        {
+                            "kind": "autopilot_candidate",
+                            "label": "Reviewed Autopilot candidate",
+                            "source_ref": candidate_key,
+                            "payload": {
+                                "session_key": candidate["session_key"],
+                                "hypothesis_key": candidate.get("hypothesis_key"),
+                            },
+                        },
+                    ]),
+                    "output_json": _json_dump({
+                        "answer": candidate_dict["conclusion"],
+                        "reviewed_inference": True,
+                        "prior_finding": formal_key,
+                    }),
+                    "eval_result_json": _json_dump({"passed": True, "checks": ["evidence_chain_present", "human_review_present", "canonical_write_disabled"]}),
+                },
+            ).mappings().first()
+            recommended_action = self._approved_finding_action(candidate_dict, candidate, reason)
+            finding = conn.execute(
+                text(
+                    """
+                    INSERT INTO aletheia_reasoning_findings
+                    (run_id, project_id, canonical_key, title, conclusion, confidence,
+                     supporting_evidence_json, counter_evidence_json, recommended_action_json,
+                     status, version, source_agent, created_at, updated_at)
+                    VALUES
+                    (:run_id, :tenant_id, :canonical_key, :title, :conclusion, :confidence,
+                     :supporting_evidence_json, :counter_evidence_json, :recommended_action_json,
+                     'approved', 1, 'FindingApprovalReviewGate', NOW(), NOW())
+                    ON CONFLICT (project_id, canonical_key) DO UPDATE SET
+                      run_id = EXCLUDED.run_id,
+                      title = EXCLUDED.title,
+                      conclusion = EXCLUDED.conclusion,
+                      confidence = EXCLUDED.confidence,
+                      supporting_evidence_json = EXCLUDED.supporting_evidence_json,
+                      counter_evidence_json = EXCLUDED.counter_evidence_json,
+                      recommended_action_json = EXCLUDED.recommended_action_json,
+                      status = 'approved',
+                      version = aletheia_reasoning_findings.version + 1,
+                      source_agent = 'FindingApprovalReviewGate',
+                      updated_at = NOW()
+                    RETURNING id, run_id, project_id, canonical_key, title, conclusion, confidence,
+                              supporting_evidence_json, counter_evidence_json, recommended_action_json,
+                              status, version, source_agent, created_at, updated_at
+                    """
+                ),
+                {
+                    "run_id": run["id"],
+                    "tenant_id": tenant.tenant_id,
+                    "canonical_key": formal_key,
+                    "title": candidate_dict["title"],
+                    "conclusion": candidate_dict["conclusion"],
+                    "confidence": candidate_dict["confidence"],
+                    "supporting_evidence_json": _json_dump(evidence_chain),
+                    "counter_evidence_json": _json_dump(candidate_dict.get("evidence_limits") or []),
+                    "recommended_action_json": _json_dump(recommended_action),
+                },
+            ).mappings().first()
+            conn.execute(
+                text(
+                    """
+                    INSERT INTO aletheia_reasoning_reviews
+                    (finding_id, project_id, canonical_key, decision, reviewer, reason,
+                     before_status, after_status, before_version, after_version, created_at)
+                    VALUES
+                    (:finding_id, :project_id, :canonical_key, 'approved', :reviewer, :reason,
+                     :before_status, 'approved', 0, :after_version, NOW())
+                    """
+                ),
+                {
+                    "finding_id": finding["id"],
+                    "project_id": tenant.tenant_id,
+                    "canonical_key": formal_key,
+                    "reviewer": reviewer,
+                    "reason": reason,
+                    "before_status": before_status,
+                    "after_version": finding["version"],
+                },
+            )
+        approved = self.get_finding(tenant, formal_key)
+        return {
+            "tenant": tenant.public_dict(),
+            "candidate_finding": self.get_autopilot_candidate(tenant, candidate_key),
+            "finding": self._decorate_approved_finding(approved),
+            "registry_entry": {
+                "finding_key": formal_key,
+                "context_label": "prior_finding",
+                "reasoning_label": "reviewed_inference",
+                "active_context": True,
+            },
+            "workspace_next_action": approved.get("recommended_action", {}).get("workspace_next_action") if approved else None,
+            "change_proposal_bridge": approved.get("recommended_action", {}).get("change_proposal_bridge") if approved else None,
+            "canonical_boundary": self._finding_canonical_boundary(),
+        }
+
+    def get_autopilot_candidate(self, tenant, candidate_key):
+        self.ensure_autopilot_schema(tenant)
+        with self.metadata_engine_for(tenant).connect() as conn:
+            row = conn.execute(
+                text(
+                    """
+                    SELECT *
+                    FROM aletheia_autopilot_candidate_findings
+                    WHERE project_id = :tenant_id AND canonical_key = :candidate_key
+                    """
+                ),
+                {"tenant_id": tenant.tenant_id, "candidate_key": candidate_key},
+            ).mappings().first()
+        return self._autopilot_candidate_to_dict(row) if row else None
+
+    def _approved_finding_action(self, candidate_dict, candidate_row, reason):
+        suggested = candidate_dict.get("suggested_action") or {}
+        return {
+            "type": "reviewed_inference",
+            "prior_insight_label": "approved finding",
+            "source_candidate_key": candidate_dict.get("canonical_key"),
+            "autopilot_session_key": candidate_row.get("session_key"),
+            "hypothesis_key": candidate_row.get("hypothesis_key"),
+            "review_reason": reason,
+            "next_action": suggested,
+            "workspace_next_action": {
+                "type": "case_next_action",
+                "label": suggested.get("next") or suggested.get("label") or "Review approved finding and assign follow-up owner",
+                "source": "approved_finding",
+                "status": "ready_for_dispatch",
+                "writes_canonical": False,
+            },
+            "change_proposal_bridge": {
+                "available": True,
+                "proposal_types": ["ontology_rule", "graph_edge", "review_playbook"],
+                "writes_canonical": False,
+                "requires_governance_review": True,
+            },
+            "canonical_boundary": self._finding_canonical_boundary(),
+        }
+
+    def _finding_canonical_boundary(self):
+        return {
+            "finding_approval_writes": ["aletheia_reasoning_findings", "aletheia_reasoning_reviews"],
+            "canonical_ontology_write": False,
+            "graph_write": False,
+            "auto_business_action": False,
+            "promotion_requires": "separate ontology/graph/rule proposal review gate",
+        }
+
     def run_creditcardfraud_autopilot_playbook(self, tenant, payload):
         if tenant.tenant_id != "creditcardfraud":
             raise ValueError("creditcardfraud playbook requires tenant=creditcardfraud")
@@ -1905,11 +2217,22 @@ class ReasoningRepository:
             ],
         }
 
-    def list_findings_overview(self, tenant, limit=50):
+    ACTIVE_FINDING_STATUSES = {"approved", "reaffirmed"}
+    INACTIVE_FINDING_STATUSES = {"rejected", "needs_more_evidence", "needs_changes", "stale", "superseded"}
+
+    def list_findings_overview(self, tenant, limit=50, status=None, context=None):
+        conditions = ["f.project_id = :tenant_id"]
+        params = {"tenant_id": tenant.tenant_id, "limit": limit}
+        if status:
+            conditions.append("f.status = :status")
+            params["status"] = status
+        elif context == "active":
+            conditions.append("f.status IN ('approved', 'reaffirmed')")
+        where = " AND ".join(conditions)
         with self.metadata_engine_for(tenant).connect() as conn:
             rows = conn.execute(
                 text(
-                    """
+                    f"""
                     SELECT f.id, f.run_id, f.project_id, f.canonical_key, f.title, f.conclusion,
                            f.confidence, f.supporting_evidence_json, f.counter_evidence_json,
                            f.recommended_action_json, f.status, f.version, f.source_agent,
@@ -1919,12 +2242,12 @@ class ReasoningRepository:
                     FROM aletheia_reasoning_findings f
                     JOIN aletheia_reasoning_runs r ON f.run_id = r.id
                     JOIN aletheia_reasoning_tasks t ON r.task_id = t.id
-                    WHERE f.project_id = :tenant_id
+                    WHERE {where}
                     ORDER BY f.updated_at DESC, f.id DESC
                     LIMIT :limit
                     """
                 ),
-                {"tenant_id": tenant.tenant_id, "limit": limit},
+                params,
             ).mappings().all()
         findings = []
         for row in rows:
@@ -1938,6 +2261,60 @@ class ReasoningRepository:
             self._normalize_scoped_finding_display(tenant, finding)
             findings.append(finding)
         return findings
+
+    def list_findings_registry(self, tenant, status=None, context=None, limit=50):
+        findings = self.list_findings_overview(tenant, limit=limit, status=status, context=context)
+        return {
+            "tenant": tenant.public_dict(),
+            "context": context or "all",
+            "status": status,
+            "active_statuses": sorted(self.ACTIVE_FINDING_STATUSES),
+            "excluded_from_active": sorted(self.INACTIVE_FINDING_STATUSES),
+            "findings": [self._decorate_approved_finding(finding) for finding in findings],
+        }
+
+    def _decorate_approved_finding(self, finding):
+        if finding.get("status") in self.ACTIVE_FINDING_STATUSES:
+            finding = dict(finding)
+            action = finding.get("recommended_action") or {}
+            finding["context_label"] = "prior_finding"
+            finding["reasoning_use"] = {
+                "kind": "prior_finding",
+                "label": "reviewed_inference",
+                "source_ref": finding.get("canonical_key"),
+                "allowed_context": "active_reasoning_context",
+                "canonical_write": False,
+                "graph_write": False,
+                "auto_business_action": False,
+            }
+            finding["workspace_next_action"] = action.get("workspace_next_action") or action.get("next_action") or action.get("next")
+            finding["change_proposal_bridge"] = action.get("change_proposal_bridge") or {
+                "available": True,
+                "writes_canonical": False,
+                "requires_review_gate": True,
+            }
+        return finding
+
+    def active_prior_findings(self, tenant, limit=5):
+        findings = self.list_findings_overview(tenant, limit=limit, context="active")
+        prior = []
+        for finding in findings:
+            prior.append({
+                "kind": "prior_finding",
+                "label": "reviewed_inference",
+                "summary": finding.get("conclusion") or finding.get("title"),
+                "source_ref": finding.get("canonical_key"),
+                "confidence": finding.get("confidence"),
+                "payload": {
+                    "finding_key": finding.get("canonical_key"),
+                    "status": finding.get("status"),
+                    "title": finding.get("title"),
+                    "reviewed_inference": True,
+                    "canonical_write": False,
+                    "graph_write": False,
+                },
+            })
+        return prior
 
     def finding_detail(self, tenant, canonical_key):
         with self.metadata_engine_for(tenant).connect() as conn:
@@ -2128,6 +2505,10 @@ class ReasoningRepository:
             "review_gate": "draft_only",
             "graph_url": payload.get("graph_url"),
         }
+        prior_findings = self.active_prior_findings(tenant, limit=5)
+        if prior_findings:
+            task_scope["prior_findings"] = prior_findings
+            task_scope["evidence_paths"] = [*evidence_paths, *prior_findings]
         allowed_tools = ["graph_query", "instance_lookup", "edge_lookup", "artifact_lookup", "propose_finding", "propose_action"]
         with self.metadata_engine_for(tenant).begin() as conn:
             conn.execute(
@@ -2955,6 +3336,17 @@ class ReasoningRepository:
         return self._run_to_dict(row) if row else None
 
     def review_finding(self, tenant, canonical_key, status, reviewer, reason):
+        status_aliases = {
+            "needs_changes": "needs_more_evidence",
+            "needs-evidence": "needs_more_evidence",
+            "needs-more-evidence": "needs_more_evidence",
+            "reject": "rejected",
+            "approve": "approved",
+            "mark-stale": "stale",
+            "supersede": "superseded",
+            "reaffirm": "reaffirmed",
+        }
+        decision = status_aliases.get(status, status)
         _require_reason(status, reason or "")
         with self.metadata_engine_for(tenant).begin() as conn:
             finding = conn.execute(
@@ -2972,9 +3364,9 @@ class ReasoningRepository:
                 raise KeyError(canonical_key)
             before_status = finding["status"]
             before_version = finding["version"]
-            after_version = before_version if status == "comment" else before_version + 1
-            after_status = before_status if status == "comment" else status
-            if status != "comment":
+            after_version = before_version if decision == "comment" else before_version + 1
+            after_status = before_status if decision == "comment" else "approved" if decision == "reaffirmed" else decision
+            if decision != "comment":
                 conn.execute(
                     text(
                         """
@@ -2983,7 +3375,7 @@ class ReasoningRepository:
                         WHERE project_id = :tenant_id AND canonical_key = :canonical_key
                         """
                     ),
-                    {"tenant_id": tenant.tenant_id, "canonical_key": canonical_key, "status": status},
+                    {"tenant_id": tenant.tenant_id, "canonical_key": canonical_key, "status": after_status},
                 )
             conn.execute(
                 text(
@@ -3000,7 +3392,7 @@ class ReasoningRepository:
                     "finding_id": finding["id"],
                     "project_id": finding["project_id"],
                     "canonical_key": finding["canonical_key"],
-                    "decision": status,
+                    "decision": decision,
                     "reviewer": reviewer,
                     "reason": reason,
                     "before_status": before_status,
@@ -3009,7 +3401,7 @@ class ReasoningRepository:
                     "after_version": after_version,
                 },
             )
-            if status in ("approved", "rejected"):
+            if after_status in ("approved", "rejected"):
                 self._maybe_complete_task(conn, tenant.tenant_id, finding["id"])
         return self.get_finding(tenant, canonical_key)
 
@@ -3101,6 +3493,54 @@ class ReasoningRepository:
             self._normalize_scoped_finding_display(tenant, finding)
         finding["reviews"] = [dict(review) for review in reviews]
         return finding
+
+    def finding_workspace_action(self, tenant, canonical_key, payload=None):
+        finding = self.get_finding(tenant, canonical_key)
+        if not finding:
+            raise KeyError(canonical_key)
+        if finding.get("status") not in self.ACTIVE_FINDING_STATUSES:
+            raise ValueError("workspace action can only be created from active approved/reaffirmed findings")
+        recommended = finding.get("recommended_action") or {}
+        action = recommended.get("workspace_next_action") or {
+            "type": "case_next_action",
+            "label": "Review approved finding and assign owner",
+            "status": "ready_for_dispatch",
+            "writes_canonical": False,
+        }
+        return {
+            "tenant": tenant.public_dict(),
+            "finding_key": canonical_key,
+            "workspace_next_action": {
+                **action,
+                "source": "approved_finding",
+                "finding_key": canonical_key,
+                "created_by": (payload or {}).get("reviewer") or "Itachi",
+                "canonical_write": False,
+                "graph_write": False,
+            },
+        }
+
+    def finding_change_proposal(self, tenant, canonical_key, payload=None):
+        finding = self.get_finding(tenant, canonical_key)
+        if not finding:
+            raise KeyError(canonical_key)
+        if finding.get("status") not in self.ACTIVE_FINDING_STATUSES:
+            raise ValueError("change proposal can only be drafted from active approved/reaffirmed findings")
+        proposal_type = (payload or {}).get("proposal_type") or "ontology_rule"
+        return {
+            "tenant": tenant.public_dict(),
+            "finding_key": canonical_key,
+            "proposal": {
+                "proposal_key": f"proposal:{proposal_type}:{_slug(canonical_key)}",
+                "proposal_type": proposal_type,
+                "status": "proposal_draft",
+                "source_finding_key": canonical_key,
+                "summary": finding.get("conclusion"),
+                "writes_canonical": False,
+                "requires_governance_review": True,
+                "boundary": self._finding_canonical_boundary(),
+            },
+        }
 
     def _employee_label(self, row):
         return f"{row.get('firstName', '')} {row.get('lastName', '')}".strip()
@@ -4534,6 +4974,21 @@ class ReviewWorkbenchHandler(BaseHTTPRequestHandler):
             status_filter = query.get("status", [None])[0]
             self._send_json(self.reasoning_repository.list_tasks(tenant, status_filter=status_filter))
             return
+        if parsed.path == "/api/reasoning/findings":
+            query = parse_qs(parsed.query)
+            status_filter = query.get("status", [None])[0]
+            context = query.get("context", [None])[0]
+            try:
+                limit = int(query.get("limit", ["50"])[0])
+                self._send_json(self.reasoning_repository.list_findings_registry(
+                    tenant,
+                    status=status_filter,
+                    context=context,
+                    limit=limit,
+                ))
+            except ValueError as exc:
+                self._send_error(HTTPStatus.BAD_REQUEST, str(exc))
+            return
         if parsed.path.startswith("/api/reasoning/tasks/"):
             task_key = unquote(parsed.path.removeprefix("/api/reasoning/tasks/"))
             task = self.reasoning_repository.get_task(tenant, task_key)
@@ -4773,6 +5228,33 @@ class ReviewWorkbenchHandler(BaseHTTPRequestHandler):
                 return
             self._send_json(result)
             return
+        if parsed.path.startswith("/api/reasoning/autopilot/candidate-findings/"):
+            parts = parsed.path.removeprefix("/api/reasoning/autopilot/candidate-findings/").split("/")
+            if len(parts) != 2:
+                self._send_error(HTTPStatus.NOT_FOUND, "Expected /api/reasoning/autopilot/candidate-findings/<canonical_key>/<action>")
+                return
+            candidate_key = unquote(parts[0])
+            action = parts[1]
+            try:
+                body = self._read_json()
+                result = self.reasoning_repository.review_autopilot_candidate(
+                    tenant,
+                    candidate_key,
+                    action,
+                    body.get("reviewer") or "Itachi",
+                    body.get("reason") or "",
+                )
+            except KeyError as exc:
+                self._send_error(HTTPStatus.NOT_FOUND, f"Autopilot candidate not found: {exc.args[0]}")
+                return
+            except ValueError as exc:
+                self._send_error(HTTPStatus.BAD_REQUEST, str(exc))
+                return
+            except Exception as exc:  # pragma: no cover - displayed to local operator
+                self._send_error(HTTPStatus.INTERNAL_SERVER_ERROR, str(exc))
+                return
+            self._send_json(result)
+            return
         if parsed.path == "/api/reasoning/tasks/from-graph":
             try:
                 body = self._read_json()
@@ -4859,6 +5341,32 @@ class ReviewWorkbenchHandler(BaseHTTPRequestHandler):
                 return
             self._send_json(result)
             return
+        if parsed.path.startswith("/api/reasoning/findings/") and parsed.path.endswith("/actions"):
+            finding_key = unquote(parsed.path.removeprefix("/api/reasoning/findings/").removesuffix("/actions").rstrip("/"))
+            try:
+                body = self._read_json()
+                result = self.reasoning_repository.finding_workspace_action(tenant, finding_key, body)
+            except KeyError as exc:
+                self._send_error(HTTPStatus.NOT_FOUND, f"Reasoning finding not found: {exc.args[0]}")
+                return
+            except ValueError as exc:
+                self._send_error(HTTPStatus.BAD_REQUEST, str(exc))
+                return
+            self._send_json(result)
+            return
+        if parsed.path.startswith("/api/reasoning/findings/") and parsed.path.endswith("/change-proposals"):
+            finding_key = unquote(parsed.path.removeprefix("/api/reasoning/findings/").removesuffix("/change-proposals").rstrip("/"))
+            try:
+                body = self._read_json()
+                result = self.reasoning_repository.finding_change_proposal(tenant, finding_key, body)
+            except KeyError as exc:
+                self._send_error(HTTPStatus.NOT_FOUND, f"Reasoning finding not found: {exc.args[0]}")
+                return
+            except ValueError as exc:
+                self._send_error(HTTPStatus.BAD_REQUEST, str(exc))
+                return
+            self._send_json(result)
+            return
         if parsed.path.startswith("/api/reasoning/findings/"):
             parts = parsed.path.removeprefix("/api/reasoning/findings/").split("/")
             if len(parts) != 2:
@@ -4874,8 +5382,14 @@ class ReviewWorkbenchHandler(BaseHTTPRequestHandler):
                     result = self.reasoning_repository.review_finding(tenant, finding_key, "approved", reviewer, reason)
                 elif action == "reject":
                     result = self.reasoning_repository.review_finding(tenant, finding_key, "rejected", reviewer, reason)
-                elif action == "needs-changes":
-                    result = self.reasoning_repository.review_finding(tenant, finding_key, "needs_changes", reviewer, reason)
+                elif action in {"needs-changes", "needs-evidence", "needs-more-evidence"}:
+                    result = self.reasoning_repository.review_finding(tenant, finding_key, "needs_more_evidence", reviewer, reason)
+                elif action in {"mark-stale", "stale"}:
+                    result = self.reasoning_repository.review_finding(tenant, finding_key, "stale", reviewer, reason)
+                elif action in {"supersede", "superseded"}:
+                    result = self.reasoning_repository.review_finding(tenant, finding_key, "superseded", reviewer, reason)
+                elif action in {"reaffirm", "reaffirmed"}:
+                    result = self.reasoning_repository.review_finding(tenant, finding_key, "reaffirmed", reviewer, reason)
                 elif action == "comment":
                     result = self.reasoning_repository.review_finding(tenant, finding_key, "comment", reviewer, reason)
                 else:

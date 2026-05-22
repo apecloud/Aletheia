@@ -337,6 +337,32 @@
       return data;
     },
 
+    async reasoningFindings(tenant, options) {
+      const query = {};
+      const opts = options || {};
+      if (opts.status) query.status = opts.status;
+      if (opts.context) query.context = opts.context;
+      if (opts.limit) query.limit = opts.limit;
+      const data = await fetchJson(withTenantQs("/api/reasoning/findings", tenant, query));
+      return data;
+    },
+
+    async createFindingAction(canonicalKey, body, tenant) {
+      return await fetchJson(withTenantQs(
+        `/api/reasoning/findings/${encodeURIComponent(canonicalKey)}/actions`, tenant), {
+        method: "POST",
+        body: JSON.stringify(body || {}),
+      });
+    },
+
+    async createFindingChangeProposal(canonicalKey, body, tenant) {
+      return await fetchJson(withTenantQs(
+        `/api/reasoning/findings/${encodeURIComponent(canonicalKey)}/change-proposals`, tenant), {
+        method: "POST",
+        body: JSON.stringify(body || {}),
+      });
+    },
+
     async autopilotSessions(tenant, status) {
       const query = {};
       if (status) query.status = status;
@@ -367,6 +393,14 @@
     async addAutopilotCandidateFinding(tenant, sessionKey, body) {
       return await fetchJson(withTenantQs(
         `/api/reasoning/autopilot/sessions/${encodeURIComponent(sessionKey)}/candidate-findings`, tenant), {
+        method: "POST",
+        body: JSON.stringify(body || {}),
+      });
+    },
+
+    async reviewAutopilotCandidate(candidateKey, action, body, tenant) {
+      return await fetchJson(withTenantQs(
+        `/api/reasoning/autopilot/candidate-findings/${encodeURIComponent(candidateKey)}/${action}`, tenant), {
         method: "POST",
         body: JSON.stringify(body || {}),
       });
