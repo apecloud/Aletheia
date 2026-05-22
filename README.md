@@ -122,7 +122,17 @@ Views:
 | `/reasoning.html` | Standalone reasoning session view |
 | `/settings.html` | Runtime configuration and tenant management |
 
-For a fresh database, start once with `--ensure-schema` to create the required tables.
+For a fresh database, run the demo metadata bootstrap before starting the server:
+
+```bash
+.venv/bin/python scripts/bootstrap_demo_environment.py
+.venv/bin/python review_workbench.py --host 127.0.0.1 --port 8772 --ensure-schema
+```
+
+The bootstrap creates/migrates the metadata tables, registers demo tenants, seeds
+the default Northwind ontology artifacts, and makes `creditcardfraud` visible for
+Autopilot review. `--ensure-schema` remains useful on server startup as a final
+guard, but it does not seed demo tenants or artifacts by itself.
 
 ## Project Layout
 
