@@ -372,6 +372,13 @@
       });
     },
 
+    async runCreditcardfraudAutopilotPlaybook(tenant, body) {
+      return await fetchJson(withTenantQs("/api/reasoning/autopilot/playbooks/creditcardfraud/run", tenant), {
+        method: "POST",
+        body: JSON.stringify(body || {}),
+      });
+    },
+
     // ---- task lifecycle (new API) ----
     // status filter: undefined | "active" | "completed" | "closed"
     async reasoningTasksFiltered(tenant, status) {

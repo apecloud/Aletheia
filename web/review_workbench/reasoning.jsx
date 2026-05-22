@@ -226,6 +226,7 @@ function Reasoning({ tenant }) {
   const [autopilotMaxToolCalls, setAutopilotMaxToolCalls] = useStateRX(20);
   const [autopilotSelectedKey, setAutopilotSelectedKey] = useStateRX(null);
   const [autopilotStarting, setAutopilotStarting] = useStateRX(false);
+  const [autopilotPlaybookRunning, setAutopilotPlaybookRunning] = useStateRX(false);
   const [actionMsg, setActionMsg] = useStateRX(null);
   const [running, setRunning] = useStateRX(false);
   const [askMode, setAskMode] = useStateRX(false);
@@ -675,7 +676,7 @@ function Reasoning({ tenant }) {
           approved_only: true,
           safe_views_only: true,
           allow_sensitive_fields: false,
-          blocked_fields: ["cardCVV", "enteredCVV"],
+          blocked_fields: ["card_verification_code_fields"],
         },
         created_by: "Reasoning Autopilot UI",
       });
@@ -724,6 +725,33 @@ function Reasoning({ tenant }) {
       window.dispatchEvent(new CustomEvent("aletheia:retry"));
     } catch (err) {
       setActionMsg({ kind: "err", msg: err.message || String(err) });
+    }
+  }
+
+  async function runCreditcardfraudPlaybook() {
+    setAutopilotPlaybookRunning(true);
+    setActionMsg(null);
+    try {
+      const tid = tenant ? tenant.id : "default";
+      const res = await window.AL_API.runCreditcardfraudAutopilotPlaybook(tid, {
+        objective: autopilotObjective.trim() || "Discover high-value credit card fraud risk findings",
+        session_key: autopilotSelectedKey || undefined,
+        budget: {
+          max_hypotheses: Number(autopilotMaxHypotheses) || 8,
+          max_reasoning_tasks: Number(autopilotMaxRuns) || 5,
+          max_tool_calls: Number(autopilotMaxToolCalls) || 20,
+          max_runtime_seconds: 120,
+        },
+      });
+      const key = res?.session?.session_key;
+      if (key) setAutopilotSelectedKey(key);
+      setActiveTab("autopilot");
+      setActionMsg({ kind: "ok", msg: "Creditcardfraud playbook completed · " + (key || "") });
+      window.dispatchEvent(new CustomEvent("aletheia:retry"));
+    } catch (err) {
+      setActionMsg({ kind: "err", msg: err.message || String(err) });
+    } finally {
+      setAutopilotPlaybookRunning(false);
     }
   }
 
@@ -929,6 +957,8 @@ function Reasoning({ tenant }) {
               onReviewCandidate={reviewAutopilotCandidate}
               onStart={startAutopilot}
               starting={autopilotStarting}
+              onRunPlaybook={runCreditcardfraudPlaybook}
+              playbookRunning={autopilotPlaybookRunning}
             />
           ) : askMode ? (
             <AskHero
@@ -1269,6 +1299,8 @@ function Reasoning({ tenant }) {
               setMaxToolCalls={setAutopilotMaxToolCalls}
               starting={autopilotStarting}
               onStart={startAutopilot}
+              onRunPlaybook={runCreditcardfraudPlaybook}
+              playbookRunning={autopilotPlaybookRunning}
               detail={autopilotDetail}
             />
           ) : (
@@ -1344,7 +1376,7 @@ function Reasoning({ tenant }) {
   );
 }
 
-function AutopilotWorkspace({ tenant, detailQ, detail, selectedKey, reviewReason, setReviewReason, onReviewCandidate, onStart, starting }) {
+function AutopilotWorkspace({ tenant, detailQ, detail, selectedKey, reviewReason, setReviewReason, onReviewCandidate, onStart, starting, onRunPlaybook, playbookRunning }) {
   const session = detail && detail.session;
   const hypotheses = (detail && detail.hypotheses) || [];
   const candidates = (detail && detail.candidate_findings) || [];
@@ -1395,6 +1427,11 @@ function AutopilotWorkspace({ tenant, detailQ, detail, selectedKey, reviewReason
             <div style={{ display: "flex", alignItems: "center", gap: 12, color: "var(--muted)", fontSize: 12 }}>
               <span>Start a session to create a visible hypothesis queue and draft Finding Inbox.</span>
               <button className="btn primary" onClick={onStart} disabled={starting}>{starting ? "Starting…" : "▶ Start Autopilot"}</button>
+              {tenant?.id === "creditcardfraud" && (
+                <button className="btn" onClick={onRunPlaybook} disabled={playbookRunning}>
+                  {playbookRunning ? "Running playbook…" : "Run fraud playbook"}
+                </button>
+              )}
             </div>
           </Panel>
         ) : (
@@ -1445,6 +1482,20 @@ function AutopilotWorkspace({ tenant, detailQ, detail, selectedKey, reviewReason
                 </div>
               )}
             </Panel>
+
+            {tenant?.id === "creditcardfraud" && (
+              <Panel eyebrow="Playbook" title="Creditcardfraud discovery playbook" count="draft-only" style={{ marginBottom: 16 }}>
+                <div style={{ display: "flex", gap: 10, alignItems: "center", color: "var(--muted)", fontSize: 12, lineHeight: 1.5 }}>
+                  <span>
+                    Run the fixed fraud playbook to populate card-not-present, verification mismatch, POS missing,
+                    merchant category, duplicate-cluster candidates, plus a pruned hypothesis with reason.
+                  </span>
+                  <button className="btn primary" onClick={onRunPlaybook} disabled={playbookRunning} style={{ marginLeft: "auto", whiteSpace: "nowrap" }}>
+                    {playbookRunning ? "Running…" : "Run playbook"}
+                  </button>
+                </div>
+              </Panel>
+            )}
 
             <Panel eyebrow="Finding Inbox" title="Draft candidate findings" count={`${candidates.length} candidates`} style={{ marginBottom: 16 }}>
               {candidates.length === 0 ? (
@@ -1512,7 +1563,7 @@ function AutopilotWorkspace({ tenant, detailQ, detail, selectedKey, reviewReason
   );
 }
 
-function AutopilotStartPanel({ tenant, objective, setObjective, maxHypotheses, setMaxHypotheses, maxRuns, setMaxRuns, maxToolCalls, setMaxToolCalls, starting, onStart, detail }) {
+function AutopilotStartPanel({ tenant, objective, setObjective, maxHypotheses, setMaxHypotheses, maxRuns, setMaxRuns, maxToolCalls, setMaxToolCalls, starting, onStart, onRunPlaybook, playbookRunning, detail }) {
   const safety = detail?.session?.safety_profile || {};
   const budget = detail?.session?.budget || {};
   return (
@@ -1541,6 +1592,11 @@ function AutopilotStartPanel({ tenant, objective, setObjective, maxHypotheses, s
               </div>
             </div>
             <button className="btn primary" type="submit" disabled={starting}>{starting ? "Starting…" : "▶ Start Autopilot"}</button>
+            {tenant?.id === "creditcardfraud" && (
+              <button className="btn" type="button" onClick={onRunPlaybook} disabled={playbookRunning}>
+                {playbookRunning ? "Running fraud playbook…" : "Run creditcardfraud playbook"}
+              </button>
+            )}
           </form>
         </div>
       </div>
@@ -1553,7 +1609,7 @@ function AutopilotStartPanel({ tenant, objective, setObjective, maxHypotheses, s
           <BoundaryLine label="Sensitive fields" value={safety.allow_sensitive_fields ? "allowed" : "blocked"} tone={safety.allow_sensitive_fields ? "var(--rejected)" : "var(--approved)"} />
           <BoundaryLine label="Canonical writes" value={safety.canonical_writes || "disabled"} tone="var(--rejected)" />
           <BoundaryLine label="Auto approve" value={String(!!safety.auto_approve_findings)} tone={safety.auto_approve_findings ? "var(--rejected)" : "var(--approved)"} />
-          <BoundaryLine label="Blocked fields" value={(safety.blocked_fields || ["cardCVV", "enteredCVV"]).join(", ")} />
+          <BoundaryLine label="Blocked field group" value={(safety.blocked_fields || ["card_verification_code_fields"]).join(", ")} />
         </div>
       </div>
 

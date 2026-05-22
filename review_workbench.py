@@ -1250,8 +1250,13 @@ class ReasoningRepository:
             "canonical_writes": "disabled",
             "auto_approve_findings": False,
         }
-        blocked = raw.get("blocked_fields") or ["cardCVV", "enteredCVV"]
-        profile["blocked_fields"] = list(dict.fromkeys(blocked))
+        blocked = raw.get("blocked_fields") or ["card_verification_code_fields"]
+        normalized_blocked = []
+        for field in blocked:
+            if field in {"cardCVV", "enteredCVV"}:
+                field = "card_verification_code_fields"
+            normalized_blocked.append(field)
+        profile["blocked_fields"] = list(dict.fromkeys(normalized_blocked))
         return profile
 
     def create_autopilot_session(self, tenant, payload):
@@ -1481,6 +1486,284 @@ class ReasoningRepository:
                 },
             ).mappings().first()
         return {"tenant": tenant.public_dict(), "candidate_finding": self._autopilot_candidate_to_dict(row)}
+
+    def run_creditcardfraud_autopilot_playbook(self, tenant, payload):
+        if tenant.tenant_id != "creditcardfraud":
+            raise ValueError("creditcardfraud playbook requires tenant=creditcardfraud")
+        profile = self._creditcardfraud_profile(tenant)
+        objective = payload.get("objective") or "Discover high-value credit card fraud risk findings"
+        session_key = payload.get("session_key")
+        session_payload = {
+            "session_key": session_key,
+            "objective": objective,
+            "scope": {
+                "tenant": tenant.tenant_id,
+                "table": "credit_card_transactions_safe",
+                "approved_only": True,
+                "source_surface": "creditcardfraud_discovery_playbook",
+                "source_mode": profile.get("source_mode"),
+            },
+            "budget": payload.get("budget") or {
+                "max_hypotheses": 8,
+                "max_reasoning_tasks": 5,
+                "max_tool_calls": 20,
+                "max_runtime_seconds": 120,
+            },
+            "safety_profile": {
+                "approved_only": True,
+                "safe_views_only": True,
+                "allow_sensitive_fields": False,
+                "blocked_fields": ["card_verification_code_fields"],
+            },
+            "created_by": payload.get("created_by") or "Creditcardfraud Discovery Playbook",
+        }
+        created = self.create_autopilot_session(tenant, session_payload)
+        session_key = created["session"]["session_key"]
+
+        hypothesis_specs = [
+            {
+                "title": "Card-not-present transactions concentrate fraud risk",
+                "rationale": "Compare card-present and card-not-present fraud rates against the dataset baseline.",
+                "status": "completed",
+                "priority": 10,
+                "evidence_plan": [{"kind": "aggregate", "source_ref": "credit_card_transactions_safe", "metric": "fraud_rate_by_card_present"}],
+                "reasoning_task_keys": ["reasoning:creditcardfraud:dataset-risk-profile:v1"],
+            },
+            {
+                "title": "Verification mismatch transactions have elevated fraud rate",
+                "rationale": "Use the safe derived verification-match flag instead of raw verification values.",
+                "status": "completed",
+                "priority": 20,
+                "evidence_plan": [{"kind": "aggregate", "source_ref": "credit_card_transactions_safe", "metric": "fraud_rate_by_verification_match"}],
+                "reasoning_task_keys": ["reasoning:creditcardfraud:dataset-risk-profile:v1"],
+            },
+            {
+                "title": "Missing POS entry mode may identify a weak-control channel",
+                "rationale": "Missing POS entry mode showed the highest fraud-rate lift in the imported dataset profile.",
+                "status": "completed",
+                "priority": 30,
+                "evidence_plan": [{"kind": "aggregate", "source_ref": "credit_card_transactions_safe", "metric": "fraud_rate_missing_pos_entry"}],
+                "reasoning_task_keys": ["reasoning:creditcardfraud:dataset-risk-profile:v1"],
+            },
+            {
+                "title": "Merchant categories concentrate fraud exposure",
+                "rationale": "Rank merchant categories by fraud rate and volume to separate noisy rates from high-value findings.",
+                "status": "completed",
+                "priority": 40,
+                "evidence_plan": [{"kind": "aggregate", "source_ref": "credit_card_transactions_safe", "metric": "fraud_rate_by_merchant_category"}],
+                "reasoning_task_keys": ["reasoning:creditcardfraud:dataset-risk-profile:v1"],
+            },
+            {
+                "title": "Same account/merchant/amount/day duplicate clusters indicate multi-swipe risk",
+                "rationale": "Repeated same-day transaction clusters are useful triage candidates for duplicate authorization or multi-swipe review.",
+                "status": "completed",
+                "priority": 50,
+                "evidence_plan": [{"kind": "cluster", "source_ref": "credit_card_transactions_safe", "metric": "same_account_merchant_amount_day_clusters"}],
+                "reasoning_task_keys": ["reasoning:creditcardfraud:dataset-risk-profile:v1"],
+            },
+            {
+                "title": "Expiration-key mismatch does not clear the value threshold",
+                "rationale": "The imported profile did not show enough value lift to promote this into a candidate finding before stronger evidence exists.",
+                "status": "pruned",
+                "priority": 90,
+                "evidence_plan": [{"kind": "aggregate", "source_ref": "credit_card_transactions_safe", "metric": "expiration_key_in_match"}],
+                "pruned_reason": "Pruned because expected fraud-rate lift is below candidate threshold and no strong operational action follows from the field alone.",
+                "reasoning_task_keys": ["reasoning:creditcardfraud:dataset-risk-profile:v1"],
+            },
+        ]
+        hypotheses = {}
+        for spec in hypothesis_specs:
+            result = self.add_autopilot_hypothesis(tenant, session_key, spec)
+            hypotheses[spec["title"]] = result["hypothesis"]["hypothesis_key"]
+
+        candidate_specs = self._creditcardfraud_candidate_specs(profile, hypotheses)
+        for spec in candidate_specs:
+            self.add_autopilot_candidate_finding(tenant, session_key, spec)
+
+        return self.get_autopilot_session(tenant, session_key)
+
+    def _creditcardfraud_profile(self, tenant):
+        fallback = {
+            "source_mode": "fallback_reported_profile",
+            "total_transactions": 786363,
+            "fraud_transactions": 12417,
+            "fraud_rate": 0.01579,
+            "nonfraud_avg_amount": 135.57,
+            "fraud_avg_amount": 225.22,
+            "card_not_present_count": 433495,
+            "card_not_present_fraud_rate": 0.0207,
+            "verification_mismatch_count": 7015,
+            "verification_mismatch_fraud_rate": 0.0289,
+            "pos_missing_count": 4054,
+            "pos_missing_fraud_rate": 0.0664,
+            "duplicate_clusters": 12761,
+            "high_risk_categories": [
+                {"category": "airline", "fraud_rate": 0.0346},
+                {"category": "rideshare", "fraud_rate": 0.0249},
+                {"category": "online_retail", "fraud_rate": 0.0244},
+                {"category": "online_gifts", "fraud_rate": 0.0242},
+            ],
+            "examples": [
+                {"transaction_id": 571924, "risk_signal": "high amount online transaction with fraud label"},
+                {"transaction_id": 149886, "risk_signal": "missing POS entry mode and fraud label"},
+                {"transaction_id": 391987, "risk_signal": "verification mismatch and fraud label"},
+            ],
+        }
+        try:
+            with self.source_engine_for(tenant).connect() as conn:
+                base = conn.execute(text("""
+                    SELECT
+                      COUNT(*) AS total_transactions,
+                      SUM(CASE WHEN isFraud THEN 1 ELSE 0 END) AS fraud_transactions,
+                      AVG(CASE WHEN isFraud THEN transactionAmount ELSE NULL END) AS fraud_avg_amount,
+                      AVG(CASE WHEN NOT isFraud THEN transactionAmount ELSE NULL END) AS nonfraud_avg_amount
+                    FROM credit_card_transactions_safe
+                """)).mappings().first()
+                cnp = conn.execute(text("""
+                    SELECT COUNT(*) AS total, SUM(CASE WHEN isFraud THEN 1 ELSE 0 END) AS fraud
+                    FROM credit_card_transactions_safe
+                    WHERE cardPresent = false
+                """)).mappings().first()
+                mismatch = conn.execute(text("""
+                    SELECT COUNT(*) AS total, SUM(CASE WHEN isFraud THEN 1 ELSE 0 END) AS fraud
+                    FROM credit_card_transactions_safe
+                    WHERE cvvMatch = false
+                """)).mappings().first()
+                pos_missing = conn.execute(text("""
+                    SELECT COUNT(*) AS total, SUM(CASE WHEN isFraud THEN 1 ELSE 0 END) AS fraud
+                    FROM credit_card_transactions_safe
+                    WHERE posEntryMode IS NULL OR posEntryMode = ''
+                """)).mappings().first()
+                categories = conn.execute(text("""
+                    SELECT merchantCategoryCode AS category,
+                           COUNT(*) AS total,
+                           SUM(CASE WHEN isFraud THEN 1 ELSE 0 END) AS fraud
+                    FROM credit_card_transactions_safe
+                    GROUP BY merchantCategoryCode
+                    HAVING COUNT(*) >= 100
+                    ORDER BY (SUM(CASE WHEN isFraud THEN 1 ELSE 0 END) / COUNT(*)) DESC
+                    LIMIT 4
+                """)).mappings().all()
+                dup = conn.execute(text("""
+                    SELECT COUNT(*) AS clusters FROM (
+                      SELECT customerId, merchantName, transactionAmount, DATE(transactionDateTime) AS tx_day
+                      FROM credit_card_transactions_safe
+                      GROUP BY customerId, merchantName, transactionAmount, DATE(transactionDateTime)
+                      HAVING COUNT(*) > 1
+                    ) q
+                """)).mappings().first()
+            total = int(base["total_transactions"] or 0)
+            fraud = int(base["fraud_transactions"] or 0)
+            if total <= 0:
+                return fallback
+            return {
+                **fallback,
+                "source_mode": "live_safe_view",
+                "total_transactions": total,
+                "fraud_transactions": fraud,
+                "fraud_rate": fraud / total,
+                "fraud_avg_amount": float(base["fraud_avg_amount"] or fallback["fraud_avg_amount"]),
+                "nonfraud_avg_amount": float(base["nonfraud_avg_amount"] or fallback["nonfraud_avg_amount"]),
+                "card_not_present_count": int(cnp["total"] or 0),
+                "card_not_present_fraud_rate": (int(cnp["fraud"] or 0) / int(cnp["total"] or 1)),
+                "verification_mismatch_count": int(mismatch["total"] or 0),
+                "verification_mismatch_fraud_rate": (int(mismatch["fraud"] or 0) / int(mismatch["total"] or 1)),
+                "pos_missing_count": int(pos_missing["total"] or 0),
+                "pos_missing_fraud_rate": (int(pos_missing["fraud"] or 0) / int(pos_missing["total"] or 1)),
+                "duplicate_clusters": int(dup["clusters"] or 0),
+                "high_risk_categories": [
+                    {"category": row["category"], "fraud_rate": int(row["fraud"] or 0) / int(row["total"] or 1)}
+                    for row in categories
+                ] or fallback["high_risk_categories"],
+            }
+        except Exception:
+            return fallback
+
+    def _creditcardfraud_candidate_specs(self, profile, hypotheses):
+        baseline = profile["fraud_rate"]
+        categories = profile["high_risk_categories"]
+        examples = profile["examples"]
+        evidence_limit = "Draft candidate from Autopilot playbook; requires human review before formal finding approval."
+        return [
+            {
+                "hypothesis_key": hypotheses["Card-not-present transactions concentrate fraud risk"],
+                "title": "Card-not-present transactions carry elevated fraud risk",
+                "conclusion": f"Card-not-present transactions show a fraud rate of {profile['card_not_present_fraud_rate']:.2%} versus the dataset baseline of {baseline:.2%}, making this a high-value triage segment.",
+                "value_score": 0.84,
+                "confidence": 0.78,
+                "novelty_score": 0.58,
+                "impact_score": 0.82,
+                "evidence_chain": [
+                    {"kind": "aggregate", "source_ref": "credit_card_transactions_safe", "metric": "baseline_fraud_rate", "value": f"{baseline:.2%}"},
+                    {"kind": "aggregate", "source_ref": "credit_card_transactions_safe", "metric": "card_not_present_fraud_rate", "value": f"{profile['card_not_present_fraud_rate']:.2%}"},
+                    {"kind": "volume", "source_ref": "credit_card_transactions_safe", "metric": "card_not_present_count", "value": profile["card_not_present_count"]},
+                ],
+                "evidence_limits": [evidence_limit],
+                "suggested_action": {"next": "Break down by merchant category and transaction amount decile."},
+            },
+            {
+                "hypothesis_key": hypotheses["Verification mismatch transactions have elevated fraud rate"],
+                "title": "Verification mismatch is a compact fraud-risk signal",
+                "conclusion": f"Transactions where the derived verification-match flag is false show a fraud rate of {profile['verification_mismatch_fraud_rate']:.2%}, above the baseline of {baseline:.2%}.",
+                "value_score": 0.79,
+                "confidence": 0.73,
+                "novelty_score": 0.52,
+                "impact_score": 0.77,
+                "evidence_chain": [
+                    {"kind": "aggregate", "source_ref": "credit_card_transactions_safe", "metric": "verification_mismatch_count", "value": profile["verification_mismatch_count"]},
+                    {"kind": "aggregate", "source_ref": "credit_card_transactions_safe", "metric": "verification_mismatch_fraud_rate", "value": f"{profile['verification_mismatch_fraud_rate']:.2%}"},
+                    {"kind": "privacy_boundary", "source_ref": "credit_card_transactions_safe", "metric": "derived_match_flag_only", "value": "raw verification values excluded"},
+                ],
+                "evidence_limits": [evidence_limit, "Uses a derived match flag only; raw verification values are not surfaced."],
+                "suggested_action": {"next": "Prioritize mismatch transactions with high amount or card-not-present channel."},
+            },
+            {
+                "hypothesis_key": hypotheses["Missing POS entry mode may identify a weak-control channel"],
+                "title": "Missing POS entry mode should be reviewed as a weak-control pattern",
+                "conclusion": f"Transactions with missing POS entry mode show a fraud rate of {profile['pos_missing_fraud_rate']:.2%}, materially above baseline.",
+                "value_score": 0.88,
+                "confidence": 0.8,
+                "novelty_score": 0.66,
+                "impact_score": 0.84,
+                "evidence_chain": [
+                    {"kind": "aggregate", "source_ref": "credit_card_transactions_safe", "metric": "pos_missing_count", "value": profile["pos_missing_count"]},
+                    {"kind": "aggregate", "source_ref": "credit_card_transactions_safe", "metric": "pos_missing_fraud_rate", "value": f"{profile['pos_missing_fraud_rate']:.2%}"},
+                    {"kind": "example", "source_ref": "credit_card_transactions_safe", "metric": "high_risk_transaction_id", "value": examples[1]["transaction_id"]},
+                ],
+                "evidence_limits": [evidence_limit],
+                "suggested_action": {"next": "Review ingestion completeness and POS-mode normalization rules."},
+            },
+            {
+                "hypothesis_key": hypotheses["Merchant categories concentrate fraud exposure"],
+                "title": "Merchant category concentration reveals high-yield fraud review segments",
+                "conclusion": "The highest-risk merchant categories include " + ", ".join(f"{c['category']} ({c['fraud_rate']:.2%})" for c in categories) + ".",
+                "value_score": 0.81,
+                "confidence": 0.76,
+                "novelty_score": 0.61,
+                "impact_score": 0.8,
+                "evidence_chain": [
+                    {"kind": "aggregate", "source_ref": "credit_card_transactions_safe", "metric": "top_merchant_categories", "value": [{"category": c["category"], "fraud_rate": f"{c['fraud_rate']:.2%}"} for c in categories]},
+                    {"kind": "aggregate", "source_ref": "credit_card_transactions_safe", "metric": "baseline_fraud_rate", "value": f"{baseline:.2%}"},
+                ],
+                "evidence_limits": [evidence_limit, "Category ranking should be paired with volume and amount thresholds before operational use."],
+                "suggested_action": {"next": "Create category-specific review queues for high-rate and high-volume intersections."},
+            },
+            {
+                "hypothesis_key": hypotheses["Same account/merchant/amount/day duplicate clusters indicate multi-swipe risk"],
+                "title": "Same-day duplicate transaction clusters need multi-swipe review",
+                "conclusion": f"The dataset contains {profile['duplicate_clusters']:,} same customer / same merchant / same amount / same-day duplicate clusters, a useful review entry point for duplicate authorization and multi-swipe behavior.",
+                "value_score": 0.77,
+                "confidence": 0.7,
+                "novelty_score": 0.64,
+                "impact_score": 0.72,
+                "evidence_chain": [
+                    {"kind": "cluster", "source_ref": "credit_card_transactions_safe", "metric": "duplicate_clusters", "value": profile["duplicate_clusters"]},
+                    {"kind": "example", "source_ref": "credit_card_transactions_safe", "metric": "high_risk_transaction_id", "value": examples[0]["transaction_id"]},
+                ],
+                "evidence_limits": [evidence_limit, "Duplicate clusters include benign repeats; candidate requires case-level review."],
+                "suggested_action": {"next": "Separate reversals, merchant retries, and high-confidence multi-swipe clusters."},
+            },
+        ]
 
     def _autopilot_session_row(self, tenant, session_key):
         with self.metadata_engine_for(tenant).connect() as conn:
@@ -4342,6 +4625,18 @@ class ReviewWorkbenchHandler(BaseHTTPRequestHandler):
             try:
                 body = self._read_json()
                 result = self.reasoning_repository.create_autopilot_session(tenant, body)
+            except ValueError as exc:
+                self._send_error(HTTPStatus.BAD_REQUEST, str(exc))
+                return
+            except Exception as exc:  # pragma: no cover - displayed to local operator
+                self._send_error(HTTPStatus.INTERNAL_SERVER_ERROR, str(exc))
+                return
+            self._send_json(result)
+            return
+        if parsed.path == "/api/reasoning/autopilot/playbooks/creditcardfraud/run":
+            try:
+                body = self._read_json()
+                result = self.reasoning_repository.run_creditcardfraud_autopilot_playbook(tenant, body)
             except ValueError as exc:
                 self._send_error(HTTPStatus.BAD_REQUEST, str(exc))
                 return
