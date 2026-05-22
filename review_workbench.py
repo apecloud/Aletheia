@@ -94,6 +94,13 @@ def _require_reason(action, reason):
         raise ValueError(f"reason is required for {action}")
 
 
+def _safe_error_message(exc):
+    message = str(exc)
+    for secret in ("aletheia_password", "aletheia_root"):
+        message = message.replace(secret, "***")
+    return message[:500]
+
+
 def _artifact_to_dict(row):
     return {
         "id": row["id"],
@@ -154,6 +161,31 @@ SOURCE_TABLE_SCHEMAS = {
         "primary_key": "categoryID",
         "columns": ["categoryID", "categoryName", "description", "picture"],
     },
+    "credit_card_transaction": {
+        "table": "credit_card_transactions_safe",
+        "primary_key": "transaction_id",
+        "columns": [
+            "transaction_id", "accountNumber", "customerId", "creditLimit",
+            "availableMoney", "transactionDateTime", "transactionAmount",
+            "merchantName", "merchantCategoryCode", "cardPresent", "cvvMatch",
+            "countryMismatch", "isFraud",
+        ],
+    },
+    "account": {
+        "table": "credit_card_transactions_safe",
+        "primary_key": "accountNumber",
+        "columns": ["accountNumber", "customerId", "creditLimit", "availableMoney", "currentBalance"],
+    },
+    "card": {
+        "table": "credit_card_transactions_safe",
+        "primary_key": "cardLast4Digits",
+        "columns": ["cardLast4Digits", "cvvMatch", "expirationDateKeyInMatch", "cardPresent"],
+    },
+    "merchant": {
+        "table": "credit_card_transactions_safe",
+        "primary_key": "merchantName",
+        "columns": ["merchantName", "merchantCategoryCode", "merchantCountryCode", "acqCountry"],
+    },
 }
 
 
@@ -187,6 +219,36 @@ SOURCE_LINK_SCHEMAS = {
         "cardinality": "1:N",
         "graph_edge": "Category -> Product",
         "source_ref": "products.categoryID",
+    },
+    "link:account:1:n:credit_card_transaction": {
+        "source_table": "credit_card_transactions_safe",
+        "source_field": "credit_card_transactions_safe.accountNumber",
+        "target_table": "credit_card_transactions_safe",
+        "target_field": "credit_card_transactions_safe.accountNumber",
+        "join_condition": "credit_card_transactions_safe.accountNumber = credit_card_transactions_safe.accountNumber",
+        "cardinality": "1:N",
+        "graph_edge": "Account -> Credit Card Transaction",
+        "source_ref": "credit_card_transactions_safe.accountNumber",
+    },
+    "link:card:1:n:credit_card_transaction": {
+        "source_table": "credit_card_transactions_safe",
+        "source_field": "credit_card_transactions_safe.cardLast4Digits",
+        "target_table": "credit_card_transactions_safe",
+        "target_field": "credit_card_transactions_safe.cardLast4Digits",
+        "join_condition": "credit_card_transactions_safe.cardLast4Digits = credit_card_transactions_safe.cardLast4Digits",
+        "cardinality": "1:N",
+        "graph_edge": "Card -> Credit Card Transaction",
+        "source_ref": "credit_card_transactions_safe.cardLast4Digits",
+    },
+    "link:merchant:1:n:credit_card_transaction": {
+        "source_table": "credit_card_transactions_safe",
+        "source_field": "credit_card_transactions_safe.merchantName",
+        "target_table": "credit_card_transactions_safe",
+        "target_field": "credit_card_transactions_safe.merchantName",
+        "join_condition": "credit_card_transactions_safe.merchantName = credit_card_transactions_safe.merchantName",
+        "cardinality": "1:N",
+        "graph_edge": "Merchant -> Credit Card Transaction",
+        "source_ref": "credit_card_transactions_safe.merchantName",
     },
 }
 
@@ -251,10 +313,27 @@ def _ontology_source_schema(artifact, table_fields=None):
             + table_fields.get(schema["target_table"], {}).get("fields", [])
         )
         schema["kind"] = "relationship_source_schema"
-        schema["schema_source"] = "live" if all(
-            table_fields.get(t, {}).get("schema_source") == "live"
-            for t in (schema["source_table"], schema["target_table"])
-        ) else "fallback"
+        source_tables = [table_fields.get(t, {}) for t in (schema["source_table"], schema["target_table"])]
+        schema["schema_source"] = (
+            "live"
+            if all(t.get("schema_source") == "live" for t in source_tables)
+            else "degraded"
+            if any(t.get("schema_source") == "degraded" for t in source_tables)
+            else "fallback"
+        )
+        if schema["schema_source"] != "live":
+            schema["degraded"] = True
+            schema["source_statuses"] = {
+                table: table_fields.get(table, {}).get("schema_source", "missing")
+                for table in (schema["source_table"], schema["target_table"])
+            }
+            errors = {
+                table: table_fields.get(table, {}).get("connection_error")
+                for table in (schema["source_table"], schema["target_table"])
+                if table_fields.get(table, {}).get("connection_error")
+            }
+            if errors:
+                schema["connection_errors"] = errors
         schema["source_object"] = payload.get("source_object_name")
         schema["target_object"] = payload.get("target_object_name")
         schema["link_type"] = payload.get("link_type") or schema.get("cardinality")
@@ -275,7 +354,7 @@ def _ontology_source_schema(artifact, table_fields=None):
         ]
         return schema
     if artifact_type == "object":
-        object_name = str(payload.get("object_name") or artifact.get("name") or canonical_key.removeprefix("object:")).lower()
+        object_name = str(payload.get("object_name") or artifact.get("name") or canonical_key.removeprefix("object:")).lower().replace(" ", "_")
         table_schema = SOURCE_TABLE_SCHEMAS.get(object_name)
         if table_schema:
             schema = dict(table_schema)
@@ -283,6 +362,10 @@ def _ontology_source_schema(artifact, table_fields=None):
             schema["columns"] = live.get("columns") if live else schema.get("columns", [])
             schema["fields"] = _apply_table_hints(schema, live.get("fields")) if live else _fallback_fields(schema)
             schema["schema_source"] = live.get("schema_source") if live else "fallback"
+            if live and live.get("schema_source") != "live":
+                schema["degraded"] = True
+                schema["degraded_reason"] = live.get("degraded_reason")
+                schema["connection_error"] = live.get("connection_error")
             schema["kind"] = "object_source_schema"
             schema["object_name"] = artifact.get("name")
             return schema
@@ -335,12 +418,21 @@ class ReviewRepository:
             fields = [_field_property_from_row(row, table_name) for row in rows]
             return {
                 "table": table_name,
-                "schema_source": "live" if fields else "fallback",
+                "schema_source": "live" if fields else "degraded",
                 "columns": [field["name"] for field in fields],
                 "fields": fields,
+                **({} if fields else {"degraded": True, "degraded_reason": "source table was reachable but no columns were found"}),
             }
-        except Exception:
-            return {"table": table_name, "schema_source": "fallback", "columns": [], "fields": []}
+        except Exception as exc:
+            return {
+                "table": table_name,
+                "schema_source": "degraded",
+                "columns": [],
+                "fields": [],
+                "degraded": True,
+                "degraded_reason": "source database connection failed",
+                "connection_error": _safe_error_message(exc),
+            }
 
     def source_schemas_for_artifact(self, tenant, artifact):
         canonical_key = artifact.get("canonical_key") or ""
@@ -352,13 +444,17 @@ class ReviewRepository:
             table_names.add(link_schema["source_table"])
             table_names.add(link_schema["target_table"])
         elif artifact_type == "object":
-            object_name = str(payload.get("object_name") or artifact.get("name") or canonical_key.removeprefix("object:")).lower()
+            object_name = str(payload.get("object_name") or artifact.get("name") or canonical_key.removeprefix("object:")).lower().replace(" ", "_")
             if object_name in SOURCE_TABLE_SCHEMAS:
                 table_names.add(SOURCE_TABLE_SCHEMAS[object_name]["table"])
         schemas = {}
+        object_hint = None
+        if artifact_type == "object":
+            object_name = str(payload.get("object_name") or artifact.get("name") or canonical_key.removeprefix("object:")).lower().replace(" ", "_")
+            object_hint = SOURCE_TABLE_SCHEMAS.get(object_name)
         for table in table_names:
             schema = self.source_table_schema(tenant, table)
-            hint = SOURCE_TABLE_HINTS_BY_TABLE.get(table)
+            hint = object_hint if object_hint and object_hint.get("table") == table else SOURCE_TABLE_HINTS_BY_TABLE.get(table)
             if hint and schema.get("fields"):
                 schema["fields"] = _apply_table_hints(hint, schema["fields"])
             schemas[table] = schema
