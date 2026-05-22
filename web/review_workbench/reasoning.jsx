@@ -317,6 +317,7 @@ function Reasoning({ tenant }) {
   const [autopilotReviewReason, setAutopilotReviewReason] = useStateRX("");
   const [autopilotReviewTargetKey, setAutopilotReviewTargetKey] = useStateRX("");
   const [autopilotReviewMissingKey, setAutopilotReviewMissingKey] = useStateRX("");
+  const [highlightedFindingKey, setHighlightedFindingKey] = useStateRX("");
   const [autopilotObjective, setAutopilotObjective] = useStateRX("Find high-value fraud risk findings");
   const [autopilotMaxHypotheses, setAutopilotMaxHypotheses] = useStateRX(8);
   const [autopilotMaxRuns, setAutopilotMaxRuns] = useStateRX(5);
@@ -870,7 +871,7 @@ function Reasoning({ tenant }) {
     try {
       setAutopilotReviewMissingKey("");
       const action = status === "needs_more_evidence" ? "needs-evidence" : status === "approved" ? "approve" : "reject";
-      await window.AL_API.reviewAutopilotCandidate(
+      const res = await window.AL_API.reviewAutopilotCandidate(
         candidate.canonical_key,
         action,
         { reason: autopilotReviewReason.trim(), reviewer: "M. Aoki" },
@@ -878,9 +879,15 @@ function Reasoning({ tenant }) {
       );
       setAutopilotReviewReason("");
       setAutopilotReviewTargetKey("");
+      if (status === "approved") {
+        const findingKey = res?.finding?.canonical_key || res?.finding_key || "";
+        setHighlightedFindingKey(findingKey);
+        setRegistryFilters(prev => ({ ...prev, status: "approved", context: "active" }));
+        setActiveTab("mine");
+      }
       setActionMsg({
         kind: "ok",
-        msg: status === "approved" ? "Finding approved and added to Registry." : `Candidate marked ${status}.`,
+        msg: status === "approved" ? "Added to Finding Registry. Opened Registry panel." : `Candidate marked ${status}.`,
       });
       window.dispatchEvent(new CustomEvent("aletheia:retry"));
     } catch (err) {
@@ -1525,6 +1532,7 @@ function Reasoning({ tenant }) {
             filters={registryFilters}
             setFilters={setRegistryFilters}
             setActionMsg={setActionMsg}
+            highlightedFindingKey={highlightedFindingKey}
           />
 
           <div className="section">
@@ -2130,7 +2138,7 @@ function OntologyBasisPanel({ task, tenant }) {
   );
 }
 
-function ApprovedFindingRegistry({ findings, query, tenant, filters, setFilters, setActionMsg }) {
+function ApprovedFindingRegistry({ findings, query, tenant, filters, setFilters, setActionMsg, highlightedFindingKey }) {
   const list = findings || [];
   const tenantId = tenant ? tenant.id : "default";
   const [selected, setSelected] = useStateRX({});
@@ -2251,14 +2259,21 @@ function ApprovedFindingRegistry({ findings, query, tenant, filters, setFilters,
           <div style={{ fontSize: 11, color: "var(--muted)", lineHeight: 1.55 }}>
             No active approved findings yet. Approved findings will enter future reasoning as prior_finding / reviewed_inference context.
           </div>
-        ) : list.slice(0, 8).map(f => (
-          <div key={f.canonical_key} style={{ border: "1px solid var(--line)", background: "var(--bg-1)", padding: 10 }}>
+        ) : list.slice(0, 8).map(f => {
+          const highlighted = highlightedFindingKey && f.canonical_key === highlightedFindingKey;
+          return (
+          <div key={f.canonical_key} style={{
+            border: "1px solid " + (highlighted ? "var(--approved)" : "var(--line)"),
+            background: highlighted ? "oklch(0.74 0.13 165 / 0.08)" : "var(--bg-1)",
+            padding: 10,
+            boxShadow: highlighted ? "0 0 0 1px oklch(0.74 0.13 165 / 0.18) inset" : "none",
+          }}>
             <div style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
               <input type="checkbox" checked={!!selected[f.canonical_key]} onChange={e => setSelected({ ...selected, [f.canonical_key]: e.target.checked })} />
               <a href={`/?screen=reasoning&tenant=${encodeURIComponent(tenantId)}&task=${encodeURIComponent(f.task_key || (f.task && f.task.canonical_key) || "")}`}
                  style={{ color: "var(--text)", textDecoration: "none", flex: 1 }}>
                 <span style={{ fontSize: 10, color: f.reasoning_use ? "var(--approved)" : "var(--muted)", fontFamily: "var(--font-mono)" }}>
-                  {f.reasoning_use ? "active prior insight · reviewed_inference" : "audit only"} · {f.source_label || "Reasoning"} · {f.finding_type || "finding"}
+                  {highlighted ? "newly added · " : ""}{f.reasoning_use ? "active prior insight · reviewed_inference" : "audit only"} · {f.source_label || "Reasoning"} · {f.finding_type || "finding"}
                 </span>
                 <strong style={{ display: "block", fontSize: 12, marginTop: 3 }}>{f.title}</strong>
                 <span style={{ display: "block", fontSize: 11, color: "var(--muted)", lineHeight: 1.4, marginTop: 3 }}>
@@ -2298,7 +2313,8 @@ function ApprovedFindingRegistry({ findings, query, tenant, filters, setFilters,
               </div>
             )}
           </div>
-        ))}
+          );
+        })}
         <div style={{ fontSize: 11, color: "var(--muted)", lineHeight: 1.45 }}>
           Action close/reopen records Finding usage events only; it does not change Finding status or write canonical ontology/graph.
         </div>
