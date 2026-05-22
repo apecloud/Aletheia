@@ -2671,25 +2671,49 @@ class ReasoningRepository:
         if not question:
             raise ValueError("question is required")
         scope = payload.get("scope") or {}
-        center_node = scope.get("center_node") or "Employee:4"
-        depth = int(scope.get("depth") or 1)
-        limit = int(scope.get("limit") or 200)
+        center_node = scope.get("center_node") or payload.get("center_node")
+        depth = int(scope.get("depth") or payload.get("depth") or 1)
+        limit = int(scope.get("limit") or payload.get("limit") or 200)
+        if not center_node:
+            types = self.instance_repository.types(tenant).get("types") or []
+            if not types:
+                raise ValueError(f"No approved object types are available for tenant {tenant.tenant_id}")
+            first_type = types[0]["type"]
+            instances = self.instance_repository.search(tenant, first_type, "", limit=1).get("instances") or []
+            if not instances:
+                raise ValueError(f"No source instances are available for tenant {tenant.tenant_id} type {first_type}")
+            center_node = instances[0]["id"]
+        if ":" not in center_node:
+            raise ValueError("center_node must be like ObjectType:ID")
+        object_type, instance_id = center_node.split(":", 1)
+        tenant_types = self.instance_repository.types(tenant).get("types") or []
+        allowed_types = {str(t.get("type") or "") for t in tenant_types}
+        if allowed_types and object_type not in allowed_types:
+            raise ValueError(f"center_node {center_node} is not an approved object type for tenant {tenant.tenant_id}")
+        graph = self.instance_repository.neighborhood(tenant, object_type, instance_id, depth=depth, limit=limit)
+        if not graph or not graph.get("approved"):
+            raise ValueError(f"center_node {center_node} is outside the approved graph scope (node not found or not approved)")
+        graph_type = graph.get("scope", {}).get("type") or object_type
+        graph_url = (
+            scope.get("graph_url")
+            or graph.get("graph_url")
+            or f"/graph.html?tenant={quote(tenant.tenant_id)}&type={quote(graph_type)}&id={quote(str(instance_id))}&depth={depth}&limit={limit}"
+        )
         inner_scope = {
             "source": "question_center",
             "center_node": center_node,
             "depth": depth,
             "node_limit": limit,
             "edge_limit": limit,
-            "allowed_node_types": ["Employee", "Order"],
-            "allowed_link_keys": ["link:employee:1:n:order"],
+            "allowed_node_types": graph.get("scope", {}).get("allowed_node_types") or [graph_type],
+            "allowed_link_keys": graph.get("scope", {}).get("allowed_link_keys") or [],
             "approved_only": True,
             "evidence_paths": [
                 {
                     "kind": "question_scope",
                     "label": center_node,
                     "summary": f"Question Center scoped task for: {question}",
-                    "url": scope.get("graph_url")
-                    or f"/graph.html?tenant={quote(tenant.tenant_id)}&type=Employee&id=4&depth={depth}&limit={limit}",
+                    "url": graph_url,
                     "source_ref": "question_center",
                     "payload": {"scope": scope.get("type") or "tenant", "center_node": center_node},
                 }
@@ -2702,8 +2726,7 @@ class ReasoningRepository:
             {
                 "question": question,
                 "source": "question_center",
-                "graph_url": scope.get("graph_url")
-                or f"/graph.html?tenant={quote(tenant.tenant_id)}&type=Employee&id=4&depth={depth}&limit={limit}",
+                "graph_url": graph_url,
                 "scope": inner_scope,
             },
         )
@@ -2749,13 +2772,15 @@ class ReasoningRepository:
         question = payload.get("question") or (
             f"Explain the approved graph evidence around {key_source} and identify any workload, concentration, or provenance risk."
         )
+        graph_scope = {}
         if center_node:
             if ":" not in center_node:
                 raise ValueError("center_node must be like Employee:4")
             object_type, instance_id = center_node.split(":", 1)
             graph = self.instance_repository.neighborhood(tenant, object_type, instance_id, depth=depth, limit=node_limit)
-            if graph and not graph.get("approved"):
+            if not graph or not graph.get("approved"):
                 raise ValueError(f"center_node {center_node} is outside the approved graph scope (node not found or not approved)")
+            graph_scope = (graph or {}).get("scope") or {}
         if center_edge:
             source = center_edge.get("source")
             target = center_edge.get("target")
@@ -2769,8 +2794,8 @@ class ReasoningRepository:
             "depth": depth,
             "node_limit": node_limit,
             "edge_limit": edge_limit,
-            "allowed_node_types": scope.get("allowed_node_types") or ["Employee", "Order"],
-            "allowed_link_keys": scope.get("allowed_link_keys") or ["link:employee:1:n:order"],
+            "allowed_node_types": scope.get("allowed_node_types") if scope.get("allowed_node_types") is not None else (graph_scope.get("allowed_node_types") or ["Employee", "Order"]),
+            "allowed_link_keys": scope.get("allowed_link_keys") if scope.get("allowed_link_keys") is not None else (graph_scope.get("allowed_link_keys") or ["link:employee:1:n:order"]),
             "approved_only": True,
             "evidence_paths": evidence_paths,
             "review_gate": "draft_only",

@@ -210,11 +210,106 @@ function FraudFindingSummary({ finding }) {
 }
 const STALE_THRESHOLD_MS = 5 * 60 * 1000;
 
+function escapeRegExpRX(value) {
+  return String(value || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function canonicalTypeFromListRX(raw, types) {
+  const compact = String(raw || "").replace(/[^a-z0-9]/gi, "").toLowerCase();
+  return (types || []).find(t => String(t || "").replace(/[^a-z0-9]/gi, "").toLowerCase() === compact) || "";
+}
+
+function tenantEmptyQuestionRX(tenantId) {
+  return tenantId === "creditcardfraud"
+    ? "Select a transaction, account, card, or merchant to analyze fraud risk."
+    : "Select a center node to ask a scoped question.";
+}
+
+function defaultQuestionForTenantRX(tenantId, type, label, node) {
+  const typeText = String(type || "").replace(/([a-z])([A-Z])/g, "$1 $2");
+  const lower = typeText.toLowerCase();
+  if (tenantId === "creditcardfraud") {
+    if (/transaction/i.test(type)) return `Explain fraud risk signals for ${label}`;
+    if (/account/i.test(type)) return `Summarize fraud exposure and suspicious activity for ${label}`;
+    if (/card/i.test(type)) return `Review verification, channel, and merchant risk signals for ${label}`;
+    if (/merchant/i.test(type)) return `Which fraud patterns are concentrated around ${label}?`;
+    return `Find high-value fraud risk patterns for ${label || node || lower}`;
+  }
+  return label ? `Give a summary of ${label}` : `Which ${typeText}s have the highest activity?`;
+}
+
+function suggestedQuestionsForTenantRX({ tenantId, type, centerNode, label, question, entities }) {
+  const q = (question || "").trim();
+  const samples = (entities || []).slice(0, 2);
+  const typeText = String(type || "").replace(/([a-z])([A-Z])/g, "$1 $2");
+  const plural = typeText.endsWith("s") ? typeText : `${typeText}s`;
+  const hasEntity = !!(centerNode && label);
+  if (tenantId === "creditcardfraud") {
+    if (hasEntity) {
+      if (q) {
+        const base = q.toLowerCase().includes(String(label).toLowerCase()) || q.includes(centerNode) ? q : `${q} — ${label}`;
+        return [
+          { q: base, node: centerNode },
+          { q: `What evidence supports this fraud-risk interpretation for ${label}?`, node: centerNode },
+          { q: `Which merchant/channel/POS signals explain risk for ${label}?`, node: centerNode },
+          { q: `What follow-up action should an analyst take for ${label}?`, node: centerNode },
+        ];
+      }
+      return [
+        { q: defaultQuestionForTenantRX(tenantId, type, label, centerNode), node: centerNode },
+        { q: `What evidence supports the risk profile for ${label}?`, node: centerNode },
+        { q: `Which transaction patterns around ${label} need review?`, node: centerNode },
+        { q: `What action should be created from ${label}'s risk signals?`, node: centerNode },
+      ];
+    }
+    const base = [];
+    for (const ent of samples) {
+      const label = ent.label || ent.id;
+      base.push({ q: q ? `${q} — ${label}` : defaultQuestionForTenantRX(tenantId, type, label, ent.id), node: ent.id });
+    }
+    if (base.length) {
+      base.push({ q: `Which ${plural} should Autopilot investigate next?`, node: base[0].node });
+      return base;
+    }
+    return [{ q: tenantEmptyQuestionRX(tenantId), node: "" }];
+  }
+  if (hasEntity) {
+    if (q) {
+      const mentionsEntity = q.toLowerCase().includes(String(label).toLowerCase()) || q.includes(centerNode);
+      const base = mentionsEntity ? q : `${q} — ${label}`;
+      return [
+        { q: base, node: centerNode },
+        { q: `${base}, compared to other ${plural}`, node: centerNode },
+        { q: `What evidence supports "${q}" for ${label}?`, node: centerNode },
+        { q: `Give a complete summary of ${label}`, node: centerNode },
+      ];
+    }
+    return [
+      { q: `Give a summary of ${label}`, node: centerNode },
+      { q: `What are the key relationships for ${label}?`, node: centerNode },
+      { q: `How does ${label} compare to other ${plural}?`, node: centerNode },
+      { q: `Are there any anomalies or risks related to ${label}?`, node: centerNode },
+    ];
+  }
+  if (type) {
+    const out = samples.map(ent => ({
+      q: q ? `${q} — ${ent.label || ent.id}` : `Give a summary of ${ent.label || ent.id}`,
+      node: ent.id,
+    }));
+    if (out.length) {
+      out.push({ q: `Which ${plural} have the highest activity?`, node: out[0].node });
+      out.push({ q: `Are there anomalies among ${plural}?`, node: out[0].node });
+      return out;
+    }
+  }
+  return [{ q: tenantEmptyQuestionRX(tenantId), node: "" }];
+}
+
 function Reasoning({ tenant }) {
   const [selectedKey, setSelectedKey] = useStateRX(null);
   const [activeTab, setActiveTab] = useStateRX("mine");  // mine | all | graph | autopilot
-  const [question, setQuestion] = useStateRX("Why is Employee #4 workload unusual?");
-  const [centerNode, setCenterNode] = useStateRX("Employee:4");
+  const [question, setQuestion] = useStateRX("");
+  const [centerNode, setCenterNode] = useStateRX("");
   const [depth, setDepth] = useStateRX(1);
   const [limit, setLimit] = useStateRX(200);
   const [followup, setFollowup] = useStateRX("");
@@ -244,13 +339,18 @@ function Reasoning({ tenant }) {
   const [askMode, setAskMode] = useStateRX(false);
   const [submitting, setSubmitting] = useStateRX(false);
 
-  const NODE_RE = /\b(Employee|Customer|Order|Product|Category|Region|Supplier|Shipper|Territory)[:\s#]+(\w+|\*)\b/i;
+  const [scopeTypes, setScopeTypes] = useStateRX([]);
+  const [scopeBootstrapKey, setScopeBootstrapKey] = useStateRX("");
+  const typeNames = scopeTypes.map(t => typeof t === "string" ? t : (t.type || t.label)).filter(Boolean);
+  const NODE_RE = typeNames.length
+    ? new RegExp("\\b(" + typeNames.map(escapeRegExpRX).join("|") + ")[:\\s#]+([\\w*.-]+)\\b", "i")
+    : /\b([A-Za-z][A-Za-z0-9_]*?)[:\s#]+([\w*.-]+)\b/i;
   function onQuestionChangeWithExtract(e) {
     const q = e.target.value;
     setQuestion(q);
     const m = q.match(NODE_RE);
     if (m) {
-      const type = m[1].charAt(0).toUpperCase() + m[1].slice(1).toLowerCase();
+      const type = canonicalTypeFromListRX(m[1], typeNames) || m[1];
       setCenterNode(type + ":" + m[2]);
     }
   }
@@ -277,6 +377,45 @@ function Reasoning({ tenant }) {
     { enabled: activeTab === "autopilot" && !!autopilotSelectedKey }
   );
   const autopilotDetail = autopilotDetailQ.data || null;
+  useEffectRX(() => {
+    let alive = true;
+    const tid = tenant ? tenant.id : "default";
+    (async () => {
+      try {
+        const typeData = await window.AL_API.fetchJson("/api/instances/types?tenant=" + encodeURIComponent(tid));
+        if (!alive) return;
+        const types = typeData.types || [];
+        setScopeTypes(types);
+        const currentType = centerNode && centerNode.includes(":") ? centerNode.split(":")[0] : "";
+        const typeNamesLocal = types.map(t => typeof t === "string" ? t : (t.type || t.label)).filter(Boolean);
+        const currentValid = currentType && typeNamesLocal.some(t => canonicalTypeFromListRX(currentType, [t]) === t);
+        const bootstrapKey = tid + "|" + typeNamesLocal.join(",");
+        if (currentValid && scopeBootstrapKey === bootstrapKey) return;
+        const firstType = typeNamesLocal[0] || "";
+        if (!firstType) {
+          setCenterNode("");
+          setQuestion(tenantEmptyQuestionRX(tid));
+          setScopeBootstrapKey(bootstrapKey);
+          return;
+        }
+        const qs = new URLSearchParams({ tenant: tid, type: firstType, q: "", limit: "1" });
+        const searchData = await window.AL_API.fetchJson("/api/instances/search?" + qs.toString());
+        if (!alive) return;
+        const first = (searchData.instances || [])[0];
+        const nextNode = first ? first.id : "";
+        const nextLabel = first ? (first.label || first.id) : firstType;
+        setCenterNode(nextNode);
+        setQuestion(defaultQuestionForTenantRX(tid, firstType, nextLabel, nextNode));
+        setScopeBootstrapKey(bootstrapKey);
+      } catch (_) {
+        if (!alive) return;
+        setScopeTypes([]);
+        setCenterNode("");
+        setQuestion(tenantEmptyQuestionRX(tenant ? tenant.id : "default"));
+      }
+    })();
+    return () => { alive = false; };
+  }, [tenant ? tenant.id : "default"]);
   useEffectRX(() => {
     if (activeTab !== "autopilot") return;
     if (!autopilotSessions.length) { setAutopilotSelectedKey(null); return; }
@@ -625,6 +764,15 @@ function Reasoning({ tenant }) {
     if (e && e.preventDefault) e.preventDefault();
     const q = questionOverride || question;
     if (!q.trim()) { setActionMsg({ kind: "err", msg: "Question is required." }); return; }
+    if (!centerNode || !centerNode.includes(":")) {
+      setActionMsg({ kind: "err", msg: "Select a tenant object as the center node before submitting." });
+      return;
+    }
+    const centerType = centerNode.split(":")[0];
+    if (typeNames.length && !canonicalTypeFromListRX(centerType, typeNames)) {
+      setActionMsg({ kind: "err", msg: `Center node ${centerNode} is not valid for tenant ${tenant ? tenant.id : "default"}.` });
+      return;
+    }
     setSubmitting(true);
     setActionMsg(null);
     try {
@@ -1328,7 +1476,7 @@ function Reasoning({ tenant }) {
                 <div>
                   <div className="eyebrow" style={{ marginBottom: 4 }}>Question</div>
                   <textarea className="textarea" rows={3} value={question} onChange={onQuestionChangeWithExtract}
-                            placeholder="Why is Employee #4 workload unusual?" />
+                            placeholder={(tenant && tenant.id) === "creditcardfraud" ? "Which transaction has elevated fraud risk?" : "Why is Employee #4 workload unusual?"} />
                 </div>
                 <EntityPicker tenant={tenant} centerNode={centerNode} setCenterNode={setCenterNode} question={question} setQuestion={setQuestion} compact />
                 <div style={{ display: "flex", gap: 6 }}>
@@ -2376,6 +2524,7 @@ Object.assign(window, { TraceLog, TraceEventBody });
    empty state. Question-first, scope-second. */
 function AskHero({ tenant, question, setQuestion, centerNode, setCenterNode, depth, setDepth, limit, setLimit, isMock, submitting, actionMsg, onDismissMsg, onCancel, onSubmit }) {
   const tenantId = tenant ? tenant.id : "default";
+  const isFraudTenant = tenantId === "creditcardfraud";
 
   React.useEffect(() => {
     function onKey(e) { if (e.key === "Escape") onCancel && onCancel(); }
@@ -2383,11 +2532,12 @@ function AskHero({ tenant, question, setQuestion, centerNode, setCenterNode, dep
     return () => window.removeEventListener("keydown", onKey);
   }, [onCancel]);
 
-  const NODE_RE = /\b(Employee|Customer|Order|Product|Category|Region|Supplier|Shipper|Territory)[:\s#]+(\w+|\*)\b/i;
   function extractNode(text) {
-    const m = text.match(NODE_RE);
+    if (!entityTypes.length) return null;
+    const typePattern = entityTypes.map(escapeRegExpRX).join("|");
+    const m = text.match(new RegExp("\\b(" + typePattern + ")[:\\s#]+([\\w*.-]+)\\b", "i"));
     if (!m) return null;
-    const type = m[1].charAt(0).toUpperCase() + m[1].slice(1).toLowerCase();
+    const type = canonicalTypeFromListRX(m[1], entityTypes) || m[1];
     return type + ":" + m[2];
   }
   function onQuestionChange(e) {
@@ -2452,6 +2602,30 @@ function AskHero({ tenant, question, setQuestion, centerNode, setCenterNode, dep
   const questionRef = React.useRef(question || "");
   React.useEffect(() => { questionRef.current = question || ""; }, [question]);
   React.useEffect(() => {
+    if (!entityTypes.length) {
+      if (pickedType) setPickedType("");
+      if (centerNode) {
+        setCenterNode("");
+        setEntityQuery("");
+      }
+      return;
+    }
+    const currentType = centerNode && centerNode.includes(":") ? centerNode.split(":")[0] : "";
+    const selectedType = pickedType || currentType;
+    const isValidType = selectedType && entityTypes.some(t => canonicalTypeFromListRX(selectedType, [t]) === t);
+    if (!isValidType) {
+      const nextType = entityTypes[0];
+      setPickedType(nextType);
+      if (centerNode) setCenterNode("");
+      setEntityQuery("");
+      setEntities([]);
+    } else if (currentType && currentType !== pickedType) {
+      setPickedType(currentType);
+      setEntityQuery("");
+      setEntities([]);
+    }
+  }, [entityTypes, pickedType, centerNode, setCenterNode, tenantId]);
+  React.useEffect(() => {
     if (!prevLabelRef.current && centerNode && entities.length) {
       const match = entities.find(e => e.id === centerNode);
       if (match) prevLabelRef.current = match.label || match.id;
@@ -2466,8 +2640,8 @@ function AskHero({ tenant, question, setQuestion, centerNode, setCenterNode, dep
     setShowDropdown(false);
     let prev = prevLabelRef.current;
     const q = questionRef.current.trim();
-    if (!q) {
-      setQuestion(`Give a summary of ${newLabel}`);
+    if (!q || q === tenantEmptyQuestionRX(tenantId)) {
+      setQuestion(defaultQuestionForTenantRX(tenantId, pickedType, newLabel, ent.id));
     } else if (prev && prev.length > 1 && q.includes(prev)) {
       setQuestion(q.split(prev).join(newLabel));
     } else {
@@ -2515,52 +2689,8 @@ function AskHero({ tenant, question, setQuestion, centerNode, setCenterNode, dep
     const hasEntity = centerNode && centerNode.includes(":");
     const selectedEnt = hasEntity && entities.find(e => e.id === centerNode);
     const label = selectedEnt ? selectedEnt.label : (hasEntity ? centerNode : "");
-    const q = (question || "").trim();
-
-    if (hasEntity && label) {
-      if (q) {
-        const mentionsEntity = q.toLowerCase().includes(label.toLowerCase())
-          || q.includes(centerNode);
-        const base = mentionsEntity ? q : `${q} — ${label}`;
-        return [
-          { q: base, node: centerNode },
-          { q: `${base}, compared to other ${type}s`, node: centerNode },
-          { q: `What evidence supports "${q}" for ${label}?`, node: centerNode },
-          { q: `Give a complete summary of ${label}`, node: centerNode },
-        ];
-      }
-      return [
-        { q: `Give a summary of ${label}`, node: centerNode },
-        { q: `What are the key relationships for ${label}?`, node: centerNode },
-        { q: `How does ${label} compare to other ${type}s?`, node: centerNode },
-        { q: `Are there any anomalies or risks related to ${label}?`, node: centerNode },
-      ];
-    }
-    if (type) {
-      const samples = entities.slice(0, 2);
-      if (q) {
-        const out = [
-          { q: `${q} — across all ${type}s`, node: `${type}:*` },
-        ];
-        for (const ent of samples) {
-          out.push({ q: `${q} — ${ent.label || ent.id}`, node: ent.id });
-        }
-        out.push({ q: `Are there anomalies among ${type}s?`, node: `${type}:*` });
-        return out;
-      }
-      const base = [
-        { q: `Which ${type}s have the highest activity?`, node: `${type}:*` },
-        { q: `Are there anomalies among ${type}s?`, node: `${type}:*` },
-      ];
-      for (const ent of samples) {
-        base.push({ q: `Give a summary of ${ent.label || ent.id}`, node: ent.id });
-      }
-      return base;
-    }
-    return [
-      { q: "Select a center node to see suggested questions", node: "" },
-    ];
-  }, [pickedType, centerNode, entities, question]);
+    return suggestedQuestionsForTenantRX({ tenantId, type, centerNode, label, question, entities });
+  }, [tenantId, pickedType, centerNode, entities, question]);
   return (
     <div style={{ flex: 1, overflow: "auto", padding: "var(--pad-5) var(--pad-6)", position: "relative" }}>
       {/* close button — top right of the canvas */}
@@ -2605,9 +2735,11 @@ function AskHero({ tenant, question, setQuestion, centerNode, setCenterNode, dep
             ← back to task list
           </button>
         </div>
-        <h1 style={{ fontSize: 28, fontWeight: 600, margin: "0 0 8px 0", lineHeight: 1.15 }}>Ask a scoped question.</h1>
+        <h1 style={{ fontSize: 28, fontWeight: 600, margin: "0 0 8px 0", lineHeight: 1.15 }}>
+          {isFraudTenant ? "Ask a fraud-scoped question." : "Ask a scoped question."}
+        </h1>
         <p style={{ color: "var(--muted)", fontSize: 14, lineHeight: 1.55, margin: "0 0 24px 0", maxWidth: "60ch" }}>
-          The agent reasons only over the approved graph in this tenant. A scoped question pins a center node, depth, and limit — and produces a <span style={{ color: "var(--changes)" }}>draft</span> finding that you can review.
+          The agent reasons only over the approved graph and live source objects for this tenant. A scoped question pins a center node, depth, and limit — and produces a <span style={{ color: "var(--changes)" }}>draft</span> finding that you can review.
         </p>
 
         <form onSubmit={onSubmit}>
@@ -2616,7 +2748,7 @@ function AskHero({ tenant, question, setQuestion, centerNode, setCenterNode, dep
               <div className="eyebrow" style={{ marginBottom: 6 }}>Question</div>
               <textarea autoFocus value={question} onChange={onQuestionChange}
                         rows={3}
-                        placeholder="e.g. Why is Employee #4 workload unusual?"
+                        placeholder={isFraudTenant ? "e.g. Which transactions have elevated fraud risk?" : "e.g. Why is Employee #4 workload unusual?"}
                         style={{
                           width: "100%",
                           background: "var(--bg-1)",
@@ -2643,7 +2775,7 @@ function AskHero({ tenant, question, setQuestion, centerNode, setCenterNode, dep
                            value={entityQuery}
                            onChange={onEntityQueryChange}
                            onFocus={() => setShowDropdown(true)}
-                           placeholder={entitiesLoading ? "Loading…" : entities.length ? entities[0].label || entities[0].id : "Search…"} />
+                           placeholder={entitiesLoading ? "Loading…" : entityTypes.length ? (entities.length ? entities[0].label || entities[0].id : "Search…") : "No tenant objects"} />
                     {showDropdown && entities.length > 0 && (
                       <div style={{
                         position: "absolute", top: "100%", left: 0, right: 0, zIndex: 20,
@@ -2808,11 +2940,28 @@ function EntityPicker({ tenant, centerNode, setCenterNode, question, setQuestion
   const currentType = centerNode && centerNode.includes(":") ? centerNode.split(":")[0] : "";
   const [pickedType, setPickedType] = React.useState(currentType || "");
   React.useEffect(() => {
-    if (!pickedType && entityTypes.length > 0) setPickedType(entityTypes[0]);
-  }, [entityTypes]);
-  React.useEffect(() => {
-    if (currentType && currentType !== pickedType) setPickedType(currentType);
-  }, [centerNode]);
+    if (!entityTypes.length) {
+      if (pickedType) setPickedType("");
+      if (centerNode) {
+        setCenterNode("");
+        setEntityQuery("");
+      }
+      setEntities([]);
+      return;
+    }
+    const selectedType = pickedType || currentType;
+    const isValidType = selectedType && entityTypes.some(t => canonicalTypeFromListRX(selectedType, [t]) === t);
+    if (!isValidType) {
+      setPickedType(entityTypes[0]);
+      if (centerNode) setCenterNode("");
+      setEntityQuery("");
+      setEntities([]);
+    } else if (currentType && currentType !== pickedType) {
+      setPickedType(currentType);
+      setEntityQuery("");
+      setEntities([]);
+    }
+  }, [entityTypes, tenantId, centerNode, pickedType]);
 
   const [entityQuery, setEntityQuery] = React.useState("");
   const [entities, setEntities] = React.useState([]);
@@ -2823,7 +2972,6 @@ function EntityPicker({ tenant, centerNode, setCenterNode, question, setQuestion
   const prevLabelRef = React.useRef("");
   const questionRef = React.useRef(question || "");
   React.useEffect(() => { questionRef.current = question || ""; }, [question]);
-
   function fetchEntities(type, q) {
     if (!type) return;
     setEntitiesLoading(true);
@@ -2861,8 +3009,8 @@ function EntityPicker({ tenant, centerNode, setCenterNode, question, setQuestion
     if (setQuestion) {
       const prev = prevLabelRef.current;
       const q = questionRef.current.trim();
-      if (!q) {
-        setQuestion(`Give a summary of ${newLabel}`);
+      if (!q || q === tenantEmptyQuestionRX(tenantId)) {
+        setQuestion(defaultQuestionForTenantRX(tenantId, pickedType, newLabel, ent.id));
       } else if (prev && prev.length > 1 && q.includes(prev)) {
         setQuestion(q.split(prev).join(newLabel));
       } else {
@@ -2916,7 +3064,7 @@ function EntityPicker({ tenant, centerNode, setCenterNode, question, setQuestion
                  value={entityQuery}
                  onChange={onEntityQueryChange}
                  onFocus={() => setShowDropdown(true)}
-                 placeholder={entitiesLoading ? "Loading…" : entities.length ? entities[0].label || entities[0].id : "Search…"} />
+                 placeholder={entitiesLoading ? "Loading…" : entityTypes.length ? (entities.length ? entities[0].label || entities[0].id : "Search…") : "No tenant objects"} />
           {showDropdown && entities.length > 0 && (
             <div style={{
               position: "absolute", top: "100%", left: 0, right: 0, zIndex: 20,
@@ -2956,21 +3104,10 @@ function EntityPicker({ tenant, centerNode, setCenterNode, question, setQuestion
         const hasEntity = centerNode && centerNode.includes(":");
         const selectedEnt = hasEntity && entities.find(e => e.id === centerNode);
         const label = selectedEnt ? selectedEnt.label : (hasEntity ? centerNode : "");
-        const q = (question || "").trim();
-        let items = [];
-        if (hasEntity && label) {
-          items = q ? [] : [
-            `Give a summary of ${label}`,
-            `What are the key relationships for ${label}?`,
-            `How does ${label} compare to other ${type}s?`,
-            `Are there any anomalies or risks related to ${label}?`,
-          ];
-        } else if (type && !q) {
-          items = [
-            `Which ${type}s have the highest activity?`,
-            `Are there anomalies among ${type}s?`,
-          ];
-        }
+        const items = suggestedQuestionsForTenantRX({ tenantId, type, centerNode, label, question, entities })
+          .filter(item => item.node)
+          .slice(0, 4)
+          .map(item => item.q);
         if (!items.length) return null;
         return (
           <div style={{ marginTop: 6, display: "flex", flexWrap: "wrap", gap: 4 }}>
