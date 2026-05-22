@@ -862,9 +862,9 @@ function Reasoning({ tenant }) {
   async function reviewAutopilotCandidate(candidate, status) {
     if (!candidate || !autopilotDetail?.session) return;
     setAutopilotReviewTargetKey(candidate.canonical_key);
-    if ((status === "approved" || status === "rejected" || status === "needs_more_evidence") && !autopilotReviewReason.trim()) {
+    if ((status === "rejected" || status === "needs_more_evidence") && !autopilotReviewReason.trim()) {
       setAutopilotReviewMissingKey(candidate.canonical_key);
-      setActionMsg({ kind: "err", msg: "Add a candidate review note before approving or rejecting." });
+      setActionMsg({ kind: "err", msg: "Add a candidate review note before rejecting or requesting more evidence." });
       return;
     }
     try {
@@ -878,10 +878,17 @@ function Reasoning({ tenant }) {
       );
       setAutopilotReviewReason("");
       setAutopilotReviewTargetKey("");
-      setActionMsg({ kind: "ok", msg: `Candidate marked ${status}.` });
+      setActionMsg({
+        kind: "ok",
+        msg: status === "approved" ? "Finding approved and added to Registry." : `Candidate marked ${status}.`,
+      });
       window.dispatchEvent(new CustomEvent("aletheia:retry"));
     } catch (err) {
-      setActionMsg({ kind: "err", msg: err.message || String(err) });
+      let message = err.message || String(err);
+      if (status === "approved" && /evidence[_ ]chain/i.test(message)) {
+        message = "Missing evidence chain.";
+      }
+      setActionMsg({ kind: "err", msg: message });
     }
   }
 
@@ -1741,7 +1748,7 @@ function AutopilotWorkspace({
                             fontSize: 11,
                             lineHeight: 1.45,
                           }}>
-                            Review note required before this candidate can be approved as a finding.
+                            Review note required before rejecting or requesting more evidence.
                           </div>
                         )}
                         <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
@@ -1757,14 +1764,14 @@ function AutopilotWorkspace({
                             </>
                           )}
                           <span style={{ marginLeft: "auto", color: "var(--changes)", fontSize: 11 }}>
-                            Human review gate only · Autopilot auto-promote remains blocked
+                            Requires human approval · Autopilot suggests, people approve
                           </span>
                         </div>
                         {isSelectedForReview && !isReviewed && (
                           <div style={{ marginTop: 8 }}>
                             <textarea className="textarea" rows={2} value={reviewReason}
                                       onChange={e => { setReviewReason(e.target.value); setReviewMissingKey(""); }}
-                                      placeholder="Review note required before approval." />
+                                      placeholder="Optional note for approval; required for reject or needs-more-evidence." />
                           </div>
                         )}
                       </div>
