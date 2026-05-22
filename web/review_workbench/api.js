@@ -343,6 +343,9 @@
       if (opts.status) query.status = opts.status;
       if (opts.context) query.context = opts.context;
       if (opts.limit) query.limit = opts.limit;
+      ["finding_type", "source", "action_state", "freshness", "sort", "group", "min_confidence", "max_confidence", "min_value", "max_value"].forEach(key => {
+        if (opts[key] != null && opts[key] !== "") query[key] = opts[key];
+      });
       const data = await fetchJson(withTenantQs("/api/reasoning/findings", tenant, query));
       return data;
     },
@@ -350,6 +353,29 @@
     async createFindingAction(canonicalKey, body, tenant) {
       return await fetchJson(withTenantQs(
         `/api/reasoning/findings/${encodeURIComponent(canonicalKey)}/actions`, tenant), {
+        method: "POST",
+        body: JSON.stringify(body || {}),
+      });
+    },
+
+    async updateFindingAction(actionKey, action, body, tenant) {
+      return await fetchJson(withTenantQs(
+        `/api/reasoning/finding-actions/${encodeURIComponent(actionKey)}/${action}`, tenant), {
+        method: "POST",
+        body: JSON.stringify(body || {}),
+      });
+    },
+
+    async findingRevalidationQueue(tenant, options) {
+      const query = {};
+      const opts = options || {};
+      if (opts.status) query.status = opts.status;
+      if (opts.limit) query.limit = opts.limit;
+      return await fetchJson(withTenantQs("/api/reasoning/findings/revalidation-queue", tenant, query));
+    },
+
+    async batchRevalidateFindings(tenant, body) {
+      return await fetchJson(withTenantQs("/api/reasoning/findings/revalidation-batch", tenant), {
         method: "POST",
         body: JSON.stringify(body || {}),
       });

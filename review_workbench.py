@@ -10,6 +10,7 @@ import ssl
 import subprocess
 import sys
 import time
+from datetime import datetime
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -1250,6 +1251,7 @@ class ReasoningRepository:
         self.metadata_engines = {}
         self.source_engines = {}
         self._autopilot_schema_ready = set()
+        self._finding_experience_schema_ready = set()
 
     def tenant(self, tenant_id=None):
         return self.tenant_registry.get(tenant_id)
@@ -1270,6 +1272,38 @@ class ReasoningRepository:
             engine = create_engine(tenant.source_db_url)
             self.source_engines[tenant.source_db_url] = engine
         return engine
+
+    def ensure_finding_experience_schema(self, tenant):
+        key = tenant.metadata_db_url
+        if key in self._finding_experience_schema_ready:
+            return
+        with self.metadata_engine_for(tenant).begin() as conn:
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS aletheia_finding_actions (
+                    id SERIAL PRIMARY KEY,
+                    project_id VARCHAR(255) NOT NULL DEFAULT 'default',
+                    action_key VARCHAR(500) NOT NULL,
+                    finding_key VARCHAR(500) NOT NULL,
+                    title TEXT NOT NULL,
+                    action_type VARCHAR(100) NOT NULL DEFAULT 'investigate',
+                    owner VARCHAR(255),
+                    due_at TIMESTAMP,
+                    priority VARCHAR(50) NOT NULL DEFAULT 'medium',
+                    status VARCHAR(50) NOT NULL DEFAULT 'open',
+                    result VARCHAR(100),
+                    result_detail TEXT,
+                    created_from VARCHAR(100) NOT NULL DEFAULT 'approved_finding',
+                    canonical_write BOOLEAN NOT NULL DEFAULT FALSE,
+                    graph_write BOOLEAN NOT NULL DEFAULT FALSE,
+                    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+                    updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
+                    closed_at TIMESTAMP
+                )
+            """))
+            conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_finding_actions_project_key ON aletheia_finding_actions (project_id, action_key)"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_finding_actions_project_finding ON aletheia_finding_actions (project_id, finding_key)"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_finding_actions_project_status_due ON aletheia_finding_actions (project_id, status, due_at)"))
+        self._finding_experience_schema_ready.add(key)
 
     def ensure_autopilot_schema(self, tenant):
         key = tenant.metadata_db_url
@@ -1895,6 +1929,52 @@ class ReasoningRepository:
             "promotion_requires": "separate ontology/graph/rule proposal review gate",
         }
 
+    def _finding_action_to_dict(self, row):
+        due_at = row["due_at"]
+        closed_at = row["closed_at"]
+        updated_at = row["updated_at"]
+        created_at = row["created_at"]
+        is_overdue = False
+        if due_at and row["status"] not in {"closed"}:
+            try:
+                is_overdue = due_at < datetime.now(due_at.tzinfo)
+            except Exception:
+                is_overdue = str(due_at) < datetime.now().isoformat()
+        return {
+            "id": row["id"],
+            "tenant_id": row["project_id"],
+            "action_key": row["action_key"],
+            "finding_key": row["finding_key"],
+            "title": row["title"],
+            "action_type": row["action_type"],
+            "owner": row["owner"],
+            "due_at": str(due_at) if due_at else None,
+            "priority": row["priority"],
+            "status": row["status"],
+            "result": row["result"],
+            "result_detail": row["result_detail"],
+            "created_from": row["created_from"],
+            "canonical_write": bool(row["canonical_write"]),
+            "graph_write": bool(row["graph_write"]),
+            "is_overdue": bool(is_overdue),
+            "created_at": str(created_at) if created_at else None,
+            "updated_at": str(updated_at) if updated_at else None,
+            "closed_at": str(closed_at) if closed_at else None,
+        }
+
+    def _review_to_dict(self, row):
+        return {
+            "canonical_key": row.get("canonical_key"),
+            "decision": row["decision"],
+            "reviewer": row["reviewer"],
+            "reason": row["reason"],
+            "before_status": row["before_status"],
+            "after_status": row["after_status"],
+            "before_version": row["before_version"],
+            "after_version": row["after_version"],
+            "created_at": str(row["created_at"]) if row["created_at"] else None,
+        }
+
     def run_creditcardfraud_autopilot_playbook(self, tenant, payload):
         if tenant.tenant_id != "creditcardfraud":
             raise ValueError("creditcardfraud playbook requires tenant=creditcardfraud")
@@ -2262,16 +2342,207 @@ class ReasoningRepository:
             findings.append(finding)
         return findings
 
-    def list_findings_registry(self, tenant, status=None, context=None, limit=50):
+    def list_findings_registry(self, tenant, status=None, context=None, limit=50, filters=None):
+        self.ensure_finding_experience_schema(tenant)
+        filters = filters or {}
         findings = self.list_findings_overview(tenant, limit=limit, status=status, context=context)
+        action_map = self._finding_action_map(tenant, [finding["canonical_key"] for finding in findings])
+        review_map = self._finding_latest_review_map(tenant, [finding["canonical_key"] for finding in findings])
+        enriched = []
+        for finding in findings:
+            decorated = self._decorate_approved_finding(finding)
+            decorated["actions"] = action_map.get(finding["canonical_key"], [])
+            decorated["action_summary"] = self._finding_action_summary(decorated["actions"])
+            decorated["latest_review"] = review_map.get(finding["canonical_key"])
+            decorated["finding_type"] = self._finding_type(decorated)
+            decorated["source_label"] = self._finding_source_label(decorated)
+            decorated["freshness"] = self._finding_freshness(decorated)
+            decorated["value_score"] = self._finding_value_score(decorated)
+            decorated["evidence_count"] = len(decorated.get("supporting_evidence") or [])
+            enriched.append(decorated)
+        enriched = self._filter_registry_findings(enriched, filters)
+        enriched = self._sort_registry_findings(enriched, filters.get("sort"))
+        groups = self._group_registry_findings(enriched, filters.get("group"))
         return {
             "tenant": tenant.public_dict(),
             "context": context or "all",
             "status": status,
+            "filters": filters,
             "active_statuses": sorted(self.ACTIVE_FINDING_STATUSES),
             "excluded_from_active": sorted(self.INACTIVE_FINDING_STATUSES),
-            "findings": [self._decorate_approved_finding(finding) for finding in findings],
+            "groups": groups,
+            "findings": enriched,
         }
+
+    def _finding_action_map(self, tenant, finding_keys):
+        if not finding_keys:
+            return {}
+        with self.metadata_engine_for(tenant).connect() as conn:
+            rows = conn.execute(
+                text(
+                    """
+                    SELECT id, project_id, action_key, finding_key, title, action_type, owner, due_at,
+                           priority, status, result, result_detail, created_from, canonical_write,
+                           graph_write, created_at, updated_at, closed_at
+                    FROM aletheia_finding_actions
+                    WHERE project_id = :tenant_id AND finding_key = ANY(:finding_keys)
+                    ORDER BY updated_at DESC, id DESC
+                    """
+                ),
+                {"tenant_id": tenant.tenant_id, "finding_keys": finding_keys},
+            ).mappings().all()
+        result = {}
+        for row in rows:
+            action = self._finding_action_to_dict(row)
+            result.setdefault(action["finding_key"], []).append(action)
+        return result
+
+    def _finding_latest_review_map(self, tenant, finding_keys):
+        if not finding_keys:
+            return {}
+        with self.metadata_engine_for(tenant).connect() as conn:
+            rows = conn.execute(
+                text(
+                    """
+                    SELECT DISTINCT ON (canonical_key)
+                           canonical_key, decision, reviewer, reason, before_status, after_status,
+                           before_version, after_version, created_at
+                    FROM aletheia_reasoning_reviews
+                    WHERE project_id = :tenant_id AND canonical_key = ANY(:finding_keys)
+                    ORDER BY canonical_key, created_at DESC, id DESC
+                    """
+                ),
+                {"tenant_id": tenant.tenant_id, "finding_keys": finding_keys},
+            ).mappings().all()
+        return {row["canonical_key"]: self._review_to_dict(row) for row in rows}
+
+    def _finding_action_summary(self, actions):
+        if not actions:
+            return {"state": "no_action", "count": 0, "open_count": 0, "closed_count": 0}
+        open_actions = [a for a in actions if a["status"] not in {"closed"}]
+        closed_actions = [a for a in actions if a["status"] == "closed"]
+        overdue = [a for a in open_actions if a.get("is_overdue")]
+        primary = overdue[0] if overdue else open_actions[0] if open_actions else closed_actions[0]
+        state = "overdue_action" if overdue else "open_action" if open_actions else "closed_action"
+        return {
+            "state": state,
+            "count": len(actions),
+            "open_count": len(open_actions),
+            "closed_count": len(closed_actions),
+            "primary": primary,
+        }
+
+    def _finding_type(self, finding):
+        action = finding.get("recommended_action") or {}
+        explicit = action.get("finding_type") or action.get("type")
+        if explicit in {"risk_pattern", "operational_anomaly", "quality_issue", "ontology_conflict", "investigation_prompt"}:
+            return explicit
+        text_value = " ".join([finding.get("title") or "", finding.get("conclusion") or ""]).lower()
+        if any(word in text_value for word in ("fraud", "risk", "mismatch", "card-not-present")):
+            return "risk_pattern"
+        if any(word in text_value for word in ("anomaly", "unusual", "abnormal", "duplicate")):
+            return "operational_anomaly"
+        if any(word in text_value for word in ("missing", "quality", "degraded", "weak-control")):
+            return "quality_issue"
+        if any(word in text_value for word in ("ontology", "schema", "canonical", "graph")):
+            return "ontology_conflict"
+        return "investigation_prompt"
+
+    def _finding_source_label(self, finding):
+        action = finding.get("recommended_action") or {}
+        source_agent = finding.get("source_agent") or ""
+        if action.get("source_candidate_key") or "Autopilot" in source_agent:
+            return "Autopilot"
+        if source_agent == "FindingApprovalReviewGate":
+            return "Autopilot"
+        if "Manual" in source_agent:
+            return "Manual review"
+        return "Reasoning"
+
+    def _finding_freshness(self, finding):
+        status_value = finding.get("status")
+        latest = finding.get("latest_review") or {}
+        decision = latest.get("decision")
+        if status_value == "stale":
+            return "stale"
+        if status_value == "superseded":
+            return "superseded"
+        if decision == "reaffirmed":
+            return "reaffirmed_recently"
+        if status_value in self.ACTIVE_FINDING_STATUSES:
+            return "due_for_revalidation"
+        return "audit_only"
+
+    def _finding_value_score(self, finding):
+        action = finding.get("recommended_action") or {}
+        for key in ("value_score", "impact_score", "confidence"):
+            if action.get(key) is not None:
+                try:
+                    return float(action.get(key))
+                except (TypeError, ValueError):
+                    pass
+        try:
+            return float(finding.get("confidence") or 0)
+        except (TypeError, ValueError):
+            return 0.0
+
+    def _filter_registry_findings(self, findings, filters):
+        def keep(finding):
+            if filters.get("finding_type") and finding.get("finding_type") != filters["finding_type"]:
+                return False
+            if filters.get("source") and finding.get("source_label") != filters["source"]:
+                return False
+            if filters.get("action_state") and finding.get("action_summary", {}).get("state") != filters["action_state"]:
+                return False
+            if filters.get("freshness") and finding.get("freshness") != filters["freshness"]:
+                return False
+            min_conf = filters.get("min_confidence")
+            max_conf = filters.get("max_confidence")
+            confidence = float(finding.get("confidence") or 0)
+            if min_conf is not None and confidence < float(min_conf):
+                return False
+            if max_conf is not None and confidence > float(max_conf):
+                return False
+            min_value = filters.get("min_value")
+            max_value = filters.get("max_value")
+            value = float(finding.get("value_score") or 0)
+            if min_value is not None and value < float(min_value):
+                return False
+            if max_value is not None and value > float(max_value):
+                return False
+            return True
+        return [finding for finding in findings if keep(finding)]
+
+    def _sort_registry_findings(self, findings, sort_key):
+        sort_key = sort_key or "newest_reviewed"
+        if sort_key == "value_desc":
+            return sorted(findings, key=lambda f: float(f.get("value_score") or 0), reverse=True)
+        if sort_key == "oldest_unrevalidated":
+            return sorted(findings, key=lambda f: f.get("latest_review", {}).get("created_at") or f.get("updated_at") or "")
+        if sort_key == "action_due_asc":
+            return sorted(findings, key=lambda f: (f.get("action_summary", {}).get("primary") or {}).get("due_at") or "9999-12-31")
+        if sort_key == "confidence_desc":
+            return sorted(findings, key=lambda f: float(f.get("confidence") or 0), reverse=True)
+        return sorted(findings, key=lambda f: (f.get("latest_review", {}) or {}).get("created_at") or f.get("updated_at") or "", reverse=True)
+
+    def _group_registry_findings(self, findings, group_key):
+        if not group_key:
+            return []
+        key_map = {
+            "tenant": lambda f: f.get("tenant_id"),
+            "status": lambda f: f.get("status"),
+            "finding_type": lambda f: f.get("finding_type"),
+            "action_state": lambda f: f.get("action_summary", {}).get("state"),
+            "source": lambda f: f.get("source_label"),
+        }
+        fn = key_map.get(group_key)
+        if not fn:
+            return []
+        counts = {}
+        for finding in findings:
+            key = fn(finding) or "unknown"
+            counts[key] = counts.get(key, 0) + 1
+        return [{"group": key, "count": value} for key, value in sorted(counts.items())]
 
     def _decorate_approved_finding(self, finding):
         if finding.get("status") in self.ACTIVE_FINDING_STATUSES:
@@ -3495,6 +3766,8 @@ class ReasoningRepository:
         return finding
 
     def finding_workspace_action(self, tenant, canonical_key, payload=None):
+        self.ensure_finding_experience_schema(tenant)
+        payload = payload or {}
         finding = self.get_finding(tenant, canonical_key)
         if not finding:
             raise KeyError(canonical_key)
@@ -3507,18 +3780,188 @@ class ReasoningRepository:
             "status": "ready_for_dispatch",
             "writes_canonical": False,
         }
+        title = payload.get("title") or action.get("label") or action.get("title") or "Review approved finding"
+        action_type = payload.get("action_type") or action.get("action_type") or "investigate"
+        priority = payload.get("priority") or action.get("priority") or "medium"
+        owner = payload.get("owner") or action.get("owner")
+        due_at = payload.get("due_at") or action.get("due_at")
+        action_key = payload.get("action_key") or f"action:{_slug(canonical_key)}:{_slug(title)}"
+        with self.metadata_engine_for(tenant).begin() as conn:
+            row = conn.execute(
+                text(
+                    """
+                    INSERT INTO aletheia_finding_actions
+                    (project_id, action_key, finding_key, title, action_type, owner, due_at,
+                     priority, status, created_from, canonical_write, graph_write, created_at, updated_at)
+                    VALUES
+                    (:tenant_id, :action_key, :finding_key, :title, :action_type, :owner,
+                     CAST(:due_at AS TIMESTAMP), :priority, 'open', 'approved_finding', FALSE, FALSE, NOW(), NOW())
+                    ON CONFLICT (project_id, action_key) DO UPDATE SET
+                      title = EXCLUDED.title,
+                      action_type = EXCLUDED.action_type,
+                      owner = EXCLUDED.owner,
+                      due_at = EXCLUDED.due_at,
+                      priority = EXCLUDED.priority,
+                      updated_at = NOW()
+                    RETURNING id, project_id, action_key, finding_key, title, action_type, owner, due_at,
+                              priority, status, result, result_detail, created_from, canonical_write,
+                              graph_write, created_at, updated_at, closed_at
+                    """
+                ),
+                {
+                    "tenant_id": tenant.tenant_id,
+                    "action_key": action_key,
+                    "finding_key": canonical_key,
+                    "title": title,
+                    "action_type": action_type,
+                    "owner": owner,
+                    "due_at": due_at,
+                    "priority": priority,
+                },
+            ).mappings().first()
+            self._append_finding_usage_review(
+                conn,
+                tenant,
+                canonical_key,
+                decision="action_created",
+                reviewer=payload.get("reviewer") or "Itachi",
+                reason=f"Workspace action created: {title}",
+            )
         return {
             "tenant": tenant.public_dict(),
             "finding_key": canonical_key,
-            "workspace_next_action": {
-                **action,
-                "source": "approved_finding",
-                "finding_key": canonical_key,
-                "created_by": (payload or {}).get("reviewer") or "Itachi",
-                "canonical_write": False,
-                "graph_write": False,
-            },
+            "workspace_next_action": self._finding_action_to_dict(row),
         }
+
+    def update_finding_action(self, tenant, action_key, action, payload=None):
+        self.ensure_finding_experience_schema(tenant)
+        payload = payload or {}
+        valid_transitions = {
+            "start": {"open": "in_progress", "reopened": "in_progress", "blocked": "in_progress"},
+            "block": {"open": "blocked", "in_progress": "blocked"},
+            "close": {"in_progress": "closed"},
+            "reopen": {"closed": "reopened"},
+            "update": {},
+        }
+        close_results = {"confirmed_risk", "false_positive", "evidence_added", "proposal_created", "no_action_needed", "rerun_scheduled"}
+        with self.metadata_engine_for(tenant).begin() as conn:
+            current = conn.execute(
+                text(
+                    """
+                    SELECT id, project_id, action_key, finding_key, title, action_type, owner, due_at,
+                           priority, status, result, result_detail, created_from, canonical_write,
+                           graph_write, created_at, updated_at, closed_at
+                    FROM aletheia_finding_actions
+                    WHERE project_id = :tenant_id AND action_key = :action_key
+                    FOR UPDATE
+                    """
+                ),
+                {"tenant_id": tenant.tenant_id, "action_key": action_key},
+            ).mappings().first()
+            if not current:
+                raise KeyError(action_key)
+            before_status = current["status"]
+            new_status = before_status
+            result = payload.get("result") if "result" in payload else current["result"]
+            result_detail = payload.get("result_detail") if "result_detail" in payload else current["result_detail"]
+            if action == "update":
+                pass
+            else:
+                transition = valid_transitions.get(action)
+                if transition is None or before_status not in transition:
+                    raise ValueError(f"Invalid action transition: {before_status} -> {action}")
+                new_status = transition[before_status]
+            if new_status == "closed":
+                if not result:
+                    raise ValueError("closing an action requires result")
+                if result not in close_results:
+                    raise ValueError(f"invalid close result: {result}")
+            closed_at_expr = "NOW()" if new_status == "closed" else "NULL" if action == "reopen" else "closed_at"
+            row = conn.execute(
+                text(
+                    f"""
+                    UPDATE aletheia_finding_actions
+                    SET title = COALESCE(:title, title),
+                        action_type = COALESCE(:action_type, action_type),
+                        owner = COALESCE(:owner, owner),
+                        due_at = COALESCE(CAST(:due_at AS TIMESTAMP), due_at),
+                        priority = COALESCE(:priority, priority),
+                        status = :status,
+                        result = :result,
+                        result_detail = :result_detail,
+                        closed_at = {closed_at_expr},
+                        updated_at = NOW()
+                    WHERE project_id = :tenant_id AND action_key = :action_key
+                    RETURNING id, project_id, action_key, finding_key, title, action_type, owner, due_at,
+                              priority, status, result, result_detail, created_from, canonical_write,
+                              graph_write, created_at, updated_at, closed_at
+                    """
+                ),
+                {
+                    "tenant_id": tenant.tenant_id,
+                    "action_key": action_key,
+                    "title": payload.get("title"),
+                    "action_type": payload.get("action_type"),
+                    "owner": payload.get("owner"),
+                    "due_at": payload.get("due_at"),
+                    "priority": payload.get("priority"),
+                    "status": new_status,
+                    "result": result,
+                    "result_detail": result_detail,
+                },
+            ).mappings().first()
+            decision = f"action_{action}"
+            reason = payload.get("reason") or f"Workspace action {action}: {action_key}"
+            self._append_finding_usage_review(
+                conn,
+                tenant,
+                current["finding_key"],
+                decision=decision,
+                reviewer=payload.get("reviewer") or "Itachi",
+                reason=reason,
+            )
+        return {
+            "tenant": tenant.public_dict(),
+            "workspace_next_action": self._finding_action_to_dict(row),
+            "finding_status_unchanged": True,
+            "canonical_boundary": self._finding_canonical_boundary(),
+        }
+
+    def _append_finding_usage_review(self, conn, tenant, canonical_key, decision, reviewer, reason):
+        finding = conn.execute(
+            text(
+                """
+                SELECT id, status, version
+                FROM aletheia_reasoning_findings
+                WHERE project_id = :tenant_id AND canonical_key = :canonical_key
+                """
+            ),
+            {"tenant_id": tenant.tenant_id, "canonical_key": canonical_key},
+        ).mappings().first()
+        if not finding:
+            raise KeyError(canonical_key)
+        conn.execute(
+            text(
+                """
+                INSERT INTO aletheia_reasoning_reviews
+                (finding_id, project_id, canonical_key, decision, reviewer, reason,
+                 before_status, after_status, before_version, after_version, created_at)
+                VALUES
+                (:finding_id, :project_id, :canonical_key, :decision, :reviewer, :reason,
+                 :status, :status, :version, :version, NOW())
+                """
+            ),
+            {
+                "finding_id": finding["id"],
+                "project_id": tenant.tenant_id,
+                "canonical_key": canonical_key,
+                "decision": decision,
+                "reviewer": reviewer,
+                "reason": reason,
+                "status": finding["status"],
+                "version": finding["version"],
+            },
+        )
 
     def finding_change_proposal(self, tenant, canonical_key, payload=None):
         finding = self.get_finding(tenant, canonical_key)
@@ -3540,6 +3983,86 @@ class ReasoningRepository:
                 "requires_governance_review": True,
                 "boundary": self._finding_canonical_boundary(),
             },
+        }
+
+    def finding_revalidation_queue(self, tenant, status=None, limit=50):
+        self.ensure_finding_experience_schema(tenant)
+        findings = self.list_findings_registry(tenant, context=None, limit=limit, filters={"sort": "oldest_unrevalidated"}).get("findings", [])
+        queue = []
+        for finding in findings:
+            if status and finding.get("status") != status:
+                continue
+            if finding.get("status") not in {"approved", "reaffirmed", "stale", "superseded"}:
+                continue
+            latest = finding.get("latest_review") or {}
+            actions = finding.get("actions") or []
+            reason = "aging_threshold"
+            if finding.get("status") == "stale":
+                reason = "already_stale"
+            elif finding.get("status") == "superseded":
+                reason = "superseded_audit"
+            elif any(action.get("is_overdue") for action in actions):
+                reason = "action_overdue"
+            elif latest.get("decision") == "reaffirmed":
+                reason = "reaffirmed_recently"
+            queue.append({
+                "finding_key": finding["canonical_key"],
+                "title": finding["title"],
+                "status": finding["status"],
+                "reason": reason,
+                "last_review": latest,
+                "last_reaffirmed_at": latest.get("created_at") if latest.get("decision") == "reaffirmed" else None,
+                "action_summary": finding.get("action_summary"),
+                "affected_downstream": {
+                    "actions": len(actions),
+                    "reasoning_context": finding.get("status") in self.ACTIVE_FINDING_STATUSES,
+                },
+                "suggested_batch_operation": "reaffirm" if finding.get("status") in self.ACTIVE_FINDING_STATUSES else "mark_stale",
+                "canonical_write": False,
+                "graph_write": False,
+            })
+        return {"tenant": tenant.public_dict(), "queue": queue[:limit], "canonical_boundary": self._finding_canonical_boundary()}
+
+    def batch_revalidate_findings(self, tenant, payload):
+        self.ensure_finding_experience_schema(tenant)
+        keys = payload.get("finding_keys") or []
+        action = payload.get("action") or "reaffirm"
+        reviewer = payload.get("reviewer") or "Itachi"
+        reason = payload.get("reason") or f"batch revalidation: {action}"
+        owner = payload.get("owner")
+        if not keys:
+            raise ValueError("finding_keys is required")
+        if action not in {"reaffirm", "mark_stale", "assign_owner"}:
+            raise ValueError("batch action must be reaffirm, mark_stale, or assign_owner")
+        results = []
+        for key in keys:
+            if action == "reaffirm":
+                finding = self.review_finding(tenant, key, "reaffirmed", reviewer, reason)
+                results.append({"finding_key": key, "status": finding.get("status"), "decision": "reaffirmed"})
+            elif action == "mark_stale":
+                finding = self.review_finding(tenant, key, "stale", reviewer, reason)
+                results.append({"finding_key": key, "status": finding.get("status"), "decision": "stale"})
+            else:
+                if not owner:
+                    raise ValueError("owner is required for assign_owner")
+                action_result = self.finding_workspace_action(
+                    tenant,
+                    key,
+                    {
+                        "title": "Revalidate approved finding",
+                        "action_type": "rerun_autopilot",
+                        "owner": owner,
+                        "priority": payload.get("priority") or "medium",
+                        "due_at": payload.get("due_at"),
+                        "reviewer": reviewer,
+                    },
+                )
+                results.append({"finding_key": key, "decision": "assign_owner", "workspace_next_action": action_result["workspace_next_action"]})
+        return {
+            "tenant": tenant.public_dict(),
+            "action": action,
+            "results": results,
+            "canonical_boundary": self._finding_canonical_boundary(),
         }
 
     def _employee_label(self, row):
@@ -4980,12 +5503,34 @@ class ReviewWorkbenchHandler(BaseHTTPRequestHandler):
             context = query.get("context", [None])[0]
             try:
                 limit = int(query.get("limit", ["50"])[0])
+                filters = {
+                    "finding_type": query.get("finding_type", [None])[0],
+                    "source": query.get("source", [None])[0],
+                    "action_state": query.get("action_state", [None])[0],
+                    "freshness": query.get("freshness", [None])[0],
+                    "sort": query.get("sort", [None])[0],
+                    "group": query.get("group", [None])[0],
+                }
+                for key in ("min_confidence", "max_confidence", "min_value", "max_value"):
+                    if query.get(key, [None])[0] not in (None, ""):
+                        filters[key] = float(query.get(key, [None])[0])
+                filters = {key: value for key, value in filters.items() if value not in (None, "")}
                 self._send_json(self.reasoning_repository.list_findings_registry(
                     tenant,
                     status=status_filter,
                     context=context,
                     limit=limit,
+                    filters=filters,
                 ))
+            except ValueError as exc:
+                self._send_error(HTTPStatus.BAD_REQUEST, str(exc))
+            return
+        if parsed.path == "/api/reasoning/findings/revalidation-queue":
+            query = parse_qs(parsed.query)
+            status_filter = query.get("status", [None])[0]
+            try:
+                limit = int(query.get("limit", ["50"])[0])
+                self._send_json(self.reasoning_repository.finding_revalidation_queue(tenant, status=status_filter, limit=limit))
             except ValueError as exc:
                 self._send_error(HTTPStatus.BAD_REQUEST, str(exc))
             return
@@ -5338,6 +5883,36 @@ class ReviewWorkbenchHandler(BaseHTTPRequestHandler):
                 return
             if result is None:
                 self._send_error(HTTPStatus.NOT_FOUND, f"Reasoning task not found: {task_key}")
+                return
+            self._send_json(result)
+            return
+        if parsed.path == "/api/reasoning/findings/revalidation-batch":
+            try:
+                body = self._read_json()
+                result = self.reasoning_repository.batch_revalidate_findings(tenant, body)
+            except KeyError as exc:
+                self._send_error(HTTPStatus.NOT_FOUND, f"Reasoning finding not found: {exc.args[0]}")
+                return
+            except ValueError as exc:
+                self._send_error(HTTPStatus.BAD_REQUEST, str(exc))
+                return
+            self._send_json(result)
+            return
+        if parsed.path.startswith("/api/reasoning/finding-actions/"):
+            parts = parsed.path.removeprefix("/api/reasoning/finding-actions/").split("/")
+            if len(parts) != 2:
+                self._send_error(HTTPStatus.NOT_FOUND, "Expected /api/reasoning/finding-actions/<action_key>/<action>")
+                return
+            action_key = unquote(parts[0])
+            action = parts[1]
+            try:
+                body = self._read_json()
+                result = self.reasoning_repository.update_finding_action(tenant, action_key, action, body)
+            except KeyError as exc:
+                self._send_error(HTTPStatus.NOT_FOUND, f"Finding action not found: {exc.args[0]}")
+                return
+            except ValueError as exc:
+                self._send_error(HTTPStatus.BAD_REQUEST, str(exc))
                 return
             self._send_json(result)
             return

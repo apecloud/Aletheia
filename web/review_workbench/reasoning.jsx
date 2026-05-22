@@ -227,6 +227,16 @@ function Reasoning({ tenant }) {
   const [autopilotSelectedKey, setAutopilotSelectedKey] = useStateRX(null);
   const [autopilotStarting, setAutopilotStarting] = useStateRX(false);
   const [autopilotPlaybookRunning, setAutopilotPlaybookRunning] = useStateRX(false);
+  const [registryFilters, setRegistryFilters] = useStateRX({
+    status: "approved",
+    context: "active",
+    sort: "newest_reviewed",
+    group: "",
+    finding_type: "",
+    source: "",
+    action_state: "",
+    freshness: "",
+  });
   const [actionMsg, setActionMsg] = useStateRX(null);
   const [running, setRunning] = useStateRX(false);
   const [askMode, setAskMode] = useStateRX(false);
@@ -252,7 +262,7 @@ function Reasoning({ tenant }) {
   const autopilotSessionsQ = useApiData("autopilotSessions", [tenant ? tenant.id : "default"], { fallback: [] });
   const approvedFindingsQ = useApiData(
     "reasoningFindings",
-    [tenant ? tenant.id : "default", { status: "approved", context: "active", limit: 12 }],
+    [tenant ? tenant.id : "default", { ...registryFilters, limit: 24 }],
     { fallback: { findings: [] } }
   );
   const isStale = tasksQ.source === "live-stale";
@@ -1343,7 +1353,14 @@ function Reasoning({ tenant }) {
 
           <OntologyBasisPanel task={task} tenant={tenant} />
 
-          <ApprovedFindingRegistry findings={approvedFindingsRegistry} query={approvedFindingsQ} tenant={tenant} />
+          <ApprovedFindingRegistry
+            findings={approvedFindingsRegistry}
+            query={approvedFindingsQ}
+            tenant={tenant}
+            filters={registryFilters}
+            setFilters={setRegistryFilters}
+            setActionMsg={setActionMsg}
+          />
 
           <div className="section">
             <div className="section-head"><span>Write boundary</span></div>
@@ -1895,32 +1912,178 @@ function OntologyBasisPanel({ task, tenant }) {
   );
 }
 
-function ApprovedFindingRegistry({ findings, query, tenant }) {
+function ApprovedFindingRegistry({ findings, query, tenant, filters, setFilters, setActionMsg }) {
   const list = findings || [];
   const tenantId = tenant ? tenant.id : "default";
+  const [selected, setSelected] = useStateRX({});
+  const [owner, setOwner] = useStateRX("@Itachi");
+  const [dueAt, setDueAt] = useStateRX("");
+  const [result, setResult] = useStateRX("confirmed_risk");
+  const selectedKeys = Object.keys(selected).filter(k => selected[k]);
+  const updateFilter = (key, value) => setFilters({ ...(filters || {}), [key]: value });
+  async function createAction(finding) {
+    try {
+      await window.AL_API.createFindingAction(finding.canonical_key, {
+        title: "Follow up approved finding",
+        action_type: "investigate",
+        owner,
+        due_at: dueAt || null,
+        priority: "medium",
+        reviewer: "M. Aoki",
+      }, tenantId);
+      setActionMsg && setActionMsg({ kind: "ok", msg: "Workspace action created." });
+      window.dispatchEvent(new CustomEvent("aletheia:retry"));
+    } catch (err) {
+      setActionMsg && setActionMsg({ kind: "err", msg: err.message || String(err) });
+    }
+  }
+  async function transitionAction(actionKey, action, extra) {
+    try {
+      await window.AL_API.updateFindingAction(actionKey, action, {
+        ...(extra || {}),
+        result: action === "close" ? result : undefined,
+        reviewer: "M. Aoki",
+        reason: `Registry action ${action}`,
+      }, tenantId);
+      setActionMsg && setActionMsg({ kind: "ok", msg: `Action ${action} recorded.` });
+      window.dispatchEvent(new CustomEvent("aletheia:retry"));
+    } catch (err) {
+      setActionMsg && setActionMsg({ kind: "err", msg: err.message || String(err) });
+    }
+  }
+  async function batch(action) {
+    if (!selectedKeys.length) {
+      setActionMsg && setActionMsg({ kind: "err", msg: "Select findings for batch revalidation." });
+      return;
+    }
+    try {
+      await window.AL_API.batchRevalidateFindings(tenantId, {
+        finding_keys: selectedKeys,
+        action,
+        owner,
+        due_at: dueAt || null,
+        reviewer: "M. Aoki",
+        reason: `Batch ${action} from Approved Finding Registry`,
+      });
+      setSelected({});
+      setActionMsg && setActionMsg({ kind: "ok", msg: `Batch ${action} recorded for ${selectedKeys.length} findings.` });
+      window.dispatchEvent(new CustomEvent("aletheia:retry"));
+    } catch (err) {
+      setActionMsg && setActionMsg({ kind: "err", msg: err.message || String(err) });
+    }
+  }
   return (
     <div className="section">
       <div className="section-head"><span>Approved Finding Registry</span><span className="ct">{list.length}</span></div>
       <div className="section-body" style={{ display: "flex", flexDirection: "column", gap: 8 }}>
         <ApiStatus q={query} what="approved findings" />
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 6 }}>
+          <select className="input" value={filters.status || ""} onChange={e => updateFilter("status", e.target.value)}>
+            <option value="">Any status</option>
+            <option value="approved">Approved</option>
+            <option value="stale">Stale</option>
+            <option value="superseded">Superseded</option>
+            <option value="rejected">Rejected</option>
+            <option value="needs_more_evidence">Needs evidence</option>
+          </select>
+          <select className="input" value={filters.context || ""} onChange={e => updateFilter("context", e.target.value)}>
+            <option value="">Audit/history</option>
+            <option value="active">Active context</option>
+          </select>
+          <select className="input" value={filters.finding_type || ""} onChange={e => updateFilter("finding_type", e.target.value)}>
+            <option value="">Any type</option>
+            <option value="risk_pattern">Risk pattern</option>
+            <option value="operational_anomaly">Operational anomaly</option>
+            <option value="quality_issue">Quality issue</option>
+            <option value="ontology_conflict">Ontology conflict</option>
+            <option value="investigation_prompt">Investigation prompt</option>
+          </select>
+          <select className="input" value={filters.action_state || ""} onChange={e => updateFilter("action_state", e.target.value)}>
+            <option value="">Any action</option>
+            <option value="no_action">No action</option>
+            <option value="open_action">Open action</option>
+            <option value="overdue_action">Overdue action</option>
+            <option value="closed_action">Closed action</option>
+          </select>
+          <select className="input" value={filters.freshness || ""} onChange={e => updateFilter("freshness", e.target.value)}>
+            <option value="">Any freshness</option>
+            <option value="reaffirmed_recently">Reaffirmed</option>
+            <option value="due_for_revalidation">Due for review</option>
+            <option value="stale">Stale</option>
+            <option value="superseded">Superseded</option>
+          </select>
+          <select className="input" value={filters.sort || ""} onChange={e => updateFilter("sort", e.target.value)}>
+            <option value="newest_reviewed">Newest reviewed</option>
+            <option value="value_desc">Value score</option>
+            <option value="oldest_unrevalidated">Oldest unrevalidated</option>
+            <option value="action_due_asc">Action due date</option>
+            <option value="confidence_desc">Confidence</option>
+          </select>
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
+          <input className="input" value={owner} onChange={e => setOwner(e.target.value)} placeholder="@owner" />
+          <input className="input" type="datetime-local" value={dueAt} onChange={e => setDueAt(e.target.value)} />
+        </div>
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+          <button className="btn xs approve" onClick={() => batch("reaffirm")} disabled={!selectedKeys.length}>Reaffirm selected</button>
+          <button className="btn xs changes" onClick={() => batch("mark_stale")} disabled={!selectedKeys.length}>Mark stale</button>
+          <button className="btn xs" onClick={() => batch("assign_owner")} disabled={!selectedKeys.length}>Assign owner</button>
+        </div>
         {list.length === 0 ? (
           <div style={{ fontSize: 11, color: "var(--muted)", lineHeight: 1.55 }}>
             No active approved findings yet. Approved findings will enter future reasoning as prior_finding / reviewed_inference context.
           </div>
-        ) : list.slice(0, 5).map(f => (
-          <a key={f.canonical_key}
-             className="btn ghost"
-             href={`/?screen=reasoning&tenant=${encodeURIComponent(tenantId)}&task=${encodeURIComponent(f.task_key || (f.task && f.task.canonical_key) || "")}`}
-             style={{ flexDirection: "column", alignItems: "flex-start", gap: 4 }}>
-            <span style={{ fontSize: 11, color: "var(--approved)", fontFamily: "var(--font-mono)" }}>
-              prior_finding · reviewed_inference
-            </span>
-            <strong style={{ fontSize: 12, color: "var(--text)" }}>{f.title}</strong>
-            <span style={{ fontSize: 11, color: "var(--muted)", lineHeight: 1.4 }}>
-              Active context only · no canonical ontology/graph write
-            </span>
-          </a>
+        ) : list.slice(0, 8).map(f => (
+          <div key={f.canonical_key} style={{ border: "1px solid var(--line)", background: "var(--bg-1)", padding: 10 }}>
+            <div style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
+              <input type="checkbox" checked={!!selected[f.canonical_key]} onChange={e => setSelected({ ...selected, [f.canonical_key]: e.target.checked })} />
+              <a href={`/?screen=reasoning&tenant=${encodeURIComponent(tenantId)}&task=${encodeURIComponent(f.task_key || (f.task && f.task.canonical_key) || "")}`}
+                 style={{ color: "var(--text)", textDecoration: "none", flex: 1 }}>
+                <span style={{ fontSize: 10, color: f.reasoning_use ? "var(--approved)" : "var(--muted)", fontFamily: "var(--font-mono)" }}>
+                  {f.reasoning_use ? "active prior insight · reviewed_inference" : "audit only"} · {f.source_label || "Reasoning"} · {f.finding_type || "finding"}
+                </span>
+                <strong style={{ display: "block", fontSize: 12, marginTop: 3 }}>{f.title}</strong>
+                <span style={{ display: "block", fontSize: 11, color: "var(--muted)", lineHeight: 1.4, marginTop: 3 }}>
+                  {(f.conclusion || "").slice(0, 140)}
+                </span>
+              </a>
+              <Pill kind={f.status === "approved" ? "approved" : f.status === "stale" ? "changes" : f.status === "rejected" ? "rejected" : "proposed"}>{f.status}</Pill>
+            </div>
+            <div className="mono" style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 8, color: "var(--muted)", fontSize: 10 }}>
+              <span>conf {pctRX(f.confidence, 0)}</span>
+              <span>value {pctRX(f.value_score, 0)}</span>
+              <span>evidence {f.evidence_count || 0}</span>
+              <span>freshness {f.freshness || "-"}</span>
+              <span>action {f.action_summary?.state || "no_action"}</span>
+            </div>
+            {f.action_summary?.primary ? (
+              <div style={{ marginTop: 8, borderTop: "1px solid var(--line)", paddingTop: 8, display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+                <span style={{ fontSize: 11, color: "var(--text-dim)" }}>
+                  {f.action_summary.primary.owner || "unowned"} · due {f.action_summary.primary.due_at || "-"} · {f.action_summary.primary.status}
+                </span>
+                <select className="input" value={result} onChange={e => setResult(e.target.value)} style={{ width: 150 }}>
+                  <option value="confirmed_risk">confirmed risk</option>
+                  <option value="false_positive">false positive</option>
+                  <option value="evidence_added">evidence added</option>
+                  <option value="proposal_created">proposal created</option>
+                  <option value="no_action_needed">no action needed</option>
+                  <option value="rerun_scheduled">rerun scheduled</option>
+                </select>
+                <button className="btn xs" onClick={() => transitionAction(f.action_summary.primary.action_key, "start")}>Start</button>
+                <button className="btn xs changes" onClick={() => transitionAction(f.action_summary.primary.action_key, "block")}>Block</button>
+                <button className="btn xs approve" onClick={() => transitionAction(f.action_summary.primary.action_key, "close")}>Close</button>
+                <button className="btn xs" onClick={() => transitionAction(f.action_summary.primary.action_key, "reopen")}>Reopen</button>
+              </div>
+            ) : (
+              <div style={{ marginTop: 8 }}>
+                <button className="btn xs" onClick={() => createAction(f)}>Create action</button>
+              </div>
+            )}
+          </div>
         ))}
+        <div style={{ fontSize: 11, color: "var(--muted)", lineHeight: 1.45 }}>
+          Action close/reopen records Finding usage events only; it does not change Finding status or write canonical ontology/graph.
+        </div>
       </div>
     </div>
   );
