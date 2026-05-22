@@ -220,6 +220,8 @@ function Reasoning({ tenant }) {
   const [followup, setFollowup] = useStateRX("");
   const [reviewReason, setReviewReason] = useStateRX("");
   const [autopilotReviewReason, setAutopilotReviewReason] = useStateRX("");
+  const [autopilotReviewTargetKey, setAutopilotReviewTargetKey] = useStateRX("");
+  const [autopilotReviewMissingKey, setAutopilotReviewMissingKey] = useStateRX("");
   const [autopilotObjective, setAutopilotObjective] = useStateRX("Find high-value fraud risk findings");
   const [autopilotMaxHypotheses, setAutopilotMaxHypotheses] = useStateRX(8);
   const [autopilotMaxRuns, setAutopilotMaxRuns] = useStateRX(5);
@@ -711,11 +713,14 @@ function Reasoning({ tenant }) {
 
   async function reviewAutopilotCandidate(candidate, status) {
     if (!candidate || !autopilotDetail?.session) return;
+    setAutopilotReviewTargetKey(candidate.canonical_key);
     if ((status === "approved" || status === "rejected" || status === "needs_more_evidence") && !autopilotReviewReason.trim()) {
-      setActionMsg({ kind: "err", msg: "Reason required for candidate review." });
+      setAutopilotReviewMissingKey(candidate.canonical_key);
+      setActionMsg({ kind: "err", msg: "Add a candidate review note before approving or rejecting." });
       return;
     }
     try {
+      setAutopilotReviewMissingKey("");
       const action = status === "needs_more_evidence" ? "needs-evidence" : status === "approved" ? "approve" : "reject";
       await window.AL_API.reviewAutopilotCandidate(
         candidate.canonical_key,
@@ -724,6 +729,7 @@ function Reasoning({ tenant }) {
         tenant ? tenant.id : "default",
       );
       setAutopilotReviewReason("");
+      setAutopilotReviewTargetKey("");
       setActionMsg({ kind: "ok", msg: `Candidate marked ${status}.` });
       window.dispatchEvent(new CustomEvent("aletheia:retry"));
     } catch (err) {
@@ -957,6 +963,10 @@ function Reasoning({ tenant }) {
               selectedKey={autopilotSelectedKey}
               reviewReason={autopilotReviewReason}
               setReviewReason={setAutopilotReviewReason}
+              reviewTargetKey={autopilotReviewTargetKey}
+              reviewMissingKey={autopilotReviewMissingKey}
+              setReviewTargetKey={setAutopilotReviewTargetKey}
+              setReviewMissingKey={setAutopilotReviewMissingKey}
               onReviewCandidate={reviewAutopilotCandidate}
               onStart={startAutopilot}
               starting={autopilotStarting}
@@ -1391,7 +1401,23 @@ function Reasoning({ tenant }) {
   );
 }
 
-function AutopilotWorkspace({ tenant, detailQ, detail, selectedKey, reviewReason, setReviewReason, onReviewCandidate, onStart, starting, onRunPlaybook, playbookRunning }) {
+function AutopilotWorkspace({
+  tenant,
+  detailQ,
+  detail,
+  selectedKey,
+  reviewReason,
+  setReviewReason,
+  reviewTargetKey,
+  reviewMissingKey,
+  setReviewTargetKey,
+  setReviewMissingKey,
+  onReviewCandidate,
+  onStart,
+  starting,
+  onRunPlaybook,
+  playbookRunning,
+}) {
   const session = detail && detail.session;
   const hypotheses = (detail && detail.hypotheses) || [];
   const candidates = (detail && detail.candidate_findings) || [];
@@ -1519,7 +1545,11 @@ function AutopilotWorkspace({ tenant, detailQ, detail, selectedKey, reviewReason
                 </div>
               ) : (
                 <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-                  {candidates.map(c => (
+                  {candidates.map(c => {
+                    const isSelectedForReview = reviewTargetKey === c.canonical_key;
+                    const isMissingReviewNote = reviewMissingKey === c.canonical_key && !reviewReason.trim();
+                    const isReviewed = ["approved", "rejected", "needs_more_evidence"].includes(c.status);
+                    return (
                     <div key={c.canonical_key} style={{ border: "1px solid var(--line)", background: "var(--bg-1)", padding: 14 }}>
                       <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 8 }}>
                         <Pill kind={c.status === "rejected" ? "rejected" : c.status === "needs_more_evidence" ? "changes" : "proposed"}>{c.status}</Pill>
@@ -1551,22 +1581,55 @@ function AutopilotWorkspace({ tenant, detailQ, detail, selectedKey, reviewReason
                           Limits: {(c.evidence_limits || []).join(" · ")}
                         </div>
                       )}
-                      <div style={{ marginTop: 12, borderTop: "1px solid var(--line)", paddingTop: 10, display: "flex", gap: 8, alignItems: "center" }}>
-                        <button className="btn approve" onClick={() => onReviewCandidate(c, "approved")}>Approve as finding</button>
-                        <button className="btn changes" onClick={() => onReviewCandidate(c, "needs_more_evidence")}>Needs more evidence</button>
-                        <button className="btn reject" onClick={() => onReviewCandidate(c, "rejected")}>Reject candidate</button>
-                        <span style={{ marginLeft: "auto", color: "var(--changes)", fontSize: 11 }}>
-                          Human review gate only · Autopilot auto-promote remains blocked
-                        </span>
+                      <div style={{ marginTop: 12, borderTop: "1px solid var(--line)", paddingTop: 10 }}>
+                        {isMissingReviewNote && (
+                          <div style={{
+                            marginBottom: 8,
+                            padding: "8px 10px",
+                            border: "1px solid oklch(0.78 0.14 75 / 0.45)",
+                            background: "oklch(0.78 0.14 75 / 0.08)",
+                            color: "var(--changes)",
+                            fontFamily: "var(--font-mono)",
+                            fontSize: 11,
+                            lineHeight: 1.45,
+                          }}>
+                            Review note required before this candidate can be approved as a finding.
+                          </div>
+                        )}
+                        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                          {isReviewed ? (
+                            <span style={{ color: c.status === "approved" ? "var(--approved)" : c.status === "rejected" ? "var(--rejected)" : "var(--changes)", fontSize: 11 }}>
+                              Review recorded · {c.status === "approved" ? "approved finding created" : c.status}
+                            </span>
+                          ) : (
+                            <>
+                              <button className="btn approve" onClick={() => onReviewCandidate(c, "approved")}>Approve as finding</button>
+                              <button className="btn changes" onClick={() => onReviewCandidate(c, "needs_more_evidence")}>Needs more evidence</button>
+                              <button className="btn reject" onClick={() => onReviewCandidate(c, "rejected")}>Reject candidate</button>
+                            </>
+                          )}
+                          <span style={{ marginLeft: "auto", color: "var(--changes)", fontSize: 11 }}>
+                            Human review gate only · Autopilot auto-promote remains blocked
+                          </span>
+                        </div>
+                        {isSelectedForReview && !isReviewed && (
+                          <div style={{ marginTop: 8 }}>
+                            <textarea className="textarea" rows={2} value={reviewReason}
+                                      onChange={e => { setReviewReason(e.target.value); setReviewMissingKey(""); }}
+                                      placeholder="Review note required before approval." />
+                          </div>
+                        )}
                       </div>
                     </div>
-                  ))}
+                  );})}
                 </div>
               )}
             </Panel>
 
             <Panel eyebrow="Review gate" title="Candidate review note" count="human approval required">
-              <textarea className="textarea" rows={3} value={reviewReason} onChange={e => setReviewReason(e.target.value)}
+              <textarea className="textarea" rows={3} value={reviewReason}
+                        onChange={e => { setReviewReason(e.target.value); setReviewMissingKey(""); }}
+                        onFocus={() => setReviewTargetKey(reviewTargetKey || (candidates[0] && candidates[0].canonical_key) || "")}
                         placeholder="Reason required for approve / reject / needs more evidence." />
               <div style={{ marginTop: 8, color: "var(--muted)", fontSize: 11, lineHeight: 1.5 }}>
                 Candidate approval creates a reviewed Finding Registry entry. It can be reused as prior_finding context and can draft next actions/proposals, but does not write canonical ontology or graph.
