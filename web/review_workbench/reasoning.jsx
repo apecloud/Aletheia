@@ -212,13 +212,20 @@ const STALE_THRESHOLD_MS = 5 * 60 * 1000;
 
 function Reasoning({ tenant }) {
   const [selectedKey, setSelectedKey] = useStateRX(null);
-  const [activeTab, setActiveTab] = useStateRX("mine");  // mine | all | graph
+  const [activeTab, setActiveTab] = useStateRX("mine");  // mine | all | graph | autopilot
   const [question, setQuestion] = useStateRX("Why is Employee #4 workload unusual?");
   const [centerNode, setCenterNode] = useStateRX("Employee:4");
   const [depth, setDepth] = useStateRX(1);
   const [limit, setLimit] = useStateRX(200);
   const [followup, setFollowup] = useStateRX("");
   const [reviewReason, setReviewReason] = useStateRX("");
+  const [autopilotReviewReason, setAutopilotReviewReason] = useStateRX("");
+  const [autopilotObjective, setAutopilotObjective] = useStateRX("Find high-value fraud risk findings");
+  const [autopilotMaxHypotheses, setAutopilotMaxHypotheses] = useStateRX(8);
+  const [autopilotMaxRuns, setAutopilotMaxRuns] = useStateRX(5);
+  const [autopilotMaxToolCalls, setAutopilotMaxToolCalls] = useStateRX(20);
+  const [autopilotSelectedKey, setAutopilotSelectedKey] = useStateRX(null);
+  const [autopilotStarting, setAutopilotStarting] = useStateRX(false);
   const [actionMsg, setActionMsg] = useStateRX(null);
   const [running, setRunning] = useStateRX(false);
   const [askMode, setAskMode] = useStateRX(false);
@@ -241,8 +248,22 @@ function Reasoning({ tenant }) {
   const streamRef = useRefRX(null);
 
   const tasksQ = useApiData("reasoningTasks", [tenant ? tenant.id : "default"], { fallback: MOCK_TASKS });
+  const autopilotSessionsQ = useApiData("autopilotSessions", [tenant ? tenant.id : "default"], { fallback: [] });
   const isStale = tasksQ.source === "live-stale";
   const isMock  = tasksQ.source === "mock";
+  const autopilotSessions = autopilotSessionsQ.data || [];
+  const autopilotDetailQ = useApiData(
+    "autopilotSession",
+    [autopilotSelectedKey, tenant ? tenant.id : "default"],
+    { enabled: activeTab === "autopilot" && !!autopilotSelectedKey }
+  );
+  const autopilotDetail = autopilotDetailQ.data || null;
+  useEffectRX(() => {
+    if (activeTab !== "autopilot") return;
+    if (!autopilotSessions.length) { setAutopilotSelectedKey(null); return; }
+    if (autopilotSessions.some(s => s.session_key === autopilotSelectedKey)) return;
+    setAutopilotSelectedKey(autopilotSessions[0].session_key);
+  }, [activeTab, autopilotSessions.map(s => s.session_key).join("|")]);
   // stable, deduped, sorted task list (local optimistic adds + server data)
   const allTasks = useMemoRX(() => {
     const merged = [...localTasks, ...(tasksQ.data || [])];
@@ -273,6 +294,7 @@ function Reasoning({ tenant }) {
     switch (activeTab) {
       case "mine":    return [...allTasks.filter(t => t.source === "manual")].sort(taskSortCmp);
       case "graph":   return [...allTasks.filter(t => t.source === "graph")].sort(taskSortCmp);
+      case "autopilot": return [];
       default:        return allTasks.filter(isActiveTask);
     }
   }, [allTasks, activeTab]);
@@ -281,6 +303,7 @@ function Reasoning({ tenant }) {
     all:     allTasks.filter(isActiveTask).length,
     mine:    allTasks.filter(t => t.source === "manual").length,
     graph:   allTasks.filter(t => t.source === "graph").length,
+    autopilot: autopilotSessions.length,
   };
 
   const pendingKeyRef = useRefRX(null);
@@ -623,6 +646,87 @@ function Reasoning({ tenant }) {
     }
   }
 
+  async function startAutopilot(e) {
+    if (e && e.preventDefault) e.preventDefault();
+    if (!autopilotObjective.trim()) {
+      setActionMsg({ kind: "err", msg: "Autopilot objective is required." });
+      return;
+    }
+    setAutopilotStarting(true);
+    setActionMsg(null);
+    try {
+      const tid = tenant ? tenant.id : "default";
+      const isFraudTenant = tid === "creditcardfraud";
+      const res = await window.AL_API.createAutopilotSession(tid, {
+        objective: autopilotObjective.trim(),
+        scope: {
+          tenant: tid,
+          approved_only: true,
+          source_surface: "reasoning_autopilot_ui",
+          ...(isFraudTenant ? { table: "credit_card_transactions_safe" } : {}),
+        },
+        budget: {
+          max_hypotheses: Number(autopilotMaxHypotheses) || 8,
+          max_reasoning_tasks: Number(autopilotMaxRuns) || 5,
+          max_tool_calls: Number(autopilotMaxToolCalls) || 20,
+          max_runtime_seconds: 120,
+        },
+        safety_profile: {
+          approved_only: true,
+          safe_views_only: true,
+          allow_sensitive_fields: false,
+          blocked_fields: ["cardCVV", "enteredCVV"],
+        },
+        created_by: "Reasoning Autopilot UI",
+      });
+      const key = res?.session?.session_key;
+      if (key) setAutopilotSelectedKey(key);
+      setActiveTab("autopilot");
+      setActionMsg({ kind: "ok", msg: "Autopilot session started · " + (key || "") });
+      window.dispatchEvent(new CustomEvent("aletheia:retry"));
+    } catch (err) {
+      setActionMsg({ kind: "err", msg: err.message || String(err) });
+    } finally {
+      setAutopilotStarting(false);
+    }
+  }
+
+  async function reviewAutopilotCandidate(candidate, status) {
+    if (!candidate || !autopilotDetail?.session) return;
+    if ((status === "rejected" || status === "needs_more_evidence") && !autopilotReviewReason.trim()) {
+      setActionMsg({ kind: "err", msg: "Reason required for candidate review." });
+      return;
+    }
+    try {
+      const evidenceLimits = [...(candidate.evidence_limits || [])];
+      if (autopilotReviewReason.trim()) {
+        evidenceLimits.push(`Reviewer note: ${autopilotReviewReason.trim()}`);
+      }
+      await window.AL_API.addAutopilotCandidateFinding(
+        tenant ? tenant.id : "default",
+        autopilotDetail.session.session_key,
+        {
+          canonical_key: candidate.canonical_key,
+          title: candidate.title,
+          conclusion: candidate.conclusion,
+          value_score: candidate.value_score || 0,
+          confidence: candidate.confidence || 0,
+          novelty_score: candidate.novelty_score || 0,
+          impact_score: candidate.impact_score || 0,
+          evidence_chain: candidate.evidence_chain || [],
+          evidence_limits: evidenceLimits,
+          suggested_action: candidate.suggested_action || {},
+          status,
+        }
+      );
+      setAutopilotReviewReason("");
+      setActionMsg({ kind: "ok", msg: `Candidate marked ${status}.` });
+      window.dispatchEvent(new CustomEvent("aletheia:retry"));
+    } catch (err) {
+      setActionMsg({ kind: "err", msg: err.message || String(err) });
+    }
+  }
+
   async function deleteTask(taskKey) {
     if (!confirm("Delete this task? This cannot be undone.")) return;
     try {
@@ -646,6 +750,7 @@ function Reasoning({ tenant }) {
           <div className={"tab" + (activeTab === "mine"    ? " active" : "")} onClick={() => setActiveTab("mine")}>My Questions <span className="ct">{counts.mine}</span></div>
           <div className={"tab" + (activeTab === "all"     ? " active" : "")} onClick={() => setActiveTab("all")}>Reasoning Process <span className="ct">{counts.all}</span></div>
           <div className={"tab" + (activeTab === "graph"   ? " active" : "")} onClick={() => setActiveTab("graph")}>From Graph <span className="ct">{counts.graph}</span></div>
+          <div className={"tab" + (activeTab === "autopilot" ? " active" : "")} onClick={() => setActiveTab("autopilot")}>Autopilot <span className="ct">{counts.autopilot}</span></div>
         </div>
         <div className="spacer" />
         <button className="tool" onClick={() => setCleanupModal(true)}>Clean up</button>
@@ -653,23 +758,25 @@ function Reasoning({ tenant }) {
         {isStale && <span className="pill changes" style={{ marginRight: 8 }}><span className="dot" />Stale · last fetch failed</span>}
         {tasksQ.loading && tasksQ.data && <span className="pill"><span className="dot" />Refreshing…</span>}
         <button className="tool" onClick={() => window.dispatchEvent(new CustomEvent("aletheia:retry"))}>⟲ Refresh</button>
-        {shouldRerun && (
+        {activeTab !== "autopilot" && shouldRerun && (
           <button className="tool" onClick={runTask} disabled={running || !task}
                   title="Create a new task with the same question and scope, and run it.">
             {running ? "Rerunning…" : "↻ Rerun (new task)"}
           </button>
         )}
-        {!shouldRerun && !finding && !runDone && (
+        {activeTab !== "autopilot" && !shouldRerun && !finding && !runDone && (
           <button className="tool" onClick={runTask} disabled={running || !task}>{running ? "Running…" : "▶ Run reasoning"}</button>
         )}
-        {task && !shouldRerun && (
+        {activeTab !== "autopilot" && task && !shouldRerun && (
           <button className="tool" onClick={stopAndClose}
                   style={{ color: "var(--rejected)" }}
                   title="Stop the current run (if any) and close this task.">
             ■ Stop &amp; close
           </button>
         )}
-        <button className="tool primary" onClick={() => setAskMode(true)}>+ Ask question</button>
+        <button className="tool primary" onClick={() => activeTab === "autopilot" ? startAutopilot() : setAskMode(true)}>
+          {activeTab === "autopilot" ? "▶ Start Autopilot" : "+ Ask question"}
+        </button>
       </div>
 
       <div className="wb">
@@ -677,12 +784,48 @@ function Reasoning({ tenant }) {
         <div className="col">
           <div style={{ padding: "var(--pad-3) var(--pad-4)", borderBottom: "1px solid var(--line)", background: "var(--bg-2)" }}>
             <div className="eyebrow accent">Question → Answer → Evidence</div>
-            <div style={{ marginTop: 4, fontSize: 13, color: "var(--text)" }}>Reasoning tasks</div>
-            <button className="btn primary" style={{ width: "100%", marginTop: 10 }} onClick={() => setAskMode(true)}>+ Ask a new question</button>
+            <div style={{ marginTop: 4, fontSize: 13, color: "var(--text)" }}>
+              {activeTab === "autopilot" ? "Autopilot sessions" : "Reasoning tasks"}
+            </div>
+            <button className="btn primary" style={{ width: "100%", marginTop: 10 }}
+                    onClick={() => activeTab === "autopilot" ? startAutopilot() : setAskMode(true)}>
+              {activeTab === "autopilot" ? "▶ Start Autopilot" : "+ Ask a new question"}
+            </button>
           </div>
           <div style={{ flex: 1, overflow: "auto" }}>
-            <ApiStatus q={tasksQ} what="reasoning tasks" />
+            {activeTab === "autopilot" ? <ApiStatus q={autopilotSessionsQ} what="autopilot sessions" /> : <ApiStatus q={tasksQ} what="reasoning tasks" />}
             <div className="artifact-list">
+              {activeTab === "autopilot" ? (
+                <React.Fragment>
+                  {(autopilotSessionsQ.source === "live" || autopilotSessionsQ.source === "mock") && autopilotSessions.length === 0 && (
+                    <div style={{ padding: 24, fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--muted)", textAlign: "center", lineHeight: 1.6 }}>
+                      No Autopilot sessions yet. Start one to queue hypotheses and collect draft candidate findings.
+                    </div>
+                  )}
+                  {autopilotSessions.map(s => (
+                    <div key={s.session_key}
+                         className={"artifact-row proposed" + (s.session_key === autopilotSelectedKey ? " selected" : "")}
+                         onClick={() => setAutopilotSelectedKey(s.session_key)}>
+                      <div className="ar-bar" />
+                      <div className="ar-main">
+                        <div className="ar-top">
+                          <span className="type">AUTOPILOT</span>
+                          <span>·</span>
+                          <span className="key" style={{ color: "var(--text)" }}>{s.objective}</span>
+                        </div>
+                        <div className="ar-meta">
+                          <span>{s.scope?.table || s.scope?.tenant || "tenant scope"}</span>
+                          <span>{fmtTime(s.updated_at || s.created_at)}</span>
+                        </div>
+                      </div>
+                      <div className="ar-right">
+                        <Pill kind="proposed">{s.status || "draft"}</Pill>
+                      </div>
+                    </div>
+                  ))}
+                </React.Fragment>
+              ) : (
+                <React.Fragment>
               {(tasksQ.source === "live" || tasksQ.source === "mock") && tasks.length === 0 && (
                 <div style={{ padding: 24, fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--muted)", textAlign: "center", lineHeight: 1.6 }}>
                   {activeTab === "mine"    ? "No questions of yours yet. Click \u201c+ Ask a new question\u201d above to start." :
@@ -754,6 +897,8 @@ function Reasoning({ tenant }) {
                 </div>
                 );
               })}
+                </React.Fragment>
+              )}
             </div>
           </div>
         </div>
@@ -773,7 +918,19 @@ function Reasoning({ tenant }) {
               <button className="btn xs ghost" style={{ marginLeft: "auto" }} onClick={() => setActionMsg(null)}>✕</button>
             </div>
           )}
-          {askMode ? (
+          {activeTab === "autopilot" ? (
+            <AutopilotWorkspace
+              tenant={tenant}
+              detailQ={autopilotDetailQ}
+              detail={autopilotDetail}
+              selectedKey={autopilotSelectedKey}
+              reviewReason={autopilotReviewReason}
+              setReviewReason={setAutopilotReviewReason}
+              onReviewCandidate={reviewAutopilotCandidate}
+              onStart={startAutopilot}
+              starting={autopilotStarting}
+            />
+          ) : askMode ? (
             <AskHero
               tenant={tenant}
               question={question} setQuestion={setQuestion}
@@ -1099,6 +1256,23 @@ function Reasoning({ tenant }) {
 
         {/* ============ RIGHT — ask + follow-up ============ */}
         <div className="col inspector">
+          {activeTab === "autopilot" ? (
+            <AutopilotStartPanel
+              tenant={tenant}
+              objective={autopilotObjective}
+              setObjective={setAutopilotObjective}
+              maxHypotheses={autopilotMaxHypotheses}
+              setMaxHypotheses={setAutopilotMaxHypotheses}
+              maxRuns={autopilotMaxRuns}
+              setMaxRuns={setAutopilotMaxRuns}
+              maxToolCalls={autopilotMaxToolCalls}
+              setMaxToolCalls={setAutopilotMaxToolCalls}
+              starting={autopilotStarting}
+              onStart={startAutopilot}
+              detail={autopilotDetail}
+            />
+          ) : (
+          <React.Fragment>
           <div className="section">
             <div className="section-head"><span>Ask with scope</span></div>
             <div className="section-body">
@@ -1158,6 +1332,8 @@ function Reasoning({ tenant }) {
               <button className="btn ghost" style={{ justifyContent: "flex-start" }}>⤓ Export evidence pack</button>
             </div>
           </div>
+          </React.Fragment>
+          )}
         </div>
       </div>
 
@@ -1166,6 +1342,275 @@ function Reasoning({ tenant }) {
                     onDone={() => { window.dispatchEvent(new CustomEvent("aletheia:retry")); setSelectedKey(null); }} />
     </div>
   );
+}
+
+function AutopilotWorkspace({ tenant, detailQ, detail, selectedKey, reviewReason, setReviewReason, onReviewCandidate, onStart, starting }) {
+  const session = detail && detail.session;
+  const hypotheses = (detail && detail.hypotheses) || [];
+  const candidates = (detail && detail.candidate_findings) || [];
+  const trace = buildAutopilotTrace(session, hypotheses, candidates);
+  const safety = session && session.safety_profile ? session.safety_profile : {};
+  return (
+    <React.Fragment>
+      <div className="art-header">
+        <div className="crumb">
+          <span className="type">Reasoning Autopilot</span>
+          <span className="sep">/</span>
+          <span>{session ? session.session_key : selectedKey || "new session"}</span>
+          {detailQ.loading && <span className="pill" style={{ marginLeft: "auto" }}><span className="dot" />Loading detail…</span>}
+        </div>
+        <h1>{session ? session.objective : "Autopilot Discovery"}</h1>
+        <p className="desc">
+          Autopilot queues hypotheses and ranks draft candidate findings. It cannot write canonical ontology, approve findings, or expose sensitive raw fields.
+        </p>
+        <div className="row">
+          <div className="stat">
+            <span className="label">Hypotheses</span>
+            <span className="val mono">{hypotheses.length}</span>
+          </div>
+          <div className="stat">
+            <span className="label">Candidate findings</span>
+            <span className="val mono">{candidates.length}</span>
+          </div>
+          <div className="stat">
+            <span className="label">Write scope</span>
+            <span className="val" style={{ color: "var(--changes)" }}>{safety.write_scope || "draft_only"}</span>
+          </div>
+          <div className="stat">
+            <span className="label">Canonical writes</span>
+            <span className="val" style={{ color: "var(--rejected)" }}>{safety.canonical_writes || "disabled"}</span>
+          </div>
+          <div className="stat">
+            <span className="label">Sensitive fields</span>
+            <span className="val" style={{ color: safety.allow_sensitive_fields ? "var(--rejected)" : "var(--approved)" }}>
+              {safety.allow_sensitive_fields ? "allowed" : "blocked"}
+            </span>
+          </div>
+        </div>
+      </div>
+
+      <div style={{ flex: 1, overflow: "auto", padding: "var(--pad-4) var(--pad-5)" }}>
+        {!session ? (
+          <Panel eyebrow="Start" title="No Autopilot session selected" style={{ marginBottom: 16 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 12, color: "var(--muted)", fontSize: 12 }}>
+              <span>Start a session to create a visible hypothesis queue and draft Finding Inbox.</span>
+              <button className="btn primary" onClick={onStart} disabled={starting}>{starting ? "Starting…" : "▶ Start Autopilot"}</button>
+            </div>
+          </Panel>
+        ) : (
+          <React.Fragment>
+            <Panel eyebrow="Run trace" title="Autopilot execution trace" count={`${trace.length} events`} style={{ marginBottom: 16 }}>
+              {trace.length === 0 ? (
+                <div style={{ color: "var(--muted)", fontFamily: "var(--font-mono)", fontSize: 11 }}>
+                  No trace events yet. The playbook will append hypotheses and candidate findings through the Autopilot API.
+                </div>
+              ) : (
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  {trace.map((event, idx) => (
+                    <div key={idx} style={{ display: "grid", gridTemplateColumns: "120px 1fr auto", gap: 10, padding: "9px 10px", border: "1px solid var(--line)", background: "var(--bg-1)", alignItems: "center" }}>
+                      <span className="eyebrow" style={{ color: event.tone || "var(--accent)" }}>{event.kind}</span>
+                      <span style={{ fontSize: 12, color: "var(--text-dim)", lineHeight: 1.45 }}>{event.title}</span>
+                      <span className="mono" style={{ fontSize: 10, color: "var(--muted)" }}>{event.status}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </Panel>
+
+            <Panel eyebrow="Hypothesis queue" title="Queued reasoning hypotheses" count={`${hypotheses.length} items`} style={{ marginBottom: 16 }}>
+              {hypotheses.length === 0 ? (
+                <div style={{ color: "var(--muted)", fontFamily: "var(--font-mono)", fontSize: 11 }}>
+                  No hypotheses yet. task #142 will populate this queue for creditcardfraud discovery.
+                </div>
+              ) : (
+                <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                  {hypotheses.map(h => (
+                    <div key={h.hypothesis_key} style={{ border: "1px solid var(--line)", background: "var(--bg-1)", padding: 12 }}>
+                      <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 6 }}>
+                        <Pill kind={h.status === "pruned" ? "rejected" : h.status === "completed" ? "approved" : "changes"}>{h.status}</Pill>
+                        <strong style={{ color: "var(--text)", fontSize: 13 }}>{h.title}</strong>
+                        <span className="mono" style={{ marginLeft: "auto", color: "var(--muted)", fontSize: 10 }}>p{h.priority}</span>
+                      </div>
+                      <div style={{ color: "var(--text-dim)", fontSize: 12, lineHeight: 1.5 }}>{h.rationale || "No rationale recorded."}</div>
+                      {h.status === "pruned" && (
+                        <div style={{ marginTop: 8, color: "var(--rejected)", fontSize: 11 }}>Pruned reason: {h.pruned_reason || "missing"}</div>
+                      )}
+                      {h.evidence_plan?.length > 0 && (
+                        <div className="mono" style={{ marginTop: 8, color: "var(--muted)", fontSize: 10 }}>
+                          Evidence plan: {h.evidence_plan.map(p => p.metric || p.kind || p.source_ref).filter(Boolean).join(" · ")}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </Panel>
+
+            <Panel eyebrow="Finding Inbox" title="Draft candidate findings" count={`${candidates.length} candidates`} style={{ marginBottom: 16 }}>
+              {candidates.length === 0 ? (
+                <div style={{ color: "var(--muted)", fontFamily: "var(--font-mono)", fontSize: 11 }}>
+                  No candidate findings yet. Autopilot UI is wired; the discovery playbook will fill this inbox with draft candidates.
+                </div>
+              ) : (
+                <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                  {candidates.map(c => (
+                    <div key={c.canonical_key} style={{ border: "1px solid var(--line)", background: "var(--bg-1)", padding: 14 }}>
+                      <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 8 }}>
+                        <Pill kind={c.status === "rejected" ? "rejected" : c.status === "needs_more_evidence" ? "changes" : "proposed"}>{c.status}</Pill>
+                        <strong style={{ color: "var(--text)", fontSize: 14 }}>{c.title}</strong>
+                      </div>
+                      <div style={{ color: "var(--text-dim)", fontSize: 13, lineHeight: 1.55 }}>{c.conclusion}</div>
+                      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 8, marginTop: 12 }}>
+                        <MetricMini label="Value" value={pctRX(c.value_score, 0)} />
+                        <MetricMini label="Confidence" value={pctRX(c.confidence, 0)} />
+                        <MetricMini label="Novelty" value={pctRX(c.novelty_score, 0)} />
+                        <MetricMini label="Impact" value={pctRX(c.impact_score, 0)} />
+                      </div>
+                      <div style={{ marginTop: 12, borderTop: "1px solid var(--line)", paddingTop: 10 }}>
+                        <div className="eyebrow" style={{ marginBottom: 6 }}>Evidence chain</div>
+                        {(c.evidence_chain || []).length === 0 ? (
+                          <div style={{ color: "var(--rejected)", fontSize: 11 }}>Missing evidence chain; should not pass final validation.</div>
+                        ) : (
+                          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                            {(c.evidence_chain || []).map((e, i) => (
+                              <div key={i} className="mono" style={{ color: "var(--muted)", fontSize: 10, lineHeight: 1.45 }}>
+                                {e.kind || "evidence"} · {e.source_ref || e.source || "source"} · {e.metric || e.title || ""} {e.value ? `= ${e.value}` : ""}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                      {(c.evidence_limits || []).length > 0 && (
+                        <div style={{ marginTop: 10, color: "var(--muted)", fontSize: 11, lineHeight: 1.5 }}>
+                          Limits: {(c.evidence_limits || []).join(" · ")}
+                        </div>
+                      )}
+                      <div style={{ marginTop: 12, borderTop: "1px solid var(--line)", paddingTop: 10, display: "flex", gap: 8, alignItems: "center" }}>
+                        <button className="btn changes" onClick={() => onReviewCandidate(c, "needs_more_evidence")}>Needs more evidence</button>
+                        <button className="btn reject" onClick={() => onReviewCandidate(c, "rejected")}>Reject candidate</button>
+                        <span style={{ marginLeft: "auto", color: "var(--changes)", fontSize: 11 }}>
+                          Draft candidate only · promote is blocked by API
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </Panel>
+
+            <Panel eyebrow="Review gate" title="Candidate review note" count="no promote action">
+              <textarea className="textarea" rows={3} value={reviewReason} onChange={e => setReviewReason(e.target.value)}
+                        placeholder="Reason required for reject / needs more evidence. Formal finding approval must use a separate review gate." />
+              <div style={{ marginTop: 8, color: "var(--muted)", fontSize: 11, lineHeight: 1.5 }}>
+                This inbox intentionally has no approve/promote button. Candidate findings remain draft outputs from Autopilot until a separate human review path turns them into formal findings.
+              </div>
+            </Panel>
+          </React.Fragment>
+        )}
+      </div>
+    </React.Fragment>
+  );
+}
+
+function AutopilotStartPanel({ tenant, objective, setObjective, maxHypotheses, setMaxHypotheses, maxRuns, setMaxRuns, maxToolCalls, setMaxToolCalls, starting, onStart, detail }) {
+  const safety = detail?.session?.safety_profile || {};
+  const budget = detail?.session?.budget || {};
+  return (
+    <React.Fragment>
+      <div className="section">
+        <div className="section-head"><span>Start Autopilot</span></div>
+        <div className="section-body">
+          <form onSubmit={onStart} style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            <div>
+              <div className="eyebrow" style={{ marginBottom: 4 }}>Objective</div>
+              <textarea className="textarea" rows={3} value={objective} onChange={e => setObjective(e.target.value)}
+                        placeholder="Find high-value candidate findings…" />
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 6 }}>
+              <div>
+                <div className="eyebrow" style={{ marginBottom: 4 }}>Hypotheses</div>
+                <input className="input" type="number" min={1} max={25} value={maxHypotheses} onChange={e => setMaxHypotheses(+e.target.value)} />
+              </div>
+              <div>
+                <div className="eyebrow" style={{ marginBottom: 4 }}>Runs</div>
+                <input className="input" type="number" min={1} max={20} value={maxRuns} onChange={e => setMaxRuns(+e.target.value)} />
+              </div>
+              <div>
+                <div className="eyebrow" style={{ marginBottom: 4 }}>Tool calls</div>
+                <input className="input" type="number" min={1} max={80} value={maxToolCalls} onChange={e => setMaxToolCalls(+e.target.value)} />
+              </div>
+            </div>
+            <button className="btn primary" type="submit" disabled={starting}>{starting ? "Starting…" : "▶ Start Autopilot"}</button>
+          </form>
+        </div>
+      </div>
+
+      <div className="section">
+        <div className="section-head"><span>Safety profile</span></div>
+        <div className="section-body" style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          <BoundaryLine label="Tenant" value={tenant ? tenant.id : "default"} />
+          <BoundaryLine label="Safe views only" value={String(safety.safe_views_only !== false)} tone="var(--approved)" />
+          <BoundaryLine label="Sensitive fields" value={safety.allow_sensitive_fields ? "allowed" : "blocked"} tone={safety.allow_sensitive_fields ? "var(--rejected)" : "var(--approved)"} />
+          <BoundaryLine label="Canonical writes" value={safety.canonical_writes || "disabled"} tone="var(--rejected)" />
+          <BoundaryLine label="Auto approve" value={String(!!safety.auto_approve_findings)} tone={safety.auto_approve_findings ? "var(--rejected)" : "var(--approved)"} />
+          <BoundaryLine label="Blocked fields" value={(safety.blocked_fields || ["cardCVV", "enteredCVV"]).join(", ")} />
+        </div>
+      </div>
+
+      <div className="section">
+        <div className="section-head"><span>Budget</span></div>
+        <div className="section-body" style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          <BoundaryLine label="Max hypotheses" value={budget.max_hypotheses || maxHypotheses} />
+          <BoundaryLine label="Max reasoning tasks" value={budget.max_reasoning_tasks || maxRuns} />
+          <BoundaryLine label="Max tool calls" value={budget.max_tool_calls || maxToolCalls} />
+          <BoundaryLine label="Sample strategy" value={budget.sample_strategy || "deterministic_full_table_aggregates"} />
+        </div>
+      </div>
+    </React.Fragment>
+  );
+}
+
+function BoundaryLine({ label, value, tone }) {
+  return (
+    <div style={{ display: "flex", justifyContent: "space-between", gap: 10, fontSize: 11, borderBottom: "1px solid var(--line)", paddingBottom: 6 }}>
+      <span style={{ color: "var(--muted)" }}>{label}</span>
+      <span className="mono" style={{ color: tone || "var(--text)", textAlign: "right", overflowWrap: "anywhere" }}>{value}</span>
+    </div>
+  );
+}
+
+function MetricMini({ label, value }) {
+  return (
+    <div style={{ border: "1px solid var(--line)", padding: 8, background: "var(--bg-2)", minWidth: 0 }}>
+      <div className="eyebrow" style={{ marginBottom: 4 }}>{label}</div>
+      <div className="mono" style={{ color: "var(--text)", fontSize: 13 }}>{value}</div>
+    </div>
+  );
+}
+
+function buildAutopilotTrace(session, hypotheses, candidates) {
+  const out = [];
+  if (session) {
+    out.push({ kind: "session", title: session.objective, status: session.status || "draft", tone: "var(--accent)" });
+    out.push({ kind: "safety", title: `write_scope=${session.safety_profile?.write_scope || "draft_only"} · canonical_writes=${session.safety_profile?.canonical_writes || "disabled"}`, status: "enforced", tone: "var(--approved)" });
+  }
+  hypotheses.forEach(h => {
+    out.push({
+      kind: h.status === "pruned" ? "pruned" : "hypothesis",
+      title: h.status === "pruned" ? `${h.title} · ${h.pruned_reason || "missing prune reason"}` : h.title,
+      status: h.status,
+      tone: h.status === "pruned" ? "var(--rejected)" : "var(--changes)",
+    });
+  });
+  candidates.forEach(c => {
+    out.push({
+      kind: "candidate",
+      title: c.title,
+      status: c.status,
+      tone: c.status === "draft" ? "var(--changes)" : c.status === "rejected" ? "var(--rejected)" : "var(--accent)",
+    });
+  });
+  return out;
 }
 
 /* ---------------- CleanupModal ---------------- */

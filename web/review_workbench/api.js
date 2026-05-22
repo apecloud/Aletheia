@@ -337,6 +337,41 @@
       return data;
     },
 
+    async autopilotSessions(tenant, status) {
+      const query = {};
+      if (status) query.status = status;
+      const data = await fetchJson(withTenantQs("/api/reasoning/autopilot/sessions", tenant, query));
+      return Array.isArray(data?.sessions) ? data.sessions : [];
+    },
+
+    async autopilotSession(sessionKey, tenant) {
+      return await fetchJson(withTenantQs(
+        `/api/reasoning/autopilot/sessions/${encodeURIComponent(sessionKey)}`, tenant));
+    },
+
+    async createAutopilotSession(tenant, body) {
+      return await fetchJson(withTenantQs("/api/reasoning/autopilot/sessions", tenant), {
+        method: "POST",
+        body: JSON.stringify(body || {}),
+      });
+    },
+
+    async addAutopilotHypothesis(tenant, sessionKey, body) {
+      return await fetchJson(withTenantQs(
+        `/api/reasoning/autopilot/sessions/${encodeURIComponent(sessionKey)}/hypotheses`, tenant), {
+        method: "POST",
+        body: JSON.stringify(body || {}),
+      });
+    },
+
+    async addAutopilotCandidateFinding(tenant, sessionKey, body) {
+      return await fetchJson(withTenantQs(
+        `/api/reasoning/autopilot/sessions/${encodeURIComponent(sessionKey)}/candidate-findings`, tenant), {
+        method: "POST",
+        body: JSON.stringify(body || {}),
+      });
+    },
+
     // ---- task lifecycle (new API) ----
     // status filter: undefined | "active" | "completed" | "closed"
     async reasoningTasksFiltered(tenant, status) {
