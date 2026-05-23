@@ -31,3 +31,7 @@ Implemented a UI language switch for the Reasoning surface so the result layer f
 ## Notes
 
 This is a display-layer change. It does not mutate stored finding payloads, evidence chains, audit records, canonical ontology, or graph state.
+
+## Task #169 Fix
+
+After validation found that default tenant current answers remained English in `lang=zh`, the display adapter was extended for generic Northwind Employee profile findings. The Chinese display now covers the default tenant current answer, finding title/body, recommended action, and counter-evidence while preserving `Employee:*`, person names, source refs, table/field names, and metrics.

@@ -204,6 +204,20 @@ const RESULT_TEXT_ZH_RX = [
     "已剪枝：预期欺诈率提升低于候选阈值，且仅凭该字段无法形成强运营动作。"],
   [/Pruned because it is a ranking\/reporting hypothesis without a complete hazard -> chokepoint -> country -> risk metric -> action path\./,
     "已剪枝：这只是排名/报表假设，缺少完整的风险因子 -> 咽喉点 -> 国家 -> 风险指标 -> 行动路径。"],
+  [/Use this draft as a reviewer prompt; do not treat it as an approved finding until it passes the review gate\./,
+    "将该草稿作为审核提示使用；在通过审核关口前，不要把它当作已批准发现。"],
+  [/Conclusions are based solely on the approved graph and controlled aggregation; performance targets, utilization, profitability, or satisfaction data are not included\./,
+    "结论仅基于已批准图谱和受控聚合；不包含绩效目标、利用率、利润率或满意度数据。"],
+  [/Profile based on employees source table and approved graph controlled aggregation\./,
+    "画像基于 employees 源表和已批准图谱的受控聚合。"],
+  [/Rankings reflect a current snapshot — no time-series trends or external benchmarks\./,
+    "排名反映当前快照；不包含时间序列趋势或外部基准。"],
+  [/How do (.+)'s relationship patterns change over time\?/,
+    "$1 的关系模式随时间如何变化？"],
+  [/How does (.+) compare to typical Employee\(s\) in the same segment\?/,
+    "$1 与同分组典型 Employee 相比如何？"],
+  [/Are there anomalous patterns or potential risks\?/,
+    "是否存在异常模式或潜在风险？"],
 ];
 
 function resultTextRX(value, language) {
@@ -245,12 +259,62 @@ function evidenceKindLabelRX(kind, language) {
   return labels[kind] || kind || "证据";
 }
 
+function structuredTitleRX(finding, language) {
+  if (!isZhRX(language) || !finding || !finding.structured_answer) return null;
+  const s = finding.structured_answer;
+  const m = s.metrics || {};
+  if (m.object_type !== "Employee") return resultTextRX(s.title || finding.title, language);
+  const name = m.label || s.metrics?.name || "Employee";
+  const ranking = (m.rankings || [])[0] || {};
+  const valueAgg = (m.value_aggregations || [])[0] || {};
+  const levelZh = ranking.level === "high" ? "高活跃" : ranking.level === "low" ? "低活跃" : "中等活跃";
+  const orders = ranking.my_count || m.edge_count || m.neighbor_count || 0;
+  const rank = ranking.rank && ranking.total_peers ? `#${ranking.rank}/${ranking.total_peers}` : "未排名";
+  const value = valueAgg.my_value != null ? Number(valueAgg.my_value).toLocaleString(undefined, { maximumFractionDigits: 2 }) : "—";
+  const share = valueAgg.value_share != null ? `${(Number(valueAgg.value_share) * 100).toFixed(1)}%` : "—";
+  return `${name} 业务画像：${orders} 单（${rank}，${levelZh}），价值 ${value}（占比 ${share}）`;
+}
+
 function structuredEmployeeSummaryRX(finding, language) {
-  if (!finding || !finding.structured_answer || !finding.structured_answer.metrics || isZhRX(language)) {
+  if (!finding || !finding.structured_answer || !finding.structured_answer.metrics) {
     return finding ? finding.conclusion : "";
   }
   const s = finding.structured_answer;
   const m = s.metrics || {};
+  if (isZhRX(language) && m.object_type === "Employee") {
+    const name = m.label || m.name || `Employee:${m.instance_id || m.employee_id || ""}`;
+    const facts = s.key_facts || [];
+    const attrs = facts.find(f => /attributes/i.test(f.label || "")) || {};
+    const manager = facts.find(f => /reportsTo/i.test(f.label || "")) || {};
+    const role = String(attrs.value || "").match(/title: ([^;]+)/)?.[1] || m.title || "未标注职位";
+    const managerName = String(manager.value || "").replace(/\s*\(Employee:[^)]+\)/, "") || "未标注上级";
+    const ranking = (m.rankings || [])[0] || {};
+    const valueAgg = (m.value_aggregations || [])[0] || {};
+    const linkStats = (m.link_stats || [])[0] || {};
+    const orders = ranking.my_count || linkStats.row_count || m.edge_count || 0;
+    const peers = ranking.total_peers || "—";
+    const rank = ranking.rank || "—";
+    const avg = ranking.avg != null ? Number(ranking.avg).toFixed(1) : "—";
+    const multiplier = ranking.avg ? (Number(orders) / Number(ranking.avg)).toFixed(1) : "—";
+    const levelZh = ranking.level === "high" ? "高活跃 Employee" : ranking.level === "low" ? "低活跃 Employee" : "中等活跃 Employee";
+    const value = valueAgg.my_value != null ? Number(valueAgg.my_value).toLocaleString(undefined, { maximumFractionDigits: 2 }) : "—";
+    const total = valueAgg.total_value != null ? Number(valueAgg.total_value).toLocaleString(undefined, { maximumFractionDigits: 2 }) : "—";
+    const share = valueAgg.value_share != null ? `${(Number(valueAgg.value_share) * 100).toFixed(1)}%` : "—";
+    const valueRank = valueAgg.value_rank && valueAgg.value_total_peers ? `#${valueAgg.value_rank}/${valueAgg.value_total_peers}` : "未排名";
+    const categories = (valueAgg.category_breakdown || []).slice(0, 3).map(c => c.label).filter(Boolean).join("、") || "未形成品类聚合";
+    const years = (linkStats.yearly || []).filter(y => y.year != null);
+    const firstYear = years[0];
+    const lastYear = years[years.length - 1];
+    const peak = years.length ? years.reduce((best, item) => Number(item.count) > Number(best.count) ? item : best, years[0]) : null;
+    const trend = firstYear && lastYear && peak
+      ? `活动从 ${firstYear.count}（${firstYear.year}）到 ${lastYear.count}（${lastYear.year}），${peak.year} 年达到峰值 ${peak.count}。`
+      : "当前证据不足以形成时间趋势。";
+    const customers = linkStats.distinct_counterparties?.customer || m.customer_count || 0;
+    const topItems = linkStats.top_counterparties?.customer?.items || [];
+    const topMax = topItems.length && orders ? Math.max(...topItems.map(i => Number(i.count || 0))) : 0;
+    const topShare = topMax && orders ? `${((topMax / Number(orders)) * 100).toFixed(1)}%` : "—";
+    return `${name}（${role}，向 ${managerName} 汇报）是${levelZh}：处理 ${orders} 单，在 ${peers} 名同类中排名 #${rank}，约为平均值 ${avg} 的 ${multiplier} 倍。收入贡献为 ${value}（占总计 ${total} 的 ${share}），按价值排名 ${valueRank}。收入主要分布在 ${categories}。${trend} 活动覆盖 ${customers} 个客户，最大单一客户占比约 ${topShare}，客户分布较分散。`;
+  }
   const name = m.name || `Employee:${m.employee_id || ""}`;
   const orderCount = Number(m.order_count || 0);
   const totalOrders = Number(m.total_orders || 0);
@@ -269,6 +333,10 @@ function displayFindingConclusionRX(finding, language) {
   if (!finding) return "";
   const structured = structuredEmployeeSummaryRX(finding, language);
   return resultTextRX(structured || finding.conclusion, language);
+}
+
+function displayFindingTitleRX(finding, language) {
+  return structuredTitleRX(finding, language) || resultTextRX(finding && finding.title, language);
 }
 
 function displayCandidateTitleRX(candidate, language) {
@@ -291,6 +359,7 @@ function displayActionTextRX(value, language) {
     "Open a country/chokepoint dependency review and compare alternate maritime routes.": "创建国家/咽喉点依赖复核，并比较替代海运路线。",
     "Rank chokepoint review by hazard-adjusted trade-at-risk, not volume alone.": "按风险调整后的贸易风险排序咽喉点复核优先级，而不是仅按吞吐量排序。",
     "Create a Bab el-Mandeb review case for the top exposed countries and attach live event enrichment when available.": "为最高暴露国家创建 Bab el-Mandeb 复核事项，并在可用时附加实时事件增强证据。",
+    "Use this draft as a reviewer prompt; do not treat it as an approved finding until it passes the review gate.": "将该草稿作为审核提示使用；在通过审核关口前，不要把它当作已批准发现。",
   };
   return map[text] || resultTextRX(text, language);
 }
@@ -1429,7 +1498,7 @@ function Reasoning({ tenant, language }) {
                     )}
                   </span>
                 </div>
-                <h1>{task.name || task.question || "Untitled reasoning task"}</h1>
+                <h1>{finding ? displayFindingTitleRX(finding, language) : (task.name || task.question || "Untitled reasoning task")}</h1>
                 {task.blocker && (
                   <p className="desc" style={{ color: "var(--rejected)" }}>⚠ {task.blocker}</p>
                 )}
@@ -2531,7 +2600,7 @@ function ApprovedFindingRegistry({ findings, query, tenant, filters, setFilters,
                 <span style={{ fontSize: 10, color: f.reasoning_use ? "var(--approved)" : "var(--muted)", fontFamily: "var(--font-mono)" }}>
                   {highlighted ? "newly added · " : ""}{f.reasoning_use ? "active prior insight · reviewed_inference" : "audit only"} · {f.source_label || "Reasoning"} · {f.finding_type || "finding"}
                 </span>
-                <strong style={{ display: "block", fontSize: 12, marginTop: 3 }}>{resultTextRX(f.title, language)}</strong>
+                <strong style={{ display: "block", fontSize: 12, marginTop: 3 }}>{displayFindingTitleRX(f, language)}</strong>
                 <span style={{ display: "block", fontSize: 11, color: "var(--muted)", lineHeight: 1.4, marginTop: 3 }}>
                   {displayFindingConclusionRX(f, language).slice(0, 140)}
                 </span>
