@@ -41,6 +41,7 @@ Crawler safety controls:
 - Blocks localhost, private, link-local, reserved, multicast, and `.local` targets.
 - Blocks sensitive query parameters such as token, password, secret, credential, and api key.
 - Requires `--allowed-domain` unless `--allow-discovered-domains` is explicitly set.
+- Treats allowlist/domain policy as source policy, not only page-fetch policy. A public source outside the configured allowlist is recorded in `skipped_sources` and cannot create a draft proposal from its snippet.
 - Enforces max artifacts, max results per query, max crawl pages, timeout, and max page bytes.
 - Records blocked/skipped sources in the run payload without turning them into proposals.
 
@@ -80,6 +81,27 @@ Result:
 - created draft artifact `webenrichment:object_chokepoint:1433f0e2400a47e9`
 - canonical/graph writes remained disabled
 
+Negative source-policy smoke:
+
+```bash
+.venv/bin/python agents/web_enrichment_agent.py \
+  --tenant maritime-risk \
+  --artifact object:chokepoint \
+  --search-results-json /tmp/task172-fix/untrusted.json \
+  --allowed-domain zenodo.org \
+  --max-artifacts 1 \
+  --max-results-per-query 1 \
+  --max-crawl-pages 1 \
+  --json
+```
+
+Result:
+
+- `https://example.org/untrusted-maritime-risk-task172-fix` returned `blocked_domain_not_allowlisted`
+- `proposal_count=0`
+- `skipped_sources` contains the blocked public source
+- DB check confirmed `proposal_rows=0` and `webenrichment_artifacts=0` for the blocked URL
+
 API smoke:
 
 - `/api/web-enrichment/proposals?tenant=maritime-risk&artifact=object%3Achokepoint&limit=5` returned the proposal with safety profile, budget, field provenance, robots risk, and license risk.
@@ -94,4 +116,3 @@ node --check web/review_workbench/api.js
 npx --yes esbuild web/review_workbench/screens.jsx --outfile=/tmp/task172-screens.js --loader:.jsx=jsx --format=iife
 git diff --check
 ```
-

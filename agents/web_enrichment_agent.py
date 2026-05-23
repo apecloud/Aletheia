@@ -531,6 +531,21 @@ class WebEnrichmentAgent:
                             }
                         )
                         continue
+                    source_allowed, source_blocked_reason = _is_crawl_allowed(
+                        result.url,
+                        self.allowed_domains,
+                        self.allow_discovered_domains,
+                    )
+                    if not source_allowed:
+                        skipped_sources.append(
+                            {
+                                "target_artifact_key": artifact.canonical_key,
+                                "search_query": query,
+                                "url": result.url,
+                                "reason": source_blocked_reason,
+                            }
+                        )
+                        continue
                     seen_urls.add(result.url)
                     if crawled < self.max_crawl_pages:
                         try:
