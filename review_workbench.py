@@ -2180,12 +2180,15 @@ class ReasoningRepository:
 
     def _approved_finding_action(self, candidate_dict, candidate_row, reason):
         suggested = candidate_dict.get("suggested_action") or {}
+        deep_graph_profile = candidate_dict.get("deep_graph_profile") or self._deep_graph_profile(candidate_dict.get("evidence_chain") or [])
         return {
             "type": "reviewed_inference",
             "prior_insight_label": "approved finding",
             "source_candidate_key": candidate_dict.get("canonical_key"),
             "autopilot_session_key": candidate_row.get("session_key"),
             "hypothesis_key": candidate_row.get("hypothesis_key"),
+            "finding_emphasis": candidate_dict.get("finding_emphasis") or deep_graph_profile.get("finding_emphasis"),
+            "deep_graph_profile": deep_graph_profile,
             "review_reason": reason,
             "next_action": suggested,
             "workspace_next_action": {
@@ -2211,6 +2214,67 @@ class ReasoningRepository:
             "graph_write": False,
             "auto_business_action": False,
             "promotion_requires": "separate ontology/graph/rule proposal review gate",
+        }
+
+    DEEP_GRAPH_REQUIRED_STEPS = ("hazard", "chokepoint", "dependent_country", "risk_metric", "recommended_action")
+
+    def _deep_graph_profile(self, evidence_chain):
+        def step_for(item):
+            kind = str(item.get("kind") or "").lower()
+            metric = str(item.get("metric") or "").lower()
+            if "hazard" in kind or kind in {"risk_indicator"} or metric.startswith("likelihood_") or metric.startswith("severity_"):
+                return "hazard"
+            if "chokepoint" in kind or metric == "canal":
+                return "chokepoint"
+            if kind in {"dependent_country", "dependent_countries", "country", "countries"} or metric == "iso3":
+                return "dependent_country"
+            if kind in {"trade_metric", "risk_metric"} or metric in {"trade_at_risk_v", "trade_impacted", "v_canal", "v_canal / v", "top_trade_at_risk_v"}:
+                return "risk_metric"
+            if "action" in kind:
+                return "recommended_action"
+            return None
+
+        def label_for(item):
+            value = item.get("value")
+            if isinstance(value, list):
+                countries = [str(v.get("iso3")) for v in value if isinstance(v, dict) and v.get("iso3")]
+                return ", ".join(countries[:5]) or item.get("metric") or item.get("kind")
+            if isinstance(value, dict):
+                return value.get("label") or value.get("name") or value.get("iso3") or value.get("canal") or item.get("metric") or item.get("kind")
+            return str(value) if value not in (None, "") else item.get("metric") or item.get("kind")
+
+        step_order = []
+        nodes = []
+        for item in evidence_chain or []:
+            if not isinstance(item, dict):
+                continue
+            step = step_for(item)
+            if not step:
+                continue
+            if step not in step_order:
+                step_order.append(step)
+            nodes.append(
+                {
+                    "step": step,
+                    "kind": item.get("kind"),
+                    "source_ref": item.get("source_ref"),
+                    "metric": item.get("metric"),
+                    "label": label_for(item),
+                }
+            )
+        missing_steps = [step for step in self.DEEP_GRAPH_REQUIRED_STEPS if step not in step_order]
+        hop_count = max(len(step_order) - 1, 0)
+        multi_hop = hop_count >= 3 and not missing_steps
+        return {
+            "reasoning_type": "graph_multi_hop" if multi_hop else "evidence_chain",
+            "finding_emphasis": "deep_graph_finding" if multi_hop else "candidate_finding",
+            "required_steps": list(self.DEEP_GRAPH_REQUIRED_STEPS),
+            "observed_steps": step_order,
+            "missing_steps": missing_steps,
+            "hop_count": hop_count,
+            "multi_hop": multi_hop,
+            "path": nodes,
+            "path_label": " -> ".join(node["label"] for node in nodes if node.get("label")),
         }
 
     def _finding_action_to_dict(self, row):
@@ -2372,6 +2436,15 @@ class ReasoningRepository:
                 "approved_only": True,
                 "source_surface": "maritime_risk_graph_reasoning_playbook",
                 "source_mode": profile.get("source_mode"),
+                "reasoning_mode": "graph_multi_hop",
+                "finding_emphasis": "deep_graph_findings",
+                "required_finding_path": [
+                    "hazard",
+                    "chokepoint",
+                    "dependent_country",
+                    "trade_or_risk_metric",
+                    "recommended_action",
+                ],
             },
             "budget": payload.get("budget") or {
                 "max_hypotheses": 8,
@@ -2399,7 +2472,12 @@ class ReasoningRepository:
                 "status": "completed",
                 "priority": 10,
                 "evidence_plan": [
-                    {"kind": "graph_path", "source_ref": "maritime_chokepoint_country_dependencies", "metric": "country_to_chokepoint_dependency_share"}
+                    {
+                        "kind": "graph_path",
+                        "source_ref": "maritime_chokepoint_risk_indicators -> maritime_chokepoint_country_dependencies -> maritime_risk_playbook",
+                        "metric": "hazard_to_country_dependency_share_to_action",
+                        "required_graph_path": list(self.DEEP_GRAPH_REQUIRED_STEPS),
+                    }
                 ],
                 "reasoning_task_keys": ["reasoning:maritime-risk:chokepoint-dependency:v1"],
             },
@@ -2409,7 +2487,12 @@ class ReasoningRepository:
                 "status": "completed",
                 "priority": 20,
                 "evidence_plan": [
-                    {"kind": "join", "source_ref": "maritime_chokepoint_risk_indicators + maritime_chokepoint_systemic_risk_results", "metric": "hazard_adjusted_trade_at_risk"}
+                    {
+                        "kind": "graph_path",
+                        "source_ref": "maritime_chokepoint_risk_indicators -> maritime_chokepoint_systemic_risk_results -> maritime_risk_playbook",
+                        "metric": "hazard_adjusted_trade_at_risk_to_action",
+                        "required_graph_path": list(self.DEEP_GRAPH_REQUIRED_STEPS),
+                    }
                 ],
                 "reasoning_task_keys": ["reasoning:maritime-risk:hazard-adjusted-risk:v1"],
             },
@@ -2419,7 +2502,12 @@ class ReasoningRepository:
                 "status": "completed",
                 "priority": 30,
                 "evidence_plan": [
-                    {"kind": "graph_path", "source_ref": "maritime_chokepoint_risk_indicators -> maritime_chokepoint_systemic_risk_results", "metric": "bab_el_mandeb_country_priority"}
+                    {
+                        "kind": "graph_path",
+                        "source_ref": "maritime_chokepoint_risk_indicators -> maritime_chokepoint_systemic_risk_results -> maritime_risk_playbook",
+                        "metric": "bab_el_mandeb_hazard_to_country_priority_to_action",
+                        "required_graph_path": list(self.DEEP_GRAPH_REQUIRED_STEPS),
+                    }
                 ],
                 "reasoning_task_keys": ["reasoning:maritime-risk:red-sea-priority:v1"],
             },
@@ -5092,6 +5180,8 @@ class ReasoningRepository:
     def _finding_to_dict(self, row):
         recommended_action = _load_json(row["recommended_action_json"], {})
         structured_answer = recommended_action.get("structured_answer") or {}
+        supporting_evidence = _load_json(row["supporting_evidence_json"], [])
+        deep_graph_profile = recommended_action.get("deep_graph_profile") or self._deep_graph_profile(supporting_evidence)
         finding = {
             "id": row["id"],
             "run_id": row["run_id"],
@@ -5100,7 +5190,9 @@ class ReasoningRepository:
             "title": row["title"],
             "conclusion": row["conclusion"],
             "confidence": row["confidence"],
-            "supporting_evidence": _load_json(row["supporting_evidence_json"], []),
+            "supporting_evidence": supporting_evidence,
+            "deep_graph_profile": deep_graph_profile,
+            "finding_emphasis": recommended_action.get("finding_emphasis") or deep_graph_profile.get("finding_emphasis"),
             "counter_evidence": _load_json(row["counter_evidence_json"], []),
             "recommended_action": recommended_action,
             "status": row["status"],
@@ -5148,6 +5240,8 @@ class ReasoningRepository:
         }
 
     def _autopilot_candidate_to_dict(self, row):
+        evidence_chain = _load_json(row["evidence_chain_json"], [])
+        deep_graph_profile = self._deep_graph_profile(evidence_chain)
         return {
             "id": row["id"],
             "session_id": row["session_id"],
@@ -5160,7 +5254,9 @@ class ReasoningRepository:
             "confidence": row["confidence"],
             "novelty_score": row["novelty_score"],
             "impact_score": row["impact_score"],
-            "evidence_chain": _load_json(row["evidence_chain_json"], []),
+            "evidence_chain": evidence_chain,
+            "deep_graph_profile": deep_graph_profile,
+            "finding_emphasis": deep_graph_profile["finding_emphasis"],
             "evidence_limits": _load_json(row["evidence_limits_json"], []),
             "suggested_action": _load_json(row["suggested_action_json"], {}),
             "status": row["status"],

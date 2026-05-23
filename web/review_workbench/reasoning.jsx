@@ -1908,6 +1908,8 @@ function AutopilotWorkspace({
   const candidates = (detail && detail.candidate_findings) || [];
   const trace = buildAutopilotTrace(session, hypotheses, candidates);
   const safety = session && session.safety_profile ? session.safety_profile : {};
+  const deepGraphCandidates = candidates.filter(c => c.deep_graph_profile?.multi_hop);
+  const incompleteGraphCandidates = candidates.filter(c => c.deep_graph_profile && !c.deep_graph_profile.multi_hop && (c.deep_graph_profile.observed_steps || []).length > 0);
   return (
     <React.Fragment>
       <div className="art-header">
@@ -1982,6 +1984,26 @@ function AutopilotWorkspace({
               )}
             </Panel>
 
+            <Panel eyebrow={tRX(language, "Deep graph findings", "深度图发现")} title={tRX(language, "Multi-hop reasoning focus", "多跳推理重点")} count={`${deepGraphCandidates.length} ${tRX(language, "complete", "完整")}`} style={{ marginBottom: 16 }}>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 8, marginBottom: deepGraphCandidates.length ? 12 : 0 }}>
+                <MetricMini label={tRX(language, "Complete chains", "完整链路")} value={deepGraphCandidates.length} />
+                <MetricMini label={tRX(language, "Incomplete chains", "不完整链路")} value={incompleteGraphCandidates.length} />
+                <MetricMini label={tRX(language, "Max hops", "最大跳数")} value={Math.max(0, ...candidates.map(c => c.deep_graph_profile?.hop_count || 0))} />
+                <MetricMini label={tRX(language, "Required path", "要求路径")} value="5 steps" />
+              </div>
+              {deepGraphCandidates.length === 0 ? (
+                <div style={{ color: "var(--muted)", fontFamily: "var(--font-mono)", fontSize: 11 }}>
+                  {tRX(language, "No complete deep graph findings yet. A complete finding must connect hazard, chokepoint, dependent country, risk metric, and recommended action.", "尚无完整深度图发现。完整发现必须连接风险因子、咽喉点、依赖国家、风险指标和建议动作。")}
+                </div>
+              ) : (
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  {deepGraphCandidates.slice(0, 3).map(c => (
+                    <DeepGraphPathCard key={c.canonical_key} profile={c.deep_graph_profile} title={displayCandidateTitleRX(c, language)} language={language} compact />
+                  ))}
+                </div>
+              )}
+            </Panel>
+
             <Panel eyebrow={tRX(language, "Hypothesis queue", "假设队列")} title={tRX(language, "Queued reasoning hypotheses", "排队中的推理假设")} count={`${hypotheses.length} ${tRX(language, "items", "项")}`} style={{ marginBottom: 16 }}>
               {hypotheses.length === 0 ? (
                 <div style={{ color: "var(--muted)", fontFamily: "var(--font-mono)", fontSize: 11 }}>
@@ -2042,6 +2064,9 @@ function AutopilotWorkspace({
                         <strong style={{ color: "var(--text)", fontSize: 14 }}>{displayCandidateTitleRX(c, language)}</strong>
                       </div>
                       <div style={{ color: "var(--text-dim)", fontSize: 13, lineHeight: 1.55 }}>{displayCandidateConclusionRX(c, language)}</div>
+                      {c.deep_graph_profile && (
+                        <DeepGraphPathCard profile={c.deep_graph_profile} title={tRX(language, "Finding path", "发现路径")} language={language} />
+                      )}
                       <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 8, marginTop: 12 }}>
                         <MetricMini label={tRX(language, "Value", "价值")} value={pctRX(c.value_score, 0)} />
                         <MetricMini label={tRX(language, "Confidence", "置信度")} value={pctRX(c.confidence, 0)} />
@@ -2126,6 +2151,69 @@ function AutopilotWorkspace({
       </div>
     </React.Fragment>
   );
+}
+
+function DeepGraphPathCard({ profile, title, language, compact = false }) {
+  if (!profile) return null;
+  const observed = profile.observed_steps || [];
+  const missing = profile.missing_steps || [];
+  const path = profile.path || [];
+  return (
+    <div style={{
+      marginTop: compact ? 0 : 12,
+      padding: compact ? "9px 10px" : "10px 12px",
+      border: "1px solid var(--line)",
+      background: profile.multi_hop ? "oklch(0.7 0.11 155 / 0.08)" : "oklch(0.78 0.14 75 / 0.08)",
+    }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+        <span className="eyebrow" style={{ color: profile.multi_hop ? "var(--approved)" : "var(--changes)" }}>
+          {profile.multi_hop ? tRX(language, "deep graph finding", "深度图发现") : tRX(language, "partial graph chain", "部分图链路")}
+        </span>
+        <strong style={{ fontSize: 12, color: "var(--text)" }}>{title}</strong>
+        <span className="mono" style={{ marginLeft: "auto", color: "var(--muted)", fontSize: 10 }}>
+          {profile.hop_count || 0} {tRX(language, "hops", "跳")}
+        </span>
+      </div>
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+        {(profile.required_steps || []).map(step => {
+          const ok = observed.includes(step);
+          return (
+            <span key={step} className="mono" style={{
+              fontSize: 10,
+              padding: "4px 6px",
+              border: "1px solid var(--line)",
+              color: ok ? "var(--approved)" : "var(--muted)",
+              background: ok ? "oklch(0.7 0.11 155 / 0.08)" : "var(--bg-1)",
+            }}>
+              {ok ? "✓ " : "· "}{graphStepLabelRX(step, language)}
+            </span>
+          );
+        })}
+      </div>
+      {path.length > 0 && !compact && (
+        <div className="mono" style={{ marginTop: 8, fontSize: 10, color: "var(--muted)", lineHeight: 1.45 }}>
+          {path.map(node => node.label).filter(Boolean).join(" -> ")}
+        </div>
+      )}
+      {missing.length > 0 && (
+        <div style={{ marginTop: 8, color: "var(--changes)", fontSize: 11 }}>
+          {tRX(language, "Missing", "缺失")}: {missing.map(step => graphStepLabelRX(step, language)).join(" / ")}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function graphStepLabelRX(step, language) {
+  const labels = {
+    hazard: ["hazard", "风险因子"],
+    chokepoint: ["chokepoint", "咽喉点"],
+    dependent_country: ["dependent country", "依赖国家"],
+    risk_metric: ["risk metric", "风险指标"],
+    recommended_action: ["recommended action", "建议动作"],
+  };
+  const pair = labels[step] || [step, step];
+  return tRX(language, pair[0], pair[1]);
 }
 
 function AutopilotStartPanel({ tenant, objective, setObjective, maxHypotheses, setMaxHypotheses, maxRuns, setMaxRuns, maxToolCalls, setMaxToolCalls, starting, onStart, onRunPlaybook, playbookRunning, detail }) {
