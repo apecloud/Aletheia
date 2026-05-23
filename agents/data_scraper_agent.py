@@ -5,6 +5,8 @@ from sqlalchemy import create_engine
 from urllib.parse import urlparse
 import argparse
 import logging
+import sys
+from pathlib import Path
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger("GenericDataScraperAgent")
@@ -100,8 +102,42 @@ if __name__ == "__main__":
     parser.add_argument("--type", default="csv", choices=["csv", "json"], help="File type (csv or json)")
     parser.add_argument("--db", default=os.environ.get("ALETHEIA_MYSQL_URL", f"mysql+pymysql://aletheia_user:aletheia_password@127.0.0.1:3306/{os.environ.get('ALETHEIA_MYSQL_DB', 'aletheia_test_data')}"), 
                         help="MySQL connection string")
+    parser.add_argument("--tenant", default=os.environ.get("ALETHEIA_TENANT", "default"), help="Tenant used for optional ontology web enrichment")
+    parser.add_argument("--enrich-web", action="store_true", help="After data import, create draft web enrichment proposals for ontology artifacts")
+    parser.add_argument("--metadata-db", default=os.environ.get("ALETHEIA_PG_URL", f"postgresql+psycopg2://aletheia_pg_user:aletheia_pg_password@127.0.0.1:5432/{os.environ.get('ALETHEIA_PG_DB', 'aletheia_ontology')}"), help="Metadata/PostGIS connection string for web enrichment")
+    parser.add_argument("--artifact", action="append", default=[], help="Ontology artifact key to enrich. Repeatable.")
+    parser.add_argument("--search-results-json", help="Deterministic search fixture for offline/test enrichment")
+    parser.add_argument("--seed-url", action="append", default=[], help="Seed URL used as a search result for enrichment. Repeatable.")
+    parser.add_argument("--enable-live-search", action="store_true", help="Use live web search for enrichment")
+    parser.add_argument("--allowed-domain", action="append", default=[], help="Domain allowlist for enrichment crawling. Repeatable.")
+    parser.add_argument("--allow-discovered-domains", action="store_true", help="Allow crawling public search-result domains outside allowlist")
+    parser.add_argument("--max-enrich-artifacts", type=int, default=5)
+    parser.add_argument("--max-results-per-query", type=int, default=3)
+    parser.add_argument("--max-crawl-pages", type=int, default=2)
     
     args = parser.parse_args()
     
     scraper = GenericDataScraper(db_url=args.db)
-    scraper.download_and_import(source_url=args.url, table_name=args.table, file_type=args.type)
+    ok = scraper.download_and_import(source_url=args.url, table_name=args.table, file_type=args.type)
+    if ok and args.enrich_web:
+        sys.path.append(str(Path(__file__).resolve().parent))
+        from web_enrichment_agent import WebEnrichmentAgent
+
+        enrichment = WebEnrichmentAgent(
+            metadata_db_url=args.metadata_db,
+            tenant=args.tenant,
+            search_results_json=args.search_results_json,
+            seed_urls=args.seed_url,
+            enable_live_search=args.enable_live_search,
+            allowed_domains=args.allowed_domain,
+            allow_discovered_domains=args.allow_discovered_domains,
+            max_artifacts=args.max_enrich_artifacts,
+            max_results_per_query=args.max_results_per_query,
+            max_crawl_pages=args.max_crawl_pages,
+        )
+        result = enrichment.run(artifact_keys=args.artifact or None)
+        logger.info(
+            "Web enrichment completed: run=%s proposals=%s",
+            result["run_key"],
+            result["proposal_count"],
+        )

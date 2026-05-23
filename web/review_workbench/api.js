@@ -169,6 +169,7 @@
       sourceSchema: a.source_schema || null,
       canonical: a.canonical || null,
       usedBy: a.used_by || [],
+      webEnrichment: a.web_enrichment || [],
       evidence: (a.evidence || []).map(normalizeEvidence),
       audit:    (a.reviews  || []).map(normalizeAudit),
       sourceRefs: a.source_refs || [],
@@ -263,6 +264,14 @@
         body: JSON.stringify(body || {}),
       });
       return normalizeArtifact(data.artifact || data);
+    },
+
+    async webEnrichmentProposals(tenant, artifact, limit = 50) {
+      const qs = {};
+      if (artifact) qs.artifact = artifact;
+      if (limit) qs.limit = String(limit);
+      const data = await fetchJson(withTenantQs("/api/web-enrichment/proposals", tenant, qs));
+      return data;
     },
 
     async graphContext(tenant, { type, id, depth = 1, limit = 200 } = {}) {

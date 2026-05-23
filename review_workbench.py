@@ -675,6 +675,63 @@ class ReviewRepository:
             "stats": [dict(row) for row in stats],
         }
 
+    def list_web_enrichment(self, tenant, target_artifact_key=None, limit=50):
+        params = {"tenant_id": tenant.tenant_id, "limit": limit}
+        conditions = ["p.project_id = :tenant_id"]
+        if target_artifact_key:
+            conditions.append("p.target_artifact_key = :target_artifact_key")
+            params["target_artifact_key"] = target_artifact_key
+        where = " AND ".join(conditions)
+        try:
+            with self.engine_for(tenant).connect() as conn:
+                rows = conn.execute(
+                    text(
+                        f"""
+                        SELECT p.proposal_key, p.target_artifact_key, p.source_url,
+                               p.source_title, p.summary, p.raw_payload_json,
+                               p.content_hash, p.confidence, p.status, p.created_at,
+                               r.run_key, r.search_provider, r.safety_profile_json,
+                               r.budget_json, r.skipped_sources_json
+                        FROM aletheia_web_enrichment_proposals p
+                        JOIN aletheia_web_enrichment_runs r ON r.id = p.run_id
+                        WHERE {where}
+                        ORDER BY p.created_at DESC, p.id DESC
+                        LIMIT :limit
+                        """
+                    ),
+                    params,
+                ).mappings().all()
+        except Exception as exc:
+            return {
+                "tenant": tenant.public_dict(),
+                "proposals": [],
+                "degraded": True,
+                "degraded_reason": _safe_error_message(exc),
+            }
+        return {
+            "tenant": tenant.public_dict(),
+            "proposals": [
+                {
+                    "proposal_key": row["proposal_key"],
+                    "target_artifact_key": row["target_artifact_key"],
+                    "source_url": row["source_url"],
+                    "source_title": row["source_title"],
+                    "summary": row["summary"],
+                    "raw_payload": _load_json(row["raw_payload_json"], {}),
+                    "content_hash": row["content_hash"],
+                    "confidence": row["confidence"],
+                    "status": row["status"],
+                    "created_at": str(row["created_at"]) if row["created_at"] else None,
+                    "run_key": row["run_key"],
+                    "search_provider": row["search_provider"],
+                    "safety_profile": _load_json(row["safety_profile_json"], {}),
+                    "budget": _load_json(row["budget_json"], {}),
+                    "skipped_sources": _load_json(row["skipped_sources_json"], []),
+                }
+                for row in rows
+            ],
+        }
+
     def get_artifact(self, tenant, canonical_key):
         with self.engine_for(tenant).connect() as conn:
             artifact = conn.execute(
@@ -752,6 +809,7 @@ class ReviewRepository:
             for row in reviews
         ]
         result["used_by"] = self.used_by(tenant, result)
+        result["web_enrichment"] = self.list_web_enrichment(tenant, canonical_key, limit=20).get("proposals", [])
         return result
 
     def used_by(self, tenant, artifact):
@@ -5859,6 +5917,15 @@ class ReviewWorkbenchHandler(BaseHTTPRequestHandler):
             if "q" in filters and "search" not in filters:
                 filters["search"] = filters.pop("q")
             self._send_json(self.repository.list_artifacts(tenant, filters))
+            return
+        if parsed.path == "/api/web-enrichment/proposals":
+            query = parse_qs(parsed.query)
+            artifact_key = query.get("artifact", [None])[0]
+            try:
+                limit = int(query.get("limit", ["50"])[0])
+                self._send_json(self.repository.list_web_enrichment(tenant, artifact_key, limit=limit))
+            except ValueError as exc:
+                self._send_error(HTTPStatus.BAD_REQUEST, str(exc))
             return
         if parsed.path.startswith("/api/ontology/"):
             canonical_key = unquote(parsed.path.removeprefix("/api/ontology/"))

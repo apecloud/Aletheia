@@ -265,6 +265,11 @@ function Ontology({ data, tenant }) {
                     <Panel eyebrow="Raw source" title="Source refs and evidence" count={`${sourceRefs.length + evidence.length} refs`} nopad style={{ marginBottom: 16 }}>
                       <SourceList sourceRefs={sourceRefs} evidence={evidence} />
                     </Panel>
+                    {(selected.webEnrichment || []).length > 0 && (
+                      <Panel eyebrow="Web enrichment" title="External evidence proposals" count={`${selected.webEnrichment.length} drafts`} nopad style={{ marginBottom: 16 }}>
+                        <WebEnrichmentList proposals={selected.webEnrichment || []} />
+                      </Panel>
+                    )}
                     <Panel eyebrow="Schema map" title="Tenant ontology structure">
                       <SchemaDiagram artifacts={artifacts} selectedKey={canonicalKey} onSelect={setSelectedId} />
                     </Panel>
@@ -446,6 +451,50 @@ function SourceList({ sourceRefs, evidence }) {
           </div>
         </div>
       ))}
+    </div>
+  );
+}
+
+function WebEnrichmentList({ proposals }) {
+  if (!proposals.length) {
+    return <div style={{ padding: 24, fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--muted)" }}>No web enrichment proposals recorded.</div>;
+  }
+  return (
+    <div className="evidence-list">
+      {proposals.map((p, i) => {
+        const raw = p.raw_payload || {};
+        const source = raw.source || {};
+        const fields = raw.field_provenance || [];
+        return (
+          <div key={p.proposal_key || i} className="evidence-item hypothesis">
+            <div className="v-bar" />
+            <div className="kind">web proposal</div>
+            <div className="body-x">
+              <div className="title">{p.source_title || p.proposal_key}</div>
+              <div className="src">{p.source_url}</div>
+              <div style={{ marginTop: 6, color: "var(--text-dim)" }}>{p.summary}</div>
+              <dl className="kv" style={{ marginTop: 10 }}>
+                <dt>Proposal</dt><dd>{p.proposal_key}</dd>
+                <dt>Target</dt><dd>{p.target_artifact_key}</dd>
+                <dt>Query</dt><dd>{source.search_query || "unknown"}</dd>
+                <dt>Retrieved</dt><dd>{source.retrieved_at || p.created_at || "unknown"}</dd>
+                <dt>Robots risk</dt><dd>{source.robots_risk || "not recorded"}</dd>
+                <dt>License risk</dt><dd>{source.license_risk || "not recorded"}</dd>
+                <dt>Write boundary</dt><dd>{raw.governance?.canonical_writes || "disabled"} canonical · {raw.governance?.graph_writes || "disabled"} graph</dd>
+              </dl>
+              {fields.length > 0 && (
+                <div style={{ marginTop: 10, fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--muted)" }}>
+                  field provenance: {fields.map(f => f.artifact_field).join(", ")}
+                </div>
+              )}
+            </div>
+            <div className="conf-side">
+              <span style={{ color: "var(--text)" }}>{Math.round((p.confidence || 0) * 100)}%</span>
+              <span style={{ color: "var(--dim)", fontSize: 9, marginTop: 2 }}>confidence</span>
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
 }

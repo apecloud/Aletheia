@@ -22,6 +22,7 @@ The pipeline is a sequence of Python agents powered by `litellm` + `instructor` 
 | Extract | `data_profiler_agent` | Profiles distributions to infer semantic types |
 | Extract | `business_context_agent` | Aligns tables with business terminology from `./docs/` |
 | Extract | `data_scraper_agent` | Ingests CSV/JSON/JSONL from URLs or local paths |
+| Enrich | `web_enrichment_agent` | Searches/crawls public web sources to attach draft ontology enrichment evidence |
 | Model | `object_modeler_agent` | Collapses normalized tables into business objects |
 | Model | `link_weaver_agent` | Discovers explicit and implicit relationships |
 | Model | `action_synthesizer_agent` | Maps stored procedures/triggers to safe actions |
@@ -29,6 +30,46 @@ The pipeline is a sequence of Python agents powered by `litellm` + `instructor` 
 | Reason | `ontology_reasoning_agent` | Multi-hop graph reasoning over live subgraphs |
 
 Supporting modules: `graph_db_client` (Nebula client), `ontology_artifacts` (artifact schema), `tenant_registry` (multi-tenant routing), `hf_dataset_scraper` (HuggingFace dataset loader).
+
+### Optional Web Enrichment During Ingestion
+
+Web enrichment can be run after a dataset import to collect outside context for
+current ontology candidates. It is deliberately draft-only:
+
+- writes only `WebEnrichment` draft artifacts plus `web_source` evidence
+- records query, URL, retrieval time, summary, confidence, robots/license risk,
+  and field-level provenance
+- never approves ontology artifacts and never writes canonical graph state
+- blocks localhost/private-network URLs, secret-bearing URLs, and crawling
+  outside the configured domain policy
+
+Deterministic/offline fixture mode is the recommended CI path:
+
+```bash
+.venv/bin/python agents/web_enrichment_agent.py \
+  --tenant maritime-risk \
+  --artifact object:chokepoint \
+  --search-results-json reports/web-enrichment-fixture.json \
+  --allowed-domain zenodo.org \
+  --json
+```
+
+Live search must be explicitly enabled and should stay bounded:
+
+```bash
+.venv/bin/python agents/web_enrichment_agent.py \
+  --tenant maritime-risk \
+  --artifact object:chokepoint \
+  --enable-live-search \
+  --allowed-domain zenodo.org \
+  --max-artifacts 1 \
+  --max-results-per-query 2 \
+  --max-crawl-pages 1
+```
+
+`data_scraper_agent.py` also accepts `--enrich-web` with the same safety
+options, so ingestion can import a CSV/JSON dataset and then create reviewable
+web enrichment proposals in the same run.
 
 ## Quick Start
 

@@ -17,7 +17,31 @@
         keys: ["employee_id"],
         properties: ["first_name","last_name","title","manager_id","hired_at","status"],
         provenance: { table: "hr.employees", rows: 218 }
-      }
+      },
+      webEnrichment: [
+        {
+          proposal_key: "webenrichment:object_employee:demo",
+          target_artifact_key: "object:employee",
+          source_url: "https://example.org/employee-master-data-governance",
+          source_title: "Employee master data governance reference",
+          summary: "External reference suggests employee master records should preserve manager hierarchy, employment status, and source ownership as reviewable context.",
+          confidence: 0.64,
+          status: "draft",
+          created_at: "2026-05-23 22:00",
+          raw_payload: {
+            source: {
+              search_query: "Employee ontology definition source evidence",
+              retrieved_at: "2026-05-23T14:00:00Z",
+              robots_risk: "demo fixture; reviewer must verify robots policy",
+              license_risk: "not detected; reviewer must verify reuse terms"
+            },
+            field_provenance: [
+              { artifact_field: "description", source_url: "https://example.org/employee-master-data-governance", proposed_operation: "enrich_context", review_required: true }
+            ],
+            governance: { canonical_writes: "disabled", graph_writes: "disabled", review_gate: "ontology_review_required" }
+          }
+        }
+      ]
     },
     {
       id: "LT-RPT-014",

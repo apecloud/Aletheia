@@ -172,6 +172,46 @@ class ArtifactReviewEvent(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
+class WebEnrichmentRun(Base):
+    __tablename__ = "aletheia_web_enrichment_runs"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    project_id = Column(String(255), nullable=False, default="default")
+    run_key = Column(String(255), nullable=False)
+    source_agent = Column(String(255), nullable=False, default="WebEnrichmentAgent")
+    search_provider = Column(String(100), nullable=False, default="offline")
+    status = Column(String(50), nullable=False, default="running")
+    target_artifacts_json = Column(Text, nullable=False, default="[]")
+    safety_profile_json = Column(Text, nullable=False, default="{}")
+    budget_json = Column(Text, nullable=False, default="{}")
+    skipped_sources_json = Column(Text, nullable=False, default="[]")
+    query_count = Column(Integer, nullable=False, default=0)
+    result_count = Column(Integer, nullable=False, default=0)
+    proposal_count = Column(Integer, nullable=False, default=0)
+    error = Column(Text)
+    started_at = Column(DateTime, default=datetime.utcnow)
+    finished_at = Column(DateTime)
+
+
+class WebEnrichmentProposal(Base):
+    __tablename__ = "aletheia_web_enrichment_proposals"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    run_id = Column(Integer, ForeignKey("aletheia_web_enrichment_runs.id"), nullable=False)
+    project_id = Column(String(255), nullable=False, default="default")
+    proposal_key = Column(String(255), nullable=False)
+    target_artifact_key = Column(String(255), nullable=False)
+    ontology_artifact_id = Column(Integer, ForeignKey("aletheia_ontology_artifacts.id"))
+    source_url = Column(String(1000), nullable=False)
+    source_title = Column(String(1000))
+    summary = Column(Text)
+    raw_payload_json = Column(Text, nullable=False, default="{}")
+    content_hash = Column(String(128), nullable=False)
+    confidence = Column(Float, nullable=False, default=0.65)
+    status = Column(String(50), nullable=False, default="draft")
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
 class ReasoningTask(Base):
     __tablename__ = "aletheia_reasoning_tasks"
 
@@ -475,6 +515,10 @@ def ensure_artifact_schema(engine) -> None:
         conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_aletheia_reasoning_findings_project_key ON aletheia_reasoning_findings (project_id, canonical_key)"))
         conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_aletheia_agent_policies_project_key ON aletheia_agent_policies (project_id, policy_id)"))
         conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_aletheia_agent_runs_project_key ON aletheia_agent_runs (project_id, run_key)"))
+        conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_aletheia_web_enrichment_runs_project_key ON aletheia_web_enrichment_runs (project_id, run_key)"))
+        conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_aletheia_web_enrichment_proposals_project_key ON aletheia_web_enrichment_proposals (project_id, proposal_key)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_aletheia_web_enrichment_target ON aletheia_web_enrichment_proposals (project_id, target_artifact_key)"))
+        conn.execute(text("ALTER TABLE aletheia_web_enrichment_runs ADD COLUMN IF NOT EXISTS skipped_sources_json TEXT NOT NULL DEFAULT '[]'"))
 
 
 def _project_id_for(row) -> str:
