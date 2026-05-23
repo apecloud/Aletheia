@@ -1,0 +1,741 @@
+{
+  "creditcardfraud_types": {
+    "tenant": {
+      "tenant_id": "creditcardfraud",
+      "namespace": "creditcardfraud",
+      "display_name": "Credit Card Fraud Dataset",
+      "graph_database": "creditcardfraud",
+      "status": "active"
+    },
+    "types": [
+      {
+        "type": "CreditCardTransaction",
+        "label": "Credit Card Transaction",
+        "table": "credit_card_transactions_safe",
+        "ontology_artifact": "object:credit_card_transaction",
+        "tenant_id": "creditcardfraud"
+      },
+      {
+        "type": "Account",
+        "label": "Account",
+        "table": "credit_card_transactions_safe",
+        "ontology_artifact": "object:account",
+        "tenant_id": "creditcardfraud"
+      },
+      {
+        "type": "Card",
+        "label": "Card",
+        "table": "credit_card_transactions_safe",
+        "ontology_artifact": "object:card",
+        "tenant_id": "creditcardfraud"
+      },
+      {
+        "type": "Merchant",
+        "label": "Merchant",
+        "table": "credit_card_transactions_safe",
+        "ontology_artifact": "object:merchant",
+        "tenant_id": "creditcardfraud"
+      }
+    ]
+  },
+  "default_types": {
+    "tenant": {
+      "tenant_id": "default",
+      "namespace": "northwind",
+      "display_name": "Northwind Demo",
+      "graph_database": "aletheia",
+      "status": "active"
+    },
+    "types": [
+      {
+        "type": "Employee",
+        "label": "Employee",
+        "table": "employees",
+        "ontology_artifact": "object:employee",
+        "tenant_id": "default"
+      },
+      {
+        "type": "Order",
+        "label": "Order",
+        "table": "orders",
+        "ontology_artifact": "object:order",
+        "tenant_id": "default"
+      },
+      {
+        "type": "Customer",
+        "label": "Customer",
+        "table": "customers",
+        "ontology_artifact": "object:customer",
+        "tenant_id": "default"
+      },
+      {
+        "type": "Product",
+        "label": "Product",
+        "table": "products",
+        "ontology_artifact": "object:product",
+        "tenant_id": "default"
+      },
+      {
+        "type": "Category",
+        "label": "Category",
+        "table": "categories",
+        "ontology_artifact": "object:category",
+        "tenant_id": "default"
+      }
+    ]
+  },
+  "fraud_transaction_search": {
+    "instances": [
+      {
+        "id": "CreditCardTransaction:1",
+        "tenant_id": "creditcardfraud",
+        "namespace": "creditcardfraud",
+        "graph_database": "creditcardfraud",
+        "type": "CreditCardTransaction",
+        "label": "Transaction #1",
+        "source_table": "credit_card_transactions_safe",
+        "source_pk": "transaction_id=1",
+        "ontology_artifact": "object:credit_card_transaction",
+        "status": "approved"
+      },
+      {
+        "id": "CreditCardTransaction:2",
+        "tenant_id": "creditcardfraud",
+        "namespace": "creditcardfraud",
+        "graph_database": "creditcardfraud",
+        "type": "CreditCardTransaction",
+        "label": "Transaction #2",
+        "source_table": "credit_card_transactions_safe",
+        "source_pk": "transaction_id=2",
+        "ontology_artifact": "object:credit_card_transaction",
+        "status": "approved"
+      },
+      {
+        "id": "CreditCardTransaction:3",
+        "tenant_id": "creditcardfraud",
+        "namespace": "creditcardfraud",
+        "graph_database": "creditcardfraud",
+        "type": "CreditCardTransaction",
+        "label": "Transaction #3",
+        "source_table": "credit_card_transactions_safe",
+        "source_pk": "transaction_id=3",
+        "ontology_artifact": "object:credit_card_transaction",
+        "status": "approved"
+      }
+    ],
+    "approved": true,
+    "tenant": {
+      "tenant_id": "creditcardfraud",
+      "namespace": "creditcardfraud",
+      "display_name": "Credit Card Fraud Dataset",
+      "graph_database": "creditcardfraud",
+      "status": "active"
+    }
+  },
+  "fraud_account_search": {
+    "instances": [
+      {
+        "id": "Account:100088067",
+        "tenant_id": "creditcardfraud",
+        "namespace": "creditcardfraud",
+        "graph_database": "creditcardfraud",
+        "type": "Account",
+        "label": "Account 100088067",
+        "source_table": "credit_card_transactions_safe",
+        "source_pk": "accountNumber=100088067",
+        "ontology_artifact": "object:account",
+        "status": "approved"
+      },
+      {
+        "id": "Account:100108752",
+        "tenant_id": "creditcardfraud",
+        "namespace": "creditcardfraud",
+        "graph_database": "creditcardfraud",
+        "type": "Account",
+        "label": "Account 100108752",
+        "source_table": "credit_card_transactions_safe",
+        "source_pk": "accountNumber=100108752",
+        "ontology_artifact": "object:account",
+        "status": "approved"
+      },
+      {
+        "id": "Account:100328049",
+        "tenant_id": "creditcardfraud",
+        "namespace": "creditcardfraud",
+        "graph_database": "creditcardfraud",
+        "type": "Account",
+        "label": "Account 100328049",
+        "source_table": "credit_card_transactions_safe",
+        "source_pk": "accountNumber=100328049",
+        "ontology_artifact": "object:account",
+        "status": "approved"
+      }
+    ],
+    "approved": true,
+    "tenant": {
+      "tenant_id": "creditcardfraud",
+      "namespace": "creditcardfraud",
+      "display_name": "Credit Card Fraud Dataset",
+      "graph_database": "creditcardfraud",
+      "status": "active"
+    }
+  },
+  "fraud_employee_search": {
+    "tenant": {
+      "tenant_id": "creditcardfraud",
+      "namespace": "creditcardfraud",
+      "display_name": "Credit Card Fraud Dataset",
+      "graph_database": "creditcardfraud",
+      "status": "active"
+    },
+    "instances": [],
+    "approved": false,
+    "reason": "object:employee is not approved for tenant creditcardfraud"
+  },
+  "fraud_transaction_submit": {
+    "status": 200,
+    "body": {
+      "tenant": {
+        "tenant_id": "creditcardfraud",
+        "namespace": "creditcardfraud",
+        "display_name": "Credit Card Fraud Dataset",
+        "graph_database": "creditcardfraud",
+        "status": "active"
+      },
+      "task": {
+        "id": 34,
+        "tenant_id": "creditcardfraud",
+        "canonical_key": "reasoning:graph-scope:creditcardfraud-question-center-question-scope-creditcardtransaction-1-d1-n10-e10-qf862a058a1-rtask157-report",
+        "question": "Explain fraud risk signals for Transaction #1",
+        "scope": {
+          "allowed_link_keys": [],
+          "allowed_node_types": [
+            "CreditCardTransaction"
+          ],
+          "approved_only": true,
+          "center_edge": null,
+          "center_node": "CreditCardTransaction:1",
+          "depth": 1,
+          "edge_limit": 10,
+          "evidence_paths": [
+            {
+              "kind": "question_scope",
+              "label": "CreditCardTransaction:1",
+              "payload": {
+                "center_node": "CreditCardTransaction:1",
+                "scope": "tenant"
+              },
+              "source_ref": "question_center",
+              "summary": "Question Center scoped task for: Explain fraud risk signals for Transaction #1",
+              "url": "/graph.html?tenant=creditcardfraud&type=CreditCardTransaction&id=1&depth=1&limit=10"
+            },
+            {
+              "confidence": 0.78,
+              "kind": "prior_finding",
+              "label": "reviewed_inference",
+              "payload": {
+                "canonical_write": false,
+                "finding_key": "finding:approved:candidate-autopilot-autopilot-creditcardfraud-task156-smoke-1779422605-card-not-present-transactions-carry-elevated-fraud-risk",
+                "graph_write": false,
+                "reviewed_inference": true,
+                "status": "approved",
+                "title": "Card-not-present transactions carry elevated fraud risk"
+              },
+              "source_ref": "finding:approved:candidate-autopilot-autopilot-creditcardfraud-task156-smoke-1779422605-card-not-present-transactions-carry-elevated-fraud-risk",
+              "summary": "Card-not-present transactions show a fraud rate of 2.07% versus the dataset baseline of 1.58%, making this a high-value triage segment."
+            },
+            {
+              "confidence": 0.8,
+              "kind": "prior_finding",
+              "label": "reviewed_inference",
+              "payload": {
+                "canonical_write": false,
+                "finding_key": "finding:approved:candidate-autopilot-autopilot-creditcardfraud-task155-reaffirm-1779420848-missing-pos-entry-mode-should-be-reviewed-as-a-weak-control-pattern",
+                "graph_write": false,
+                "reviewed_inference": true,
+                "status": "approved",
+                "title": "Missing POS entry mode should be reviewed as a weak-control pattern"
+              },
+              "source_ref": "finding:approved:candidate-autopilot-autopilot-creditcardfraud-task155-reaffirm-1779420848-missing-pos-entry-mode-should-be-reviewed-as-a-weak-control-pattern",
+              "summary": "Transactions with missing POS entry mode show a fraud rate of 6.64%, materially above baseline."
+            },
+            {
+              "confidence": 0.8,
+              "kind": "prior_finding",
+              "label": "reviewed_inference",
+              "payload": {
+                "canonical_write": false,
+                "finding_key": "finding:approved:candidate-autopilot-autopilot-creditcardfraud-task155-owner-1779420848-missing-pos-entry-mode-should-be-reviewed-as-a-weak-control-pattern",
+                "graph_write": false,
+                "reviewed_inference": true,
+                "status": "approved",
+                "title": "Missing POS entry mode should be reviewed as a weak-control pattern"
+              },
+              "source_ref": "finding:approved:candidate-autopilot-autopilot-creditcardfraud-task155-owner-1779420848-missing-pos-entry-mode-should-be-reviewed-as-a-weak-control-pattern",
+              "summary": "Transactions with missing POS entry mode show a fraud rate of 6.64%, materially above baseline."
+            },
+            {
+              "confidence": 0.8,
+              "kind": "prior_finding",
+              "label": "reviewed_inference",
+              "payload": {
+                "canonical_write": false,
+                "finding_key": "finding:approved:candidate-autopilot-autopilot-creditcardfraud-task155-action-1779420848-missing-pos-entry-mode-should-be-reviewed-as-a-weak-control-pattern",
+                "graph_write": false,
+                "reviewed_inference": true,
+                "status": "approved",
+                "title": "Missing POS entry mode should be reviewed as a weak-control pattern"
+              },
+              "source_ref": "finding:approved:candidate-autopilot-autopilot-creditcardfraud-task155-action-1779420848-missing-pos-entry-mode-should-be-reviewed-as-a-weak-control-pattern",
+              "summary": "Transactions with missing POS entry mode show a fraud rate of 6.64%, materially above baseline."
+            },
+            {
+              "confidence": 0.78,
+              "kind": "prior_finding",
+              "label": "reviewed_inference",
+              "payload": {
+                "canonical_write": false,
+                "finding_key": "finding:approved:candidate-autopilot-autopilot-creditcardfraud-task154-smoke-1779420504-card-not-present-transactions-carry-elevated-fraud-risk",
+                "graph_write": false,
+                "reviewed_inference": true,
+                "status": "approved",
+                "title": "Card-not-present transactions carry elevated fraud risk"
+              },
+              "source_ref": "finding:approved:candidate-autopilot-autopilot-creditcardfraud-task154-smoke-1779420504-card-not-present-transactions-carry-elevated-fraud-risk",
+              "summary": "Card-not-present transactions show a fraud rate of 2.07% versus the dataset baseline of 1.58%, making this a high-value triage segment."
+            }
+          ],
+          "graph_url": "/graph.html?tenant=creditcardfraud&type=CreditCardTransaction&id=1&depth=1&limit=10",
+          "node_limit": 10,
+          "prior_findings": [
+            {
+              "confidence": 0.78,
+              "kind": "prior_finding",
+              "label": "reviewed_inference",
+              "payload": {
+                "canonical_write": false,
+                "finding_key": "finding:approved:candidate-autopilot-autopilot-creditcardfraud-task156-smoke-1779422605-card-not-present-transactions-carry-elevated-fraud-risk",
+                "graph_write": false,
+                "reviewed_inference": true,
+                "status": "approved",
+                "title": "Card-not-present transactions carry elevated fraud risk"
+              },
+              "source_ref": "finding:approved:candidate-autopilot-autopilot-creditcardfraud-task156-smoke-1779422605-card-not-present-transactions-carry-elevated-fraud-risk",
+              "summary": "Card-not-present transactions show a fraud rate of 2.07% versus the dataset baseline of 1.58%, making this a high-value triage segment."
+            },
+            {
+              "confidence": 0.8,
+              "kind": "prior_finding",
+              "label": "reviewed_inference",
+              "payload": {
+                "canonical_write": false,
+                "finding_key": "finding:approved:candidate-autopilot-autopilot-creditcardfraud-task155-reaffirm-1779420848-missing-pos-entry-mode-should-be-reviewed-as-a-weak-control-pattern",
+                "graph_write": false,
+                "reviewed_inference": true,
+                "status": "approved",
+                "title": "Missing POS entry mode should be reviewed as a weak-control pattern"
+              },
+              "source_ref": "finding:approved:candidate-autopilot-autopilot-creditcardfraud-task155-reaffirm-1779420848-missing-pos-entry-mode-should-be-reviewed-as-a-weak-control-pattern",
+              "summary": "Transactions with missing POS entry mode show a fraud rate of 6.64%, materially above baseline."
+            },
+            {
+              "confidence": 0.8,
+              "kind": "prior_finding",
+              "label": "reviewed_inference",
+              "payload": {
+                "canonical_write": false,
+                "finding_key": "finding:approved:candidate-autopilot-autopilot-creditcardfraud-task155-owner-1779420848-missing-pos-entry-mode-should-be-reviewed-as-a-weak-control-pattern",
+                "graph_write": false,
+                "reviewed_inference": true,
+                "status": "approved",
+                "title": "Missing POS entry mode should be reviewed as a weak-control pattern"
+              },
+              "source_ref": "finding:approved:candidate-autopilot-autopilot-creditcardfraud-task155-owner-1779420848-missing-pos-entry-mode-should-be-reviewed-as-a-weak-control-pattern",
+              "summary": "Transactions with missing POS entry mode show a fraud rate of 6.64%, materially above baseline."
+            },
+            {
+              "confidence": 0.8,
+              "kind": "prior_finding",
+              "label": "reviewed_inference",
+              "payload": {
+                "canonical_write": false,
+                "finding_key": "finding:approved:candidate-autopilot-autopilot-creditcardfraud-task155-action-1779420848-missing-pos-entry-mode-should-be-reviewed-as-a-weak-control-pattern",
+                "graph_write": false,
+                "reviewed_inference": true,
+                "status": "approved",
+                "title": "Missing POS entry mode should be reviewed as a weak-control pattern"
+              },
+              "source_ref": "finding:approved:candidate-autopilot-autopilot-creditcardfraud-task155-action-1779420848-missing-pos-entry-mode-should-be-reviewed-as-a-weak-control-pattern",
+              "summary": "Transactions with missing POS entry mode show a fraud rate of 6.64%, materially above baseline."
+            },
+            {
+              "confidence": 0.78,
+              "kind": "prior_finding",
+              "label": "reviewed_inference",
+              "payload": {
+                "canonical_write": false,
+                "finding_key": "finding:approved:candidate-autopilot-autopilot-creditcardfraud-task154-smoke-1779420504-card-not-present-transactions-carry-elevated-fraud-risk",
+                "graph_write": false,
+                "reviewed_inference": true,
+                "status": "approved",
+                "title": "Card-not-present transactions carry elevated fraud risk"
+              },
+              "source_ref": "finding:approved:candidate-autopilot-autopilot-creditcardfraud-task154-smoke-1779420504-card-not-present-transactions-carry-elevated-fraud-risk",
+              "summary": "Card-not-present transactions show a fraud rate of 2.07% versus the dataset baseline of 1.58%, making this a high-value triage segment."
+            }
+          ],
+          "review_gate": "draft_only",
+          "source": "question_center",
+          "tenant_id": "creditcardfraud"
+        },
+        "allowed_tools": [
+          "graph_query",
+          "instance_lookup",
+          "edge_lookup",
+          "artifact_lookup",
+          "propose_finding",
+          "propose_action"
+        ],
+        "status": "active",
+        "created_at": "2026-05-22 12:17:21.484380",
+        "updated_at": "2026-05-22 12:17:21.484380"
+      },
+      "reasoning_url": "/reasoning.html?tenant=creditcardfraud&task=reasoning:graph-scope:creditcardfraud-question-center-question-scope-creditcardtransaction-1-d1-n10-e10-qf862a058a1-rtask157-report"
+    }
+  },
+  "fraud_employee_submit": {
+    "status": 400,
+    "body": {
+      "error": "center_node Employee:4 is outside the approved graph scope (node not found or not approved)"
+    }
+  },
+  "default_employee_search": {
+    "instances": [
+      {
+        "id": "Employee:1",
+        "tenant_id": "default",
+        "namespace": "northwind",
+        "graph_database": "aletheia",
+        "type": "Employee",
+        "label": "Nancy Davolio",
+        "source_table": "employees",
+        "source_pk": "employeeID=1",
+        "ontology_artifact": "object:employee",
+        "status": "approved"
+      },
+      {
+        "id": "Employee:2",
+        "tenant_id": "default",
+        "namespace": "northwind",
+        "graph_database": "aletheia",
+        "type": "Employee",
+        "label": "Andrew Fuller",
+        "source_table": "employees",
+        "source_pk": "employeeID=2",
+        "ontology_artifact": "object:employee",
+        "status": "approved"
+      },
+      {
+        "id": "Employee:3",
+        "tenant_id": "default",
+        "namespace": "northwind",
+        "graph_database": "aletheia",
+        "type": "Employee",
+        "label": "Janet Leverling",
+        "source_table": "employees",
+        "source_pk": "employeeID=3",
+        "ontology_artifact": "object:employee",
+        "status": "approved"
+      }
+    ],
+    "approved": true,
+    "tenant": {
+      "tenant_id": "default",
+      "namespace": "northwind",
+      "display_name": "Northwind Demo",
+      "graph_database": "aletheia",
+      "status": "active"
+    }
+  },
+  "checks": [
+    {
+      "name": "fraud_types_expected",
+      "ok": true,
+      "detail": [
+        "CreditCardTransaction",
+        "Account",
+        "Card",
+        "Merchant"
+      ]
+    },
+    {
+      "name": "fraud_types_no_employee_order",
+      "ok": true,
+      "detail": [
+        "CreditCardTransaction",
+        "Account",
+        "Card",
+        "Merchant"
+      ]
+    },
+    {
+      "name": "default_types_still_northwind",
+      "ok": true,
+      "detail": [
+        "Employee",
+        "Order",
+        "Customer",
+        "Product",
+        "Category"
+      ]
+    },
+    {
+      "name": "fraud_transaction_instances_real",
+      "ok": true,
+      "detail": {
+        "id": "CreditCardTransaction:1",
+        "tenant_id": "creditcardfraud",
+        "namespace": "creditcardfraud",
+        "graph_database": "creditcardfraud",
+        "type": "CreditCardTransaction",
+        "label": "Transaction #1",
+        "source_table": "credit_card_transactions_safe",
+        "source_pk": "transaction_id=1",
+        "ontology_artifact": "object:credit_card_transaction",
+        "status": "approved"
+      }
+    },
+    {
+      "name": "fraud_account_instances_real",
+      "ok": true,
+      "detail": {
+        "id": "Account:100088067",
+        "tenant_id": "creditcardfraud",
+        "namespace": "creditcardfraud",
+        "graph_database": "creditcardfraud",
+        "type": "Account",
+        "label": "Account 100088067",
+        "source_table": "credit_card_transactions_safe",
+        "source_pk": "accountNumber=100088067",
+        "ontology_artifact": "object:account",
+        "status": "approved"
+      }
+    },
+    {
+      "name": "fraud_employee_blocked",
+      "ok": true,
+      "detail": {
+        "tenant": {
+          "tenant_id": "creditcardfraud",
+          "namespace": "creditcardfraud",
+          "display_name": "Credit Card Fraud Dataset",
+          "graph_database": "creditcardfraud",
+          "status": "active"
+        },
+        "instances": [],
+        "approved": false,
+        "reason": "object:employee is not approved for tenant creditcardfraud"
+      }
+    },
+    {
+      "name": "fraud_transaction_submit_ok",
+      "ok": true,
+      "detail": 200
+    },
+    {
+      "name": "fraud_transaction_scope_not_northwind",
+      "ok": true,
+      "detail": {
+        "allowed_link_keys": [],
+        "allowed_node_types": [
+          "CreditCardTransaction"
+        ],
+        "approved_only": true,
+        "center_edge": null,
+        "center_node": "CreditCardTransaction:1",
+        "depth": 1,
+        "edge_limit": 10,
+        "evidence_paths": [
+          {
+            "kind": "question_scope",
+            "label": "CreditCardTransaction:1",
+            "payload": {
+              "center_node": "CreditCardTransaction:1",
+              "scope": "tenant"
+            },
+            "source_ref": "question_center",
+            "summary": "Question Center scoped task for: Explain fraud risk signals for Transaction #1",
+            "url": "/graph.html?tenant=creditcardfraud&type=CreditCardTransaction&id=1&depth=1&limit=10"
+          },
+          {
+            "confidence": 0.78,
+            "kind": "prior_finding",
+            "label": "reviewed_inference",
+            "payload": {
+              "canonical_write": false,
+              "finding_key": "finding:approved:candidate-autopilot-autopilot-creditcardfraud-task156-smoke-1779422605-card-not-present-transactions-carry-elevated-fraud-risk",
+              "graph_write": false,
+              "reviewed_inference": true,
+              "status": "approved",
+              "title": "Card-not-present transactions carry elevated fraud risk"
+            },
+            "source_ref": "finding:approved:candidate-autopilot-autopilot-creditcardfraud-task156-smoke-1779422605-card-not-present-transactions-carry-elevated-fraud-risk",
+            "summary": "Card-not-present transactions show a fraud rate of 2.07% versus the dataset baseline of 1.58%, making this a high-value triage segment."
+          },
+          {
+            "confidence": 0.8,
+            "kind": "prior_finding",
+            "label": "reviewed_inference",
+            "payload": {
+              "canonical_write": false,
+              "finding_key": "finding:approved:candidate-autopilot-autopilot-creditcardfraud-task155-reaffirm-1779420848-missing-pos-entry-mode-should-be-reviewed-as-a-weak-control-pattern",
+              "graph_write": false,
+              "reviewed_inference": true,
+              "status": "approved",
+              "title": "Missing POS entry mode should be reviewed as a weak-control pattern"
+            },
+            "source_ref": "finding:approved:candidate-autopilot-autopilot-creditcardfraud-task155-reaffirm-1779420848-missing-pos-entry-mode-should-be-reviewed-as-a-weak-control-pattern",
+            "summary": "Transactions with missing POS entry mode show a fraud rate of 6.64%, materially above baseline."
+          },
+          {
+            "confidence": 0.8,
+            "kind": "prior_finding",
+            "label": "reviewed_inference",
+            "payload": {
+              "canonical_write": false,
+              "finding_key": "finding:approved:candidate-autopilot-autopilot-creditcardfraud-task155-owner-1779420848-missing-pos-entry-mode-should-be-reviewed-as-a-weak-control-pattern",
+              "graph_write": false,
+              "reviewed_inference": true,
+              "status": "approved",
+              "title": "Missing POS entry mode should be reviewed as a weak-control pattern"
+            },
+            "source_ref": "finding:approved:candidate-autopilot-autopilot-creditcardfraud-task155-owner-1779420848-missing-pos-entry-mode-should-be-reviewed-as-a-weak-control-pattern",
+            "summary": "Transactions with missing POS entry mode show a fraud rate of 6.64%, materially above baseline."
+          },
+          {
+            "confidence": 0.8,
+            "kind": "prior_finding",
+            "label": "reviewed_inference",
+            "payload": {
+              "canonical_write": false,
+              "finding_key": "finding:approved:candidate-autopilot-autopilot-creditcardfraud-task155-action-1779420848-missing-pos-entry-mode-should-be-reviewed-as-a-weak-control-pattern",
+              "graph_write": false,
+              "reviewed_inference": true,
+              "status": "approved",
+              "title": "Missing POS entry mode should be reviewed as a weak-control pattern"
+            },
+            "source_ref": "finding:approved:candidate-autopilot-autopilot-creditcardfraud-task155-action-1779420848-missing-pos-entry-mode-should-be-reviewed-as-a-weak-control-pattern",
+            "summary": "Transactions with missing POS entry mode show a fraud rate of 6.64%, materially above baseline."
+          },
+          {
+            "confidence": 0.78,
+            "kind": "prior_finding",
+            "label": "reviewed_inference",
+            "payload": {
+              "canonical_write": false,
+              "finding_key": "finding:approved:candidate-autopilot-autopilot-creditcardfraud-task154-smoke-1779420504-card-not-present-transactions-carry-elevated-fraud-risk",
+              "graph_write": false,
+              "reviewed_inference": true,
+              "status": "approved",
+              "title": "Card-not-present transactions carry elevated fraud risk"
+            },
+            "source_ref": "finding:approved:candidate-autopilot-autopilot-creditcardfraud-task154-smoke-1779420504-card-not-present-transactions-carry-elevated-fraud-risk",
+            "summary": "Card-not-present transactions show a fraud rate of 2.07% versus the dataset baseline of 1.58%, making this a high-value triage segment."
+          }
+        ],
+        "graph_url": "/graph.html?tenant=creditcardfraud&type=CreditCardTransaction&id=1&depth=1&limit=10",
+        "node_limit": 10,
+        "prior_findings": [
+          {
+            "confidence": 0.78,
+            "kind": "prior_finding",
+            "label": "reviewed_inference",
+            "payload": {
+              "canonical_write": false,
+              "finding_key": "finding:approved:candidate-autopilot-autopilot-creditcardfraud-task156-smoke-1779422605-card-not-present-transactions-carry-elevated-fraud-risk",
+              "graph_write": false,
+              "reviewed_inference": true,
+              "status": "approved",
+              "title": "Card-not-present transactions carry elevated fraud risk"
+            },
+            "source_ref": "finding:approved:candidate-autopilot-autopilot-creditcardfraud-task156-smoke-1779422605-card-not-present-transactions-carry-elevated-fraud-risk",
+            "summary": "Card-not-present transactions show a fraud rate of 2.07% versus the dataset baseline of 1.58%, making this a high-value triage segment."
+          },
+          {
+            "confidence": 0.8,
+            "kind": "prior_finding",
+            "label": "reviewed_inference",
+            "payload": {
+              "canonical_write": false,
+              "finding_key": "finding:approved:candidate-autopilot-autopilot-creditcardfraud-task155-reaffirm-1779420848-missing-pos-entry-mode-should-be-reviewed-as-a-weak-control-pattern",
+              "graph_write": false,
+              "reviewed_inference": true,
+              "status": "approved",
+              "title": "Missing POS entry mode should be reviewed as a weak-control pattern"
+            },
+            "source_ref": "finding:approved:candidate-autopilot-autopilot-creditcardfraud-task155-reaffirm-1779420848-missing-pos-entry-mode-should-be-reviewed-as-a-weak-control-pattern",
+            "summary": "Transactions with missing POS entry mode show a fraud rate of 6.64%, materially above baseline."
+          },
+          {
+            "confidence": 0.8,
+            "kind": "prior_finding",
+            "label": "reviewed_inference",
+            "payload": {
+              "canonical_write": false,
+              "finding_key": "finding:approved:candidate-autopilot-autopilot-creditcardfraud-task155-owner-1779420848-missing-pos-entry-mode-should-be-reviewed-as-a-weak-control-pattern",
+              "graph_write": false,
+              "reviewed_inference": true,
+              "status": "approved",
+              "title": "Missing POS entry mode should be reviewed as a weak-control pattern"
+            },
+            "source_ref": "finding:approved:candidate-autopilot-autopilot-creditcardfraud-task155-owner-1779420848-missing-pos-entry-mode-should-be-reviewed-as-a-weak-control-pattern",
+            "summary": "Transactions with missing POS entry mode show a fraud rate of 6.64%, materially above baseline."
+          },
+          {
+            "confidence": 0.8,
+            "kind": "prior_finding",
+            "label": "reviewed_inference",
+            "payload": {
+              "canonical_write": false,
+              "finding_key": "finding:approved:candidate-autopilot-autopilot-creditcardfraud-task155-action-1779420848-missing-pos-entry-mode-should-be-reviewed-as-a-weak-control-pattern",
+              "graph_write": false,
+              "reviewed_inference": true,
+              "status": "approved",
+              "title": "Missing POS entry mode should be reviewed as a weak-control pattern"
+            },
+            "source_ref": "finding:approved:candidate-autopilot-autopilot-creditcardfraud-task155-action-1779420848-missing-pos-entry-mode-should-be-reviewed-as-a-weak-control-pattern",
+            "summary": "Transactions with missing POS entry mode show a fraud rate of 6.64%, materially above baseline."
+          },
+          {
+            "confidence": 0.78,
+            "kind": "prior_finding",
+            "label": "reviewed_inference",
+            "payload": {
+              "canonical_write": false,
+              "finding_key": "finding:approved:candidate-autopilot-autopilot-creditcardfraud-task154-smoke-1779420504-card-not-present-transactions-carry-elevated-fraud-risk",
+              "graph_write": false,
+              "reviewed_inference": true,
+              "status": "approved",
+              "title": "Card-not-present transactions carry elevated fraud risk"
+            },
+            "source_ref": "finding:approved:candidate-autopilot-autopilot-creditcardfraud-task154-smoke-1779420504-card-not-present-transactions-carry-elevated-fraud-risk",
+            "summary": "Card-not-present transactions show a fraud rate of 2.07% versus the dataset baseline of 1.58%, making this a high-value triage segment."
+          }
+        ],
+        "review_gate": "draft_only",
+        "source": "question_center",
+        "tenant_id": "creditcardfraud"
+      }
+    },
+    {
+      "name": "fraud_employee_submit_blocked",
+      "ok": true,
+      "detail": {
+        "status": 400,
+        "body": {
+          "error": "center_node Employee:4 is outside the approved graph scope (node not found or not approved)"
+        }
+      }
+    }
+  ]
+}

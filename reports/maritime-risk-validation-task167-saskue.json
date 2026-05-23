@@ -1,0 +1,226 @@
+{
+  "approved_artifacts_after": 0,
+  "approved_artifacts_before": 0,
+  "artifact_count": 15,
+  "artifact_status_counts": {
+    "draft": 15
+  },
+  "base": "http://127.0.0.1:8772",
+  "candidate_summary": [
+    {
+      "chain_len": 6,
+      "complete_hazard_to_action_path": true,
+      "kinds": [
+        "hazard",
+        "hazard",
+        "chokepoint",
+        "dependent_countries",
+        "risk_metric",
+        "recommended_action"
+      ],
+      "mentions_CHN_IND_USA": true,
+      "mentions_trade_metrics": true,
+      "metrics": [
+        "likelihood_conflict",
+        "severity_conflict",
+        "canal",
+        "top_trade_at_risk_v",
+        "top_trade_at_risk_v",
+        "country_priority_review"
+      ],
+      "missing_steps": [],
+      "non_null_hazard_values": [
+        0.673076923076923,
+        0.5
+      ],
+      "status": "draft",
+      "title": "Bab el-Mandeb risk propagation identifies countries for immediate review"
+    },
+    {
+      "chain_len": 6,
+      "complete_hazard_to_action_path": true,
+      "kinds": [
+        "hazard",
+        "chokepoint",
+        "dependent_country",
+        "risk_metric",
+        "risk_metric",
+        "recommended_action"
+      ],
+      "mentions_CHN_IND_USA": false,
+      "mentions_trade_metrics": true,
+      "metrics": [
+        "chokepoint",
+        "canal",
+        "iso3",
+        "trade_at_risk_v",
+        "trade_impacted",
+        "risk_review_queue"
+      ],
+      "missing_steps": [],
+      "non_null_hazard_values": [
+        "Taiwan Strait"
+      ],
+      "status": "draft",
+      "title": "Hazard-adjusted chokepoint risk should drive review priority"
+    },
+    {
+      "chain_len": 7,
+      "complete_hazard_to_action_path": true,
+      "kinds": [
+        "hazard",
+        "hazard",
+        "chokepoint",
+        "dependent_country",
+        "trade_metric",
+        "risk_metric",
+        "recommended_action"
+      ],
+      "mentions_CHN_IND_USA": false,
+      "mentions_trade_metrics": false,
+      "metrics": [
+        "likelihood_conflict",
+        "likelihood_geopolitical",
+        "canal",
+        "iso3",
+        "v_canal",
+        "v_canal / v",
+        "portfolio_review"
+      ],
+      "missing_steps": [],
+      "non_null_hazard_values": [
+        13.333333333333334
+      ],
+      "status": "draft",
+      "title": "Single chokepoint dependency creates concentrated country exposure"
+    }
+  ],
+  "checks": {
+    "all_candidates_complete_multihop": true,
+    "all_candidates_draft": true,
+    "artifacts_all_draft_15": true,
+    "bab_chain_CHN_IND_USA_metrics_action": true,
+    "catalog_tenant_isolation": true,
+    "has_pruned_volume_only": true,
+    "live_chokepoint_schema": true,
+    "no_canonical_graph_db_count_changes": true,
+    "playbook_created_expected_counts": true,
+    "session_draft_safety": true,
+    "source_row_counts_match": true,
+    "tenant_present": true,
+    "wrong_tenant_blocked": true
+  },
+  "chokepoint_schema": {
+    "fields": 29,
+    "schema_source": "live",
+    "status": 200,
+    "status_artifact": "draft",
+    "table": "maritime_chokepoint_risk_indicators"
+  },
+  "creditcardfraud_maritime_keys": [],
+  "db_counts_after": {
+    "aletheia_ontology_artifacts": 15,
+    "aletheia_reasoning_findings": 0
+  },
+  "db_counts_before": {
+    "aletheia_ontology_artifacts": 15,
+    "aletheia_reasoning_findings": 0
+  },
+  "default_maritime_keys": [],
+  "doi": "10.5281/zenodo.13841882",
+  "hypothesis_summary": [
+    {
+      "pruned_reason": null,
+      "status": "completed",
+      "title": "Single-chokepoint dependency can create concentrated country exposure"
+    },
+    {
+      "pruned_reason": null,
+      "status": "completed",
+      "title": "Hazard severity should be joined to dependent trade value before ranking chokepoints"
+    },
+    {
+      "pruned_reason": null,
+      "status": "completed",
+      "title": "Red Sea / Bab el-Mandeb escalation should prioritize dependent countries by systemic risk"
+    },
+    {
+      "pruned_reason": "Pruned because it is a ranking/reporting hypothesis without a complete hazard -> chokepoint -> country -> risk metric -> action path.",
+      "status": "pruned",
+      "title": "High throughput alone is not enough for a graph reasoning finding"
+    }
+  ],
+  "license": "CC-BY-4.0",
+  "metadata_artifact_counts": [
+    {
+      "artifact_type": "link",
+      "c": 7,
+      "status": "draft"
+    },
+    {
+      "artifact_type": "object",
+      "c": 8,
+      "status": "draft"
+    }
+  ],
+  "overall_pass": true,
+  "playbook_status": 200,
+  "session": {
+    "safety_profile": {
+      "allow_sensitive_fields": false,
+      "approved_only": true,
+      "auto_approve_findings": false,
+      "blocked_fields": [],
+      "canonical_writes": "disabled",
+      "masked_fields_only": true,
+      "safe_views_only": true,
+      "write_scope": "draft_only"
+    },
+    "scope": {
+      "approved_only": true,
+      "source_mode": "live_source_tables",
+      "source_surface": "maritime_risk_graph_reasoning_playbook",
+      "tables": [
+        "maritime_chokepoint_country_dependencies",
+        "maritime_chokepoint_risk_indicators",
+        "maritime_chokepoint_systemic_risk_results"
+      ],
+      "tenant": "maritime-risk"
+    },
+    "session_key": "autopilot:maritime-risk:task167-validation-pass",
+    "status": "draft"
+  },
+  "source_files": {
+    "chokepoint_country_dependencies.csv": {
+      "sha256": "66e110b87145e2911d525fd96162b64df7396fe569c838acd5d46d6987bc9c18",
+      "size_bytes": 651408,
+      "source_url": "https://zenodo.org/api/records/13841882/files/chokepoint_country_dependencies.csv/content"
+    },
+    "chokepoint_risk_indicators.csv": {
+      "sha256": "e4d81e9e11f46629b422a6d9c27a21523faab65fa65a7493adb5ec202ee9bc21",
+      "size_bytes": 2984,
+      "source_url": "https://zenodo.org/api/records/13841882/files/chokepoint_risk_indicators.csv/content"
+    },
+    "chokepoint_systemic_risk_results.csv": {
+      "sha256": "7e9dcd50c8fd55970c1e58aae742efde8dfebee224bb7576c93fe4f0e3d1024f",
+      "size_bytes": 3129683,
+      "source_url": "https://zenodo.org/api/records/13841882/files/chokepoint_systemic_risk_results.csv/content"
+    }
+  },
+  "source_record": "https://zenodo.org/records/13841882",
+  "source_row_counts": {
+    "maritime_chokepoint_country_dependencies": 4950,
+    "maritime_chokepoint_risk_indicators": 24,
+    "maritime_chokepoint_systemic_risk_results": 4752
+  },
+  "tenant": "maritime-risk",
+  "unexpected_db_count_changes": {},
+  "wrong_tenant_creditcardfraud": {
+    "message": "maritime-risk playbook requires tenant=maritime-risk",
+    "status": 400
+  },
+  "wrong_tenant_default": {
+    "message": "maritime-risk playbook requires tenant=maritime-risk",
+    "status": 400
+  }
+}

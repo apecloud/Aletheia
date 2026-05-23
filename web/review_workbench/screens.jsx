@@ -283,7 +283,7 @@ function Ontology({ data, tenant }) {
                 )}
 
                 {detailMode === "governance" && (
-                  <Panel eyebrow="Governance & Impact" title="Canonical readiness and downstream usage" count={(selected.usedBy || []).length || (canonicalKey ? "basis" : null)}>
+                  <Panel eyebrow="Lifecycle & usage" title="Canonical readiness and downstream usage" count={(selected.usedBy || []).length || (canonicalKey ? "basis" : null)}>
                     <div style={{ display: "grid", gap: 12 }}>
                       <GovernanceSummary selected={selected} tenant={tenant} tenantId={tenantId} />
                       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -323,11 +323,11 @@ function Ontology({ data, tenant }) {
           )}
         </div>
 
-        {/* governance summary */}
+        {/* catalog health summary */}
         <div style={{ display: "flex", flexDirection: "column", minHeight: 0 }}>
           <div style={{ padding: "var(--pad-3) var(--pad-4)", borderBottom: "1px solid var(--line)", background: "var(--bg-2)" }}>
-            <div className="eyebrow accent">Governance & Impact</div>
-            <div style={{ marginTop: 4, fontSize: 13, color: "var(--text)" }}>Canonical state and downstream usage</div>
+            <div className="eyebrow accent">Catalog health</div>
+            <div style={{ marginTop: 4, fontSize: 13, color: "var(--text)" }}>Canonical state and boundary checks</div>
           </div>
           <div style={{ padding: "var(--pad-3) var(--pad-4)", overflow: "auto" }}>
             <div className="eyebrow" style={{ marginBottom: 8 }}>Status distribution</div>

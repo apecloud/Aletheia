@@ -1,0 +1,54 @@
+{
+  "generated_at": "2026-05-23T12:18:00+08:00",
+  "commit": "679229a",
+  "overall_ok": true,
+  "fingerprints": {
+    "fraud_registry": "ad606238224e0996b9ea39aba4a4cb73867fe24c1c6f83681105b3c714b10422",
+    "maritime_session": "4829c3f0adf766078a0deb9a3f1649cc549239381f19bbcf62cb5afd9f14fab0",
+    "default_task": "3940bd642934958484cd6b44900069cd7b76d7ce5b182986e87c079313eabb6c"
+  },
+  "checks": [
+    {
+      "name": "fraud_no_raw_cvv",
+      "ok": true
+    },
+    {
+      "name": "maritime_no_raw_cvv",
+      "ok": true
+    },
+    {
+      "name": "default_no_raw_cvv",
+      "ok": true
+    },
+    {
+      "name": "fraud_active_registry_statuses",
+      "ok": true,
+      "statuses": [
+        "approved"
+      ]
+    },
+    {
+      "name": "maritime_candidates_remain_draft",
+      "ok": true,
+      "statuses": [
+        "draft"
+      ]
+    },
+    {
+      "name": "maritime_canonical_writes_disabled",
+      "ok": true
+    },
+    {
+      "name": "default_payload_keeps_raw_identifiers",
+      "ok": true
+    },
+    {
+      "name": "fraud_payload_keeps_source_refs",
+      "ok": true
+    },
+    {
+      "name": "maritime_payload_keeps_metric_refs",
+      "ok": true
+    }
+  ]
+}

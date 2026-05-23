@@ -1,0 +1,158 @@
+{
+  "run_result": {
+    "proposal_count": 1,
+    "query_count": 1,
+    "result_count": 3,
+    "run_key": "web-enrichment:maritime-risk:20260523143427:11145",
+    "safety_profile": {
+      "allow_discovered_domains": false,
+      "allowed_domains": [
+        "zenodo.org"
+      ],
+      "blocked_private_networks": true,
+      "canonical_writes": "disabled",
+      "graph_writes": "disabled",
+      "write_scope": "draft_enrichment_proposals_only"
+    },
+    "skipped_sources": [
+      {
+        "reason": "blocked_domain_not_allowlisted",
+        "search_query": "Chokepoint Maritime chokepoint or strait that can concentrate trade disruption risk. ontology definition source evidence",
+        "target_artifact_key": "object:chokepoint",
+        "url": "https://example.org/untrusted-maritime-risk-task173-1779546867"
+      },
+      {
+        "reason": "blocked_non_public_or_sensitive_url",
+        "search_query": "Chokepoint Maritime chokepoint or strait that can concentrate trade disruption risk. ontology definition source evidence",
+        "target_artifact_key": "object:chokepoint",
+        "url": "http://127.0.0.1:8772/private?token=task173secret1779546867"
+      }
+    ],
+    "status": "completed",
+    "target_artifacts": [
+      "object:chokepoint"
+    ],
+    "tenant": "maritime-risk"
+  },
+  "urls": {
+    "allowed": "https://zenodo.org/records/13841882?task173=1779546867",
+    "untrusted": "https://example.org/untrusted-maritime-risk-task173-1779546867",
+    "private": "http://127.0.0.1:8772/private?token=task173secret1779546867"
+  },
+  "blocked_counts": {
+    "proposal_rows": 0,
+    "webenrichment_artifacts": 0
+  },
+  "private_counts": {
+    "proposal_rows": 0,
+    "webenrichment_artifacts": 0
+  },
+  "allowed_counts": {
+    "proposal_rows": 1,
+    "webenrichment_artifacts": 1
+  },
+  "canonical_unchanged": {
+    "non_web_artifact_count_unchanged": true,
+    "non_web_status_version_hash_unchanged": true,
+    "approved_non_web_count_unchanged": true,
+    "target_payload_hash_unchanged": true,
+    "target_status_version_before": {
+      "status": "approved",
+      "version": 2,
+      "artifact_type": "object"
+    },
+    "target_status_version_after": {
+      "status": "approved",
+      "version": 2,
+      "artifact_type": "object"
+    }
+  },
+  "api_allowed_proposal": [
+    {
+      "proposal_key": "webenrichment:object_chokepoint:7cc8d880e94c218c",
+      "target_artifact_key": "object:chokepoint",
+      "source_url": "https://zenodo.org/records/13841882?task173=1779546867",
+      "source_title": "Allowed Zenodo maritime source",
+      "summary": "Zenodo maritime chokepoint risk data. CC-BY-4.0 license.",
+      "raw_payload": {
+        "field_provenance": [
+          {
+            "artifact_field": "description",
+            "evidence_summary": "Zenodo maritime chokepoint risk data. CC-BY-4.0 license.",
+            "proposed_operation": "enrich_context",
+            "review_required": true,
+            "source_url": "https://zenodo.org/records/13841882?task173=1779546867"
+          }
+        ],
+        "governance": {
+          "canonical_writes": "disabled",
+          "graph_writes": "disabled",
+          "review_gate": "ontology_review_required",
+          "status": "draft",
+          "target_artifact_modified": false
+        },
+        "proposal_type": "external_web_enrichment",
+        "proposed_enrichment": "Zenodo maritime chokepoint risk data. CC-BY-4.0 license.",
+        "source": {
+          "blocked_reason": "crawl_budget_exhausted",
+          "crawl_status": "snippet_only",
+          "license_risk": "CC-BY mentioned by source/search result",
+          "retrieved_at": "2026-05-23T14:34:27.930242Z",
+          "robots_risk": "crawl skipped: crawl_budget_exhausted",
+          "search_provider": "static_json",
+          "search_query": "Chokepoint Maritime chokepoint or strait that can concentrate trade disruption risk. ontology definition source evidence",
+          "search_rank": 1,
+          "snippet": "Zenodo maritime chokepoint risk data. CC-BY-4.0 license.",
+          "title": "Allowed Zenodo maritime source",
+          "url": "https://zenodo.org/records/13841882?task173=1779546867"
+        },
+        "target_artifact_key": "object:chokepoint",
+        "target_artifact_type": "object",
+        "target_name": "Chokepoint"
+      },
+      "content_hash": "7cc8d880e94c218cdee659518e13f03962ba0bae811a2f437163811ee0e57ee0",
+      "confidence": 0.55,
+      "status": "draft",
+      "created_at": "2026-05-23 14:34:27.936666",
+      "run_key": "web-enrichment:maritime-risk:20260523143427:11145",
+      "search_provider": "static_json",
+      "safety_profile": {
+        "allow_discovered_domains": false,
+        "allowed_domains": [
+          "zenodo.org"
+        ],
+        "blocked_private_networks": true,
+        "canonical_writes": "disabled",
+        "graph_writes": "disabled",
+        "write_scope": "draft_enrichment_proposals_only"
+      },
+      "budget": {
+        "max_artifacts": 1,
+        "max_crawl_pages": 0,
+        "max_page_bytes": 256000,
+        "max_results_per_query": 3,
+        "timeout_seconds": 8.0
+      },
+      "skipped_sources": [
+        {
+          "reason": "blocked_domain_not_allowlisted",
+          "search_query": "Chokepoint Maritime chokepoint or strait that can concentrate trade disruption risk. ontology definition source evidence",
+          "target_artifact_key": "object:chokepoint",
+          "url": "https://example.org/untrusted-maritime-risk-task173-1779546867"
+        },
+        {
+          "reason": "blocked_non_public_or_sensitive_url",
+          "search_query": "Chokepoint Maritime chokepoint or strait that can concentrate trade disruption risk. ontology definition source evidence",
+          "target_artifact_key": "object:chokepoint",
+          "url": "http://127.0.0.1:8772/private?token=task173secret1779546867"
+        }
+      ]
+    }
+  ],
+  "artifact_web_enrichment_count": 5,
+  "graph_default_fingerprint": {
+    "approved": true,
+    "node_count": 157,
+    "edge_count": 156
+  }
+}

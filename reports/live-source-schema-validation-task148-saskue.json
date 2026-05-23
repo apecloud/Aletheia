@@ -1,0 +1,125 @@
+{
+  "task": 148,
+  "result": "PASS",
+  "service": "http://127.0.0.1:8772",
+  "baseline_commit": "bd64569 Recover live source schema demo",
+  "docker_mysql": {
+    "container": "aletheia-mysql",
+    "status": "running",
+    "port": "3306"
+  },
+  "live_schema_checks": [
+    {
+      "tenant": "default",
+      "artifact": "object:employee",
+      "http_status": 200,
+      "schema_source": "live",
+      "field_count": 18,
+      "key_fields": {
+        "employees.employeeID": {
+          "data_type": "bigint",
+          "nullable": true
+        }
+      }
+    },
+    {
+      "tenant": "default",
+      "artifact": "link:employee:1:n:order",
+      "http_status": 200,
+      "schema_source": "live",
+      "field_properties_count": 2,
+      "key_fields": {
+        "employees.employeeID": {
+          "data_type": "bigint",
+          "nullable": true
+        },
+        "orders.employeeID": {
+          "data_type": "bigint",
+          "nullable": true,
+          "key_role": "relationship_reference"
+        }
+      }
+    },
+    {
+      "tenant": "creditcardfraud",
+      "artifact": "object:credit_card_transaction",
+      "http_status": 200,
+      "schema_source": "live",
+      "field_count": 37,
+      "source_surface": "credit_card_transactions_safe",
+      "key_fields": {
+        "credit_card_transactions_safe.transaction_id": {
+          "data_type": "bigint",
+          "nullable": false
+        },
+        "credit_card_transactions_safe.cvvMatch": {
+          "data_type": "tinyint",
+          "nullable": true
+        },
+        "credit_card_transactions_safe.cardLast4Digits": {
+          "data_type": "varchar",
+          "nullable": true
+        }
+      }
+    },
+    {
+      "tenant": "creditcardfraud",
+      "artifact": "link:card:1:n:credit_card_transaction",
+      "http_status": 200,
+      "schema_source": "live",
+      "field_properties_count": 2,
+      "source_surface": "credit_card_transactions_safe",
+      "key_fields": {
+        "credit_card_transactions_safe.cardLast4Digits": {
+          "data_type": "varchar",
+          "nullable": true
+        }
+      }
+    }
+  ],
+  "sensitive_field_checks": {
+    "api_absent": [
+      "cardCVV",
+      "enteredCVV"
+    ],
+    "dom_absent": [
+      "cardCVV",
+      "enteredCVV"
+    ],
+    "safe_source_present": "credit_card_transactions_safe"
+  },
+  "degraded_path": {
+    "bad_source_db_url": "mysql+pymysql://root:<redacted>@127.0.0.1:3999/aletheia_test_data",
+    "http_status": 200,
+    "schema_source": "degraded",
+    "degraded": true,
+    "degraded_reason": "source database connection failed",
+    "connection_error_present": true,
+    "password_leaks_absent": [
+      "super-secret-password",
+      "aletheia_pg_password",
+      "root:",
+      "3999"
+    ]
+  },
+  "browser_artifacts": {
+    "screenshots": [
+      "/tmp/task148-employee-live.png",
+      "/tmp/task148-employee-order-live.png",
+      "/tmp/task148-fraud-tx-live.png",
+      "/tmp/task148-fraud-link-live.png"
+    ],
+    "dom_captures": [
+      "/tmp/task148_employee_dom.txt",
+      "/tmp/task148_employee_order_dom.txt",
+      "/tmp/task148_fraud_tx_dom.txt",
+      "/tmp/task148_fraud_link_dom.txt"
+    ]
+  },
+  "commands_passed": [
+    ".venv/bin/python -m py_compile review_workbench.py agents/tenant_registry.py scripts/bootstrap_demo_environment.py",
+    ".venv/bin/python -m unittest tests/test_ontology_eval.py",
+    "node --check web/review_workbench/api.js",
+    "git diff --check"
+  ]
+}

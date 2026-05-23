@@ -1,0 +1,92 @@
+{
+  "task": 146,
+  "result": "PASS",
+  "validated_services": {
+    "current": "http://127.0.0.1:8772",
+    "fresh": "http://127.0.0.1:8776"
+  },
+  "fresh_bootstrap": {
+    "database": "aletheia_task146_bootstrap",
+    "created_with": "local postgres superuser slc",
+    "app_user_create_database_permission": false,
+    "bootstrap_runs": 2,
+    "idempotent_counts": {
+      "creditcardfraud": {
+        "draft": 7
+      },
+      "default": {
+        "approved": 8
+      }
+    },
+    "tables_present": [
+      "aletheia_artifact_evidence",
+      "aletheia_artifact_reviews",
+      "aletheia_ontology_artifacts",
+      "aletheia_reasoning_findings",
+      "aletheia_reasoning_tasks",
+      "aletheia_tenants"
+    ],
+    "cleanup": "temporary 8776 server stopped and temporary database dropped"
+  },
+  "current_8772_smoke": {
+    "ontology_catalog_default_http": 200,
+    "ontology_object_employee_http": 200,
+    "ontology_link_employee_order_http": 200,
+    "autopilot_sessions_creditcardfraud_http": 200,
+    "creditcardfraud_playbook_http": 200,
+    "default_catalog_artifacts": 8,
+    "employee_status": "approved",
+    "employee_version": 1,
+    "employee_order_join": "orders.employeeID = employees.employeeID",
+    "playbook_hypotheses": 6,
+    "playbook_candidate_findings": 5
+  },
+  "fresh_8776_smoke": {
+    "ontology_catalog_default_http": 200,
+    "ontology_object_employee_http": 200,
+    "creditcardfraud_playbook_http": 200,
+    "default_catalog_artifacts": 8,
+    "employee_status": "approved",
+    "employee_version": 1,
+    "playbook_hypotheses": 6,
+    "playbook_candidate_findings": 5
+  },
+  "sensitive_field_checks": {
+    "absent": [
+      "cardCVV",
+      "enteredCVV"
+    ],
+    "present_safe_boundary": [
+      "card_verification_code_fields",
+      "credit_card_transactions_safe"
+    ]
+  },
+  "source_schema_boundary": {
+    "mysql_or_docker_running": false,
+    "observed_schema_source": "fallback",
+    "blocks_task_146": false,
+    "note": "Live source-schema introspection should be validated in a separate data-source recovery task."
+  },
+  "browser_artifacts": {
+    "screenshots": [
+      "/tmp/task146-fresh-ontology-employee.png",
+      "/tmp/task146-fresh-autopilot.png",
+      "/tmp/task146-ontology-catalog.png",
+      "/tmp/task146-ontology-employee.png",
+      "/tmp/task146-autopilot.png"
+    ],
+    "dom_captures": [
+      "/tmp/task146_fresh_ontology_employee_dom.txt",
+      "/tmp/task146_fresh_autopilot_dom.txt",
+      "/tmp/task146_ontology_catalog_dom.txt",
+      "/tmp/task146_ontology_employee_dom.txt",
+      "/tmp/task146_autopilot_dom.txt"
+    ]
+  },
+  "commands_passed": [
+    ".venv/bin/python -m py_compile review_workbench.py agents/tenant_registry.py scripts/bootstrap_demo_environment.py",
+    ".venv/bin/python -m unittest tests/test_ontology_eval.py",
+    "node --check web/review_workbench/api.js",
+    "git diff --check"
+  ]
+}

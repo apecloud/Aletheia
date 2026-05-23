@@ -1,5 +1,18 @@
 /* Aletheia — main app orchestrator (wired to real API) */
 
+class ErrorBoundary extends React.Component {
+  constructor(props) { super(props); this.state = { error: null }; }
+  static getDerivedStateFromError(error) { return { error }; }
+  render() {
+    if (this.state.error) {
+      return React.createElement("pre", {
+        style: { padding: 40, color: "#f44", fontFamily: "var(--font-mono)", fontSize: 13, whiteSpace: "pre-wrap" }
+      }, "UI Error:\n" + this.state.error.message + "\n\n" + (this.state.error.stack || ""));
+    }
+    return this.props.children;
+  }
+}
+
 const { useState: useStateApp, useEffect: useEffectApp } = React;
 
 const EMPTY_TENANT = { id: "—", name: "no tenant", namespace: "—", graph: "—" };
@@ -72,7 +85,19 @@ function App() {
 
   function cycleTenant() {
     const idx = tenants.findIndex(t => t.id === tenant.id);
-    setTenantId(tenants[(idx + 1) % tenants.length].id);
+    selectTenant(tenants[(idx + 1) % tenants.length].id);
+  }
+  function selectTenant(nextTenantId) {
+    const next = nextTenantId || "default";
+    setTenantId(next);
+    try {
+      const url = new URL(location.href);
+      url.searchParams.set("tenant", next);
+      url.searchParams.set("screen", screen);
+      url.searchParams.delete("task");
+      url.searchParams.delete("ontology_basis");
+      history.replaceState(null, "", url.toString());
+    } catch {}
   }
   function cycleRole() {
     const roles = ["Developer", "Analyst", "CXO"];
@@ -86,18 +111,19 @@ function App() {
   return (
     <div className="app">
       <TopBar screen={screen} tenant={tenant} role={role}
+              tenants={tenants} onTenantSelect={selectTenant}
               onTenant={cycleTenant} onRole={cycleRole}
               language={language} onLanguageSelect={selectLanguage}
               onConn={() => setConnOpen(true)} />
       <MockBanner onClick={() => setConnOpen(true)} />
       <div className="body">
         <Rail screen={screen} onNav={setScreen} />
-        {screen === "workbench" && <Workbench data={data} tenant={tenant} />}
-        {screen === "reasoning" && <Reasoning tenant={tenant} language={language} />}
-        {screen === "ontology"  && <Ontology data={data} tenant={tenant} />}
-        {screen === "graph"     && <GraphExplorer data={data} tenant={tenant} />}
-        {screen === "quality"   && <Quality data={data} tenant={tenant} />}
-        {screen === "runtime"   && <Runtime data={data} tenant={tenant} />}
+        {screen === "workbench" && <ErrorBoundary><Workbench data={data} tenant={tenant} /></ErrorBoundary>}
+        {screen === "reasoning" && <ErrorBoundary><Reasoning tenant={tenant} language={language} /></ErrorBoundary>}
+        {screen === "ontology"  && <ErrorBoundary><Ontology data={data} tenant={tenant} /></ErrorBoundary>}
+        {screen === "graph"     && <ErrorBoundary><GraphExplorer data={data} tenant={tenant} /></ErrorBoundary>}
+        {screen === "quality"   && <ErrorBoundary><Quality data={data} tenant={tenant} /></ErrorBoundary>}
+        {screen === "runtime"   && <ErrorBoundary><Runtime data={data} tenant={tenant} /></ErrorBoundary>}
       </div>
       <StatusBar tenant={tenant} language={language} />
 
@@ -145,4 +171,4 @@ function App() {
   );
 }
 
-ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+ReactDOM.createRoot(document.getElementById("root")).render(<ErrorBoundary><App /></ErrorBoundary>);

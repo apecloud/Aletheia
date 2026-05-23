@@ -70,8 +70,8 @@ function GraphExplorer({ data, tenant }) {
   const isMockG  = graphQ.source === "mock";
   const graph = useMemoGX(() => normalizeGraph(graphQ.data, { nodes: [], edges: [] }), [graphQ.data]);
 
-  const [selected, setSelected] = useStateGX(graph.nodes[0]);
-  useEffectGX(() => { if (graph.nodes[0]) setSelected(graph.nodes[0]); }, [graph]);
+  const [selected, setSelected] = useStateGX(null);
+  useEffectGX(() => { if (graph.nodes.length && !selected) setSelected(graph.nodes[0]); }, [graph]);
 
   const map = Object.fromEntries(graph.nodes.map(n => [n.id, n]));
   const typeColors = {
@@ -174,7 +174,7 @@ function GraphExplorer({ data, tenant }) {
               <div style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center" }}>
                 <ApiStatus q={graphQ} what="graph context" />
               </div>
-            ) : graph.nodes.length === 0 ? (
+            ) : graph.nodes.length === 0 || !selected ? (
               <div style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", color: "var(--muted)", fontFamily: "var(--font-mono)", fontSize: 12 }}>
                 Empty graph for this scope.
               </div>
@@ -309,7 +309,7 @@ function BigGraph({ data, selected, onSelect, hoverId, setHoverId }) {
     Customer: "var(--proposed)",
     Region: "var(--dim)"
   };
-  const sel = selected.id;
+  const sel = selected ? selected.id : null;
   const neighborIds = new Set();
   data.edges.forEach(e => {
     if (e.s === sel) neighborIds.add(e.t);

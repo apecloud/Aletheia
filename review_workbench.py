@@ -1034,15 +1034,31 @@ class InstanceRepository:
             self.source_engines[tenant.source_db_url] = engine
         return engine
 
+    def _cfg_key(self, object_type):
+        raw = str(object_type or "").strip()
+        if not raw:
+            return ""
+        snake = re.sub(r"(?<!^)(?=[A-Z])", "_", raw).replace("-", "_").lower()
+        compact = re.sub(r"[^a-z0-9]", "", raw.lower())
+        for key in self.ENTITY_CONFIG:
+            key_compact = re.sub(r"[^a-z0-9]", "", key.lower())
+            if raw.lower() == key.lower() or snake == key.lower() or compact == key_compact:
+                return key
+        return raw.lower()
+
+    def _cfg_type(self, cfg, fallback):
+        return cfg.get("type") or str(fallback).capitalize()
+
     def types(self, tenant):
         all_keys = [cfg["artifact"] for cfg in self.ENTITY_CONFIG.values()]
         artifacts = self._approved_artifacts(tenant, all_keys)
         types = []
         for type_key, cfg in self.ENTITY_CONFIG.items():
             if cfg["artifact"] in artifacts:
+                type_name = self._cfg_type(cfg, type_key)
                 types.append({
-                    "type": type_key.capitalize(),
-                    "label": type_key.capitalize(),
+                    "type": type_name,
+                    "label": cfg.get("label") or type_name,
                     "table": cfg["table"],
                     "ontology_artifact": cfg["artifact"],
                     "tenant_id": tenant.tenant_id,
@@ -1050,7 +1066,8 @@ class InstanceRepository:
         return {"tenant": tenant.public_dict(), "types": types}
 
     def search(self, tenant, object_type, query, limit=25):
-        cfg = self.ENTITY_CONFIG.get(object_type.lower())
+        cfg_key = self._cfg_key(object_type)
+        cfg = self.ENTITY_CONFIG.get(cfg_key)
         if not cfg:
             return {
                 "tenant": tenant.public_dict(),
@@ -1071,13 +1088,20 @@ class InstanceRepository:
         for col in cfg["label_cols"]:
             conditions.append(f"{col} LIKE :like_query")
         where = " OR ".join(conditions)
-        sql = f"SELECT * FROM {cfg['table']} WHERE (:query = '' OR {where}) ORDER BY {cfg['pk']} LIMIT :limit"
+        if cfg.get("distinct"):
+            select_cols = list(dict.fromkeys([cfg["pk"], *cfg["label_cols"]]))
+            sql = (
+                f"SELECT DISTINCT {', '.join(select_cols)} FROM {cfg['table']} "
+                f"WHERE (:query = '' OR {where}) ORDER BY {cfg['pk']} LIMIT :limit"
+            )
+        else:
+            sql = f"SELECT * FROM {cfg['table']} WHERE (:query = '' OR {where}) ORDER BY {cfg['pk']} LIMIT :limit"
         with self.source_engine_for(tenant).connect() as conn:
             rows = conn.execute(
                 text(sql),
                 {"query": query, "like_query": f"%{query}%", "limit": limit},
             ).mappings().all()
-        type_cap = object_type.capitalize()
+        type_cap = self._cfg_type(cfg, cfg_key)
         return {
             "instances": [
                 self._entity_node(tenant, type_cap, dict(row))
@@ -1092,7 +1116,8 @@ class InstanceRepository:
         artifacts = self._approved_artifacts(tenant, [canonical_key])
         if canonical_key not in artifacts:
             return None
-        if object_type.lower() == "employee":
+        cfg_key = self._cfg_key(object_type)
+        if cfg_key == "employee":
             employee = self._fetch_employee(tenant, instance_id)
             if not employee:
                 return None
@@ -1122,7 +1147,7 @@ class InstanceRepository:
                     "direct_reports": reports.get("direct_reports", 0),
                 },
             }
-        if object_type.lower() == "order":
+        if cfg_key == "order":
             order = self._fetch_order(tenant, instance_id)
             if not order:
                 return None
@@ -1145,6 +1170,21 @@ class InstanceRepository:
                     "shipName": order.get("shipName"),
                 },
             }
+        cfg = self.ENTITY_CONFIG.get(cfg_key)
+        row = self._fetch_entity(tenant, object_type, instance_id)
+        if cfg and row:
+            node = self._entity_node(tenant, self._cfg_type(cfg, cfg_key), row)
+            if not node:
+                return None
+            return {
+                **node,
+                "source_row": self._row(row),
+                "key_properties": {
+                    key: _jsonable(row.get(key))
+                    for key in dict.fromkeys([cfg["pk"], *cfg.get("label_cols", [])])
+                    if key in row
+                },
+            }
         return None
 
     # ---- generic entity config ----
@@ -1154,6 +1194,42 @@ class InstanceRepository:
         "customer": {"table": "customers", "pk": "customerID","label_cols": ["companyName"],             "label_join": "",       "artifact": "object:customer"},
         "product":  {"table": "products",  "pk": "productID", "label_cols": ["productName"],             "label_join": "",       "artifact": "object:product"},
         "category": {"table": "categories","pk": "categoryID","label_cols": ["categoryName"],            "label_join": "",       "artifact": "object:category"},
+        "credit_card_transaction": {
+            "type": "CreditCardTransaction",
+            "label": "Credit Card Transaction",
+            "table": "credit_card_transactions_safe",
+            "pk": "transaction_id",
+            "label_cols": ["transaction_id", "merchantName"],
+            "label_fmt": "Transaction #{}",
+            "artifact": "object:credit_card_transaction",
+        },
+        "account": {
+            "type": "Account",
+            "table": "credit_card_transactions_safe",
+            "pk": "accountNumber",
+            "label_cols": ["accountNumber", "customerId"],
+            "label_fmt": "Account {}",
+            "artifact": "object:account",
+            "distinct": True,
+        },
+        "card": {
+            "type": "Card",
+            "table": "credit_card_transactions_safe",
+            "pk": "cardLast4Digits",
+            "label_cols": ["cardLast4Digits"],
+            "label_fmt": "Card ****{}",
+            "artifact": "object:card",
+            "distinct": True,
+        },
+        "merchant": {
+            "type": "Merchant",
+            "table": "credit_card_transactions_safe",
+            "pk": "merchantName",
+            "label_cols": ["merchantName", "merchantCategoryCode"],
+            "label_join": " · ",
+            "artifact": "object:merchant",
+            "distinct": True,
+        },
     }
     LINK_CONFIG = [
         {"link": "link:employee:1:n:order",       "from": "employee", "to": "order",    "fk_table": "orders",    "fk_col": "employeeID"},
@@ -1161,10 +1237,13 @@ class InstanceRepository:
         {"link": "link:category:1:n:product",      "from": "category", "to": "product",  "fk_table": "products",  "fk_col": "categoryID"},
         {"link": "link:order:n:m:product",          "from": "order",    "to": "product",  "fk_table": "order_details", "fk_col": "orderID", "target_fk": "productID"},
         {"link": "link:employee:1:n:employee",      "from": "employee", "to": "employee", "fk_table": "employees", "fk_col": "reportsTo", "reverse": True},
+        {"link": "link:account:1:n:credit_card_transaction", "from": "account", "to": "credit_card_transaction", "fk_table": "credit_card_transactions_safe", "fk_col": "accountNumber"},
+        {"link": "link:card:1:n:credit_card_transaction", "from": "card", "to": "credit_card_transaction", "fk_table": "credit_card_transactions_safe", "fk_col": "cardLast4Digits"},
+        {"link": "link:merchant:1:n:credit_card_transaction", "from": "merchant", "to": "credit_card_transaction", "fk_table": "credit_card_transactions_safe", "fk_col": "merchantName"},
     ]
 
     def _fetch_entity(self, tenant, object_type, instance_id):
-        cfg = self.ENTITY_CONFIG.get(object_type.lower())
+        cfg = self.ENTITY_CONFIG.get(self._cfg_key(object_type))
         if not cfg:
             return None
         with self.source_engine_for(tenant).connect() as conn:
@@ -1175,7 +1254,7 @@ class InstanceRepository:
         return dict(row) if row else None
 
     def _entity_node(self, tenant, object_type, row):
-        cfg = self.ENTITY_CONFIG.get(object_type.lower())
+        cfg = self.ENTITY_CONFIG.get(self._cfg_key(object_type))
         if not cfg:
             return None
         pk_val = row[cfg["pk"]]
@@ -1198,7 +1277,8 @@ class InstanceRepository:
         }
 
     def neighborhood(self, tenant, object_type, instance_id, depth=1, limit=200):
-        cfg = self.ENTITY_CONFIG.get(object_type.lower())
+        cfg_key = self._cfg_key(object_type)
+        cfg = self.ENTITY_CONFIG.get(cfg_key)
         if not cfg:
             return None
         depth = max(1, min(int(depth), 2))
@@ -1216,14 +1296,15 @@ class InstanceRepository:
         center_row = self._fetch_entity(tenant, object_type, instance_id)
         if not center_row:
             return None
-        center = self._entity_node(tenant, object_type, center_row)
+        center_type = self._cfg_type(cfg, cfg_key)
+        center = self._entity_node(tenant, center_type, center_row)
         nodes = [center]
         edges = []
-        allowed_node_types = {object_type}
+        allowed_node_types = {center_type}
         allowed_link_keys = []
         for lc in self.LINK_CONFIG:
-            is_from = lc["from"] == object_type.lower()
-            is_to = lc["to"] == object_type.lower() and lc.get("reverse")
+            is_from = lc["from"] == cfg_key
+            is_to = lc["to"] == cfg_key and lc.get("reverse")
             if not is_from and not is_to:
                 continue
             link_artifacts = self._approved_artifacts(tenant, [lc["link"]])
@@ -1234,7 +1315,8 @@ class InstanceRepository:
             target_cfg = self.ENTITY_CONFIG.get(target_type_key)
             if not target_cfg:
                 continue
-            allowed_node_types.add(target_cfg["table"].rstrip("s").capitalize())
+            neighbor_type = self._cfg_type(target_cfg, target_type_key)
+            allowed_node_types.add(neighbor_type)
             with self.source_engine_for(tenant).connect() as conn:
                 if is_from and lc.get("target_fk"):
                     # n:m via join table
@@ -1254,7 +1336,6 @@ class InstanceRepository:
                     ).mappings().all()
                 else:
                     rows = []
-            neighbor_type = target_type_key.capitalize()
             for row in rows:
                 row = dict(row)
                 n = self._entity_node(tenant, neighbor_type, row)
@@ -1281,7 +1362,7 @@ class InstanceRepository:
             "scope": {
                 "tenant_id": tenant.tenant_id,
                 "center_node": center["id"],
-                "type": object_type,
+                "type": center_type,
                 "id": str(instance_id),
                 "depth": depth,
                 "node_limit": limit,
@@ -1330,6 +1411,9 @@ class InstanceRepository:
         return {row["canonical_key"]: dict(row) for row in rows}
 
     def _object_key(self, object_type):
+        cfg = self.ENTITY_CONFIG.get(self._cfg_key(object_type))
+        if cfg:
+            return cfg["artifact"]
         return f"object:{object_type}".lower()
 
     def _fetch_employee(self, tenant, employee_id):
@@ -1840,7 +1924,8 @@ class ReasoningRepository:
         decision = decision_aliases.get(action, action)
         if decision not in {"approved", "rejected", "needs_more_evidence", "comment"}:
             raise ValueError(f"Unsupported candidate review action: {action}")
-        _require_reason(decision, reason or "")
+        if decision != "approved":
+            _require_reason(decision, reason or "")
         with self.metadata_engine_for(tenant).begin() as conn:
             candidate = conn.execute(
                 text(
@@ -2390,6 +2475,15 @@ class ReasoningRepository:
                 "likelihood_piracy": 0.2556,
                 "severity_piracy": 0.005,
             },
+            "top_dependency_hazard": {
+                "canal": "Bab el-Mandeb Strait",
+                "likelihood_conflict": 0.6731,
+                "severity_conflict": 0.5,
+                "likelihood_geopolitical": 2.3529,
+                "severity_geopolitical": 0.5,
+                "likelihood_piracy": 0.2556,
+                "severity_piracy": 0.005,
+            },
         }
         try:
             with self.source_engine_for(tenant).connect() as conn:
@@ -2407,6 +2501,18 @@ class ReasoningRepository:
                         LIMIT 5
                     """)).mappings().all()
                 ]
+                dependency_canal = top_dependency[0]["canal"] if top_dependency else fallback["top_dependency"][0]["canal"]
+                dependency_hazard = conn.execute(
+                    text("""
+                        SELECT canal, likelihood_conflict, severity_conflict,
+                               likelihood_geopolitical, severity_geopolitical,
+                               likelihood_piracy, severity_piracy,
+                               likelihood_blockage, severity_blockage
+                        FROM maritime_chokepoint_risk_indicators
+                        WHERE canal = :canal
+                    """),
+                    {"canal": dependency_canal},
+                ).mappings().first()
                 top_systemic_risk = [
                     dict(row)
                     for row in conn.execute(text("""

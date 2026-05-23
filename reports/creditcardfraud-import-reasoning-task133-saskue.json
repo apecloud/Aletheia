@@ -1,0 +1,165 @@
+{
+  "task": 133,
+  "result": "DONE",
+  "source_dataset": "/Users/slc/code/Aletheia/datasets/creditcardfraud",
+  "source_format": "jsonl",
+  "source_rows": 786363,
+  "target": {
+    "source_database": "aletheia_test_data",
+    "raw_table": "credit_card_transactions",
+    "safe_view": "credit_card_transactions_safe",
+    "tenant_id": "creditcardfraud",
+    "namespace": "creditcardfraud",
+    "display_name": "Credit Card Fraud Dataset",
+    "graph_database": "aletheia_creditcardfraud"
+  },
+  "import": {
+    "rows_imported": 786363,
+    "columns": 39,
+    "indexes": 8,
+    "table_size_mb": 180.3,
+    "derived_fields": [
+      "cvvMatch",
+      "countryMismatch",
+      "availableRatio",
+      "balanceRatio",
+      "amountToLimitRatio",
+      "transactionHour",
+      "transactionDate",
+      "transactionMonth",
+      "riskSignalCount"
+    ],
+    "sensitive_fields": [
+      "accountNumber",
+      "cardCVV",
+      "enteredCVV",
+      "cardLast4Digits"
+    ],
+    "safe_view_excludes": [
+      "cardCVV",
+      "enteredCVV"
+    ],
+    "separate_database_attempt": {
+      "database": "aletheia_creditcardfraud",
+      "result": "denied",
+      "reason": "configured MySQL user lacks CREATE DATABASE permission"
+    }
+  },
+  "aletheia_registration": {
+    "ontology_artifacts": 7,
+    "objects": [
+      "object:credit_card_transaction",
+      "object:account",
+      "object:card",
+      "object:merchant"
+    ],
+    "links": [
+      "link:account:1:n:credit_card_transaction",
+      "link:card:1:n:credit_card_transaction",
+      "link:merchant:1:n:credit_card_transaction"
+    ],
+    "artifact_status": "draft",
+    "reasoning_task": "reasoning:creditcardfraud:dataset-risk-profile:v1",
+    "reasoning_finding": "finding:creditcardfraud:dataset-risk-profile:v1",
+    "finding_status": "draft"
+  },
+  "profile": {
+    "transactions": 786363,
+    "accounts": 5000,
+    "merchants": 2490,
+    "categories": 19,
+    "fraud_count": 12417,
+    "fraud_rate": 0.0158,
+    "avg_transaction_amount": 136.99,
+    "avg_fraud_amount": 225.22,
+    "avg_legit_amount": 135.57,
+    "duplicate_same_account_merchant_amount_day_clusters": 12761
+  },
+  "risk_patterns": {
+    "card_not_present": {
+      "count": 433495,
+      "fraud_rate": 0.0207
+    },
+    "cvv_mismatch": {
+      "count": 7015,
+      "fraud_rate": 0.0289
+    },
+    "missing_pos_entry_mode": {
+      "count": 4054,
+      "fraud_rate": 0.0664
+    },
+    "top_category_fraud_rates": [
+      {
+        "category": "airline",
+        "fraud_rate": 0.0346
+      },
+      {
+        "category": "rideshare",
+        "fraud_rate": 0.0249
+      },
+      {
+        "category": "online_retail",
+        "fraud_rate": 0.0244
+      },
+      {
+        "category": "online_gifts",
+        "fraud_rate": 0.0242
+      }
+    ],
+    "country_mismatch": {
+      "count": 67,
+      "fraud_rate": 0.0,
+      "interpretation": "rare and not a useful standalone fraud signal in this import"
+    }
+  },
+  "high_risk_examples": [
+    {
+      "transaction_id": 571924,
+      "accountNumber": "693329001",
+      "merchantName": "apple.com",
+      "category": "online_retail",
+      "amount": 818.69,
+      "signals": [
+        "card_not_present",
+        "high_balance_ratio",
+        "high_amount_to_limit_ratio",
+        "off_hours"
+      ],
+      "isFraud": true
+    },
+    {
+      "transaction_id": 149886,
+      "accountNumber": "204494014",
+      "merchantName": "discount.com",
+      "category": "online_retail",
+      "amount": 770.8,
+      "signals": [
+        "card_not_present",
+        "high_balance_ratio",
+        "high_amount_to_limit_ratio",
+        "off_hours"
+      ],
+      "isFraud": true
+    },
+    {
+      "transaction_id": 391987,
+      "accountNumber": "849733512",
+      "merchantName": "Lyft",
+      "category": "rideshare",
+      "amount": 540.74,
+      "signals": [
+        "card_not_present",
+        "cvv_mismatch",
+        "high_balance_ratio",
+        "high_amount_to_limit_ratio"
+      ],
+      "isFraud": true
+    }
+  ],
+  "evidence_limits": [
+    "Deterministic SQL/profile reasoning over observed labels; not a trained fraud model.",
+    "Raw CVV values are sensitive and should not be exposed in reviewer-facing UI.",
+    "Production modeling requires temporal split and leakage checks."
+  ],
+  "report": "/Users/slc/code/Aletheia/reports/creditcardfraud-import-reasoning-task133-saskue.md"
+}

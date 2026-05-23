@@ -3,7 +3,7 @@
 const { useState, useEffect, useRef, useMemo } = React;
 
 /* ---------- TopBar ---------- */
-function TopBar({ screen, tenant, role, onTenant, onRole, language, onLanguageSelect, onConn }) {
+function TopBar({ screen, tenant, role, tenants, onTenant, onTenantSelect, onRole, language, onLanguageSelect, onConn }) {
   const labelByScreen = {
     workbench: { kicker: "Case",  now: "Workspace" },
     reasoning: { kicker: "Process", now: "Reasoning" },
@@ -26,11 +26,30 @@ function TopBar({ screen, tenant, role, onTenant, onRole, language, onLanguageSe
       <div></div>
       <div className="right">
         <ConnectionChip onClick={onConn} />
-        <div className="chip" onClick={onTenant}>
+        <label className="chip" title="Select tenant / dataset">
           <span className="label">Tenant</span>
-          <span className="val">{tenant.name}</span>
+          <select
+            value={tenant.id}
+            onChange={e => onTenantSelect ? onTenantSelect(e.target.value) : onTenant && onTenant()}
+            style={{
+              appearance: "none",
+              WebkitAppearance: "none",
+              border: 0,
+              outline: "none",
+              background: "transparent",
+              color: "var(--text)",
+              font: "inherit",
+              fontSize: 11,
+              maxWidth: 230,
+              cursor: "pointer",
+              padding: 0,
+            }}>
+            {(tenants || [tenant]).map(t => (
+              <option key={t.id} value={t.id}>{t.name || t.id}</option>
+            ))}
+          </select>
           <span className="caret">▾</span>
-        </div>
+        </label>
         <div className="chip" onClick={onRole}>
           <span className="label">Role</span>
           <span className="val">{role}</span>
