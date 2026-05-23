@@ -7,6 +7,7 @@ const EMPTY_TENANT = { id: "—", name: "no tenant", namespace: "—", graph: "�
 function App() {
   const [screen, setScreen] = useStateApp("workbench");
   const [tenantId, setTenantId] = useStateApp(localStorage.getItem("aletheia.tenant") || "default");
+  const [language, setLanguage] = useStateApp(localStorage.getItem("aletheia.language") || "en");
   const [role, setRole] = useStateApp("Analyst");
   const [connOpen, setConnOpen] = useStateApp(false);
 
@@ -44,8 +45,10 @@ function App() {
       const params = new URLSearchParams(location.search);
       const s = params.get("screen");
       const t = params.get("tenant");
+      const lang = params.get("lang");
       if (s) setScreen(s);
       if (t) setTenantId(t);
+      if (lang === "zh" || lang === "en") setLanguage(lang);
     } catch {}
   }, []);
 
@@ -55,6 +58,15 @@ function App() {
   const tenant = tenants.find(t => t.id === tenantId) || tenants[0];
 
   useEffectApp(() => { try { localStorage.setItem("aletheia.tenant", tenant.id); } catch {} }, [tenant.id]);
+  useEffectApp(() => {
+    try {
+      localStorage.setItem("aletheia.language", language);
+      document.documentElement.lang = language === "zh" ? "zh-CN" : "en";
+      const url = new URL(location.href);
+      url.searchParams.set("lang", language);
+      history.replaceState(null, "", url.toString());
+    } catch {}
+  }, [language]);
 
   const data = window.AL_DATA;
 
@@ -67,23 +79,27 @@ function App() {
     const idx = roles.indexOf(role);
     setRole(roles[(idx + 1) % roles.length]);
   }
+  function selectLanguage(nextLanguage) {
+    setLanguage(nextLanguage === "zh" ? "zh" : "en");
+  }
 
   return (
     <div className="app">
       <TopBar screen={screen} tenant={tenant} role={role}
               onTenant={cycleTenant} onRole={cycleRole}
+              language={language} onLanguageSelect={selectLanguage}
               onConn={() => setConnOpen(true)} />
       <MockBanner onClick={() => setConnOpen(true)} />
       <div className="body">
         <Rail screen={screen} onNav={setScreen} />
         {screen === "workbench" && <Workbench data={data} tenant={tenant} />}
-        {screen === "reasoning" && <Reasoning tenant={tenant} />}
+        {screen === "reasoning" && <Reasoning tenant={tenant} language={language} />}
         {screen === "ontology"  && <Ontology data={data} tenant={tenant} />}
         {screen === "graph"     && <GraphExplorer data={data} tenant={tenant} />}
         {screen === "quality"   && <Quality data={data} tenant={tenant} />}
         {screen === "runtime"   && <Runtime data={data} tenant={tenant} />}
       </div>
-      <StatusBar tenant={tenant} />
+      <StatusBar tenant={tenant} language={language} />
 
       <ConnectionDialog open={connOpen} onClose={() => setConnOpen(false)} />
 

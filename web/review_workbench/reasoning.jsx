@@ -124,6 +124,177 @@ function moneyRX(value) {
   return n == null ? "—" : `$${n.toFixed(2)}`;
 }
 
+function isZhRX(language) {
+  return String(language || "en").toLowerCase().startsWith("zh");
+}
+
+function tRX(language, en, zh) {
+  return isZhRX(language) ? zh : en;
+}
+
+const RESULT_TITLE_ZH_RX = {
+  "Card-not-present transactions carry elevated fraud risk": "非面对面交易具有更高欺诈风险",
+  "Verification mismatch is a compact fraud-risk signal": "验证不匹配是紧凑的欺诈风险信号",
+  "Missing POS entry mode should be reviewed as a weak-control pattern": "缺失 POS 录入模式应作为弱控制模式复核",
+  "Merchant category concentration reveals high-yield fraud review segments": "商户类别集中度揭示高价值欺诈复核分组",
+  "Same-day duplicate transaction clusters need multi-swipe review": "同日重复交易簇需要复核多次刷卡风险",
+  "Single chokepoint dependency creates concentrated country exposure": "单一咽喉点依赖造成国家风险集中暴露",
+  "Hazard-adjusted chokepoint risk should drive review priority": "咽喉点复核优先级应纳入风险因子调整",
+  "Bab el-Mandeb risk propagation identifies countries for immediate review": "Bab el-Mandeb 风险传播识别需立即复核的国家",
+  "Single-chokepoint dependency can create concentrated country exposure": "单一咽喉点依赖可能造成国家暴露集中",
+  "Hazard severity should be joined to dependent trade value before ranking chokepoints": "咽喉点排序前应把风险严重度与依赖贸易额关联",
+  "Red Sea / Bab el-Mandeb escalation should prioritize dependent countries by systemic risk": "红海 / Bab el-Mandeb 升级风险应按系统性风险确定国家优先级",
+  "High throughput alone is not enough for a graph reasoning finding": "仅有高吞吐量不足以形成图推理发现",
+  "Card-not-present transactions concentrate fraud risk": "非面对面交易集中欺诈风险",
+  "Verification mismatch transactions have elevated fraud rate": "验证不匹配交易欺诈率更高",
+  "Missing POS entry mode may identify a weak-control channel": "缺失 POS 录入模式可能识别弱控制渠道",
+  "Merchant categories concentrate fraud exposure": "商户类别集中欺诈暴露",
+  "Same account/merchant/amount/day duplicate clusters indicate multi-swipe risk": "同账户/商户/金额/日期重复簇提示多次刷卡风险",
+  "Expiration-key mismatch does not clear the value threshold": "有效期录入不匹配未达到价值阈值",
+  "Find graph reasoning findings for maritime chokepoint risk": "发现海运咽喉点风险的图推理发现",
+  "Discover graph reasoning findings for maritime chokepoint risk": "发现海运咽喉点风险的图推理发现",
+  "Find high-value fraud risk findings": "发现高价值欺诈风险发现",
+  "Discover high-value credit card fraud risk findings": "发现高价值信用卡欺诈风险发现",
+  "Find high-value reasoning findings": "发现高价值推理发现",
+  "Compare card-present and card-not-present fraud rates against the dataset baseline.": "对比面对面与非面对面交易欺诈率相对数据集基线的差异。",
+  "Use the safe derived verification-match flag instead of raw verification values.": "使用安全的派生验证匹配标记，而不是原始验证值。",
+  "Missing POS entry mode showed the highest fraud-rate lift in the imported dataset profile.": "导入数据画像中，POS 录入模式缺失显示出最高的欺诈率提升。",
+  "Rank merchant categories by fraud rate and volume to separate noisy rates from high-value findings.": "按欺诈率和交易量对商户类别排序，区分噪声比例和高价值发现。",
+  "Repeated same-day transaction clusters are useful triage candidates for duplicate authorization or multi-swipe review.": "同日重复交易簇适合作为重复授权或多次刷卡复核的分诊候选。",
+  "The imported profile did not show enough value lift to promote this into a candidate finding before stronger evidence exists.": "导入画像尚未显示足够价值提升，因此在更强证据出现前不提升为候选发现。",
+  "Rank country/chokepoint pairs by value share and dependent trade value to find countries exposed to one chokepoint.": "按价值占比和依赖贸易额排序国家/咽喉点组合，识别暴露于单一咽喉点的国家。",
+  "Combine hazard likelihood/severity with systemic risk results so the finding explains risk propagation, not just trade volume.": "把风险可能性/严重度与系统性风险结果结合，使发现能解释风险传播，而不只是贸易量。",
+  "Use the chokepoint hazard row and downstream country risk rows to prioritize analyst review when upstream events increase.": "使用咽喉点风险行和下游国家风险行，在上游事件增强时确定分析师复核优先级。",
+  "A volume-only ranking does not explain hazard, dependency, country exposure, and action linkage.": "仅按交易量排名无法解释风险因子、依赖关系、国家暴露和行动关联。",
+  "No rationale recorded.": "未记录依据。",
+};
+
+const RESULT_TEXT_ZH_RX = [
+  [/Card-not-present transactions show a fraud rate of ([^ ]+) versus the dataset baseline of ([^,]+), making this a high-value triage segment\./,
+    "非面对面交易欺诈率为 $1，高于数据集基线 $2，因此是高价值分诊分组。"],
+  [/Transactions where the derived verification-match flag is false show a fraud rate of ([^,]+), above the baseline of ([^.]+)\./,
+    "派生验证匹配标记为 false 的交易欺诈率为 $1，高于基线 $2。"],
+  [/Transactions with missing POS entry mode show a fraud rate of ([^,]+), materially above baseline\./,
+    "POS 录入模式缺失的交易欺诈率为 $1，明显高于基线。"],
+  [/The highest-risk merchant categories include (.+)\./,
+    "最高风险的商户类别包括 $1。"],
+  [/The dataset contains ([0-9,]+) same customer \/ same merchant \/ same amount \/ same-day duplicate clusters, a useful review entry point for duplicate authorization and multi-swipe behavior\./,
+    "数据集中存在 $1 个同客户 / 同商户 / 同金额 / 同日重复交易簇，可作为重复授权和多次刷卡行为的复核入口。"],
+  [/([A-Z]{2,3}) depends heavily on ([^,]+), where the hazard profile includes conflict likelihood ([^ ]+) and geopolitical likelihood ([^:]+): ([^ ]+) of modeled maritime trade value flows through that chokepoint \(\$([^)]+) of dependent value\)\./,
+    "$1 高度依赖 $2；该咽喉点风险画像包含冲突可能性 $3、地缘政治可能性 $4。建模海运贸易价值中有 $5 经过该咽喉点，依赖价值为 $6。"],
+  [/([^ ]+(?: [^ ]+)*) has the highest modeled trade-at-risk row in the current dataset: ([A-Z]{2,3}) shows \$(.+) expected trade value at risk and \$(.+) trade impacted\./,
+    "当前数据集中 $1 对应最高的建模风险贸易行：$2 的预期风险贸易价值为 $3，受影响贸易额为 $4。"],
+  [/If Red Sea \/ Bab el-Mandeb risk rises, the first review queue should include (.+)\. The graph path is hazard at Bab el-Mandeb -> chokepoint -> dependent country -> systemic risk metric -> analyst action\./,
+    "如果红海 / Bab el-Mandeb 风险上升，首批复核队列应包含 $1。图路径为：Bab el-Mandeb 风险因子 -> 咽喉点 -> 依赖国家 -> 系统性风险指标 -> 分析师行动。"],
+  [/Draft candidate from maritime-risk graph playbook; requires human review before formal finding approval\./,
+    "来自 maritime-risk 图推理 playbook 的候选发现；正式批准前需要人工复核。"],
+  [/This phase uses structural 2022 dependency data and does not include live event updates\./,
+    "当前阶段使用 2022 年结构性依赖数据，尚未包含实时事件更新。"],
+  [/The playbook uses structural chokepoint risk data; ACLED\/GDELT live events are a planned enrichment, not yet imported\./,
+    "该 playbook 使用结构化咽喉点风险数据；ACLED/GDELT 实时事件是计划中的增强数据，尚未导入。"],
+  [/Draft candidate from Autopilot playbook; requires human review before formal finding approval\./,
+    "来自 Autopilot playbook 的候选发现；正式批准前需要人工复核。"],
+  [/Uses a derived match flag only; raw verification values are not surfaced\./,
+    "仅使用派生匹配标记；原始验证值不会展示。"],
+  [/Category ranking should be paired with volume and amount thresholds before operational use\./,
+    "商户类别排序在投入运营前应结合交易量和金额阈值。"],
+  [/Duplicate clusters include benign repeats; candidate requires case-level review\./,
+    "重复簇可能包含正常重复交易；该候选需要逐案复核。"],
+  [/Pruned because expected fraud-rate lift is below candidate threshold and no strong operational action follows from the field alone\./,
+    "已剪枝：预期欺诈率提升低于候选阈值，且仅凭该字段无法形成强运营动作。"],
+  [/Pruned because it is a ranking\/reporting hypothesis without a complete hazard -> chokepoint -> country -> risk metric -> action path\./,
+    "已剪枝：这只是排名/报表假设，缺少完整的风险因子 -> 咽喉点 -> 国家 -> 风险指标 -> 行动路径。"],
+];
+
+function resultTextRX(value, language) {
+  const text = value == null ? "" : String(value);
+  if (!isZhRX(language)) return text;
+  if (RESULT_TITLE_ZH_RX[text]) return RESULT_TITLE_ZH_RX[text];
+  for (const [pattern, replacement] of RESULT_TEXT_ZH_RX) {
+    if (pattern.test(text)) return text.replace(pattern, replacement);
+  }
+  return text;
+}
+
+function resultListRX(values, language) {
+  return (values || []).map(v => resultTextRX(v, language));
+}
+
+function evidenceKindLabelRX(kind, language) {
+  const labels = {
+    aggregate: "聚合指标",
+    volume: "交易量",
+    cluster: "重复簇",
+    example: "样例",
+    privacy_boundary: "隐私边界",
+    hazard: "风险因子",
+    chokepoint: "咽喉点",
+    dependent_country: "依赖国家",
+    dependent_countries: "依赖国家",
+    trade_metric: "贸易指标",
+    risk_metric: "风险指标",
+    recommended_action: "建议行动",
+    graph_path: "图路径",
+    join: "关联证据",
+    fact: "事实",
+    hypothesis: "假设",
+    conflict: "冲突",
+    missing: "缺失",
+  };
+  if (!isZhRX(language)) return kind || "evidence";
+  return labels[kind] || kind || "证据";
+}
+
+function structuredEmployeeSummaryRX(finding, language) {
+  if (!finding || !finding.structured_answer || !finding.structured_answer.metrics || isZhRX(language)) {
+    return finding ? finding.conclusion : "";
+  }
+  const s = finding.structured_answer;
+  const m = s.metrics || {};
+  const name = m.name || `Employee:${m.employee_id || ""}`;
+  const orderCount = Number(m.order_count || 0);
+  const totalOrders = Number(m.total_orders || 0);
+  const orderShare = asNumberRX(m.order_share_percent);
+  const rank = m.order_rank && m.employee_count ? `${m.order_rank}/${m.employee_count}` : "n/a";
+  const customerCount = Number(m.customer_count || 0);
+  const location = m.location || "unknown location";
+  const role = m.title || "untitled role";
+  const load = rank !== "n/a" && Number(m.order_rank) >= Math.ceil(Number(m.employee_count || 0) * 0.7)
+    ? "low order load"
+    : "moderate/high order load";
+  return `${name} is ${role} in ${location}. In the approved Northwind graph and controlled aggregates, this profile shows ${load}: ${orderCount} handled orders out of ${totalOrders} (${orderShare == null ? "n/a" : orderShare.toFixed(1) + "%"}), order rank ${rank}, and coverage across ${customerCount} customers. Current evidence does not by itself prove an abnormal workload; targets, time allocation, profitability, and customer quality would be needed for an operational judgment.`;
+}
+
+function displayFindingConclusionRX(finding, language) {
+  if (!finding) return "";
+  const structured = structuredEmployeeSummaryRX(finding, language);
+  return resultTextRX(structured || finding.conclusion, language);
+}
+
+function displayCandidateTitleRX(candidate, language) {
+  return resultTextRX(candidate && candidate.title, language);
+}
+
+function displayCandidateConclusionRX(candidate, language) {
+  return resultTextRX(candidate && candidate.conclusion, language);
+}
+
+function displayActionTextRX(value, language) {
+  const text = value == null ? "" : String(value);
+  if (!isZhRX(language)) return text;
+  const map = {
+    "Break down by merchant category and transaction amount decile.": "按商户类别和交易金额分位进一步拆分。",
+    "Prioritize mismatch transactions with high amount or card-not-present channel.": "优先复核高金额或非面对面渠道中的验证不匹配交易。",
+    "Review ingestion completeness and POS-mode normalization rules.": "复核数据摄取完整性和 POS 模式归一化规则。",
+    "Create category-specific review queues for high-rate and high-volume intersections.": "为高欺诈率与高交易量交叉分组创建类别专项复核队列。",
+    "Separate reversals, merchant retries, and high-confidence multi-swipe clusters.": "区分冲正、商户重试和高置信多次刷卡簇。",
+    "Open a country/chokepoint dependency review and compare alternate maritime routes.": "创建国家/咽喉点依赖复核，并比较替代海运路线。",
+    "Rank chokepoint review by hazard-adjusted trade-at-risk, not volume alone.": "按风险调整后的贸易风险排序咽喉点复核优先级，而不是仅按吞吐量排序。",
+    "Create a Bab el-Mandeb review case for the top exposed countries and attach live event enrichment when available.": "为最高暴露国家创建 Bab el-Mandeb 复核事项，并在可用时附加实时事件增强证据。",
+  };
+  return map[text] || resultTextRX(text, language);
+}
+
 function firstAggregatePayload(finding) {
   const evidence = (finding && finding.supporting_evidence) || [];
   const aggregate = evidence.find(e => e && e.payload && (
@@ -148,7 +319,7 @@ function MetricTile({ label, value, sub, tone }) {
   );
 }
 
-function FraudFindingSummary({ finding }) {
+function FraudFindingSummary({ finding, language }) {
   const payload = firstAggregatePayload(finding);
   if (!payload) return null;
   const counts = payload.counts || {};
@@ -159,22 +330,22 @@ function FraudFindingSummary({ finding }) {
   const examples = (payload.high_risk_examples || []).slice(0, 3);
   return (
     <div style={{ paddingTop: 12, borderTop: "1px solid var(--line)", display: "flex", flexDirection: "column", gap: 12 }}>
-      <div className="eyebrow">Fraud risk summary</div>
+      <div className="eyebrow">{tRX(language, "Fraud risk summary", "欺诈风险摘要")}</div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 8 }}>
-        <MetricTile label="Rows" value={counts.rows_total != null ? Number(counts.rows_total).toLocaleString() : "—"} />
-        <MetricTile label="Fraud rate" value={pctRX(counts.fraud_rate)} tone="var(--rejected)" />
-        <MetricTile label="Fraud tx" value={counts.fraud_count != null ? Number(counts.fraud_count).toLocaleString() : "—"} />
-        <MetricTile label="Fraud avg amount" value={moneyRX(amounts.avg_fraud_amount)} />
+        <MetricTile label={tRX(language, "Rows", "行数")} value={counts.rows_total != null ? Number(counts.rows_total).toLocaleString() : "—"} />
+        <MetricTile label={tRX(language, "Fraud rate", "欺诈率")} value={pctRX(counts.fraud_rate)} tone="var(--rejected)" />
+        <MetricTile label={tRX(language, "Fraud tx", "欺诈交易")} value={counts.fraud_count != null ? Number(counts.fraud_count).toLocaleString() : "—"} />
+        <MetricTile label={tRX(language, "Fraud avg amount", "欺诈平均金额")} value={moneyRX(amounts.avg_fraud_amount)} />
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 8 }}>
-        <MetricTile label="Card-not-present" value={pctRX(flags.fraud_cnp)} sub={`${Number(flags.cnp_count || 0).toLocaleString()} tx`} />
+        <MetricTile label={tRX(language, "Card-not-present", "非面对面交易")} value={pctRX(flags.fraud_cnp)} sub={`${Number(flags.cnp_count || 0).toLocaleString()} tx`} />
         <MetricTile label="cvvMatch=false" value={pctRX(flags.fraud_cvv_mismatch)} sub={`${Number(flags.cvv_mismatch_count || 0).toLocaleString()} tx`} />
-        <MetricTile label="POS entry missing" value={pctRX(posMissing && posMissing.fraud_rate)} sub={`${Number(posMissing && posMissing.cnt || 0).toLocaleString()} tx`} />
-        <MetricTile label="Duplicate samples" value={(payload.duplicate_pattern || []).length ? String((payload.duplicate_pattern || []).length) : "—"} sub="same account/merchant/amount/day" />
+        <MetricTile label={tRX(language, "POS entry missing", "POS 录入缺失")} value={pctRX(posMissing && posMissing.fraud_rate)} sub={`${Number(posMissing && posMissing.cnt || 0).toLocaleString()} tx`} />
+        <MetricTile label={tRX(language, "Duplicate samples", "重复样例")} value={(payload.duplicate_pattern || []).length ? String((payload.duplicate_pattern || []).length) : "—"} sub={tRX(language, "same account/merchant/amount/day", "同账户/商户/金额/日期")} />
       </div>
       {categories.length > 0 && (
         <div>
-          <div className="eyebrow" style={{ marginBottom: 8 }}>High-risk merchant categories</div>
+          <div className="eyebrow" style={{ marginBottom: 8 }}>{tRX(language, "High-risk merchant categories", "高风险商户类别")}</div>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             {categories.map(cat => (
               <span key={cat.category} className="pill" style={{ borderColor: "var(--accent-line)", background: "var(--accent-bg)" }}>
@@ -186,7 +357,7 @@ function FraudFindingSummary({ finding }) {
       )}
       {examples.length > 0 && (
         <div>
-          <div className="eyebrow" style={{ marginBottom: 8 }}>High-risk examples</div>
+          <div className="eyebrow" style={{ marginBottom: 8 }}>{tRX(language, "High-risk examples", "高风险样例")}</div>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 8 }}>
             {examples.map(ex => (
               <div key={ex.transaction_id} style={{ border: "1px solid var(--line)", background: "var(--bg-1)", padding: 10, minWidth: 0 }}>
@@ -203,7 +374,9 @@ function FraudFindingSummary({ finding }) {
         </div>
       )}
       <div style={{ fontSize: 11, color: "var(--muted)", lineHeight: 1.5 }}>
-        Evidence boundary: deterministic SQL aggregates over the safe transaction view; raw CVV values are not required for this reasoning surface.
+        {tRX(language,
+          "Evidence boundary: deterministic SQL aggregates over the safe transaction view; raw CVV values are not required for this reasoning surface.",
+          "证据边界：基于安全交易视图的确定性 SQL 聚合；该推理界面不需要原始 CVV 值。")}
       </div>
     </div>
   );
@@ -226,10 +399,10 @@ function tenantEmptyQuestionRX(tenantId) {
     : "Select a center node to ask a scoped question.";
 }
 
-function autopilotObjectiveForTenantRX(tenantId) {
-  if (tenantId === "maritime-risk") return "Find graph reasoning findings for maritime chokepoint risk";
-  if (tenantId === "creditcardfraud") return "Find high-value fraud risk findings";
-  return "Find high-value reasoning findings";
+function autopilotObjectiveForTenantRX(tenantId, language) {
+  if (tenantId === "maritime-risk") return tRX(language, "Find graph reasoning findings for maritime chokepoint risk", "发现海运咽喉点风险的图推理发现");
+  if (tenantId === "creditcardfraud") return tRX(language, "Find high-value fraud risk findings", "发现高价值欺诈风险发现");
+  return tRX(language, "Find high-value reasoning findings", "发现高价值推理发现");
 }
 
 function defaultQuestionForTenantRX(tenantId, type, label, node) {
@@ -346,7 +519,7 @@ function suggestedQuestionsForTenantRX({ tenantId, type, centerNode, label, ques
   return [{ q: tenantEmptyQuestionRX(tenantId), node: "" }];
 }
 
-function Reasoning({ tenant }) {
+function Reasoning({ tenant, language }) {
   const [selectedKey, setSelectedKey] = useStateRX(null);
   const [activeTab, setActiveTab] = useStateRX("mine");  // mine | all | graph | autopilot
   const [question, setQuestion] = useStateRX("");
@@ -421,9 +594,9 @@ function Reasoning({ tenant }) {
   const autopilotDetail = autopilotDetailQ.data || null;
   useEffectRX(() => {
     const tid = tenant ? tenant.id : "default";
-    setAutopilotObjective(autopilotObjectiveForTenantRX(tid));
+    setAutopilotObjective(autopilotObjectiveForTenantRX(tid, language));
     setAutopilotSelectedKey(null);
-  }, [tenant ? tenant.id : "default"]);
+  }, [tenant ? tenant.id : "default", language]);
   useEffectRX(() => {
     let alive = true;
     const tid = tenant ? tenant.id : "default";
@@ -1209,6 +1382,7 @@ function Reasoning({ tenant }) {
               starting={autopilotStarting}
               onRunPlaybook={(tenant && tenant.id) === "maritime-risk" ? runMaritimeRiskPlaybook : runCreditcardfraudPlaybook}
               playbookRunning={autopilotPlaybookRunning}
+              language={language}
             />
           ) : askMode ? (
             <AskHero
@@ -1380,25 +1554,27 @@ function Reasoning({ tenant }) {
                         </div>
                       )}
                       <div style={{ fontSize: 15, color: "var(--text)", lineHeight: 1.55 }}>
-                        {finding.conclusion}
+                        {displayFindingConclusionRX(finding, language)}
                       </div>
-                      <FraudFindingSummary finding={finding} />
+                      <FraudFindingSummary finding={finding} language={language} />
                       {finding.action_proposal && (
                         <div style={{ paddingTop: 12, borderTop: "1px solid var(--line)" }}>
-                          <div className="eyebrow" style={{ marginBottom: 6 }}>Proposed action</div>
-                          <div style={{ fontSize: 13, color: "var(--text-dim)" }}>{finding.action_proposal}</div>
+                          <div className="eyebrow" style={{ marginBottom: 6 }}>{tRX(language, "Proposed action", "建议动作")}</div>
+                          <div style={{ fontSize: 13, color: "var(--text-dim)" }}>{displayActionTextRX(finding.action_proposal, language)}</div>
                         </div>
                       )}
                       {finding.counter_evidence && (
                         <div style={{ paddingTop: 12, borderTop: "1px solid var(--line)" }}>
-                          <div className="eyebrow" style={{ marginBottom: 6, color: "var(--rejected)" }}>Counter evidence / limits</div>
-                          <div style={{ fontSize: 13, color: "var(--text-dim)" }}>{finding.counter_evidence}</div>
+                          <div className="eyebrow" style={{ marginBottom: 6, color: "var(--rejected)" }}>{tRX(language, "Counter evidence / limits", "反向证据 / 边界")}</div>
+                          <div style={{ fontSize: 13, color: "var(--text-dim)" }}>{Array.isArray(finding.counter_evidence) ? resultListRX(finding.counter_evidence.map(e => e.summary || e), language).join(" · ") : resultTextRX(finding.counter_evidence, language)}</div>
                         </div>
                       )}
                       <div style={{ paddingTop: 12, borderTop: "1px solid var(--line)", display: "flex", gap: 8, alignItems: "center" }}>
                         <div className="eyebrow" style={{ color: "var(--changes)" }}>Canonical boundary</div>
                         <div style={{ fontSize: 11, color: "var(--muted)" }}>
-                          Approving this finding cites it in the approved-finding layer; it does NOT modify canonical ontology or graph.
+                          {tRX(language,
+                            "Approving this finding cites it in the approved-finding layer; it does NOT modify canonical ontology or graph.",
+                            "批准该发现只会把它引用到已审核发现层；不会修改正式本体或图谱。")}
                         </div>
                       </div>
                       {shouldRerun && (
@@ -1486,7 +1662,7 @@ function Reasoning({ tenant }) {
                             <div className="v-bar" />
                             <div className="kind">{ontologyKey ? "ontology basis" : ev.kind}</div>
                             <div className="body-x">
-                              <div className="title">{ev.title}</div>
+                              <div className="title">{resultTextRX(ev.title, language)}</div>
                               <div className="src">
                                 {ontologyKey
                                   ? `${ontologyKey} · compact basis only`
@@ -1608,6 +1784,7 @@ function Reasoning({ tenant }) {
             setFilters={setRegistryFilters}
             setActionMsg={setActionMsg}
             highlightedFindingKey={highlightedFindingKey}
+            language={language}
           />
 
           <div className="section">
@@ -1655,6 +1832,7 @@ function AutopilotWorkspace({
   starting,
   onRunPlaybook,
   playbookRunning,
+  language,
 }) {
   const session = detail && detail.session;
   const hypotheses = (detail && detail.hypotheses) || [];
@@ -1670,9 +1848,11 @@ function AutopilotWorkspace({
           <span>{session ? session.session_key : selectedKey || "new session"}</span>
           {detailQ.loading && <span className="pill" style={{ marginLeft: "auto" }}><span className="dot" />Loading detail…</span>}
         </div>
-        <h1>{session ? session.objective : "Autopilot Discovery"}</h1>
+        <h1>{session ? resultTextRX(session.objective, language) : tRX(language, "Autopilot Discovery", "Autopilot 自动发现")}</h1>
         <p className="desc">
-          Autopilot queues hypotheses and ranks draft candidate findings. It cannot write canonical ontology, approve findings, or expose sensitive raw fields.
+          {tRX(language,
+            "Autopilot queues hypotheses and ranks draft candidate findings. It cannot write canonical ontology, approve findings, or expose sensitive raw fields.",
+            "Autopilot 会排队假设并排序候选发现草稿；它不能写入正式本体、不能自动批准发现，也不能暴露敏感原始字段。")}
         </p>
         <div className="row">
           <div className="stat">
@@ -1702,20 +1882,20 @@ function AutopilotWorkspace({
 
       <div style={{ flex: 1, overflow: "auto", padding: "var(--pad-4) var(--pad-5)" }}>
         {!session ? (
-          <Panel eyebrow="Start" title="No Autopilot session selected" style={{ marginBottom: 16 }}>
+          <Panel eyebrow={tRX(language, "Start", "开始")} title={tRX(language, "No Autopilot session selected", "未选择 Autopilot 会话")} style={{ marginBottom: 16 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 12, color: "var(--muted)", fontSize: 12 }}>
-              <span>Start a session to create a visible hypothesis queue and draft Finding Inbox.</span>
-              <button className="btn primary" onClick={onStart} disabled={starting}>{starting ? "Starting…" : "▶ Start Autopilot"}</button>
+              <span>{tRX(language, "Start a session to create a visible hypothesis queue and draft Finding Inbox.", "启动会话后会生成可见的假设队列和候选发现草稿收件箱。")}</span>
+              <button className="btn primary" onClick={onStart} disabled={starting}>{starting ? tRX(language, "Starting…", "启动中…") : "▶ " + tRX(language, "Start Autopilot", "启动 Autopilot")}</button>
               {(tenant?.id === "creditcardfraud" || tenant?.id === "maritime-risk") && (
                 <button className="btn" onClick={onRunPlaybook} disabled={playbookRunning}>
-                  {playbookRunning ? "Running playbook…" : tenant?.id === "maritime-risk" ? "Run maritime-risk playbook" : "Run fraud playbook"}
+                  {playbookRunning ? tRX(language, "Running playbook…", "Playbook 运行中…") : tenant?.id === "maritime-risk" ? tRX(language, "Run maritime-risk playbook", "运行 maritime-risk playbook") : tRX(language, "Run fraud playbook", "运行欺诈 playbook")}
                 </button>
               )}
             </div>
           </Panel>
         ) : (
           <React.Fragment>
-            <Panel eyebrow="Run trace" title="Autopilot execution trace" count={`${trace.length} events`} style={{ marginBottom: 16 }}>
+            <Panel eyebrow={tRX(language, "Run trace", "运行轨迹")} title={tRX(language, "Autopilot execution trace", "Autopilot 执行轨迹")} count={`${trace.length} ${tRX(language, "events", "事件")}`} style={{ marginBottom: 16 }}>
               {trace.length === 0 ? (
                 <div style={{ color: "var(--muted)", fontFamily: "var(--font-mono)", fontSize: 11 }}>
                   No trace events yet. The playbook will append hypotheses and candidate findings through the Autopilot API.
@@ -1725,7 +1905,7 @@ function AutopilotWorkspace({
                   {trace.map((event, idx) => (
                     <div key={idx} style={{ display: "grid", gridTemplateColumns: "120px 1fr auto", gap: 10, padding: "9px 10px", border: "1px solid var(--line)", background: "var(--bg-1)", alignItems: "center" }}>
                       <span className="eyebrow" style={{ color: event.tone || "var(--accent)" }}>{event.kind}</span>
-                      <span style={{ fontSize: 12, color: "var(--text-dim)", lineHeight: 1.45 }}>{event.title}</span>
+                      <span style={{ fontSize: 12, color: "var(--text-dim)", lineHeight: 1.45 }}>{resultTextRX(event.title, language)}</span>
                       <span className="mono" style={{ fontSize: 10, color: "var(--muted)" }}>{event.status}</span>
                     </div>
                   ))}
@@ -1733,7 +1913,7 @@ function AutopilotWorkspace({
               )}
             </Panel>
 
-            <Panel eyebrow="Hypothesis queue" title="Queued reasoning hypotheses" count={`${hypotheses.length} items`} style={{ marginBottom: 16 }}>
+            <Panel eyebrow={tRX(language, "Hypothesis queue", "假设队列")} title={tRX(language, "Queued reasoning hypotheses", "排队中的推理假设")} count={`${hypotheses.length} ${tRX(language, "items", "项")}`} style={{ marginBottom: 16 }}>
               {hypotheses.length === 0 ? (
                 <div style={{ color: "var(--muted)", fontFamily: "var(--font-mono)", fontSize: 11 }}>
                   No hypotheses yet. Run a tenant playbook to populate this queue with draft candidate findings.
@@ -1744,12 +1924,12 @@ function AutopilotWorkspace({
                     <div key={h.hypothesis_key} style={{ border: "1px solid var(--line)", background: "var(--bg-1)", padding: 12 }}>
                       <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 6 }}>
                         <Pill kind={h.status === "pruned" ? "rejected" : h.status === "completed" ? "approved" : "changes"}>{h.status}</Pill>
-                        <strong style={{ color: "var(--text)", fontSize: 13 }}>{h.title}</strong>
+                        <strong style={{ color: "var(--text)", fontSize: 13 }}>{resultTextRX(h.title, language)}</strong>
                         <span className="mono" style={{ marginLeft: "auto", color: "var(--muted)", fontSize: 10 }}>p{h.priority}</span>
                       </div>
-                      <div style={{ color: "var(--text-dim)", fontSize: 12, lineHeight: 1.5 }}>{h.rationale || "No rationale recorded."}</div>
+                      <div style={{ color: "var(--text-dim)", fontSize: 12, lineHeight: 1.5 }}>{resultTextRX(h.rationale || "No rationale recorded.", language)}</div>
                       {h.status === "pruned" && (
-                        <div style={{ marginTop: 8, color: "var(--rejected)", fontSize: 11 }}>Pruned reason: {h.pruned_reason || "missing"}</div>
+                        <div style={{ marginTop: 8, color: "var(--rejected)", fontSize: 11 }}>{tRX(language, "Pruned reason", "剪枝原因")}: {resultTextRX(h.pruned_reason || "missing", language)}</div>
                       )}
                       {h.evidence_plan?.length > 0 && (
                         <div className="mono" style={{ marginTop: 8, color: "var(--muted)", fontSize: 10 }}>
@@ -1763,19 +1943,19 @@ function AutopilotWorkspace({
             </Panel>
 
             {(tenant?.id === "creditcardfraud" || tenant?.id === "maritime-risk") && (
-              <Panel eyebrow="Playbook" title={tenant?.id === "maritime-risk" ? "Maritime-risk graph reasoning playbook" : "Creditcardfraud discovery playbook"} count="draft-only" style={{ marginBottom: 16 }}>
+              <Panel eyebrow="Playbook" title={tenant?.id === "maritime-risk" ? tRX(language, "Maritime-risk graph reasoning playbook", "Maritime-risk 图推理 Playbook") : tRX(language, "Creditcardfraud discovery playbook", "信用卡欺诈发现 Playbook")} count="draft-only" style={{ marginBottom: 16 }}>
                 <div style={{ display: "flex", gap: 10, alignItems: "center", color: "var(--muted)", fontSize: 12, lineHeight: 1.5 }}>
                   <span>{tenant?.id === "maritime-risk"
-                    ? "Run the fixed maritime playbook to populate chokepoint dependency, hazard-adjusted risk, and country-priority graph findings, plus a pruned non-graph ranking hypothesis."
-                    : "Run the fixed fraud playbook to populate card-not-present, verification mismatch, POS missing, merchant category, duplicate-cluster candidates, plus a pruned hypothesis with reason."}</span>
+                    ? tRX(language, "Run the fixed maritime playbook to populate chokepoint dependency, hazard-adjusted risk, and country-priority graph findings, plus a pruned non-graph ranking hypothesis.", "运行固定 maritime playbook，生成咽喉点依赖、风险因子调整、国家优先级等图推理发现，并保留一条已剪枝的非图排名假设。")
+                    : tRX(language, "Run the fixed fraud playbook to populate card-not-present, verification mismatch, POS missing, merchant category, duplicate-cluster candidates, plus a pruned hypothesis with reason.", "运行固定欺诈 playbook，生成非面对面交易、验证不匹配、POS 缺失、商户类别、重复簇等候选发现，并保留一条带原因的剪枝假设。")}</span>
                   <button className="btn primary" onClick={onRunPlaybook} disabled={playbookRunning} style={{ marginLeft: "auto", whiteSpace: "nowrap" }}>
-                    {playbookRunning ? "Running…" : "Run playbook"}
+                    {playbookRunning ? tRX(language, "Running…", "运行中…") : tRX(language, "Run playbook", "运行 Playbook")}
                   </button>
                 </div>
               </Panel>
             )}
 
-            <Panel eyebrow="Finding Inbox" title="Draft candidate findings" count={`${candidates.length} candidates`} style={{ marginBottom: 16 }}>
+            <Panel eyebrow={tRX(language, "Finding Inbox", "发现收件箱")} title={tRX(language, "Draft candidate findings", "候选发现草稿")} count={`${candidates.length} ${tRX(language, "candidates", "候选")}`} style={{ marginBottom: 16 }}>
               {candidates.length === 0 ? (
                 <div style={{ color: "var(--muted)", fontFamily: "var(--font-mono)", fontSize: 11 }}>
                   No candidate findings yet. Autopilot UI is wired; the discovery playbook will fill this inbox with draft candidates.
@@ -1790,24 +1970,24 @@ function AutopilotWorkspace({
                     <div key={c.canonical_key} style={{ border: "1px solid var(--line)", background: "var(--bg-1)", padding: 14 }}>
                       <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 8 }}>
                         <Pill kind={c.status === "rejected" ? "rejected" : c.status === "needs_more_evidence" ? "changes" : "proposed"}>{c.status}</Pill>
-                        <strong style={{ color: "var(--text)", fontSize: 14 }}>{c.title}</strong>
+                        <strong style={{ color: "var(--text)", fontSize: 14 }}>{displayCandidateTitleRX(c, language)}</strong>
                       </div>
-                      <div style={{ color: "var(--text-dim)", fontSize: 13, lineHeight: 1.55 }}>{c.conclusion}</div>
+                      <div style={{ color: "var(--text-dim)", fontSize: 13, lineHeight: 1.55 }}>{displayCandidateConclusionRX(c, language)}</div>
                       <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 8, marginTop: 12 }}>
-                        <MetricMini label="Value" value={pctRX(c.value_score, 0)} />
-                        <MetricMini label="Confidence" value={pctRX(c.confidence, 0)} />
-                        <MetricMini label="Novelty" value={pctRX(c.novelty_score, 0)} />
-                        <MetricMini label="Impact" value={pctRX(c.impact_score, 0)} />
+                        <MetricMini label={tRX(language, "Value", "价值")} value={pctRX(c.value_score, 0)} />
+                        <MetricMini label={tRX(language, "Confidence", "置信度")} value={pctRX(c.confidence, 0)} />
+                        <MetricMini label={tRX(language, "Novelty", "新颖度")} value={pctRX(c.novelty_score, 0)} />
+                        <MetricMini label={tRX(language, "Impact", "影响")} value={pctRX(c.impact_score, 0)} />
                       </div>
                       <div style={{ marginTop: 12, borderTop: "1px solid var(--line)", paddingTop: 10 }}>
-                        <div className="eyebrow" style={{ marginBottom: 6 }}>Evidence chain</div>
+                        <div className="eyebrow" style={{ marginBottom: 6 }}>{tRX(language, "Evidence chain", "证据链")}</div>
                         {(c.evidence_chain || []).length === 0 ? (
                           <div style={{ color: "var(--rejected)", fontSize: 11 }}>Missing evidence chain; should not pass final validation.</div>
                         ) : (
                           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                             {(c.evidence_chain || []).map((e, i) => (
                               <div key={i} className="mono" style={{ color: "var(--muted)", fontSize: 10, lineHeight: 1.45 }}>
-                                {e.kind || "evidence"} · {e.source_ref || e.source || "source"} · {e.metric || e.title || ""} {e.value ? `= ${e.value}` : ""}
+                                {evidenceKindLabelRX(e.kind, language)} · {e.source_ref || e.source || "source"} · {e.metric || e.title || ""} {e.value ? `= ${Array.isArray(e.value) ? JSON.stringify(e.value) : resultTextRX(e.value, language)}` : ""}
                               </div>
                             ))}
                           </div>
@@ -1815,7 +1995,7 @@ function AutopilotWorkspace({
                       </div>
                       {(c.evidence_limits || []).length > 0 && (
                         <div style={{ marginTop: 10, color: "var(--muted)", fontSize: 11, lineHeight: 1.5 }}>
-                          Limits: {(c.evidence_limits || []).join(" · ")}
+                          {tRX(language, "Limits", "证据边界")}: {resultListRX(c.evidence_limits || [], language).join(" · ")}
                         </div>
                       )}
                       <div style={{ marginTop: 12, borderTop: "1px solid var(--line)", paddingTop: 10 }}>
@@ -1836,17 +2016,17 @@ function AutopilotWorkspace({
                         <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
                           {isReviewed ? (
                             <span style={{ color: c.status === "approved" ? "var(--approved)" : c.status === "rejected" ? "var(--rejected)" : "var(--changes)", fontSize: 11 }}>
-                              Review recorded · {c.status === "approved" ? "approved finding created" : c.status}
+                              {tRX(language, "Review recorded", "复核已记录")} · {c.status === "approved" ? tRX(language, "approved finding created", "已创建批准发现") : c.status}
                             </span>
                           ) : (
                             <>
-                              <button className="btn approve" onClick={() => onReviewCandidate(c, "approved")}>Approve as finding</button>
-                              <button className="btn changes" onClick={() => onReviewCandidate(c, "needs_more_evidence")}>Needs more evidence</button>
-                              <button className="btn reject" onClick={() => onReviewCandidate(c, "rejected")}>Reject candidate</button>
+                              <button className="btn approve" onClick={() => onReviewCandidate(c, "approved")}>{tRX(language, "Approve as finding", "批准为发现")}</button>
+                              <button className="btn changes" onClick={() => onReviewCandidate(c, "needs_more_evidence")}>{tRX(language, "Needs more evidence", "需要更多证据")}</button>
+                              <button className="btn reject" onClick={() => onReviewCandidate(c, "rejected")}>{tRX(language, "Reject candidate", "拒绝候选")}</button>
                             </>
                           )}
                           <span style={{ marginLeft: "auto", color: "var(--changes)", fontSize: 11 }}>
-                            Requires human approval · Autopilot suggests, people approve
+                            {tRX(language, "Requires human approval · Autopilot suggests, people approve", "需要人工批准 · Autopilot 提建议，人来批准")}
                           </span>
                         </div>
                         {isSelectedForReview && !isReviewed && (
@@ -2212,7 +2392,7 @@ function OntologyBasisPanel({ task, tenant }) {
   );
 }
 
-function ApprovedFindingRegistry({ findings, query, tenant, filters, setFilters, setActionMsg, highlightedFindingKey }) {
+function ApprovedFindingRegistry({ findings, query, tenant, filters, setFilters, setActionMsg, highlightedFindingKey, language }) {
   const list = findings || [];
   const tenantId = tenant ? tenant.id : "default";
   const [selected, setSelected] = useStateRX({});
@@ -2274,7 +2454,7 @@ function ApprovedFindingRegistry({ findings, query, tenant, filters, setFilters,
   }
   return (
     <div className="section">
-      <div className="section-head"><span>Approved Finding Registry</span><span className="ct">{list.length}</span></div>
+      <div className="section-head"><span>{tRX(language, "Approved Finding Registry", "已批准发现库")}</span><span className="ct">{list.length}</span></div>
       <div className="section-body" style={{ display: "flex", flexDirection: "column", gap: 8 }}>
         <ApiStatus q={query} what="approved findings" />
         <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 6 }}>
@@ -2331,7 +2511,9 @@ function ApprovedFindingRegistry({ findings, query, tenant, filters, setFilters,
         </div>
         {list.length === 0 ? (
           <div style={{ fontSize: 11, color: "var(--muted)", lineHeight: 1.55 }}>
-            No active approved findings yet. Approved findings will enter future reasoning as prior_finding / reviewed_inference context.
+            {tRX(language,
+              "No active approved findings yet. Approved findings will enter future reasoning as prior_finding / reviewed_inference context.",
+              "暂无活跃的已批准发现。批准后的发现会作为 prior_finding / reviewed_inference 进入后续推理上下文。")}
           </div>
         ) : list.slice(0, 8).map(f => {
           const highlighted = highlightedFindingKey && f.canonical_key === highlightedFindingKey;
@@ -2349,9 +2531,9 @@ function ApprovedFindingRegistry({ findings, query, tenant, filters, setFilters,
                 <span style={{ fontSize: 10, color: f.reasoning_use ? "var(--approved)" : "var(--muted)", fontFamily: "var(--font-mono)" }}>
                   {highlighted ? "newly added · " : ""}{f.reasoning_use ? "active prior insight · reviewed_inference" : "audit only"} · {f.source_label || "Reasoning"} · {f.finding_type || "finding"}
                 </span>
-                <strong style={{ display: "block", fontSize: 12, marginTop: 3 }}>{f.title}</strong>
+                <strong style={{ display: "block", fontSize: 12, marginTop: 3 }}>{resultTextRX(f.title, language)}</strong>
                 <span style={{ display: "block", fontSize: 11, color: "var(--muted)", lineHeight: 1.4, marginTop: 3 }}>
-                  {(f.conclusion || "").slice(0, 140)}
+                  {displayFindingConclusionRX(f, language).slice(0, 140)}
                 </span>
               </a>
               <Pill kind={f.status === "approved" ? "approved" : f.status === "stale" ? "changes" : f.status === "rejected" ? "rejected" : "proposed"}>{f.status}</Pill>
@@ -2390,7 +2572,9 @@ function ApprovedFindingRegistry({ findings, query, tenant, filters, setFilters,
           );
         })}
         <div style={{ fontSize: 11, color: "var(--muted)", lineHeight: 1.45 }}>
-          Action close/reopen records Finding usage events only; it does not change Finding status or write canonical ontology/graph.
+          {tRX(language,
+            "Action close/reopen records Finding usage events only; it does not change Finding status or write canonical ontology/graph.",
+            "关闭/重开行动只记录发现的使用事件；不会改变发现状态，也不会写入正式本体或图谱。")}
         </div>
       </div>
     </div>

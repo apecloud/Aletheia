@@ -3,7 +3,7 @@
 const { useState, useEffect, useRef, useMemo } = React;
 
 /* ---------- TopBar ---------- */
-function TopBar({ screen, tenant, role, onTenant, onRole, onConn }) {
+function TopBar({ screen, tenant, role, onTenant, onRole, language, onLanguageSelect, onConn }) {
   const labelByScreen = {
     workbench: { kicker: "Case",  now: "Workspace" },
     reasoning: { kicker: "Process", now: "Reasoning" },
@@ -36,6 +36,28 @@ function TopBar({ screen, tenant, role, onTenant, onRole, onConn }) {
           <span className="val">{role}</span>
           <span className="caret">▾</span>
         </div>
+        <label className="chip" title="Display language">
+          <span className="label">Lang</span>
+          <select
+            value={language || "en"}
+            onChange={e => onLanguageSelect && onLanguageSelect(e.target.value)}
+            style={{
+              appearance: "none",
+              WebkitAppearance: "none",
+              border: 0,
+              outline: "none",
+              background: "transparent",
+              color: "var(--text)",
+              font: "inherit",
+              fontSize: 11,
+              cursor: "pointer",
+              padding: 0,
+            }}>
+            <option value="en">English</option>
+            <option value="zh">中文</option>
+          </select>
+          <span className="caret">▾</span>
+        </label>
         <div className="user">
           <div className="avatar">MA</div>
           <div style={{ display: "flex", flexDirection: "column", lineHeight: 1.2 }}>
@@ -79,7 +101,7 @@ function Rail({ screen, onNav }) {
 }
 
 /* ---------- Status Bar (bottom) ---------- */
-function StatusBar({ tenant }) {
+function StatusBar({ tenant, language }) {
   const [clock, setClock] = useState(new Date());
   const [latency, setLatency] = useState(38);
   const conn = useConnectionState ? useConnectionState() : { status: "unknown" };
@@ -120,6 +142,10 @@ function StatusBar({ tenant }) {
       <div className="seg">
         <span className="label">Latency</span>
         <span className="val">{latency}ms</span>
+      </div>
+      <div className="seg">
+        <span className="label">Lang</span>
+        <span className="val">{language === "zh" ? "中文" : "English"}</span>
       </div>
       <div className="seg">
         <span className="label">UTC</span>
