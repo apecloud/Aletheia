@@ -15,9 +15,9 @@ Reasoning page:
 - When the active tenant is `maritime-risk`, the Autopilot tab shows `Run maritime-risk playbook`.
 - The playbook populates a visible hypothesis queue and draft candidate Finding Inbox.
 
-Validation session:
+Latest validation session:
 
-- `autopilot:maritime-risk:task166-validation`
+- `autopilot:maritime-risk:task167-fix-validation-v2`
 - JSON payload: `reports/maritime-risk-playbook-task166.json`
 
 ## Hypothesis Queue
@@ -57,6 +57,8 @@ For `Bab el-Mandeb risk propagation identifies countries for immediate review`, 
 
 This is deliberately not a ranking-only demo. The candidate can explain why an upstream Red Sea / Bab el-Mandeb risk signal changes downstream country review priority.
 
+The `Single chokepoint dependency creates concentrated country exposure` candidate was tightened after #167 review: it now starts with hazard evidence from `maritime_chokepoint_risk_indicators`, then follows `chokepoint -> dependent_country -> trade_metric/risk_metric -> recommended_action`. It is no longer a dependency-only candidate.
+
 ## Safety Boundary
 
 - `canonical_writes=disabled`
@@ -70,7 +72,7 @@ This is deliberately not a ranking-only demo. The candidate can explain why an u
 Validated on local `http://127.0.0.1:8772`:
 
 - Playbook run returned 4 hypotheses and 3 candidate findings.
-- Every candidate has `evidence_chain` length >= 5.
+- Every candidate has a complete `hazard -> chokepoint -> dependent country -> trade/risk metric -> recommended action` chain.
 - Every candidate includes a `recommended_action` evidence step.
 - The pruned volume-only hypothesis has a `pruned_reason`.
 - Safety profile keeps canonical writes disabled and auto approval disabled.

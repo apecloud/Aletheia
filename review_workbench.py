@@ -2384,12 +2384,14 @@ class ReasoningRepository:
                 "top_systemic_risk": top_systemic_risk or fallback["top_systemic_risk"],
                 "bab_el_mandeb_priority": bab_priority or fallback["bab_el_mandeb_priority"],
                 "bab_el_mandeb_hazard": dict(bab_hazard) if bab_hazard else fallback["bab_el_mandeb_hazard"],
+                "top_dependency_hazard": dict(dependency_hazard) if dependency_hazard else fallback["top_dependency_hazard"],
             }
         except Exception:
             return fallback
 
     def _maritime_risk_candidate_specs(self, profile, hypotheses):
         dependency = profile["top_dependency"][0]
+        dependency_hazard = profile["top_dependency_hazard"]
         systemic = profile["top_systemic_risk"][0]
         bab_priority = profile["bab_el_mandeb_priority"]
         bab_hazard = profile["bab_el_mandeb_hazard"]
@@ -2403,7 +2405,9 @@ class ReasoningRepository:
                 "hypothesis_key": hypotheses["Single-chokepoint dependency can create concentrated country exposure"],
                 "title": "Single chokepoint dependency creates concentrated country exposure",
                 "conclusion": (
-                    f"{dependency['iso3']} depends heavily on {dependency['canal']}: "
+                    f"{dependency['iso3']} depends heavily on {dependency['canal']}, where the hazard profile includes "
+                    f"conflict likelihood {dependency_hazard.get('likelihood_conflict') or 'n/a'} and geopolitical likelihood "
+                    f"{dependency_hazard.get('likelihood_geopolitical') or 'n/a'}: "
                     f"{float(dependency['share']):.1%} of modeled maritime trade value flows through that chokepoint "
                     f"(${float(dependency['v_canal']) / 1_000_000_000:.2f}B of dependent value)."
                 ),
@@ -2412,10 +2416,12 @@ class ReasoningRepository:
                 "novelty_score": 0.62,
                 "impact_score": 0.8,
                 "evidence_chain": [
-                    {"kind": "country", "source_ref": "maritime_chokepoint_country_dependencies", "metric": "iso3", "value": dependency["iso3"]},
-                    {"kind": "chokepoint", "source_ref": "maritime_chokepoint_country_dependencies", "metric": "canal", "value": dependency["canal"]},
-                    {"kind": "trade_dependency", "source_ref": "maritime_chokepoint_country_dependencies", "metric": "v_canal", "value": round(float(dependency["v_canal"]), 2)},
-                    {"kind": "dependency_share", "source_ref": "maritime_chokepoint_country_dependencies", "metric": "v_canal / v", "value": f"{float(dependency['share']):.1%}"},
+                    {"kind": "hazard", "source_ref": "maritime_chokepoint_risk_indicators", "metric": "likelihood_conflict", "value": dependency_hazard.get("likelihood_conflict")},
+                    {"kind": "hazard", "source_ref": "maritime_chokepoint_risk_indicators", "metric": "likelihood_geopolitical", "value": dependency_hazard.get("likelihood_geopolitical")},
+                    {"kind": "chokepoint", "source_ref": "maritime_chokepoint_risk_indicators", "metric": "canal", "value": dependency["canal"]},
+                    {"kind": "dependent_country", "source_ref": "maritime_chokepoint_country_dependencies", "metric": "iso3", "value": dependency["iso3"]},
+                    {"kind": "trade_metric", "source_ref": "maritime_chokepoint_country_dependencies", "metric": "v_canal", "value": round(float(dependency["v_canal"]), 2)},
+                    {"kind": "risk_metric", "source_ref": "maritime_chokepoint_country_dependencies", "metric": "v_canal / v", "value": f"{float(dependency['share']):.1%}"},
                     {"kind": "recommended_action", "source_ref": "maritime_risk_playbook", "metric": "portfolio_review", "value": "Prioritize dependency diversification review for the country/chokepoint pair."},
                 ],
                 "evidence_limits": [evidence_limit, "This phase uses structural 2022 dependency data and does not include live event updates."],
@@ -2435,6 +2441,7 @@ class ReasoningRepository:
                 "impact_score": 0.87,
                 "evidence_chain": [
                     {"kind": "hazard", "source_ref": "maritime_chokepoint_risk_indicators", "metric": "chokepoint", "value": systemic["canal"]},
+                    {"kind": "chokepoint", "source_ref": "maritime_chokepoint_risk_indicators", "metric": "canal", "value": systemic["canal"]},
                     {"kind": "dependent_country", "source_ref": "maritime_chokepoint_systemic_risk_results", "metric": "iso3", "value": systemic["iso3"]},
                     {"kind": "risk_metric", "source_ref": "maritime_chokepoint_systemic_risk_results", "metric": "trade_at_risk_v", "value": round(float(systemic["trade_at_risk_v"]), 2)},
                     {"kind": "risk_metric", "source_ref": "maritime_chokepoint_systemic_risk_results", "metric": "trade_impacted", "value": round(float(systemic["trade_impacted"]), 2)},
@@ -2462,6 +2469,7 @@ class ReasoningRepository:
                         {"iso3": row["iso3"], "trade_at_risk_v": round(float(row["trade_at_risk_v"]), 2), "trade_impacted": round(float(row["trade_impacted"]), 2)}
                         for row in bab_priority[:5]
                     ]},
+                    {"kind": "risk_metric", "source_ref": "maritime_chokepoint_systemic_risk_results", "metric": "top_trade_at_risk_v", "value": round(float(bab_priority[0]["trade_at_risk_v"]), 2) if bab_priority else None},
                     {"kind": "recommended_action", "source_ref": "maritime_risk_playbook", "metric": "country_priority_review", "value": "Assign analyst review to top exposed countries and request updated live event enrichment."},
                 ],
                 "evidence_limits": [evidence_limit, "The playbook uses structural chokepoint risk data; ACLED/GDELT live events are a planned enrichment, not yet imported."],
