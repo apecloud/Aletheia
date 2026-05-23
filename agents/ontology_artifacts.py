@@ -283,6 +283,61 @@ class ReasoningReviewEvent(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
+class IterativeGraphEnrichmentRun(Base):
+    __tablename__ = "aletheia_iterative_graph_enrichment_runs"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    project_id = Column(String(255), nullable=False, default="default")
+    run_key = Column(String(255), nullable=False)
+    source_agent = Column(String(255), nullable=False, default="IterativeGraphEnrichmentAgent")
+    status = Column(String(50), nullable=False, default="running")
+    objective = Column(Text)
+    frontier_json = Column(Text, nullable=False, default="[]")
+    expansion_trace_json = Column(Text, nullable=False, default="[]")
+    safety_profile_json = Column(Text, nullable=False, default="{}")
+    budget_json = Column(Text, nullable=False, default="{}")
+    skipped_sources_json = Column(Text, nullable=False, default="[]")
+    proposed_count = Column(Integer, nullable=False, default=0)
+    pruned_count = Column(Integer, nullable=False, default=0)
+    finding_count = Column(Integer, nullable=False, default=0)
+    error = Column(Text)
+    started_at = Column(DateTime, default=datetime.utcnow)
+    finished_at = Column(DateTime)
+
+
+class ProposedGraphElement(Base):
+    __tablename__ = "aletheia_proposed_graph_elements"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    run_id = Column(Integer, ForeignKey("aletheia_iterative_graph_enrichment_runs.id"), nullable=False)
+    project_id = Column(String(255), nullable=False, default="default")
+    element_key = Column(String(255), nullable=False)
+    element_type = Column(String(50), nullable=False)
+    name = Column(String(500), nullable=False)
+    payload_json = Column(Text, nullable=False, default="{}")
+    evidence_refs_json = Column(Text, nullable=False, default="[]")
+    source_url = Column(String(1000))
+    confidence = Column(Float, nullable=False, default=0.6)
+    status = Column(String(50), nullable=False, default="draft")
+    iteration = Column(Integer, nullable=False, default=1)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class GraphDeepResearchBenchmarkRun(Base):
+    __tablename__ = "aletheia_graph_deep_research_benchmarks"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    project_id = Column(String(255), nullable=False, default="default")
+    benchmark_key = Column(String(255), nullable=False)
+    enrichment_run_key = Column(String(255), nullable=False)
+    baseline_name = Column(String(255), nullable=False, default="external_deep_research_baseline")
+    baseline_summary_json = Column(Text, nullable=False, default="{}")
+    graph_findings_json = Column(Text, nullable=False, default="[]")
+    comparison_json = Column(Text, nullable=False, default="{}")
+    status = Column(String(50), nullable=False, default="completed")
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
 class AgentRuntimeConfig(Base):
     __tablename__ = "aletheia_agent_runtime_configs"
 
@@ -492,6 +547,8 @@ def delete_artifacts_by_type(session, artifact_types: Iterable[str], project_id:
 
 def ensure_artifact_schema(engine) -> None:
     Base.metadata.create_all(engine)
+    if engine.dialect.name == "sqlite":
+        return
     with engine.begin() as conn:
         conn.execute(text("ALTER TABLE aletheia_artifact_reviews ADD COLUMN IF NOT EXISTS project_id VARCHAR(255) DEFAULT 'default'"))
         conn.execute(text("UPDATE aletheia_artifact_reviews r SET project_id = a.project_id FROM aletheia_ontology_artifacts a WHERE r.artifact_id = a.id AND (r.project_id IS NULL OR r.project_id = 'default')"))
@@ -519,6 +576,10 @@ def ensure_artifact_schema(engine) -> None:
         conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_aletheia_web_enrichment_proposals_project_key ON aletheia_web_enrichment_proposals (project_id, proposal_key)"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_aletheia_web_enrichment_target ON aletheia_web_enrichment_proposals (project_id, target_artifact_key)"))
         conn.execute(text("ALTER TABLE aletheia_web_enrichment_runs ADD COLUMN IF NOT EXISTS skipped_sources_json TEXT NOT NULL DEFAULT '[]'"))
+        conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_aletheia_iterative_graph_runs_project_key ON aletheia_iterative_graph_enrichment_runs (project_id, run_key)"))
+        conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_aletheia_proposed_graph_elements_project_key ON aletheia_proposed_graph_elements (project_id, element_key)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_aletheia_proposed_graph_run ON aletheia_proposed_graph_elements (project_id, run_id, iteration)"))
+        conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_aletheia_graph_benchmarks_project_key ON aletheia_graph_deep_research_benchmarks (project_id, benchmark_key)"))
 
 
 def _project_id_for(row) -> str:
