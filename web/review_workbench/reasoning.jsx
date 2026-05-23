@@ -220,14 +220,28 @@ function canonicalTypeFromListRX(raw, types) {
 }
 
 function tenantEmptyQuestionRX(tenantId) {
+  if (tenantId === "maritime-risk") return "Select a chokepoint, country, dependency, or risk result to analyze propagation risk.";
   return tenantId === "creditcardfraud"
     ? "Select a transaction, account, card, or merchant to analyze fraud risk."
     : "Select a center node to ask a scoped question.";
 }
 
+function autopilotObjectiveForTenantRX(tenantId) {
+  if (tenantId === "maritime-risk") return "Find graph reasoning findings for maritime chokepoint risk";
+  if (tenantId === "creditcardfraud") return "Find high-value fraud risk findings";
+  return "Find high-value reasoning findings";
+}
+
 function defaultQuestionForTenantRX(tenantId, type, label, node) {
   const typeText = String(type || "").replace(/([a-z])([A-Z])/g, "$1 $2");
   const lower = typeText.toLowerCase();
+  if (tenantId === "maritime-risk") {
+    if (/chokepoint/i.test(type)) return `Which countries are most exposed to ${label}?`;
+    if (/country/i.test(type)) return `Which chokepoint dependencies create the highest risk for ${label}?`;
+    if (/dependency/i.test(type)) return `Explain the risk path for ${label}`;
+    if (/risk/i.test(type) || /hazard/i.test(type)) return `What evidence supports this maritime risk signal for ${label}?`;
+    return `Find maritime chokepoint risk findings for ${label || node || lower}`;
+  }
   if (tenantId === "creditcardfraud") {
     if (/transaction/i.test(type)) return `Explain fraud risk signals for ${label}`;
     if (/account/i.test(type)) return `Summarize fraud exposure and suspicious activity for ${label}`;
@@ -244,6 +258,33 @@ function suggestedQuestionsForTenantRX({ tenantId, type, centerNode, label, ques
   const typeText = String(type || "").replace(/([a-z])([A-Z])/g, "$1 $2");
   const plural = typeText.endsWith("s") ? typeText : `${typeText}s`;
   const hasEntity = !!(centerNode && label);
+  if (tenantId === "maritime-risk") {
+    if (hasEntity) {
+      if (q) {
+        const base = q.toLowerCase().includes(String(label).toLowerCase()) || q.includes(centerNode) ? q : `${q} — ${label}`;
+        return [
+          { q: base, node: centerNode },
+          { q: `Show the hazard -> chokepoint -> country -> risk metric path for ${label}`, node: centerNode },
+          { q: `Which dependent countries or chokepoints should be prioritized from ${label}?`, node: centerNode },
+          { q: `What action should be created from ${label}'s maritime risk evidence?`, node: centerNode },
+        ];
+      }
+      return [
+        { q: defaultQuestionForTenantRX(tenantId, type, label, centerNode), node: centerNode },
+        { q: `What evidence supports the risk propagation path for ${label}?`, node: centerNode },
+        { q: `Which downstream countries or trade metrics are affected by ${label}?`, node: centerNode },
+      ];
+    }
+    const base = samples.map(ent => ({
+      q: q ? `${q} — ${ent.label || ent.id}` : defaultQuestionForTenantRX(tenantId, type, ent.label || ent.id, ent.id),
+      node: ent.id,
+    }));
+    if (base.length) {
+      base.push({ q: `Which ${plural} produce the strongest multi-hop risk chain?`, node: base[0].node });
+      return base;
+    }
+    return [{ q: tenantEmptyQuestionRX(tenantId), node: "" }];
+  }
   if (tenantId === "creditcardfraud") {
     if (hasEntity) {
       if (q) {
@@ -378,6 +419,11 @@ function Reasoning({ tenant }) {
     { enabled: activeTab === "autopilot" && !!autopilotSelectedKey }
   );
   const autopilotDetail = autopilotDetailQ.data || null;
+  useEffectRX(() => {
+    const tid = tenant ? tenant.id : "default";
+    setAutopilotObjective(autopilotObjectiveForTenantRX(tid));
+    setAutopilotSelectedKey(null);
+  }, [tenant ? tenant.id : "default"]);
   useEffectRX(() => {
     let alive = true;
     const tid = tenant ? tenant.id : "default";
@@ -826,6 +872,7 @@ function Reasoning({ tenant }) {
     try {
       const tid = tenant ? tenant.id : "default";
       const isFraudTenant = tid === "creditcardfraud";
+      const isMaritimeTenant = tid === "maritime-risk";
       const res = await window.AL_API.createAutopilotSession(tid, {
         objective: autopilotObjective.trim(),
         scope: {
@@ -833,6 +880,7 @@ function Reasoning({ tenant }) {
           approved_only: true,
           source_surface: "reasoning_autopilot_ui",
           ...(isFraudTenant ? { table: "credit_card_transactions_safe" } : {}),
+          ...(isMaritimeTenant ? { tables: ["maritime_chokepoint_country_dependencies", "maritime_chokepoint_risk_indicators", "maritime_chokepoint_systemic_risk_results"] } : {}),
         },
         budget: {
           max_hypotheses: Number(autopilotMaxHypotheses) || 8,
@@ -844,7 +892,7 @@ function Reasoning({ tenant }) {
           approved_only: true,
           safe_views_only: true,
           allow_sensitive_fields: false,
-          blocked_fields: ["card_verification_code_fields"],
+          blocked_fields: isFraudTenant ? ["card_verification_code_fields"] : [],
         },
         created_by: "Reasoning Autopilot UI",
       });
@@ -918,6 +966,33 @@ function Reasoning({ tenant }) {
       if (key) setAutopilotSelectedKey(key);
       setActiveTab("autopilot");
       setActionMsg({ kind: "ok", msg: "Creditcardfraud playbook completed · " + (key || "") });
+      window.dispatchEvent(new CustomEvent("aletheia:retry"));
+    } catch (err) {
+      setActionMsg({ kind: "err", msg: err.message || String(err) });
+    } finally {
+      setAutopilotPlaybookRunning(false);
+    }
+  }
+
+  async function runMaritimeRiskPlaybook() {
+    setAutopilotPlaybookRunning(true);
+    setActionMsg(null);
+    try {
+      const tid = tenant ? tenant.id : "default";
+      const res = await window.AL_API.runMaritimeRiskAutopilotPlaybook(tid, {
+        objective: autopilotObjective.trim() || "Discover graph reasoning findings for maritime chokepoint risk",
+        session_key: autopilotSelectedKey || undefined,
+        budget: {
+          max_hypotheses: Number(autopilotMaxHypotheses) || 8,
+          max_reasoning_tasks: Number(autopilotMaxRuns) || 5,
+          max_tool_calls: Number(autopilotMaxToolCalls) || 20,
+          max_runtime_seconds: 120,
+        },
+      });
+      const key = res?.session?.session_key;
+      if (key) setAutopilotSelectedKey(key);
+      setActiveTab("autopilot");
+      setActionMsg({ kind: "ok", msg: "Maritime-risk playbook completed · " + (key || "") });
       window.dispatchEvent(new CustomEvent("aletheia:retry"));
     } catch (err) {
       setActionMsg({ kind: "err", msg: err.message || String(err) });
@@ -1132,7 +1207,7 @@ function Reasoning({ tenant }) {
               onReviewCandidate={reviewAutopilotCandidate}
               onStart={startAutopilot}
               starting={autopilotStarting}
-              onRunPlaybook={runCreditcardfraudPlaybook}
+              onRunPlaybook={(tenant && tenant.id) === "maritime-risk" ? runMaritimeRiskPlaybook : runCreditcardfraudPlaybook}
               playbookRunning={autopilotPlaybookRunning}
             />
           ) : askMode ? (
@@ -1477,7 +1552,7 @@ function Reasoning({ tenant }) {
               setMaxToolCalls={setAutopilotMaxToolCalls}
               starting={autopilotStarting}
               onStart={startAutopilot}
-              onRunPlaybook={runCreditcardfraudPlaybook}
+              onRunPlaybook={(tenant && tenant.id) === "maritime-risk" ? runMaritimeRiskPlaybook : runCreditcardfraudPlaybook}
               playbookRunning={autopilotPlaybookRunning}
               detail={autopilotDetail}
             />
@@ -1631,9 +1706,9 @@ function AutopilotWorkspace({
             <div style={{ display: "flex", alignItems: "center", gap: 12, color: "var(--muted)", fontSize: 12 }}>
               <span>Start a session to create a visible hypothesis queue and draft Finding Inbox.</span>
               <button className="btn primary" onClick={onStart} disabled={starting}>{starting ? "Starting…" : "▶ Start Autopilot"}</button>
-              {tenant?.id === "creditcardfraud" && (
+              {(tenant?.id === "creditcardfraud" || tenant?.id === "maritime-risk") && (
                 <button className="btn" onClick={onRunPlaybook} disabled={playbookRunning}>
-                  {playbookRunning ? "Running playbook…" : "Run fraud playbook"}
+                  {playbookRunning ? "Running playbook…" : tenant?.id === "maritime-risk" ? "Run maritime-risk playbook" : "Run fraud playbook"}
                 </button>
               )}
             </div>
@@ -1661,7 +1736,7 @@ function AutopilotWorkspace({
             <Panel eyebrow="Hypothesis queue" title="Queued reasoning hypotheses" count={`${hypotheses.length} items`} style={{ marginBottom: 16 }}>
               {hypotheses.length === 0 ? (
                 <div style={{ color: "var(--muted)", fontFamily: "var(--font-mono)", fontSize: 11 }}>
-                  No hypotheses yet. task #142 will populate this queue for creditcardfraud discovery.
+                  No hypotheses yet. Run a tenant playbook to populate this queue with draft candidate findings.
                 </div>
               ) : (
                 <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
@@ -1687,13 +1762,12 @@ function AutopilotWorkspace({
               )}
             </Panel>
 
-            {tenant?.id === "creditcardfraud" && (
-              <Panel eyebrow="Playbook" title="Creditcardfraud discovery playbook" count="draft-only" style={{ marginBottom: 16 }}>
+            {(tenant?.id === "creditcardfraud" || tenant?.id === "maritime-risk") && (
+              <Panel eyebrow="Playbook" title={tenant?.id === "maritime-risk" ? "Maritime-risk graph reasoning playbook" : "Creditcardfraud discovery playbook"} count="draft-only" style={{ marginBottom: 16 }}>
                 <div style={{ display: "flex", gap: 10, alignItems: "center", color: "var(--muted)", fontSize: 12, lineHeight: 1.5 }}>
-                  <span>
-                    Run the fixed fraud playbook to populate card-not-present, verification mismatch, POS missing,
-                    merchant category, duplicate-cluster candidates, plus a pruned hypothesis with reason.
-                  </span>
+                  <span>{tenant?.id === "maritime-risk"
+                    ? "Run the fixed maritime playbook to populate chokepoint dependency, hazard-adjusted risk, and country-priority graph findings, plus a pruned non-graph ranking hypothesis."
+                    : "Run the fixed fraud playbook to populate card-not-present, verification mismatch, POS missing, merchant category, duplicate-cluster candidates, plus a pruned hypothesis with reason."}</span>
                   <button className="btn primary" onClick={onRunPlaybook} disabled={playbookRunning} style={{ marginLeft: "auto", whiteSpace: "nowrap" }}>
                     {playbookRunning ? "Running…" : "Run playbook"}
                   </button>
@@ -1834,9 +1908,9 @@ function AutopilotStartPanel({ tenant, objective, setObjective, maxHypotheses, s
               </div>
             </div>
             <button className="btn primary" type="submit" disabled={starting}>{starting ? "Starting…" : "▶ Start Autopilot"}</button>
-            {tenant?.id === "creditcardfraud" && (
+            {(tenant?.id === "creditcardfraud" || tenant?.id === "maritime-risk") && (
               <button className="btn" type="button" onClick={onRunPlaybook} disabled={playbookRunning}>
-                {playbookRunning ? "Running fraud playbook…" : "Run creditcardfraud playbook"}
+                {playbookRunning ? "Running playbook…" : tenant?.id === "maritime-risk" ? "Run maritime-risk playbook" : "Run creditcardfraud playbook"}
               </button>
             )}
           </form>
@@ -1851,7 +1925,7 @@ function AutopilotStartPanel({ tenant, objective, setObjective, maxHypotheses, s
           <BoundaryLine label="Sensitive fields" value={safety.allow_sensitive_fields ? "allowed" : "blocked"} tone={safety.allow_sensitive_fields ? "var(--rejected)" : "var(--approved)"} />
           <BoundaryLine label="Canonical writes" value={safety.canonical_writes || "disabled"} tone="var(--rejected)" />
           <BoundaryLine label="Auto approve" value={String(!!safety.auto_approve_findings)} tone={safety.auto_approve_findings ? "var(--rejected)" : "var(--approved)"} />
-          <BoundaryLine label="Blocked field group" value={(safety.blocked_fields || ["card_verification_code_fields"]).join(", ")} />
+          <BoundaryLine label="Blocked field group" value={(safety.blocked_fields || []).length ? (safety.blocked_fields || []).join(", ") : "none"} />
         </div>
       </div>
 

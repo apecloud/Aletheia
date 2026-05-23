@@ -198,6 +198,77 @@ SOURCE_TABLE_SCHEMAS = {
         "primary_key": "merchantName",
         "columns": ["merchantName", "merchantCategoryCode", "merchantCountryCode", "acqCountry"],
     },
+    "chokepoint": {
+        "table": "maritime_chokepoint_risk_indicators",
+        "primary_key": "risk_indicator_id",
+        "columns": ["risk_indicator_id", "canal", "drought", "TC1", "TC3", "severity_conflict", "severity_piracy", "severity_geopolitical"],
+    },
+    "country": {
+        "table": "maritime_chokepoint_country_dependencies",
+        "primary_key": "iso3",
+        "columns": ["iso3", "q", "v", "q_sea_predict", "v_sea_predict", "revenue_USD"],
+    },
+    "tradedependency": {
+        "table": "maritime_chokepoint_country_dependencies",
+        "primary_key": "dependency_id",
+        "columns": ["dependency_id", "iso3", "canal", "q_canal", "v_canal", "q", "v", "revenue_USD"],
+    },
+    "trade_dependency": {
+        "table": "maritime_chokepoint_country_dependencies",
+        "primary_key": "dependency_id",
+        "columns": ["dependency_id", "iso3", "canal", "q_canal", "v_canal", "q", "v", "revenue_USD"],
+    },
+    "hazard": {
+        "table": "maritime_chokepoint_risk_indicators",
+        "primary_key": "risk_indicator_id",
+        "columns": [
+            "risk_indicator_id", "canal",
+            "likelihood_conflict", "timescale_conflict", "severity_conflict",
+            "likelihood_piracy", "timescale_piracy", "severity_piracy",
+            "likelihood_blockage", "timescale_blockage", "severity_blockage",
+            "likelihood_geopolitical", "timescale_geopolitical", "severity_geopolitical",
+        ],
+    },
+    "riskindicator": {
+        "table": "maritime_chokepoint_risk_indicators",
+        "primary_key": "risk_indicator_id",
+        "columns": ["risk_indicator_id", "canal", "piracy", "geopolitical", "drought", "TC1", "TC3", "likelihood_conflict", "severity_conflict", "likelihood_blockage", "severity_blockage"],
+    },
+    "risk_indicator": {
+        "table": "maritime_chokepoint_risk_indicators",
+        "primary_key": "risk_indicator_id",
+        "columns": ["risk_indicator_id", "canal", "piracy", "geopolitical", "drought", "TC1", "TC3", "likelihood_conflict", "severity_conflict", "likelihood_blockage", "severity_blockage"],
+    },
+    "systemicriskresult": {
+        "table": "maritime_chokepoint_systemic_risk_results",
+        "primary_key": "risk_result_id",
+        "columns": ["risk_result_id", "iso3", "canal", "v_share", "v_share_mar", "trade_at_risk_v", "trade_at_risk_q", "revenue_at_risk", "trade_impacted"],
+    },
+    "systemic_risk_result": {
+        "table": "maritime_chokepoint_systemic_risk_results",
+        "primary_key": "risk_result_id",
+        "columns": ["risk_result_id", "iso3", "canal", "v_share", "v_share_mar", "trade_at_risk_v", "trade_at_risk_q", "revenue_at_risk", "trade_impacted"],
+    },
+    "riskfinding": {
+        "table": "maritime_chokepoint_systemic_risk_results",
+        "primary_key": "risk_result_id",
+        "columns": ["risk_result_id", "iso3", "canal", "trade_at_risk_v", "trade_impacted"],
+    },
+    "risk_finding": {
+        "table": "maritime_chokepoint_systemic_risk_results",
+        "primary_key": "risk_result_id",
+        "columns": ["risk_result_id", "iso3", "canal", "trade_at_risk_v", "trade_impacted"],
+    },
+    "mitigationaction": {
+        "table": "maritime_chokepoint_systemic_risk_results",
+        "primary_key": "risk_result_id",
+        "columns": ["risk_result_id", "iso3", "canal", "trade_at_risk_v", "trade_impacted"],
+    },
+    "mitigation_action": {
+        "table": "maritime_chokepoint_systemic_risk_results",
+        "primary_key": "risk_result_id",
+        "columns": ["risk_result_id", "iso3", "canal", "trade_at_risk_v", "trade_impacted"],
+    },
 }
 
 
@@ -261,6 +332,76 @@ SOURCE_LINK_SCHEMAS = {
         "cardinality": "1:N",
         "graph_edge": "Merchant -> Credit Card Transaction",
         "source_ref": "credit_card_transactions_safe.merchantName",
+    },
+    "link:country:n:m:chokepoint_dependency": {
+        "source_table": "maritime_chokepoint_country_dependencies",
+        "source_field": "maritime_chokepoint_country_dependencies.iso3",
+        "target_table": "maritime_chokepoint_risk_indicators",
+        "target_field": "maritime_chokepoint_risk_indicators.canal",
+        "join_condition": "maritime_chokepoint_country_dependencies.canal = maritime_chokepoint_risk_indicators.canal",
+        "cardinality": "N:M",
+        "graph_edge": "Country -> Chokepoint",
+        "source_ref": "maritime_chokepoint_country_dependencies.canal",
+    },
+    "link:chokepoint:1:n:risk_indicator": {
+        "source_table": "maritime_chokepoint_risk_indicators",
+        "source_field": "maritime_chokepoint_risk_indicators.canal",
+        "target_table": "maritime_chokepoint_risk_indicators",
+        "target_field": "maritime_chokepoint_risk_indicators.risk_indicator_id",
+        "join_condition": "risk_indicator.canal = chokepoint.canal",
+        "cardinality": "1:N",
+        "graph_edge": "Chokepoint -> RiskIndicator",
+        "source_ref": "maritime_chokepoint_risk_indicators.canal",
+    },
+    "link:country:1:n:systemic_risk_result": {
+        "source_table": "maritime_chokepoint_country_dependencies",
+        "source_field": "maritime_chokepoint_country_dependencies.iso3",
+        "target_table": "maritime_chokepoint_systemic_risk_results",
+        "target_field": "maritime_chokepoint_systemic_risk_results.iso3",
+        "join_condition": "maritime_chokepoint_country_dependencies.iso3 = maritime_chokepoint_systemic_risk_results.iso3",
+        "cardinality": "1:N",
+        "graph_edge": "Country -> SystemicRiskResult",
+        "source_ref": "maritime_chokepoint_systemic_risk_results.iso3",
+    },
+    "link:trade_dependency:n:1:country": {
+        "source_table": "maritime_chokepoint_country_dependencies",
+        "source_field": "maritime_chokepoint_country_dependencies.dependency_id",
+        "target_table": "maritime_chokepoint_country_dependencies",
+        "target_field": "maritime_chokepoint_country_dependencies.iso3",
+        "join_condition": "trade_dependency.iso3 = country.iso3",
+        "cardinality": "N:1",
+        "graph_edge": "TradeDependency -> Country",
+        "source_ref": "maritime_chokepoint_country_dependencies.iso3",
+    },
+    "link:trade_dependency:n:1:chokepoint": {
+        "source_table": "maritime_chokepoint_country_dependencies",
+        "source_field": "maritime_chokepoint_country_dependencies.dependency_id",
+        "target_table": "maritime_chokepoint_risk_indicators",
+        "target_field": "maritime_chokepoint_risk_indicators.canal",
+        "join_condition": "trade_dependency.canal = chokepoint.canal",
+        "cardinality": "N:1",
+        "graph_edge": "TradeDependency -> Chokepoint",
+        "source_ref": "maritime_chokepoint_country_dependencies.canal",
+    },
+    "link:risk_finding:n:m:evidence": {
+        "source_table": "maritime_chokepoint_systemic_risk_results",
+        "source_field": "maritime_chokepoint_systemic_risk_results.risk_result_id",
+        "target_table": "maritime_chokepoint_risk_indicators",
+        "target_field": "maritime_chokepoint_risk_indicators.canal",
+        "join_condition": "risk_finding.canal = risk_indicator.canal",
+        "cardinality": "N:M",
+        "graph_edge": "RiskFinding -> RiskIndicator",
+        "source_ref": "maritime_chokepoint_systemic_risk_results.canal",
+    },
+    "link:mitigation_action:n:1:risk_finding": {
+        "source_table": "maritime_chokepoint_systemic_risk_results",
+        "source_field": "maritime_chokepoint_systemic_risk_results.risk_result_id",
+        "target_table": "maritime_chokepoint_systemic_risk_results",
+        "target_field": "maritime_chokepoint_systemic_risk_results.risk_result_id",
+        "join_condition": "mitigation_action.risk_result_id = risk_finding.risk_result_id",
+        "cardinality": "N:1",
+        "graph_edge": "MitigationAction -> RiskFinding",
+        "source_ref": "maritime_chokepoint_systemic_risk_results.risk_result_id",
     },
 }
 
@@ -1391,7 +1532,7 @@ class ReasoningRepository:
             "canonical_writes": "disabled",
             "auto_approve_findings": False,
         }
-        blocked = raw.get("blocked_fields") or ["card_verification_code_fields"]
+        blocked = raw.get("blocked_fields") if "blocked_fields" in raw else ["card_verification_code_fields"]
         normalized_blocked = []
         for field in blocked:
             if field in {"cardCVV", "enteredCVV"}:
@@ -2069,6 +2210,264 @@ class ReasoningRepository:
             self.add_autopilot_candidate_finding(tenant, session_key, spec)
 
         return self.get_autopilot_session(tenant, session_key)
+
+    def run_maritime_risk_autopilot_playbook(self, tenant, payload):
+        if tenant.tenant_id != "maritime-risk":
+            raise ValueError("maritime-risk playbook requires tenant=maritime-risk")
+        profile = self._maritime_risk_profile(tenant)
+        objective = payload.get("objective") or "Discover graph reasoning findings for maritime chokepoint risk"
+        session_payload = {
+            "session_key": payload.get("session_key"),
+            "objective": objective,
+            "scope": {
+                "tenant": tenant.tenant_id,
+                "tables": [
+                    "maritime_chokepoint_country_dependencies",
+                    "maritime_chokepoint_risk_indicators",
+                    "maritime_chokepoint_systemic_risk_results",
+                ],
+                "approved_only": True,
+                "source_surface": "maritime_risk_graph_reasoning_playbook",
+                "source_mode": profile.get("source_mode"),
+            },
+            "budget": payload.get("budget") or {
+                "max_hypotheses": 8,
+                "max_reasoning_tasks": 5,
+                "max_tool_calls": 20,
+                "max_runtime_seconds": 120,
+            },
+            "safety_profile": {
+                "approved_only": True,
+                "safe_views_only": True,
+                "allow_sensitive_fields": False,
+                "blocked_fields": [],
+                "canonical_writes": "disabled",
+                "auto_approve_findings": False,
+            },
+            "created_by": payload.get("created_by") or "Maritime-risk Graph Reasoning Playbook",
+        }
+        created = self.create_autopilot_session(tenant, session_payload)
+        session_key = created["session"]["session_key"]
+
+        hypothesis_specs = [
+            {
+                "title": "Single-chokepoint dependency can create concentrated country exposure",
+                "rationale": "Rank country/chokepoint pairs by value share and dependent trade value to find countries exposed to one chokepoint.",
+                "status": "completed",
+                "priority": 10,
+                "evidence_plan": [
+                    {"kind": "graph_path", "source_ref": "maritime_chokepoint_country_dependencies", "metric": "country_to_chokepoint_dependency_share"}
+                ],
+                "reasoning_task_keys": ["reasoning:maritime-risk:chokepoint-dependency:v1"],
+            },
+            {
+                "title": "Hazard severity should be joined to dependent trade value before ranking chokepoints",
+                "rationale": "Combine hazard likelihood/severity with systemic risk results so the finding explains risk propagation, not just trade volume.",
+                "status": "completed",
+                "priority": 20,
+                "evidence_plan": [
+                    {"kind": "join", "source_ref": "maritime_chokepoint_risk_indicators + maritime_chokepoint_systemic_risk_results", "metric": "hazard_adjusted_trade_at_risk"}
+                ],
+                "reasoning_task_keys": ["reasoning:maritime-risk:hazard-adjusted-risk:v1"],
+            },
+            {
+                "title": "Red Sea / Bab el-Mandeb escalation should prioritize dependent countries by systemic risk",
+                "rationale": "Use the chokepoint hazard row and downstream country risk rows to prioritize analyst review when upstream events increase.",
+                "status": "completed",
+                "priority": 30,
+                "evidence_plan": [
+                    {"kind": "graph_path", "source_ref": "maritime_chokepoint_risk_indicators -> maritime_chokepoint_systemic_risk_results", "metric": "bab_el_mandeb_country_priority"}
+                ],
+                "reasoning_task_keys": ["reasoning:maritime-risk:red-sea-priority:v1"],
+            },
+            {
+                "title": "High throughput alone is not enough for a graph reasoning finding",
+                "rationale": "A volume-only ranking does not explain hazard, dependency, country exposure, and action linkage.",
+                "status": "pruned",
+                "priority": 90,
+                "evidence_plan": [{"kind": "aggregate", "source_ref": "maritime_chokepoint_country_dependencies", "metric": "sum_v_canal"}],
+                "pruned_reason": "Pruned because it is a ranking/reporting hypothesis without a complete hazard -> chokepoint -> country -> risk metric -> action path.",
+                "reasoning_task_keys": ["reasoning:maritime-risk:volume-only:v1"],
+            },
+        ]
+        hypotheses = {}
+        for spec in hypothesis_specs:
+            result = self.add_autopilot_hypothesis(tenant, session_key, spec)
+            hypotheses[spec["title"]] = result["hypothesis"]["hypothesis_key"]
+
+        for spec in self._maritime_risk_candidate_specs(profile, hypotheses):
+            self.add_autopilot_candidate_finding(tenant, session_key, spec)
+
+        return self.get_autopilot_session(tenant, session_key)
+
+    def _maritime_risk_profile(self, tenant):
+        fallback = {
+            "source_mode": "fallback_reported_profile",
+            "tables": {
+                "maritime_chokepoint_country_dependencies": 4950,
+                "maritime_chokepoint_risk_indicators": 24,
+                "maritime_chokepoint_systemic_risk_results": 4752,
+            },
+            "top_dependency": [
+                {"iso3": "ERI", "canal": "Bab el-Mandeb Strait", "v_canal": 820217259.96, "v": 1122417684.78, "share": 0.7308},
+                {"iso3": "QAT", "canal": "Strait of Hormuz", "v_canal": 96857752381.97, "v": 139422651416.03, "share": 0.6947},
+                {"iso3": "DJI", "canal": "Bab el-Mandeb Strait", "v_canal": 5487893583.24, "v": 7982553963.16, "share": 0.6875},
+            ],
+            "top_systemic_risk": [
+                {"iso3": "CHN", "canal": "Taiwan Strait", "trade_at_risk_v": 23559681578.78, "trade_impacted": 81768261948.46, "v_share": 0.2324},
+                {"iso3": "CHN", "canal": "Bab el-Mandeb Strait", "trade_at_risk_v": 15110427387.67, "trade_impacted": 46556020850.45, "v_share": 0.0918},
+                {"iso3": "USA", "canal": "Panama Canal", "trade_at_risk_v": 12192832212.34, "trade_impacted": 306107297223.91, "v_share": 0.1049},
+            ],
+            "bab_el_mandeb_priority": [
+                {"iso3": "CHN", "canal": "Bab el-Mandeb Strait", "trade_at_risk_v": 15110427387.67, "trade_impacted": 46556020850.45, "v_share": 0.0918},
+                {"iso3": "IND", "canal": "Bab el-Mandeb Strait", "trade_at_risk_v": 7067159777.33, "trade_impacted": 21774290660.73, "v_share": 0.2291},
+                {"iso3": "USA", "canal": "Bab el-Mandeb Strait", "trade_at_risk_v": 6574347208.87, "trade_impacted": 20255909239.48, "v_share": 0.0479},
+            ],
+            "bab_el_mandeb_hazard": {
+                "canal": "Bab el-Mandeb Strait",
+                "likelihood_conflict": 0.6731,
+                "severity_conflict": 0.5,
+                "likelihood_geopolitical": 2.3529,
+                "severity_geopolitical": 0.5,
+                "likelihood_piracy": 0.2556,
+                "severity_piracy": 0.005,
+            },
+        }
+        try:
+            with self.source_engine_for(tenant).connect() as conn:
+                tables = {
+                    table: int(conn.execute(text(f"SELECT COUNT(*) FROM {table}")).scalar_one())
+                    for table in fallback["tables"]
+                }
+                top_dependency = [
+                    dict(row)
+                    for row in conn.execute(text("""
+                        SELECT iso3, canal, v_canal, v, v_canal / NULLIF(v, 0) AS share
+                        FROM maritime_chokepoint_country_dependencies
+                        WHERE v > 0
+                        ORDER BY share DESC, v_canal DESC
+                        LIMIT 5
+                    """)).mappings().all()
+                ]
+                top_systemic_risk = [
+                    dict(row)
+                    for row in conn.execute(text("""
+                        SELECT iso3, canal, trade_at_risk_v, trade_impacted, revenue_at_risk, v_share
+                        FROM maritime_chokepoint_systemic_risk_results
+                        ORDER BY trade_at_risk_v DESC
+                        LIMIT 5
+                    """)).mappings().all()
+                ]
+                bab_priority = [
+                    dict(row)
+                    for row in conn.execute(text("""
+                        SELECT iso3, canal, trade_at_risk_v, trade_impacted, revenue_at_risk, v_share
+                        FROM maritime_chokepoint_systemic_risk_results
+                        WHERE canal = 'Bab el-Mandeb Strait'
+                        ORDER BY trade_at_risk_v DESC
+                        LIMIT 5
+                    """)).mappings().all()
+                ]
+                bab_hazard = conn.execute(text("""
+                    SELECT canal, likelihood_conflict, severity_conflict,
+                           likelihood_geopolitical, severity_geopolitical,
+                           likelihood_piracy, severity_piracy,
+                           likelihood_blockage, severity_blockage
+                    FROM maritime_chokepoint_risk_indicators
+                    WHERE canal = 'Bab el-Mandeb Strait'
+                """)).mappings().first()
+            return {
+                **fallback,
+                "source_mode": "live_source_tables",
+                "tables": tables,
+                "top_dependency": top_dependency or fallback["top_dependency"],
+                "top_systemic_risk": top_systemic_risk or fallback["top_systemic_risk"],
+                "bab_el_mandeb_priority": bab_priority or fallback["bab_el_mandeb_priority"],
+                "bab_el_mandeb_hazard": dict(bab_hazard) if bab_hazard else fallback["bab_el_mandeb_hazard"],
+            }
+        except Exception:
+            return fallback
+
+    def _maritime_risk_candidate_specs(self, profile, hypotheses):
+        dependency = profile["top_dependency"][0]
+        systemic = profile["top_systemic_risk"][0]
+        bab_priority = profile["bab_el_mandeb_priority"]
+        bab_hazard = profile["bab_el_mandeb_hazard"]
+        priority_labels = ", ".join(
+            f"{row['iso3']} (${float(row['trade_at_risk_v']) / 1_000_000_000:.1f}B at risk)"
+            for row in bab_priority[:3]
+        )
+        evidence_limit = "Draft candidate from maritime-risk graph playbook; requires human review before formal finding approval."
+        return [
+            {
+                "hypothesis_key": hypotheses["Single-chokepoint dependency can create concentrated country exposure"],
+                "title": "Single chokepoint dependency creates concentrated country exposure",
+                "conclusion": (
+                    f"{dependency['iso3']} depends heavily on {dependency['canal']}: "
+                    f"{float(dependency['share']):.1%} of modeled maritime trade value flows through that chokepoint "
+                    f"(${float(dependency['v_canal']) / 1_000_000_000:.2f}B of dependent value)."
+                ),
+                "value_score": 0.82,
+                "confidence": 0.78,
+                "novelty_score": 0.62,
+                "impact_score": 0.8,
+                "evidence_chain": [
+                    {"kind": "country", "source_ref": "maritime_chokepoint_country_dependencies", "metric": "iso3", "value": dependency["iso3"]},
+                    {"kind": "chokepoint", "source_ref": "maritime_chokepoint_country_dependencies", "metric": "canal", "value": dependency["canal"]},
+                    {"kind": "trade_dependency", "source_ref": "maritime_chokepoint_country_dependencies", "metric": "v_canal", "value": round(float(dependency["v_canal"]), 2)},
+                    {"kind": "dependency_share", "source_ref": "maritime_chokepoint_country_dependencies", "metric": "v_canal / v", "value": f"{float(dependency['share']):.1%}"},
+                    {"kind": "recommended_action", "source_ref": "maritime_risk_playbook", "metric": "portfolio_review", "value": "Prioritize dependency diversification review for the country/chokepoint pair."},
+                ],
+                "evidence_limits": [evidence_limit, "This phase uses structural 2022 dependency data and does not include live event updates."],
+                "suggested_action": {"next": "Open a country/chokepoint dependency review and compare alternate maritime routes."},
+            },
+            {
+                "hypothesis_key": hypotheses["Hazard severity should be joined to dependent trade value before ranking chokepoints"],
+                "title": "Hazard-adjusted chokepoint risk should drive review priority",
+                "conclusion": (
+                    f"{systemic['canal']} has the highest modeled trade-at-risk row in the current dataset: "
+                    f"{systemic['iso3']} shows ${float(systemic['trade_at_risk_v']) / 1_000_000_000:.1f}B expected trade value at risk "
+                    f"and ${float(systemic['trade_impacted']) / 1_000_000_000:.1f}B trade impacted."
+                ),
+                "value_score": 0.88,
+                "confidence": 0.8,
+                "novelty_score": 0.66,
+                "impact_score": 0.87,
+                "evidence_chain": [
+                    {"kind": "hazard", "source_ref": "maritime_chokepoint_risk_indicators", "metric": "chokepoint", "value": systemic["canal"]},
+                    {"kind": "dependent_country", "source_ref": "maritime_chokepoint_systemic_risk_results", "metric": "iso3", "value": systemic["iso3"]},
+                    {"kind": "risk_metric", "source_ref": "maritime_chokepoint_systemic_risk_results", "metric": "trade_at_risk_v", "value": round(float(systemic["trade_at_risk_v"]), 2)},
+                    {"kind": "risk_metric", "source_ref": "maritime_chokepoint_systemic_risk_results", "metric": "trade_impacted", "value": round(float(systemic["trade_impacted"]), 2)},
+                    {"kind": "recommended_action", "source_ref": "maritime_risk_playbook", "metric": "risk_review_queue", "value": "Create a priority review queue for countries with high trade_at_risk_v on this chokepoint."},
+                ],
+                "evidence_limits": [evidence_limit, "Hazard indicators are joined at chokepoint level; country-level risk is modeled through dependency and systemic risk tables."],
+                "suggested_action": {"next": "Rank affected countries by trade_at_risk_v and validate current operational exposure."},
+            },
+            {
+                "hypothesis_key": hypotheses["Red Sea / Bab el-Mandeb escalation should prioritize dependent countries by systemic risk"],
+                "title": "Bab el-Mandeb risk propagation identifies countries for immediate review",
+                "conclusion": (
+                    "If Red Sea / Bab el-Mandeb risk rises, the first review queue should include "
+                    f"{priority_labels}. The graph path is hazard at Bab el-Mandeb -> chokepoint -> dependent country -> systemic risk metric -> analyst action."
+                ),
+                "value_score": 0.9,
+                "confidence": 0.82,
+                "novelty_score": 0.72,
+                "impact_score": 0.9,
+                "evidence_chain": [
+                    {"kind": "hazard", "source_ref": "maritime_chokepoint_risk_indicators", "metric": "likelihood_conflict", "value": bab_hazard.get("likelihood_conflict")},
+                    {"kind": "hazard", "source_ref": "maritime_chokepoint_risk_indicators", "metric": "severity_conflict", "value": bab_hazard.get("severity_conflict")},
+                    {"kind": "chokepoint", "source_ref": "maritime_chokepoint_risk_indicators", "metric": "canal", "value": "Bab el-Mandeb Strait"},
+                    {"kind": "dependent_countries", "source_ref": "maritime_chokepoint_systemic_risk_results", "metric": "top_trade_at_risk_v", "value": [
+                        {"iso3": row["iso3"], "trade_at_risk_v": round(float(row["trade_at_risk_v"]), 2), "trade_impacted": round(float(row["trade_impacted"]), 2)}
+                        for row in bab_priority[:5]
+                    ]},
+                    {"kind": "recommended_action", "source_ref": "maritime_risk_playbook", "metric": "country_priority_review", "value": "Assign analyst review to top exposed countries and request updated live event enrichment."},
+                ],
+                "evidence_limits": [evidence_limit, "The playbook uses structural chokepoint risk data; ACLED/GDELT live events are a planned enrichment, not yet imported."],
+                "suggested_action": {"next": "Create a Bab el-Mandeb review case for the top exposed countries and attach live event enrichment when available."},
+            },
+        ]
 
     def _creditcardfraud_profile(self, tenant):
         fallback = {
@@ -5758,6 +6157,18 @@ class ReviewWorkbenchHandler(BaseHTTPRequestHandler):
             try:
                 body = self._read_json()
                 result = self.reasoning_repository.run_creditcardfraud_autopilot_playbook(tenant, body)
+            except ValueError as exc:
+                self._send_error(HTTPStatus.BAD_REQUEST, str(exc))
+                return
+            except Exception as exc:  # pragma: no cover - displayed to local operator
+                self._send_error(HTTPStatus.INTERNAL_SERVER_ERROR, str(exc))
+                return
+            self._send_json(result)
+            return
+        if parsed.path == "/api/reasoning/autopilot/playbooks/maritime-risk/run":
+            try:
+                body = self._read_json()
+                result = self.reasoning_repository.run_maritime_risk_autopilot_playbook(tenant, body)
             except ValueError as exc:
                 self._send_error(HTTPStatus.BAD_REQUEST, str(exc))
                 return
