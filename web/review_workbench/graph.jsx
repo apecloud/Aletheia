@@ -69,6 +69,7 @@ function GraphExplorer({ data, tenant }) {
   const [depth, setDepth] = useStateGX(Math.max(1, Math.min(Number(initialParams.get("depth") || 1), 3)));
   const [limit, setLimit] = useStateGX(Math.max(1, Number(initialParams.get("limit") || 200)));
   const [hoverId, setHoverId] = useStateGX(null);
+  const [leftTab, setLeftTab] = useStateGX(initialParams.get("graph_tab") || "approved");
 
   const typesQ = useApiData("instanceTypes", [tenantId, { includeDraft: true }], { fallback: [] });
   const centerTypes = Array.isArray(typesQ.data) ? typesQ.data : [];
@@ -122,9 +123,10 @@ function GraphExplorer({ data, tenant }) {
       if (centerNodeId) url.searchParams.set("id", centerNodeId); else url.searchParams.delete("id");
       url.searchParams.set("depth", String(depth));
       url.searchParams.set("limit", String(limit));
+      url.searchParams.set("graph_tab", leftTab);
       history.replaceState(null, "", url.toString());
     } catch {}
-  }, [tenantId, centerType, centerNodeId, depth, limit]);
+  }, [tenantId, centerType, centerNodeId, depth, limit, leftTab]);
 
   const graphQ = useApiData(
     "graphContext",
@@ -158,11 +160,7 @@ function GraphExplorer({ data, tenant }) {
   return (
     <div className="canvas">
       <div className="subbar">
-        <div className="tabs">
-          <div className="tab active">Approved Scope <span className="ct">218</span></div>
-          <div className="tab">Sandbox <span className="ct">12</span></div>
-          <div className="tab">Saved Views <span className="ct">5</span></div>
-        </div>
+        <div className="eyebrow accent">Graph Explorer</div>
         <div className="spacer" />
         {isMockG  && <span className="pill changes" style={{ marginRight: 8 }}><span className="dot" />Mock fallback</span>}
         {isStaleG && <span className="pill changes" style={{ marginRight: 8 }}><span className="dot" />Stale · last fetch failed</span>}
@@ -176,12 +174,24 @@ function GraphExplorer({ data, tenant }) {
         {/* LEFT — scope */}
         <div className="col">
           <div style={{ padding: "var(--pad-3) var(--pad-4)", borderBottom: "1px solid var(--line)" }}>
-            <div className="eyebrow accent">Scope</div>
+            <div className="eyebrow accent">Graph Catalog</div>
             <div style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text)", marginTop: 4 }}>
-              tenant <span style={{ color: "var(--accent)" }}>{tenant ? tenant.id : "default"}</span> · tenant-scoped center
+              tenant <span style={{ color: "var(--accent)" }}>{tenant ? tenant.id : "default"}</span> · graph spaces
+            </div>
+            <div className="tabs" style={{ marginTop: 10, flexWrap: "wrap" }}>
+              <div className={"tab" + (leftTab === "approved" ? " active" : "")} onClick={() => setLeftTab("approved")}>
+                Approved graph <span className="ct">{graph.nodes.length}</span>
+              </div>
+              <div className={"tab" + (leftTab === "proposed" ? " active" : "")} onClick={() => setLeftTab("proposed")}>
+                Proposed graph <span className="ct">{(proposed.elements || []).length}</span>
+              </div>
+              <div className={"tab" + (leftTab === "saved" ? " active" : "")} onClick={() => setLeftTab("saved")}>
+                Saved views <span className="ct">0</span>
+              </div>
             </div>
           </div>
 
+          {leftTab === "approved" && <>
           <div style={{ padding: "var(--pad-3) var(--pad-4)", borderBottom: "1px solid var(--line)", display: "flex", flexDirection: "column", gap: 10 }}>
             <div>
               <div className="eyebrow" style={{ marginBottom: 4 }}>Center</div>
@@ -244,6 +254,19 @@ function GraphExplorer({ data, tenant }) {
               </div>
             </div>
           </div>
+          </>}
+
+          {leftTab === "proposed" && (
+            <div style={{ flex: 1, minHeight: 0, overflow: "auto" }}>
+              <ProposedGraphPanel proposed={proposed} loading={proposedQ.loading} source={proposedQ.source} compact />
+            </div>
+          )}
+
+          {leftTab === "saved" && (
+            <div style={{ flex: 1, padding: 24, fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--muted)" }}>
+              No saved graph views for tenant {tenantId}.
+            </div>
+          )}
         </div>
 
         {/* CENTER — canvas */}
@@ -312,7 +335,6 @@ function GraphExplorer({ data, tenant }) {
 
         {/* RIGHT — inspector */}
         <div className="col inspector">
-          <ProposedGraphPanel proposed={proposed} loading={proposedQ.loading} source={proposedQ.source} />
           {!selected ? (
             <div style={{ padding: 24, fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--muted)" }}>
               No node selected. Load a graph from the left panel.
