@@ -178,16 +178,16 @@ function GraphExplorer({ data, tenant }) {
             <div style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text)", marginTop: 4 }}>
               tenant <span style={{ color: "var(--accent)" }}>{tenant ? tenant.id : "default"}</span> · graph spaces
             </div>
-            <div className="tabs" style={{ marginTop: 10, flexWrap: "wrap" }}>
-              <div className={"tab" + (leftTab === "approved" ? " active" : "")} onClick={() => setLeftTab("approved")}>
+            <div className="side-tabs" style={{ marginTop: 10 }}>
+              <button className={"side-tab" + (leftTab === "approved" ? " active" : "")} onClick={() => setLeftTab("approved")}>
                 Approved graph <span className="ct">{graph.nodes.length}</span>
-              </div>
-              <div className={"tab" + (leftTab === "proposed" ? " active" : "")} onClick={() => setLeftTab("proposed")}>
+              </button>
+              <button className={"side-tab" + (leftTab === "proposed" ? " active" : "")} onClick={() => setLeftTab("proposed")}>
                 Proposed graph <span className="ct">{(proposed.elements || []).length}</span>
-              </div>
-              <div className={"tab" + (leftTab === "saved" ? " active" : "")} onClick={() => setLeftTab("saved")}>
+              </button>
+              <button className={"side-tab" + (leftTab === "saved" ? " active" : "")} onClick={() => setLeftTab("saved")}>
                 Saved views <span className="ct">0</span>
-              </div>
+              </button>
             </div>
           </div>
 
