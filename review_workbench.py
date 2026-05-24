@@ -1561,6 +1561,93 @@ class InstanceRepository:
             )
         return {"tenant": tenant.public_dict(), "runs": list(runs.values()), "elements": elements}
 
+    def review_proposed_graph_element(self, tenant, element_key, action, body=None):
+        action = (action or "").replace("_", "-").lower()
+        body = body or {}
+        status_by_action = {
+            "approve": "approved",
+            "reject": "rejected",
+            "needs-evidence": "needs_more_evidence",
+            "comment": None,
+        }
+        if action not in status_by_action:
+            raise ValueError("Unsupported graph proposal review action")
+        reason = (body.get("reason") or body.get("note") or "").strip()
+        if action in {"reject", "needs-evidence"} and not reason:
+            raise ValueError("Review reason is required for reject or needs evidence")
+        reviewer = (body.get("reviewer") or "Saskue").strip() or "Saskue"
+        reviewed_at = datetime.utcnow().isoformat()
+        with self.metadata_engine_for(tenant).begin() as conn:
+            row = conn.execute(
+                text(
+                    """
+                    SELECT element_key, element_type, name, payload_json, evidence_refs_json,
+                           source_url, confidence, status, iteration, created_at
+                    FROM aletheia_proposed_graph_elements
+                    WHERE project_id = :tenant_id AND element_key = :element_key
+                    """
+                ),
+                {"tenant_id": tenant.tenant_id, "element_key": element_key},
+            ).mappings().first()
+            if row is None:
+                return None
+            payload = _load_json(row["payload_json"], {})
+            before_status = row["status"]
+            after_status = status_by_action[action] or before_status
+            review_event = {
+                "decision": action,
+                "reviewer": reviewer,
+                "reason": reason,
+                "before_status": before_status,
+                "after_status": after_status,
+                "created_at": reviewed_at,
+                "canonical_write": False,
+                "formal_graph_write": False,
+            }
+            payload.setdefault("review_events", []).append(review_event)
+            payload["review_boundary"] = {
+                "writes_canonical": False,
+                "writes_formal_graph": False,
+                "status_scope": "proposed_graph_element_only",
+            }
+            conn.execute(
+                text(
+                    """
+                    UPDATE aletheia_proposed_graph_elements
+                    SET status = :status, payload_json = :payload_json
+                    WHERE project_id = :tenant_id AND element_key = :element_key
+                    """
+                ),
+                {
+                    "tenant_id": tenant.tenant_id,
+                    "element_key": element_key,
+                    "status": after_status,
+                    "payload_json": _json_dump(payload),
+                },
+            )
+        element = {
+            "element_key": row["element_key"],
+            "element_type": row["element_type"],
+            "name": row["name"],
+            "payload": payload,
+            "evidence_refs": _load_json(row["evidence_refs_json"], []),
+            "source_url": row["source_url"],
+            "confidence": row["confidence"],
+            "status": after_status,
+            "iteration": row["iteration"],
+            "created_at": _jsonable(row["created_at"]),
+        }
+        return {
+            "tenant": tenant.public_dict(),
+            "element": element,
+            "review": review_event,
+            "write_boundary": {
+                "canonical_write": False,
+                "formal_graph_write": False,
+                "target": "proposed_graph_space",
+            },
+        }
+
     def _fetch_employee(self, tenant, employee_id):
         with self.source_engine_for(tenant).connect() as conn:
             return conn.execute(
@@ -6513,6 +6600,23 @@ class ReviewWorkbenchHandler(BaseHTTPRequestHandler):
             tenant = self._tenant(parsed)
         except (KeyError, ValueError) as exc:
             self._send_error(HTTPStatus.BAD_REQUEST, str(exc))
+            return
+        if parsed.path.startswith("/api/graph/proposed-elements/"):
+            parts = parsed.path.removeprefix("/api/graph/proposed-elements/").split("/")
+            if len(parts) != 2:
+                self._send_error(HTTPStatus.BAD_REQUEST, "Expected /api/graph/proposed-elements/{element_key}/{action}")
+                return
+            element_key, action = unquote(parts[0]), unquote(parts[1])
+            try:
+                body = self._read_json()
+                result = self.instance_repository.review_proposed_graph_element(tenant, element_key, action, body)
+            except ValueError as exc:
+                self._send_error(HTTPStatus.BAD_REQUEST, str(exc))
+                return
+            if result is None:
+                self._send_error(HTTPStatus.NOT_FOUND, "Proposed graph element not found")
+                return
+            self._send_json(result)
             return
         if parsed.path.startswith("/api/agent-gateway/runtimes/") and parsed.path.endswith("/health"):
             runtime_id = unquote(parsed.path.removeprefix("/api/agent-gateway/runtimes/").removesuffix("/health").rstrip("/"))

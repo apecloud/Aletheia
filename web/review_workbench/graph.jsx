@@ -258,7 +258,7 @@ function GraphExplorer({ data, tenant }) {
 
           {leftTab === "proposed" && (
             <div style={{ flex: 1, minHeight: 0, overflow: "auto" }}>
-              <ProposedGraphPanel proposed={proposed} loading={proposedQ.loading} source={proposedQ.source} compact />
+              <ProposedGraphPanel tenantId={tenantId} proposed={proposed} loading={proposedQ.loading} source={proposedQ.source} compact />
             </div>
           )}
 
@@ -407,7 +407,12 @@ function GraphExplorer({ data, tenant }) {
   );
 }
 
-function ProposedGraphPanel({ proposed, loading, source }) {
+function ProposedGraphPanel({ tenantId, proposed, loading, source }) {
+  const [selectedElement, setSelectedElement] = useStateGX(null);
+  const [kindFilter, setKindFilter] = useStateGX("all");
+  const [reviewReason, setReviewReason] = useStateGX("");
+  const [reviewBusy, setReviewBusy] = useStateGX(false);
+  const [reviewMessage, setReviewMessage] = useStateGX(null);
   const runs = proposed?.runs || [];
   const elements = proposed?.elements || [];
   const counts = elements.reduce((acc, item) => {
@@ -415,7 +420,52 @@ function ProposedGraphPanel({ proposed, loading, source }) {
     return acc;
   }, {});
   const latestRun = runs[0] || null;
-  const findings = elements.filter(item => item.element_type === "finding");
+  const filteredElements = kindFilter === "all"
+    ? elements
+    : elements.filter(item => item.element_type === kindFilter);
+  const findings = filteredElements.filter(item => item.element_type === "finding");
+  useEffectGX(() => {
+    if (!selectedElement) return;
+    const latest = elements.find(item => item.element_key === selectedElement.element_key);
+    if (latest && latest !== selectedElement) setSelectedElement(latest);
+  }, [JSON.stringify(elements.map(item => `${item.element_key}:${item.status}`))]);
+  function selectKind(nextKind) {
+    setKindFilter(nextKind);
+    setReviewMessage(null);
+    const nextItems = nextKind === "all"
+      ? elements
+      : elements.filter(item => item.element_type === nextKind);
+    if (!nextItems.some(item => item.element_key === selectedElement?.element_key)) {
+      setSelectedElement(nextItems[0] || null);
+    }
+  }
+  async function reviewElement(action) {
+    if (!selectedElement) return;
+    const reason = reviewReason.trim();
+    if ((action === "reject" || action === "needs-evidence") && !reason) {
+      setReviewMessage({ kind: "error", text: "Review reason is required for reject / needs evidence." });
+      return;
+    }
+    setReviewBusy(true);
+    setReviewMessage(null);
+    try {
+      const result = await window.AL_API.reviewGraphProposedElement(tenantId, selectedElement.element_key, action, {
+        reason,
+        reviewer: "Saskue",
+      });
+      if (result?.element) setSelectedElement(result.element);
+      setReviewReason("");
+      setReviewMessage({
+        kind: "ok",
+        text: `${action} recorded · canonical/formal graph unchanged`,
+      });
+      window.dispatchEvent(new CustomEvent("aletheia:retry"));
+    } catch (err) {
+      setReviewMessage({ kind: "error", text: err.message || String(err) });
+    } finally {
+      setReviewBusy(false);
+    }
+  }
   return (
     <div className="section">
       <div className="section-head">
@@ -424,9 +474,10 @@ function ProposedGraphPanel({ proposed, loading, source }) {
       </div>
       <div className="section-body">
         <div className="chip-row" style={{ marginBottom: 10 }}>
-          <Chip active count={counts.node || 0}>nodes</Chip>
-          <Chip active count={counts.edge || 0}>edges</Chip>
-          <Chip active count={counts.finding || 0}>findings</Chip>
+          <Chip active={kindFilter === "all"} onClick={() => selectKind("all")} count={elements.length}>all</Chip>
+          <Chip active={kindFilter === "node"} onClick={() => selectKind("node")} count={counts.node || 0}>nodes</Chip>
+          <Chip active={kindFilter === "edge"} onClick={() => selectKind("edge")} count={counts.edge || 0}>edges</Chip>
+          <Chip active={kindFilter === "finding"} onClick={() => selectKind("finding")} count={counts.finding || 0}>findings</Chip>
         </div>
         {latestRun ? (
           <dl className="kv" style={{ marginBottom: 12 }}>
@@ -442,7 +493,8 @@ function ProposedGraphPanel({ proposed, loading, source }) {
         {findings.map(item => {
           const profile = item.payload?.deep_graph_profile || {};
           return (
-            <div key={item.element_key} style={{ border: "1px solid var(--line)", padding: 10, marginBottom: 10, background: "var(--bg-2)" }}>
+            <button key={item.element_key} type="button" onClick={() => { setSelectedElement(item); setReviewMessage(null); }}
+                    style={{ border: selectedElement?.element_key === item.element_key ? "1px solid var(--accent)" : "1px solid var(--line)", padding: 10, marginBottom: 10, background: "var(--bg-2)", width: "100%", textAlign: "left", cursor: "pointer" }}>
               <div className="eyebrow accent">deep graph finding · draft</div>
               <div style={{ color: "var(--text)", fontWeight: 600, marginTop: 4 }}>{item.name}</div>
               <div style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--muted)", marginTop: 6 }}>
@@ -452,12 +504,16 @@ function ProposedGraphPanel({ proposed, loading, source }) {
                 <dt>Confidence</dt><dd>{Math.round((item.confidence || 0) * 100)}%</dd>
                 <dt>Evidence</dt><dd>{(item.evidence_refs || []).join(", ") || item.source_url || "—"}</dd>
               </dl>
-            </div>
+            </button>
           );
         })}
+        <div style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--muted)", marginBottom: 8 }}>
+          Showing {kindFilter === "all" ? "all proposed graph elements" : `${kindFilter} proposals`} · click an item to review.
+        </div>
         <div style={{ maxHeight: 220, overflow: "auto", display: "flex", flexDirection: "column", gap: 6 }}>
-          {elements.map(item => (
-            <div key={item.element_key} style={{ borderBottom: "1px solid var(--line-soft)", paddingBottom: 6 }}>
+          {filteredElements.map(item => (
+            <button key={item.element_key} type="button" onClick={() => { setSelectedElement(item); setReviewMessage(null); }}
+                    style={{ border: selectedElement?.element_key === item.element_key ? "1px solid var(--accent)" : "1px solid var(--line-soft)", borderLeft: selectedElement?.element_key === item.element_key ? "3px solid var(--accent)" : "1px solid var(--line-soft)", padding: 8, background: selectedElement?.element_key === item.element_key ? "var(--accent-bg)" : "transparent", textAlign: "left", cursor: "pointer" }}>
               <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
                 <span style={{ color: "var(--text)", fontSize: 12 }}>{item.name}</span>
                 <span className="ct">{item.element_type}</span>
@@ -465,15 +521,101 @@ function ProposedGraphPanel({ proposed, loading, source }) {
               <div style={{ fontFamily: "var(--font-mono)", color: "var(--muted)", fontSize: 10 }}>
                 {item.status} · {item.source_url || "source unknown"}
               </div>
-            </div>
+            </button>
           ))}
+          {filteredElements.length === 0 && (
+            <div style={{ fontFamily: "var(--font-mono)", color: "var(--muted)", fontSize: 10, border: "1px solid var(--line-soft)", padding: 8 }}>
+              No {kindFilter} proposed graph elements.
+            </div>
+          )}
         </div>
+        {selectedElement && (
+          <ProposedGraphDetail
+            item={selectedElement}
+            reason={reviewReason}
+            setReason={setReviewReason}
+            busy={reviewBusy}
+            message={reviewMessage}
+            onReview={reviewElement}
+          />
+        )}
         {source === "error" && (
           <div style={{ marginTop: 8, fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--rejected)" }}>
             Proposed graph API unavailable.
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+function ProposedGraphDetail({ item, reason, setReason, busy, message, onReview }) {
+  const payload = item.payload || {};
+  const profile = payload.deep_graph_profile || {};
+  const reviewEvents = payload.review_events || [];
+  const boundary = payload.review_boundary || payload.write_boundary || payload.governance || {};
+  const path = profile.path || payload.path || payload.evidence_path || [];
+  const pathLabel = profile.path_label || payload.path_label || "";
+  const conclusion = payload.conclusion || payload.summary || payload.description || "";
+  return (
+    <div style={{ marginTop: 14, borderTop: "1px solid var(--line)", paddingTop: 12 }}>
+      <div className="eyebrow accent">Review selected {item.element_type}</div>
+      <div style={{ color: "var(--text)", fontWeight: 600, marginTop: 4 }}>{item.name}</div>
+      <dl className="kv" style={{ marginTop: 10 }}>
+        <dt>Key</dt><dd>{item.element_key}</dd>
+        <dt>Status</dt><dd>{item.status}</dd>
+        <dt>Run</dt><dd>{item.run_key || "—"}</dd>
+        <dt>Confidence</dt><dd>{Math.round((item.confidence || 0) * 100)}%</dd>
+        <dt>Source</dt><dd>{item.source_url || "—"}</dd>
+        <dt>Evidence</dt><dd>{(item.evidence_refs || []).join(", ") || "—"}</dd>
+        <dt>Boundary</dt><dd>{boundary.writes_canonical === false || boundary.canonical_write === false ? "canonical disabled" : "canonical disabled"} · {boundary.writes_formal_graph === false || boundary.formal_graph_write === false ? "formal graph disabled" : "formal graph disabled"}</dd>
+      </dl>
+      {(pathLabel || conclusion) && (
+        <div style={{ marginTop: 10, padding: 10, border: "1px solid var(--line-soft)", background: "var(--bg-2)" }}>
+          {pathLabel && <div style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--accent)", marginBottom: 6 }}>{pathLabel}</div>}
+          {conclusion && <div style={{ fontSize: 12, color: "var(--text-dim)", lineHeight: 1.5 }}>{conclusion}</div>}
+        </div>
+      )}
+      {Array.isArray(path) && path.length > 0 && (
+        <div style={{ marginTop: 10 }}>
+          <div className="eyebrow" style={{ marginBottom: 6 }}>Evidence path</div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+            {path.map((step, index) => (
+              <div key={index} style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--muted)", borderBottom: "1px solid var(--line-soft)", paddingBottom: 4 }}>
+                {index + 1}. {typeof step === "string" ? step : (step.label || step.name || step.key || JSON.stringify(step))}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+      <div style={{ marginTop: 12 }}>
+        <div className="eyebrow" style={{ marginBottom: 6 }}>Review note</div>
+        <textarea className="input" value={reason} onChange={e => setReason(e.target.value)}
+                  placeholder="Optional for approve; required for reject / needs evidence"
+                  style={{ minHeight: 64, resize: "vertical" }} />
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, marginTop: 8 }}>
+          <button className="btn approve" disabled={busy || item.status === "approved"} onClick={() => onReview("approve")}>Approve</button>
+          <button className="btn changes" disabled={busy} onClick={() => onReview("needs-evidence")}>Needs evidence</button>
+          <button className="btn reject" disabled={busy} onClick={() => onReview("reject")}>Reject</button>
+          <button className="btn ghost" disabled={busy} onClick={() => onReview("comment")}>Comment</button>
+        </div>
+        {message && (
+          <div style={{ marginTop: 8, fontFamily: "var(--font-mono)", fontSize: 10, color: message.kind === "error" ? "var(--rejected)" : "var(--approved)" }}>
+            {message.text}
+          </div>
+        )}
+      </div>
+      {reviewEvents.length > 0 && (
+        <div style={{ marginTop: 12 }}>
+          <div className="eyebrow" style={{ marginBottom: 6 }}>Review history</div>
+          {reviewEvents.slice().reverse().map((event, index) => (
+            <div key={index} style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--muted)", borderTop: "1px solid var(--line-soft)", paddingTop: 5, marginTop: 5 }}>
+              {event.decision} · {event.reviewer || "reviewer"} · {event.after_status || item.status}
+              {event.reason ? ` · ${event.reason}` : ""}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -565,4 +707,4 @@ function BigGraph({ data, selected, onSelect, hoverId, setHoverId }) {
   );
 }
 
-Object.assign(window, { GraphExplorer, BigGraph });
+Object.assign(window, { GraphExplorer, BigGraph, ProposedGraphPanel, ProposedGraphDetail });

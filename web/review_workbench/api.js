@@ -291,6 +291,14 @@
       return data || { runs: [], elements: [] };
     },
 
+    async reviewGraphProposedElement(tenant, elementKey, action, body = {}) {
+      return await fetchJson(withTenantQs(
+        `/api/graph/proposed-elements/${encodeURIComponent(elementKey)}/${encodeURIComponent(action)}`, tenant), {
+        method: "POST",
+        body: JSON.stringify(body || {}),
+      });
+    },
+
     async instanceTypes(tenant, { includeDraft = false } = {}) {
       const data = await fetchJson(withTenantQs("/api/instances/types", tenant, {
         include_draft: includeDraft ? "1" : "0",
