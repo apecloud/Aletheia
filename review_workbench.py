@@ -1049,23 +1049,40 @@ class InstanceRepository:
     def _cfg_type(self, cfg, fallback):
         return cfg.get("type") or str(fallback).capitalize()
 
-    def types(self, tenant):
+    def _artifact_statuses(self, tenant, keys):
+        with self.metadata_engine_for(tenant).connect() as conn:
+            rows = conn.execute(
+                text(
+                    """
+                    SELECT canonical_key, name, artifact_type, status, version, payload_json, description
+                    FROM aletheia_ontology_artifacts
+                    WHERE project_id = :tenant_id AND canonical_key = ANY(:keys)
+                    """
+                ),
+                {"tenant_id": tenant.tenant_id, "keys": list(keys)},
+            ).mappings().all()
+        return {row["canonical_key"]: dict(row) for row in rows}
+
+    def types(self, tenant, include_draft=False):
         all_keys = [cfg["artifact"] for cfg in self.ENTITY_CONFIG.values()]
-        artifacts = self._approved_artifacts(tenant, all_keys)
+        artifacts = self._artifact_statuses(tenant, all_keys) if include_draft else self._approved_artifacts(tenant, all_keys)
         types = []
         for type_key, cfg in self.ENTITY_CONFIG.items():
             if cfg["artifact"] in artifacts:
+                artifact = artifacts[cfg["artifact"]]
                 type_name = self._cfg_type(cfg, type_key)
                 types.append({
                     "type": type_name,
                     "label": cfg.get("label") or type_name,
                     "table": cfg["table"],
                     "ontology_artifact": cfg["artifact"],
+                    "artifact_status": artifact.get("status"),
+                    "approved": artifact.get("status") == "approved",
                     "tenant_id": tenant.tenant_id,
                 })
         return {"tenant": tenant.public_dict(), "types": types}
 
-    def search(self, tenant, object_type, query, limit=25):
+    def search(self, tenant, object_type, query, limit=25, include_draft=False):
         cfg_key = self._cfg_key(object_type)
         cfg = self.ENTITY_CONFIG.get(cfg_key)
         if not cfg:
@@ -1076,7 +1093,7 @@ class InstanceRepository:
                 "reason": f"Unknown type {object_type}",
             }
         canonical_key = cfg["artifact"]
-        artifacts = self._approved_artifacts(tenant, [canonical_key])
+        artifacts = self._artifact_statuses(tenant, [canonical_key]) if include_draft else self._approved_artifacts(tenant, [canonical_key])
         if canonical_key not in artifacts:
             return {
                 "tenant": tenant.public_dict(),
@@ -1107,7 +1124,8 @@ class InstanceRepository:
                 self._entity_node(tenant, type_cap, dict(row))
                 for row in rows
             ],
-            "approved": True,
+            "approved": artifacts[canonical_key].get("status") == "approved",
+            "artifact_status": artifacts[canonical_key].get("status"),
             "tenant": tenant.public_dict(),
         }
 
@@ -1229,6 +1247,71 @@ class InstanceRepository:
             "label_join": " · ",
             "artifact": "object:merchant",
             "distinct": True,
+        },
+        "chokepoint": {
+            "type": "Chokepoint",
+            "table": "maritime_chokepoint_risk_indicators",
+            "pk": "risk_indicator_id",
+            "label_cols": ["canal"],
+            "label_join": "",
+            "artifact": "object:chokepoint",
+        },
+        "country": {
+            "type": "Country",
+            "table": "maritime_chokepoint_country_dependencies",
+            "pk": "iso3",
+            "label_cols": ["iso3"],
+            "label_join": "",
+            "artifact": "object:country",
+            "distinct": True,
+        },
+        "trade_dependency": {
+            "type": "TradeDependency",
+            "table": "maritime_chokepoint_country_dependencies",
+            "pk": "dependency_id",
+            "label_cols": ["iso3", "canal"],
+            "label_join": " · ",
+            "artifact": "object:trade_dependency",
+        },
+        "hazard": {
+            "type": "Hazard",
+            "table": "maritime_chokepoint_risk_indicators",
+            "pk": "risk_indicator_id",
+            "label_cols": ["canal"],
+            "label_fmt": "Hazards at {}",
+            "artifact": "object:hazard",
+        },
+        "risk_indicator": {
+            "type": "RiskIndicator",
+            "table": "maritime_chokepoint_risk_indicators",
+            "pk": "risk_indicator_id",
+            "label_cols": ["canal"],
+            "label_fmt": "Risk indicators at {}",
+            "artifact": "object:risk_indicator",
+        },
+        "systemic_risk_result": {
+            "type": "SystemicRiskResult",
+            "table": "maritime_chokepoint_systemic_risk_results",
+            "pk": "risk_result_id",
+            "label_cols": ["iso3", "canal"],
+            "label_join": " · ",
+            "artifact": "object:systemic_risk_result",
+        },
+        "risk_finding": {
+            "type": "RiskFinding",
+            "table": "maritime_chokepoint_systemic_risk_results",
+            "pk": "risk_result_id",
+            "label_cols": ["iso3", "canal"],
+            "label_fmt": "Finding candidate {}",
+            "artifact": "object:risk_finding",
+        },
+        "mitigation_action": {
+            "type": "MitigationAction",
+            "table": "maritime_chokepoint_systemic_risk_results",
+            "pk": "risk_result_id",
+            "label_cols": ["iso3", "canal"],
+            "label_fmt": "Action candidate {}",
+            "artifact": "object:mitigation_action",
         },
     }
     LINK_CONFIG = [
@@ -1415,6 +1498,68 @@ class InstanceRepository:
         if cfg:
             return cfg["artifact"]
         return f"object:{object_type}".lower()
+
+    def proposed_graph_elements(self, tenant, run_key=None, limit=50):
+        limit = max(1, min(int(limit), 200))
+        where = "e.project_id = :tenant_id"
+        params = {"tenant_id": tenant.tenant_id, "limit": limit}
+        if run_key:
+            where += " AND r.run_key = :run_key"
+            params["run_key"] = run_key
+        with self.metadata_engine_for(tenant).connect() as conn:
+            rows = conn.execute(
+                text(
+                    f"""
+                    SELECT e.element_key, e.element_type, e.name, e.payload_json,
+                           e.evidence_refs_json, e.source_url, e.confidence, e.status,
+                           e.iteration, e.created_at, r.run_key, r.objective,
+                           r.status AS run_status, r.proposed_count, r.finding_count,
+                           r.pruned_count, r.expansion_trace_json, r.safety_profile_json,
+                           r.skipped_sources_json, r.started_at, r.finished_at
+                    FROM aletheia_proposed_graph_elements e
+                    JOIN aletheia_iterative_graph_enrichment_runs r ON r.id = e.run_id
+                    WHERE {where}
+                    ORDER BY r.started_at DESC, e.iteration ASC, e.element_type ASC, e.name ASC
+                    LIMIT :limit
+                    """
+                ),
+                params,
+            ).mappings().all()
+        elements = []
+        runs = {}
+        for row in rows:
+            run = runs.setdefault(
+                row["run_key"],
+                {
+                    "run_key": row["run_key"],
+                    "objective": row["objective"],
+                    "status": row["run_status"],
+                    "proposed_count": row["proposed_count"],
+                    "finding_count": row["finding_count"],
+                    "pruned_count": row["pruned_count"],
+                    "expansion_trace": _load_json(row["expansion_trace_json"], []),
+                    "safety_profile": _load_json(row["safety_profile_json"], {}),
+                    "skipped_sources": _load_json(row["skipped_sources_json"], []),
+                    "started_at": _jsonable(row["started_at"]),
+                    "finished_at": _jsonable(row["finished_at"]),
+                },
+            )
+            elements.append(
+                {
+                    "element_key": row["element_key"],
+                    "element_type": row["element_type"],
+                    "name": row["name"],
+                    "payload": _load_json(row["payload_json"], {}),
+                    "evidence_refs": _load_json(row["evidence_refs_json"], []),
+                    "source_url": row["source_url"],
+                    "confidence": row["confidence"],
+                    "status": row["status"],
+                    "iteration": row["iteration"],
+                    "created_at": _jsonable(row["created_at"]),
+                    "run_key": run["run_key"],
+                }
+            )
+        return {"tenant": tenant.public_dict(), "runs": list(runs.values()), "elements": elements}
 
     def _fetch_employee(self, tenant, employee_id):
         with self.source_engine_for(tenant).connect() as conn:
@@ -6268,6 +6413,12 @@ class ReviewWorkbenchHandler(BaseHTTPRequestHandler):
                 )
             self._send_json(graph)
             return
+        if parsed.path == "/api/graph/proposed-elements":
+            query = parse_qs(parsed.query)
+            run_key = query.get("run_key", [""])[0] or None
+            limit = int(query.get("limit", ["50"])[0])
+            self._send_json(self.instance_repository.proposed_graph_elements(tenant, run_key=run_key, limit=limit))
+            return
         if parsed.path.startswith("/api/graph/node/"):
             node_key = unquote(parsed.path.removeprefix("/api/graph/node/"))
             if ":" not in node_key:
@@ -6303,14 +6454,17 @@ class ReviewWorkbenchHandler(BaseHTTPRequestHandler):
             self._send_json({"tenant": tenant.public_dict(), "edge": edge})
             return
         if parsed.path == "/api/instances/types":
-            self._send_json(self.instance_repository.types(tenant))
+            query = parse_qs(parsed.query)
+            include_draft = query.get("include_draft", ["0"])[0] in {"1", "true", "yes"}
+            self._send_json(self.instance_repository.types(tenant, include_draft=include_draft))
             return
         if parsed.path == "/api/instances/search":
             query = parse_qs(parsed.query)
             object_type = query.get("type", ["Employee"])[0]
             search = query.get("q", [""])[0]
             limit = int(query.get("limit", ["25"])[0])
-            self._send_json(self.instance_repository.search(tenant, object_type, search, limit=limit))
+            include_draft = query.get("include_draft", ["0"])[0] in {"1", "true", "yes"}
+            self._send_json(self.instance_repository.search(tenant, object_type, search, limit=limit, include_draft=include_draft))
             return
         if parsed.path == "/api/instances/edge":
             query = parse_qs(parsed.query)

@@ -276,12 +276,36 @@
 
     async graphContext(tenant, { type, id, depth = 1, limit = 200 } = {}) {
       const data = await fetchJson(withTenantQs("/api/graph/context", tenant, {
-        type: type || "Employee",
-        id: id || "4",
+        type: type || "",
+        id: id || "",
         depth: String(depth),
         limit: String(limit),
       }));
       return data;
+    },
+
+    async graphProposedElements(tenant, { runKey = "", limit = 50 } = {}) {
+      const qs = { limit: String(limit) };
+      if (runKey) qs.run_key = runKey;
+      const data = await fetchJson(withTenantQs("/api/graph/proposed-elements", tenant, qs));
+      return data || { runs: [], elements: [] };
+    },
+
+    async instanceTypes(tenant, { includeDraft = false } = {}) {
+      const data = await fetchJson(withTenantQs("/api/instances/types", tenant, {
+        include_draft: includeDraft ? "1" : "0",
+      }));
+      return data.types || [];
+    },
+
+    async instanceSearch(tenant, type, q = "", limit = 25, { includeDraft = false } = {}) {
+      const data = await fetchJson(withTenantQs("/api/instances/search", tenant, {
+        type: type || "",
+        q,
+        limit: String(limit),
+        include_draft: includeDraft ? "1" : "0",
+      }));
+      return data.instances || [];
     },
 
     async overview(tenant) {

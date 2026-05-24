@@ -54,32 +54,106 @@ function normalizeGraph(raw, fallback) {
   };
 }
 
+function compactText(value, limit = 96) {
+  const text = String(value || "");
+  return text.length > limit ? text.slice(0, limit - 1) + "…" : text;
+}
+
 function GraphExplorer({ data, tenant }) {
-  const [centerType, setCenterType] = useStateGX("Employee");
-  const [centerNodeId, setCenterNodeId] = useStateGX("4");
-  const [depth, setDepth] = useStateGX(1);
-  const [limit, setLimit] = useStateGX(200);
+  const initialParams = useMemoGX(() => {
+    try { return new URLSearchParams(location.search); } catch { return new URLSearchParams(); }
+  }, []);
+  const tenantId = tenant ? tenant.id : "default";
+  const [centerType, setCenterType] = useStateGX(initialParams.get("type") || "");
+  const [centerNodeId, setCenterNodeId] = useStateGX(initialParams.get("id") || "");
+  const [depth, setDepth] = useStateGX(Math.max(1, Math.min(Number(initialParams.get("depth") || 1), 3)));
+  const [limit, setLimit] = useStateGX(Math.max(1, Number(initialParams.get("limit") || 200)));
   const [hoverId, setHoverId] = useStateGX(null);
+
+  const typesQ = useApiData("instanceTypes", [tenantId, { includeDraft: true }], { fallback: [] });
+  const centerTypes = Array.isArray(typesQ.data) ? typesQ.data : [];
+  const centerTypeNames = centerTypes.map(t => t.type);
+  const activeType = centerTypes.find(t => t.type === centerType) || null;
+  const typesLoaded = typesQ.source !== "loading";
+  const candidatesQ = useApiData(
+    "instanceSearch",
+    [tenantId, centerType, "", 25, { includeDraft: true }],
+    { enabled: typesLoaded && !!activeType, fallback: [] }
+  );
+  const candidates = Array.isArray(candidatesQ.data) ? candidatesQ.data : [];
+  const proposedQ = useApiData("graphProposedElements", [tenantId, { limit: 100 }], {
+    fallback: { runs: [], elements: [] },
+  });
+  const proposed = proposedQ.data || { runs: [], elements: [] };
+
+  useEffectGX(() => {
+    if (typesQ.source === "loading") return;
+    if (centerTypes.length === 0) {
+      if (centerType) setCenterType("");
+      if (centerNodeId) setCenterNodeId("");
+      return;
+    }
+    if (!centerType || !centerTypes.some(t => t.type === centerType)) {
+      setCenterType(centerTypes[0].type);
+      setCenterNodeId("");
+    }
+  }, [tenantId, typesQ.source, JSON.stringify(centerTypeNames)]);
+
+  useEffectGX(() => {
+    if (!centerType || candidatesQ.source === "loading") return;
+    if (candidates.length === 0) {
+      if (centerNodeId) setCenterNodeId("");
+      return;
+    }
+    const expectedId = `${centerType}:${centerNodeId}`;
+    const match = centerNodeId && candidates.some(c => c.id === expectedId || String(c.id || "").endsWith(`:${centerNodeId}`));
+    if (!match) {
+      const first = candidates[0];
+      setCenterNodeId(String(first.id || "").split(":").slice(1).join(":"));
+    }
+  }, [tenantId, centerType, candidatesQ.source, JSON.stringify(candidates.map(c => c.id))]);
+
+  useEffectGX(() => {
+    try {
+      const url = new URL(location.href);
+      url.searchParams.set("screen", "graph");
+      url.searchParams.set("tenant", tenantId);
+      if (centerType) url.searchParams.set("type", centerType); else url.searchParams.delete("type");
+      if (centerNodeId) url.searchParams.set("id", centerNodeId); else url.searchParams.delete("id");
+      url.searchParams.set("depth", String(depth));
+      url.searchParams.set("limit", String(limit));
+      history.replaceState(null, "", url.toString());
+    } catch {}
+  }, [tenantId, centerType, centerNodeId, depth, limit]);
 
   const graphQ = useApiData(
     "graphContext",
-    [tenant ? tenant.id : "default", { type: centerType, id: centerNodeId, depth, limit }],
-    { fallback: data.GRAPH }
+    [tenantId, { type: centerType, id: centerNodeId, depth, limit }],
+    { enabled: typesLoaded && !!activeType && !!centerNodeId, fallback: null }
   );
   const isStaleG = graphQ.source === "live-stale";
   const isMockG  = graphQ.source === "mock";
   const graph = useMemoGX(() => normalizeGraph(graphQ.data, { nodes: [], edges: [] }), [graphQ.data]);
 
   const [selected, setSelected] = useStateGX(null);
-  useEffectGX(() => { if (graph.nodes.length && !selected) setSelected(graph.nodes[0]); }, [graph]);
+  useEffectGX(() => {
+    if (!graph.nodes.length) {
+      if (selected) setSelected(null);
+      return;
+    }
+    setSelected(prev => graph.nodes.find(n => prev && n.id === prev.id) || graph.nodes[0]);
+  }, [graph]);
 
   const map = Object.fromEntries(graph.nodes.map(n => [n.id, n]));
-  const typeColors = {
-    Employee: "var(--accent)",
-    Order: "var(--changes)",
-    Customer: "var(--proposed)",
-    Region: "var(--dim)"
-  };
+  const palette = ["var(--accent)", "var(--changes)", "var(--proposed)", "var(--approved)", "var(--dim)"];
+  const graphTypes = Array.from(new Set(graph.nodes.map(n => n.type).filter(Boolean)));
+  const typeColors = Object.fromEntries(graphTypes.map((t, i) => [t, palette[i % palette.length]]));
+  const edgeCounts = graph.edges.reduce((acc, e) => {
+    const key = e.kind || "edge";
+    acc[key] = (acc[key] || 0) + 1;
+    return acc;
+  }, {});
+  const centerLabel = centerType && centerNodeId ? `${centerType}:${centerNodeId}` : "No tenant center";
 
   return (
     <div className="canvas">
@@ -104,7 +178,7 @@ function GraphExplorer({ data, tenant }) {
           <div style={{ padding: "var(--pad-3) var(--pad-4)", borderBottom: "1px solid var(--line)" }}>
             <div className="eyebrow accent">Scope</div>
             <div style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text)", marginTop: 4 }}>
-              tenant <span style={{ color: "var(--accent)" }}>{tenant ? tenant.id : "default"}</span> · approved-only
+              tenant <span style={{ color: "var(--accent)" }}>{tenant ? tenant.id : "default"}</span> · tenant-scoped center
             </div>
           </div>
 
@@ -113,11 +187,19 @@ function GraphExplorer({ data, tenant }) {
               <div className="eyebrow" style={{ marginBottom: 4 }}>Center</div>
               <div style={{ display: "flex", gap: 6 }}>
                 <select className="select" style={{ width: 110 }} value={centerType} onChange={e => setCenterType(e.target.value)}>
-                  <option>Employee</option>
-                  <option>Order</option>
-                  <option>Customer</option>
+                  {centerTypes.length === 0 && <option value="">No tenant types</option>}
+                  {centerTypes.map(t => <option key={t.type} value={t.type}>{t.label || t.type}{t.approved ? "" : " · draft"}</option>)}
                 </select>
-                <input className="input" value={centerNodeId} onChange={e => setCenterNodeId(e.target.value)} />
+                <select className="select" value={centerNodeId} onChange={e => setCenterNodeId(e.target.value)} disabled={!centerType || candidates.length === 0}>
+                  {candidates.length === 0 && <option value="">No center nodes</option>}
+                  {candidates.map(c => {
+                    const id = String(c.id || "").split(":").slice(1).join(":");
+                    return <option key={c.id} value={id}>{c.label || c.id}</option>;
+                  })}
+                </select>
+              </div>
+              <div style={{ marginTop: 6, fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--muted)" }}>
+                {activeType ? `${activeType.table} · ${activeType.ontology_artifact} · ${activeType.artifact_status || "unknown"}` : "No tenant graph center types for this tenant."}
               </div>
             </div>
             <div style={{ display: "flex", gap: 6 }}>
@@ -130,13 +212,13 @@ function GraphExplorer({ data, tenant }) {
                 <input className="input" value={limit} onChange={e => setLimit(+e.target.value)} type="number" />
               </div>
             </div>
-            <button className="btn primary" onClick={() => window.dispatchEvent(new CustomEvent("aletheia:retry"))}>Load graph</button>
+            <button className="btn primary" disabled={!centerType || !centerNodeId} onClick={() => window.dispatchEvent(new CustomEvent("aletheia:retry"))}>Load graph</button>
           </div>
 
           <div style={{ padding: "var(--pad-3) var(--pad-4)", borderBottom: "1px solid var(--line)" }}>
             <div className="eyebrow" style={{ marginBottom: 8 }}>Current scope</div>
             <dl className="kv">
-              <dt>Center</dt><dd>{centerType}:{centerNodeId}</dd>
+              <dt>Center</dt><dd>{centerLabel}</dd>
               <dt>Nodes</dt><dd>{graph.nodes.length}</dd>
               <dt>Edges</dt><dd>{graph.edges.length}</dd>
               <dt>Depth</dt><dd>{depth}</dd>
@@ -147,10 +229,8 @@ function GraphExplorer({ data, tenant }) {
           <div style={{ padding: "var(--pad-3) var(--pad-4)", borderBottom: "1px solid var(--line)" }}>
             <div className="eyebrow" style={{ marginBottom: 8 }}>Edge types</div>
             <div className="chip-row">
-              <Chip active count={4}>ReportsTo</Chip>
-              <Chip active count={4}>OwnedBy</Chip>
-              <Chip active count={2}>PlacedBy</Chip>
-              <Chip count={1}>InRegion</Chip>
+              {Object.keys(edgeCounts).length === 0 && <Chip count={0}>none</Chip>}
+              {Object.entries(edgeCounts).map(([kind, count]) => <Chip key={kind} active count={count}>{kind}</Chip>)}
             </div>
           </div>
 
@@ -158,10 +238,9 @@ function GraphExplorer({ data, tenant }) {
             <div style={{ padding: "var(--pad-3) var(--pad-4)" }}>
               <div className="eyebrow" style={{ marginBottom: 8 }}>Expand history</div>
               <div style={{ display: "flex", flexDirection: "column", gap: 6, fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--muted)" }}>
-                <div>02:11 — load Employee:4 · depth 1 · 12 nodes</div>
-                <div>02:09 — expand Employee:9 · +4 nodes</div>
-                <div>02:04 — fit to view</div>
-                <div>01:58 — load Employee:4 · depth 1 · 8 nodes</div>
+                <div>current — load {centerLabel} · depth {depth} · {graph.nodes.length} nodes</div>
+                <div>tenant — {tenantId} · {tenant?.graph || "graph db unknown"}</div>
+                <div>source — tenant center list from `/api/instances/types?include_draft=1`</div>
               </div>
             </div>
           </div>
@@ -170,7 +249,11 @@ function GraphExplorer({ data, tenant }) {
         {/* CENTER — canvas */}
         <div className="col" style={{ overflow: "hidden" }}>
           <div className="graph-canvas">
-            {graphQ.source === "error" || graphQ.source === "loading" ? (
+            {!centerType || !centerNodeId ? (
+              <div style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", color: "var(--muted)", fontFamily: "var(--font-mono)", fontSize: 12 }}>
+                No tenant center nodes for tenant {tenantId}.
+              </div>
+            ) : graphQ.source === "error" || graphQ.source === "loading" ? (
               <div style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center" }}>
                 <ApiStatus q={graphQ} what="graph context" />
               </div>
@@ -229,6 +312,7 @@ function GraphExplorer({ data, tenant }) {
 
         {/* RIGHT — inspector */}
         <div className="col inspector">
+          <ProposedGraphPanel proposed={proposed} loading={proposedQ.loading} source={proposedQ.source} />
           {!selected ? (
             <div style={{ padding: 24, fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--muted)" }}>
               No node selected. Load a graph from the left panel.
@@ -301,14 +385,82 @@ function GraphExplorer({ data, tenant }) {
   );
 }
 
+function ProposedGraphPanel({ proposed, loading, source }) {
+  const runs = proposed?.runs || [];
+  const elements = proposed?.elements || [];
+  const counts = elements.reduce((acc, item) => {
+    acc[item.element_type] = (acc[item.element_type] || 0) + 1;
+    return acc;
+  }, {});
+  const latestRun = runs[0] || null;
+  const findings = elements.filter(item => item.element_type === "finding");
+  return (
+    <div className="section">
+      <div className="section-head">
+        <span>Proposed graph space</span>
+        <span className="ct">{loading ? "loading" : `${elements.length} draft`}</span>
+      </div>
+      <div className="section-body">
+        <div className="chip-row" style={{ marginBottom: 10 }}>
+          <Chip active count={counts.node || 0}>nodes</Chip>
+          <Chip active count={counts.edge || 0}>edges</Chip>
+          <Chip active count={counts.finding || 0}>findings</Chip>
+        </div>
+        {latestRun ? (
+          <dl className="kv" style={{ marginBottom: 12 }}>
+            <dt>Run</dt><dd>{latestRun.run_key}</dd>
+            <dt>Status</dt><dd>{latestRun.status} · canonical writes disabled</dd>
+            <dt>Skipped</dt><dd>{(latestRun.skipped_sources || []).length}</dd>
+          </dl>
+        ) : (
+          <div style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--muted)", marginBottom: 12 }}>
+            No proposed graph elements for this tenant.
+          </div>
+        )}
+        {findings.map(item => {
+          const profile = item.payload?.deep_graph_profile || {};
+          return (
+            <div key={item.element_key} style={{ border: "1px solid var(--line)", padding: 10, marginBottom: 10, background: "var(--bg-2)" }}>
+              <div className="eyebrow accent">deep graph finding · draft</div>
+              <div style={{ color: "var(--text)", fontWeight: 600, marginTop: 4 }}>{item.name}</div>
+              <div style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--muted)", marginTop: 6 }}>
+                {profile.path_label || compactText(item.payload?.conclusion, 140)}
+              </div>
+              <dl className="kv" style={{ marginTop: 8 }}>
+                <dt>Confidence</dt><dd>{Math.round((item.confidence || 0) * 100)}%</dd>
+                <dt>Evidence</dt><dd>{(item.evidence_refs || []).join(", ") || item.source_url || "—"}</dd>
+              </dl>
+            </div>
+          );
+        })}
+        <div style={{ maxHeight: 220, overflow: "auto", display: "flex", flexDirection: "column", gap: 6 }}>
+          {elements.map(item => (
+            <div key={item.element_key} style={{ borderBottom: "1px solid var(--line-soft)", paddingBottom: 6 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
+                <span style={{ color: "var(--text)", fontSize: 12 }}>{item.name}</span>
+                <span className="ct">{item.element_type}</span>
+              </div>
+              <div style={{ fontFamily: "var(--font-mono)", color: "var(--muted)", fontSize: 10 }}>
+                {item.status} · {item.source_url || "source unknown"}
+              </div>
+            </div>
+          ))}
+        </div>
+        {source === "error" && (
+          <div style={{ marginTop: 8, fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--rejected)" }}>
+            Proposed graph API unavailable.
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function BigGraph({ data, selected, onSelect, hoverId, setHoverId }) {
   const map = Object.fromEntries(data.nodes.map(n => [n.id, n]));
-  const typeColors = {
-    Employee: "var(--accent)",
-    Order: "var(--changes)",
-    Customer: "var(--proposed)",
-    Region: "var(--dim)"
-  };
+  const palette = ["var(--accent)", "var(--changes)", "var(--proposed)", "var(--approved)", "var(--dim)"];
+  const graphTypes = Array.from(new Set(data.nodes.map(n => n.type).filter(Boolean)));
+  const typeColors = Object.fromEntries(graphTypes.map((t, i) => [t, palette[i % palette.length]]));
   const sel = selected ? selected.id : null;
   const neighborIds = new Set();
   data.edges.forEach(e => {
