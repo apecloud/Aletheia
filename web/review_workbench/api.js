@@ -306,6 +306,27 @@
       });
     },
 
+    async continuousEnrichmentSessions(tenant) {
+      const data = await fetchJson(withTenantQs("/api/enrichment/sessions", tenant));
+      return data || { sessions: [] };
+    },
+
+    async runContinuousEnrichmentCycle(tenant, sessionKey, body = {}) {
+      return await fetchJson(withTenantQs(
+        `/api/enrichment/sessions/${encodeURIComponent(sessionKey)}/run-cycle`, tenant), {
+        method: "POST",
+        body: JSON.stringify(body || {}),
+      });
+    },
+
+    async updateContinuousEnrichmentSession(tenant, sessionKey, action) {
+      return await fetchJson(withTenantQs(
+        `/api/enrichment/sessions/${encodeURIComponent(sessionKey)}/${encodeURIComponent(action)}`, tenant), {
+        method: "POST",
+        body: JSON.stringify({}),
+      });
+    },
+
     async instanceTypes(tenant, { includeDraft = false } = {}) {
       const data = await fetchJson(withTenantQs("/api/instances/types", tenant, {
         include_draft: includeDraft ? "1" : "0",

@@ -86,6 +86,10 @@ function GraphExplorer({ data, tenant }) {
     fallback: { runs: [], elements: [] },
   });
   const proposed = proposedQ.data || { runs: [], elements: [] };
+  const enrichmentQ = useApiData("continuousEnrichmentSessions", [tenantId], {
+    fallback: { sessions: [] },
+  });
+  const enrichment = enrichmentQ.data || { sessions: [] };
 
   useEffectGX(() => {
     if (typesQ.source === "loading") return;
@@ -258,7 +262,7 @@ function GraphExplorer({ data, tenant }) {
 
           {leftTab === "proposed" && (
             <div style={{ flex: 1, minHeight: 0, overflow: "auto" }}>
-              <ProposedGraphPanel tenantId={tenantId} proposed={proposed} loading={proposedQ.loading} source={proposedQ.source} compact />
+              <ProposedGraphPanel tenantId={tenantId} proposed={proposed} enrichment={enrichment} loading={proposedQ.loading} source={proposedQ.source} compact />
             </div>
           )}
 
@@ -407,15 +411,18 @@ function GraphExplorer({ data, tenant }) {
   );
 }
 
-function ProposedGraphPanel({ tenantId, proposed, loading, source }) {
+function ProposedGraphPanel({ tenantId, proposed, enrichment, loading, source }) {
   const [selectedElement, setSelectedElement] = useStateGX(null);
   const [kindFilter, setKindFilter] = useStateGX("all");
   const [selectedKeys, setSelectedKeys] = useStateGX([]);
   const [reviewReason, setReviewReason] = useStateGX("");
   const [reviewBusy, setReviewBusy] = useStateGX(false);
   const [reviewMessage, setReviewMessage] = useStateGX(null);
+  const [cycleBusy, setCycleBusy] = useStateGX(false);
   const runs = proposed?.runs || [];
   const elements = proposed?.elements || [];
+  const sessions = enrichment?.sessions || [];
+  const activeSession = sessions[0] || null;
   const counts = elements.reduce((acc, item) => {
     acc[item.element_type] = (acc[item.element_type] || 0) + 1;
     return acc;
@@ -528,6 +535,27 @@ function ProposedGraphPanel({ tenantId, proposed, loading, source }) {
       setReviewBusy(false);
     }
   }
+  async function runContinuousCycle() {
+    if (!activeSession) {
+      setReviewMessage({ kind: "error", text: "No continuous enrichment session for this tenant." });
+      return;
+    }
+    setCycleBusy(true);
+    setReviewMessage(null);
+    try {
+      const result = await window.AL_API.runContinuousEnrichmentCycle(tenantId, activeSession.session_key, {});
+      const cycle = result?.cycle || {};
+      setReviewMessage({
+        kind: "ok",
+        text: `Cycle completed · ${cycle.returned_element_count || cycle.proposed_count || 0} proposed elements · ${cycle.finding_count || 0} findings`,
+      });
+      window.dispatchEvent(new CustomEvent("aletheia:retry"));
+    } catch (err) {
+      setReviewMessage({ kind: "error", text: err.message || String(err) });
+    } finally {
+      setCycleBusy(false);
+    }
+  }
   return (
     <div className="section">
       <div className="section-head">
@@ -535,6 +563,32 @@ function ProposedGraphPanel({ tenantId, proposed, loading, source }) {
         <span className="ct">{loading ? "loading" : `${elements.length} draft`}</span>
       </div>
       <div className="section-body">
+        <div style={{ border: "1px solid var(--accent-line)", background: "var(--accent-bg)", padding: 10, marginBottom: 10 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "flex-start" }}>
+            <div>
+              <div className="eyebrow accent">Continuous enrichment agent</div>
+              <div style={{ marginTop: 4, color: "var(--text)", fontSize: 12, fontWeight: 600 }}>
+                {activeSession ? activeSession.session_key : "No session"}
+              </div>
+              <div style={{ marginTop: 4, fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--muted)", lineHeight: 1.45 }}>
+                {activeSession
+                  ? `${activeSession.status} · cycles ${activeSession.cycle_count || 0} · last ${activeSession.last_run_key || "none"}`
+                  : "Create or load a continuous enrichment session to run crawl/reason cycles."}
+              </div>
+            </div>
+            <button className="btn xs primary" disabled={!activeSession || cycleBusy} onClick={runContinuousCycle}>
+              {cycleBusy ? "Running…" : "Run cycle"}
+            </button>
+          </div>
+          {activeSession?.latest?.findings?.length > 0 && (
+            <div style={{ marginTop: 8, fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--text-dim)" }}>
+              Latest findings: {activeSession.latest.findings.map(f => f.name).slice(0, 2).join(" · ")}
+            </div>
+          )}
+          <div style={{ marginTop: 6, fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--muted)" }}>
+            Boundary: ontology candidates require review · graph facts stay proposed · findings stay candidate.
+          </div>
+        </div>
         <div className="chip-row" style={{ marginBottom: 10 }}>
           <Chip active={kindFilter === "all"} onClick={() => selectKind("all")} count={elements.length}>all</Chip>
           <Chip active={kindFilter === "node"} onClick={() => selectKind("node")} count={counts.node || 0}>nodes</Chip>

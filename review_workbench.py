@@ -22,6 +22,7 @@ from sqlalchemy import create_engine, text
 from reasoning_engine import ReasoningEngine
 
 sys.path.append(str(Path(__file__).resolve().parent / "agents"))
+from iterative_graph_enrichment_agent import IterativeGraphEnrichmentAgent  # noqa: E402
 from ontology_artifacts import ensure_artifact_schema  # noqa: E402
 from tenant_registry import TenantRegistry  # noqa: E402
 
@@ -1598,6 +1599,304 @@ class InstanceRepository:
         if cfg:
             return cfg["artifact"]
         return f"object:{object_type}".lower()
+
+    def _ensure_continuous_enrichment_schema(self, tenant):
+        with self.metadata_engine_for(tenant).begin() as conn:
+            conn.execute(
+                text(
+                    """
+                    CREATE TABLE IF NOT EXISTS aletheia_continuous_enrichment_sessions (
+                        id SERIAL PRIMARY KEY,
+                        project_id VARCHAR(255) NOT NULL DEFAULT 'default',
+                        session_key VARCHAR(255) NOT NULL,
+                        objective TEXT NOT NULL,
+                        status VARCHAR(50) NOT NULL DEFAULT 'idle',
+                        config_json TEXT NOT NULL DEFAULT '{}',
+                        frontier_json TEXT NOT NULL DEFAULT '[]',
+                        last_run_key VARCHAR(255),
+                        cycle_count INTEGER NOT NULL DEFAULT 0,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )
+                    """
+                )
+            )
+            conn.execute(
+                text(
+                    """
+                    CREATE UNIQUE INDEX IF NOT EXISTS uq_continuous_enrichment_session_project_key
+                    ON aletheia_continuous_enrichment_sessions (project_id, session_key)
+                    """
+                )
+            )
+
+    def _default_continuous_session(self, tenant):
+        session_key = f"continuous:{tenant.tenant_id}:us-iran-impact:mvp"
+        objective = (
+            "Analyze US-Iran escalation impacts across military events, Hormuz and maritime chokepoints, "
+            "energy flows, importing countries, shipping/insurance, financial markets, supply chains, "
+            "and candidate reviewer actions"
+        )
+        config = {
+            "mode": "bounded_autonomous",
+            "run_mode": "manual_cycle_mvp",
+            "allowed_domains": ["zenodo.org"],
+            "max_iterations": 1,
+            "max_frontier": 4,
+            "max_results_per_query": 4,
+            "canonical_writes": "disabled",
+            "formal_graph_writes": "disabled",
+            "ontology_review_required": True,
+            "fact_graph_target": "proposed_graph_space",
+            "finding_target": "candidate_findings",
+        }
+        frontier = [
+            {"kind": "event", "target_key": "Event:US-Iran escalation", "priority": 1.0, "depth": 0},
+            {"kind": "chokepoint", "target_key": "Chokepoint:Hormuz Strait", "priority": 0.95, "depth": 0},
+            {"kind": "commodity", "target_key": "Commodity:Crude Oil", "priority": 0.85, "depth": 0},
+            {"kind": "country_cluster", "target_key": "Country:JPN/KOR/CHN/USA", "priority": 0.8, "depth": 0},
+        ]
+        self._ensure_continuous_enrichment_schema(tenant)
+        with self.metadata_engine_for(tenant).begin() as conn:
+            conn.execute(
+                text(
+                    """
+                    INSERT INTO aletheia_continuous_enrichment_sessions
+                        (project_id, session_key, objective, status, config_json, frontier_json, updated_at)
+                    VALUES
+                        (:tenant_id, :session_key, :objective, 'idle', :config_json, :frontier_json, CURRENT_TIMESTAMP)
+                    ON CONFLICT (project_id, session_key) DO NOTHING
+                    """
+                ),
+                {
+                    "tenant_id": tenant.tenant_id,
+                    "session_key": session_key,
+                    "objective": objective,
+                    "config_json": _json_dump(config),
+                    "frontier_json": _json_dump(frontier),
+                },
+            )
+        return session_key
+
+    def _continuous_source_fixture(self, session_key):
+        suffix = _slug(f"{session_key}-{int(time.time())}")
+        return [
+            {
+                "title": "US-Iran escalation raises Hormuz shipping disruption risk for JPN KOR energy imports",
+                "url": f"https://zenodo.org/records/13841882/{suffix}-hormuz-energy",
+                "snippet": (
+                    "shipping disruption and sanctions around Hormuz Strait create import exposure for JPN KOR "
+                    "with trade_at_risk_v and dependency_share metrics; analyst review action required."
+                ),
+            },
+            {
+                "title": "US-Iran conflict risk affects Bab el-Mandeb trade routes for CHN IND USA",
+                "url": f"https://zenodo.org/records/13841882/{suffix}-bab-el-mandeb",
+                "snippet": (
+                    "likelihood_conflict and severity_conflict around Bab el-Mandeb Strait expose CHN IND USA "
+                    "to trade_at_risk_v and trade_impacted; analyst review action required."
+                ),
+            },
+            {
+                "title": "Malacca Strait geopolitical spillover affects CHN JPN KOR trade flows",
+                "url": f"https://zenodo.org/records/13841882/{suffix}-malacca",
+                "snippet": (
+                    "likelihood_geopolitical hazard at Malacca Strait affects CHN JPN KOR dependency_share "
+                    "and trade_impacted; analyst review action required."
+                ),
+            },
+            {
+                "title": "Untrusted US-Iran impact claim",
+                "url": f"https://example.org/{suffix}-untrusted",
+                "snippet": "conflict at Suez Canal affects USA trade_at_risk_v",
+            },
+        ]
+
+    def _continuous_session_row(self, tenant, session_key):
+        self._ensure_continuous_enrichment_schema(tenant)
+        self._default_continuous_session(tenant)
+        with self.metadata_engine_for(tenant).connect() as conn:
+            return conn.execute(
+                text(
+                    """
+                    SELECT id, project_id, session_key, objective, status, config_json, frontier_json,
+                           last_run_key, cycle_count, created_at, updated_at
+                    FROM aletheia_continuous_enrichment_sessions
+                    WHERE project_id = :tenant_id AND session_key = :session_key
+                    """
+                ),
+                {"tenant_id": tenant.tenant_id, "session_key": session_key},
+            ).mappings().first()
+
+    def _continuous_session_to_dict(self, tenant, row):
+        if row is None:
+            return None
+        latest = None
+        if row["last_run_key"]:
+            latest_data = self.proposed_graph_elements(tenant, run_key=row["last_run_key"], limit=120)
+            latest = {
+                "run": (latest_data.get("runs") or [None])[0],
+                "element_count": len(latest_data.get("elements") or []),
+                "finding_count": len([e for e in latest_data.get("elements") or [] if e.get("element_type") == "finding"]),
+                "findings": [
+                    {
+                        "name": e.get("name"),
+                        "element_key": e.get("element_key"),
+                        "status": e.get("status"),
+                        "confidence": e.get("confidence"),
+                        "path": ((e.get("payload") or {}).get("deep_graph_profile") or {}).get("path_label"),
+                        "source_url": e.get("source_url"),
+                    }
+                    for e in latest_data.get("elements") or []
+                    if e.get("element_type") == "finding"
+                ],
+            }
+        return {
+            "session_key": row["session_key"],
+            "tenant_id": row["project_id"],
+            "objective": row["objective"],
+            "status": row["status"],
+            "config": _load_json(row["config_json"], {}),
+            "frontier": _load_json(row["frontier_json"], []),
+            "last_run_key": row["last_run_key"],
+            "cycle_count": row["cycle_count"],
+            "created_at": _jsonable(row["created_at"]),
+            "updated_at": _jsonable(row["updated_at"]),
+            "latest": latest,
+            "write_boundary": {
+                "ontology_candidates_require_review": True,
+                "graph_fact_target": "proposed_graph_space",
+                "candidate_findings_only": True,
+                "canonical_write": False,
+                "formal_graph_write": False,
+            },
+        }
+
+    def continuous_enrichment_sessions(self, tenant):
+        self._ensure_continuous_enrichment_schema(tenant)
+        self._default_continuous_session(tenant)
+        with self.metadata_engine_for(tenant).connect() as conn:
+            rows = conn.execute(
+                text(
+                    """
+                    SELECT id, project_id, session_key, objective, status, config_json, frontier_json,
+                           last_run_key, cycle_count, created_at, updated_at
+                    FROM aletheia_continuous_enrichment_sessions
+                    WHERE project_id = :tenant_id
+                    ORDER BY updated_at DESC, session_key ASC
+                    """
+                ),
+                {"tenant_id": tenant.tenant_id},
+            ).mappings().all()
+        return {"tenant": tenant.public_dict(), "sessions": [self._continuous_session_to_dict(tenant, row) for row in rows]}
+
+    def continuous_enrichment_session(self, tenant, session_key):
+        row = self._continuous_session_row(tenant, session_key)
+        if row is None:
+            return None
+        return {"tenant": tenant.public_dict(), "session": self._continuous_session_to_dict(tenant, row)}
+
+    def update_continuous_enrichment_session_status(self, tenant, session_key, status):
+        if status not in {"idle", "paused", "stopped"}:
+            raise ValueError("Unsupported continuous enrichment session status")
+        row = self._continuous_session_row(tenant, session_key)
+        if row is None:
+            return None
+        with self.metadata_engine_for(tenant).begin() as conn:
+            conn.execute(
+                text(
+                    """
+                    UPDATE aletheia_continuous_enrichment_sessions
+                    SET status = :status, updated_at = CURRENT_TIMESTAMP
+                    WHERE project_id = :tenant_id AND session_key = :session_key
+                    """
+                ),
+                {"tenant_id": tenant.tenant_id, "session_key": session_key, "status": status},
+            )
+        return self.continuous_enrichment_session(tenant, session_key)
+
+    def run_continuous_enrichment_cycle(self, tenant, session_key, body=None):
+        body = body or {}
+        row = self._continuous_session_row(tenant, session_key)
+        if row is None:
+            return None
+        if row["status"] == "stopped":
+            raise ValueError("Continuous enrichment session is stopped")
+        if row["status"] == "paused" and not body.get("force"):
+            raise ValueError("Continuous enrichment session is paused")
+        config = _load_json(row["config_json"], {})
+        allowed_domains = body.get("allowed_domains") or config.get("allowed_domains") or ["zenodo.org"]
+        fixture_path = Path("/tmp") / f"aletheia-continuous-{_slug(session_key)}-{int(time.time())}.json"
+        fixture_path.write_text(_json_dump(body.get("search_results") or self._continuous_source_fixture(session_key)), encoding="utf-8")
+        objective = body.get("objective") or row["objective"]
+        with self.metadata_engine_for(tenant).begin() as conn:
+            conn.execute(
+                text(
+                    """
+                    UPDATE aletheia_continuous_enrichment_sessions
+                    SET status = 'running', updated_at = CURRENT_TIMESTAMP
+                    WHERE project_id = :tenant_id AND session_key = :session_key
+                    """
+                ),
+                {"tenant_id": tenant.tenant_id, "session_key": session_key},
+            )
+        try:
+            result = IterativeGraphEnrichmentAgent(
+                tenant.metadata_db_url,
+                tenant=tenant.tenant_id,
+                search_results_json=str(fixture_path),
+                allowed_domains=allowed_domains,
+                max_iterations=int(body.get("max_iterations") or config.get("max_iterations") or 1),
+                max_frontier=int(body.get("max_frontier") or config.get("max_frontier") or 4),
+                max_results_per_query=int(body.get("max_results_per_query") or config.get("max_results_per_query") or 4),
+            ).run(objective, artifact_keys=body.get("artifact_keys") or None)
+        finally:
+            try:
+                fixture_path.unlink()
+            except OSError:
+                pass
+        with self.metadata_engine_for(tenant).begin() as conn:
+            conn.execute(
+                text(
+                    """
+                    UPDATE aletheia_continuous_enrichment_sessions
+                    SET status = 'idle',
+                        last_run_key = :run_key,
+                        cycle_count = cycle_count + 1,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE project_id = :tenant_id AND session_key = :session_key
+                    """
+                ),
+                {"tenant_id": tenant.tenant_id, "session_key": session_key, "run_key": result["run"]["run_key"]},
+            )
+        return {
+            "tenant": tenant.public_dict(),
+            "session": self.continuous_enrichment_session(tenant, session_key)["session"],
+            "cycle": {
+                "run_key": result["run"]["run_key"],
+                "status": result["run"]["status"],
+                "proposed_count": result["run"]["proposed_count"],
+                "returned_element_count": len(result.get("proposed_graph") or []),
+                "finding_count": len([e for e in result.get("proposed_graph") or [] if e.get("element_type") == "finding"]),
+                "skipped_sources": result["run"].get("skipped_sources") or [],
+                "findings": [
+                    {
+                        "name": e.get("name"),
+                        "confidence": e.get("confidence"),
+                        "source_url": e.get("source_url"),
+                        "path": ((e.get("payload") or {}).get("deep_graph_profile") or {}).get("path_label"),
+                    }
+                    for e in result.get("proposed_graph") or []
+                    if e.get("element_type") == "finding"
+                ],
+            },
+            "write_boundary": {
+                "canonical_write": False,
+                "formal_graph_write": False,
+                "target": "proposed_graph_space",
+                "findings": "candidate_only",
+            },
+        }
 
     def proposed_graph_elements(self, tenant, run_key=None, limit=50):
         limit = max(1, min(int(limit), 200))
@@ -6715,6 +7014,19 @@ class ReviewWorkbenchHandler(BaseHTTPRequestHandler):
             limit = int(query.get("limit", ["50"])[0])
             self._send_json(self.instance_repository.proposed_graph_elements(tenant, run_key=run_key, limit=limit))
             return
+        if parsed.path == "/api/enrichment/sessions":
+            self._send_json(self.instance_repository.continuous_enrichment_sessions(tenant))
+            return
+        if parsed.path.startswith("/api/enrichment/sessions/"):
+            session_key = unquote(parsed.path.removeprefix("/api/enrichment/sessions/").rstrip("/"))
+            if "/" in session_key:
+                session_key = session_key.split("/", 1)[0]
+            result = self.instance_repository.continuous_enrichment_session(tenant, session_key)
+            if result is None:
+                self._send_error(HTTPStatus.NOT_FOUND, f"Continuous enrichment session not found: {session_key}")
+                return
+            self._send_json(result)
+            return
         if parsed.path.startswith("/api/graph/node/"):
             node_key = unquote(parsed.path.removeprefix("/api/graph/node/"))
             if ":" not in node_key:
@@ -6898,6 +7210,36 @@ class ReviewWorkbenchHandler(BaseHTTPRequestHandler):
                 self._send_error(HTTPStatus.NOT_FOUND, "Graph expansion not found")
                 return
             self._send_json(graph)
+            return
+        if parsed.path.startswith("/api/enrichment/sessions/") and parsed.path.endswith("/run-cycle"):
+            session_key = unquote(parsed.path.removeprefix("/api/enrichment/sessions/").removesuffix("/run-cycle").rstrip("/"))
+            try:
+                body = self._read_json()
+                result = self.instance_repository.run_continuous_enrichment_cycle(tenant, session_key, body)
+            except ValueError as exc:
+                self._send_error(HTTPStatus.BAD_REQUEST, str(exc))
+                return
+            except Exception as exc:  # pragma: no cover - displayed to local operator
+                self._send_error(HTTPStatus.INTERNAL_SERVER_ERROR, str(exc))
+                return
+            if result is None:
+                self._send_error(HTTPStatus.NOT_FOUND, f"Continuous enrichment session not found: {session_key}")
+                return
+            self._send_json(result)
+            return
+        if parsed.path.startswith("/api/enrichment/sessions/") and parsed.path.endswith(("/pause", "/resume", "/stop")):
+            action = parsed.path.rstrip("/").rsplit("/", 1)[1]
+            session_key = unquote(parsed.path.removeprefix("/api/enrichment/sessions/").removesuffix(f"/{action}").rstrip("/"))
+            status = {"pause": "paused", "resume": "idle", "stop": "stopped"}[action]
+            try:
+                result = self.instance_repository.update_continuous_enrichment_session_status(tenant, session_key, status)
+            except ValueError as exc:
+                self._send_error(HTTPStatus.BAD_REQUEST, str(exc))
+                return
+            if result is None:
+                self._send_error(HTTPStatus.NOT_FOUND, f"Continuous enrichment session not found: {session_key}")
+                return
+            self._send_json(result)
             return
         if parsed.path == "/api/reasoning/autopilot/sessions":
             try:
