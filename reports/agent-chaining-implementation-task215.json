@@ -1,0 +1,56 @@
+{
+  "task": 215,
+  "status": "implemented",
+  "tenant": "maritime-risk",
+  "capabilities": {
+    "cadence_config": ["manual", "hourly", "daily", "custom"],
+    "custom_interval_minutes": true,
+    "incremental_frontier": true,
+    "frontier_dedupe": true,
+    "graph_changed_event": true,
+    "new_evidence_available_event": true,
+    "autopilot_trigger": true,
+    "candidate_findings_only": true
+  },
+  "smoke_runs": [
+    {
+      "run_key": "iterative-graph:maritime-risk:20260525164853:98165",
+      "returned_element_count": 42,
+      "frontier_used_count": 2,
+      "new_frontier_count": 39,
+      "events": ["graph_changed", "new_evidence_available", "autopilot_triggered"],
+      "autopilot_session_key": "autopilot:maritime-risk:continuous-enrichment:iterative-graph-maritime-risk-20260525164853-98165"
+    },
+    {
+      "run_key": "iterative-graph:maritime-risk:20260525164903:98165",
+      "frontier_used": [
+        "CHN depends on Bab el-Mandeb Strait",
+        "CHN depends on Malacca Strait"
+      ],
+      "frontier_sources": ["proposed_graph", "proposed_graph"],
+      "events": ["graph_changed", "new_evidence_available", "autopilot_triggered"],
+      "autopilot_session_key": "autopilot:maritime-risk:continuous-enrichment:iterative-graph-maritime-risk-20260525164903-98165"
+    }
+  ],
+  "ui": {
+    "url": "http://127.0.0.1:8772/?screen=workbench&tenant=maritime-risk&workspace_tab=agents&agent_tab=enrichment",
+    "dom_capture": "/tmp/task215-workspace-agent-dom.html",
+    "screenshot": "/tmp/task215-workspace-agent-chain.png"
+  },
+  "write_boundary": {
+    "ontology_candidates_require_review": true,
+    "graph_fact_target": "proposed_graph_space",
+    "candidate_findings_only": true,
+    "canonical_write": false,
+    "formal_graph_write": false,
+    "auto_approve_findings": false
+  },
+  "verification": [
+    "py_compile review_workbench.py agents/iterative_graph_enrichment_agent.py",
+    "node --check web/review_workbench/api.js",
+    "esbuild web/review_workbench/workbench.jsx",
+    "unittest tests/test_iterative_graph_enrichment.py tests/test_ontology_eval.py",
+    "git diff --check",
+    "Chrome DOM smoke"
+  ]
+}

@@ -1155,6 +1155,7 @@ class InstanceRepository:
         self.ensure_schema = ensure_schema
         self.metadata_engines = {}
         self.source_engines = {}
+        self.reasoning_repository = None
 
     def tenant(self, tenant_id=None):
         return self.tenant_registry.get(tenant_id)
@@ -1679,11 +1680,17 @@ class InstanceRepository:
         )
         config = {
             "mode": "bounded_autonomous",
-            "run_mode": "manual_cycle_mvp",
+            "run_mode": "scheduled_or_manual",
+            "cadence": "manual",
+            "custom_interval_minutes": 60,
+            "rate_limit_per_cycle": 4,
+            "stop_condition": "pause, stop, budget exhausted, or no new frontier",
             "allowed_domains": ["zenodo.org"],
             "max_iterations": 1,
             "max_frontier": 4,
             "max_results_per_query": 4,
+            "visited_frontier_keys": [],
+            "latest_events": [],
             "canonical_writes": "disabled",
             "formal_graph_writes": "disabled",
             "ontology_review_required": True,
@@ -1751,6 +1758,144 @@ class InstanceRepository:
                 "snippet": "conflict at Suez Canal affects USA trade_at_risk_v",
             },
         ]
+
+    def _continuous_update_config(self, config, body):
+        config = dict(config or {})
+        if "cadence" in body:
+            cadence = (body.get("cadence") or "manual").strip()
+            if cadence not in {"manual", "hourly", "daily", "custom"}:
+                raise ValueError("cadence must be manual, hourly, daily, or custom")
+            config["cadence"] = cadence
+        if "custom_interval_minutes" in body:
+            interval = max(1, min(int(body.get("custom_interval_minutes") or 60), 10080))
+            config["custom_interval_minutes"] = interval
+        if "allowlist" in body or "allowed_domains" in body:
+            raw_domains = body.get("allowed_domains") or body.get("allowlist") or []
+            if isinstance(raw_domains, str):
+                domains = [part.strip().lower() for part in re.split(r"[,\\s]+", raw_domains) if part.strip()]
+            else:
+                domains = [str(part).strip().lower() for part in raw_domains if str(part).strip()]
+            if not domains:
+                raise ValueError("allowlist must include at least one public domain")
+            config["allowed_domains"] = list(dict.fromkeys(domains))
+        if "budget" in body:
+            budget = int(body.get("budget") or config.get("max_frontier") or 4)
+            config["max_frontier"] = max(1, min(budget, 25))
+            config["rate_limit_per_cycle"] = max(1, min(budget, 25))
+        for key in ("max_iterations", "max_frontier", "max_results_per_query", "rate_limit_per_cycle"):
+            if key in body:
+                config[key] = max(1, min(int(body.get(key) or config.get(key) or 1), 50))
+        if "stop_condition" in body:
+            config["stop_condition"] = (body.get("stop_condition") or "").strip() or config.get("stop_condition")
+        return config
+
+    def _continuous_cadence_seconds(self, config):
+        cadence = (config or {}).get("cadence") or "manual"
+        if cadence == "hourly":
+            return 3600
+        if cadence == "daily":
+            return 86400
+        if cadence == "custom":
+            return max(1, int((config or {}).get("custom_interval_minutes") or 60)) * 60
+        return None
+
+    def _continuous_next_run_at(self, config):
+        seconds = self._continuous_cadence_seconds(config)
+        if not seconds:
+            return None
+        return datetime.utcfromtimestamp(time.time() + seconds).isoformat()
+
+    def _continuous_frontier_key(self, item):
+        return str(item.get("key") or item.get("target_key") or item.get("name") or "").strip()
+
+    def _continuous_frontier_name(self, item):
+        return str(item.get("name") or item.get("target_key") or item.get("key") or "frontier").strip()
+
+    def _continuous_frontier_for_cycle(self, stored_frontier, config, max_frontier):
+        visited = set(config.get("visited_frontier_keys") or [])
+        selected = []
+        for item in stored_frontier or []:
+            key = self._continuous_frontier_key(item)
+            if not key or key in visited:
+                continue
+            selected.append({
+                "key": key,
+                "name": self._continuous_frontier_name(item),
+                "artifact_type": item.get("artifact_type") or item.get("kind") or "frontier_item",
+                "source": item.get("source") or "continuous_frontier",
+                "depth": int(item.get("depth") or 0),
+            })
+            if len(selected) >= max_frontier:
+                break
+        if selected:
+            return selected
+        # If a session has exhausted its synthetic seed frontier, let the
+        # agent fall back to ontology artifacts while preserving the next
+        # frontier discovered from proposed graph outputs.
+        return []
+
+    def _continuous_next_frontier(self, previous_frontier, result, config):
+        visited = set(config.get("visited_frontier_keys") or [])
+        existing = {self._continuous_frontier_key(item) for item in (previous_frontier or [])}
+        next_frontier = []
+        additions = []
+        for element in result.get("proposed_graph") or []:
+            if element.get("element_type") not in {"node", "edge"}:
+                continue
+            key = element.get("element_key")
+            if not key or key in existing or key in visited:
+                continue
+            payload = element.get("payload") or {}
+            item = {
+                "kind": f"proposed_{element.get('element_type')}",
+                "key": key,
+                "name": element.get("name") or key,
+                "artifact_type": f"proposed_{element.get('element_type')}",
+                "source": "proposed_graph",
+                "source_run_key": result.get("run", {}).get("run_key"),
+                "confidence": element.get("confidence"),
+                "depth": int(element.get("iteration") or 1),
+                "evidence_refs": element.get("evidence_refs") or [],
+                "source_url": element.get("source_url"),
+                "ontology_type": payload.get("ontology_type") or payload.get("source_type") or payload.get("relation"),
+            }
+            next_frontier.append(item)
+            additions.append(item)
+            existing.add(key)
+        # Keep untouched frontier items so paused or budget-limited sessions
+        # can continue after the newly discovered nodes/edges.
+        for item in previous_frontier or []:
+            key = self._continuous_frontier_key(item)
+            if key and key not in visited and key not in existing:
+                next_frontier.append(item)
+                existing.add(key)
+        return next_frontier[:100], additions
+
+    def _continuous_append_events(self, config, events):
+        merged = list(config.get("latest_events") or [])
+        merged.extend(events)
+        config["latest_events"] = merged[-50:]
+        return config
+
+    def configure_continuous_enrichment_session(self, tenant, session_key, body=None):
+        body = body or {}
+        row = self._continuous_session_row(tenant, session_key)
+        if row is None:
+            return None
+        config = self._continuous_update_config(_load_json(row["config_json"], {}), body)
+        config["next_run_at"] = self._continuous_next_run_at(config)
+        with self.metadata_engine_for(tenant).begin() as conn:
+            conn.execute(
+                text(
+                    """
+                    UPDATE aletheia_continuous_enrichment_sessions
+                    SET config_json = :config_json, updated_at = CURRENT_TIMESTAMP
+                    WHERE project_id = :tenant_id AND session_key = :session_key
+                    """
+                ),
+                {"tenant_id": tenant.tenant_id, "session_key": session_key, "config_json": _json_dump(config)},
+            )
+        return self.continuous_enrichment_session(tenant, session_key)
 
     def _continuous_session_row(self, tenant, session_key):
         self._ensure_continuous_enrichment_schema(tenant)
@@ -1864,21 +2009,26 @@ class InstanceRepository:
             raise ValueError("Continuous enrichment session is stopped")
         if row["status"] == "paused" and not body.get("force"):
             raise ValueError("Continuous enrichment session is paused")
-        config = _load_json(row["config_json"], {})
-        allowed_domains = body.get("allowed_domains") or config.get("allowed_domains") or ["zenodo.org"]
+        config = self._continuous_update_config(_load_json(row["config_json"], {}), body)
+        allowed_domains = config.get("allowed_domains") or ["zenodo.org"]
+        max_frontier = int(config.get("max_frontier") or config.get("rate_limit_per_cycle") or 4)
+        stored_frontier = _load_json(row["frontier_json"], [])
+        frontier_items = self._continuous_frontier_for_cycle(stored_frontier, config, max_frontier)
         fixture_path = Path("/tmp") / f"aletheia-continuous-{_slug(session_key)}-{int(time.time())}.json"
         fixture_path.write_text(_json_dump(body.get("search_results") or self._continuous_source_fixture(session_key)), encoding="utf-8")
         objective = body.get("objective") or row["objective"]
         with self.metadata_engine_for(tenant).begin() as conn:
             conn.execute(
                 text(
-                    """
+                        """
                     UPDATE aletheia_continuous_enrichment_sessions
-                    SET status = 'running', updated_at = CURRENT_TIMESTAMP
+                    SET status = 'running',
+                        config_json = :config_json,
+                        updated_at = CURRENT_TIMESTAMP
                     WHERE project_id = :tenant_id AND session_key = :session_key
                     """
                 ),
-                {"tenant_id": tenant.tenant_id, "session_key": session_key},
+                {"tenant_id": tenant.tenant_id, "session_key": session_key, "config_json": _json_dump(config)},
             )
         try:
             result = IterativeGraphEnrichmentAgent(
@@ -1886,15 +2036,101 @@ class InstanceRepository:
                 tenant=tenant.tenant_id,
                 search_results_json=str(fixture_path),
                 allowed_domains=allowed_domains,
-                max_iterations=int(body.get("max_iterations") or config.get("max_iterations") or 1),
-                max_frontier=int(body.get("max_frontier") or config.get("max_frontier") or 4),
-                max_results_per_query=int(body.get("max_results_per_query") or config.get("max_results_per_query") or 4),
-            ).run(objective, artifact_keys=body.get("artifact_keys") or None)
+                max_iterations=int(config.get("max_iterations") or 1),
+                max_frontier=max_frontier,
+                max_results_per_query=int(config.get("max_results_per_query") or 4),
+            ).run(objective, artifact_keys=body.get("artifact_keys") or None, frontier_items=frontier_items or None)
         finally:
             try:
                 fixture_path.unlink()
             except OSError:
                 pass
+        run_key = result["run"]["run_key"]
+        proposed_graph = result.get("proposed_graph") or []
+        next_frontier, frontier_additions = self._continuous_next_frontier(stored_frontier, result, config)
+        visited = list(dict.fromkeys([*(config.get("visited_frontier_keys") or []), *[self._continuous_frontier_key(item) for item in frontier_items if self._continuous_frontier_key(item)]]))
+        config["visited_frontier_keys"] = visited[-500:]
+        events = []
+        graph_changed = bool(proposed_graph)
+        if graph_changed:
+            config["last_graph_changed_at"] = datetime.utcnow().isoformat()
+            events.append(
+                {
+                    "type": "graph_changed",
+                    "run_key": run_key,
+                    "proposed_count": result["run"].get("proposed_count"),
+                    "returned_element_count": len(proposed_graph),
+                    "new_frontier_count": len(frontier_additions),
+                    "created_at": config["last_graph_changed_at"],
+                    "canonical_write": False,
+                    "formal_graph_write": False,
+                    "target": "proposed_graph_space",
+                }
+            )
+            events.append(
+                {
+                    "type": "new_evidence_available",
+                    "run_key": run_key,
+                    "frontier_keys": [item.get("key") for item in frontier_additions[:10]],
+                    "created_at": datetime.utcnow().isoformat(),
+                    "review_boundary": "proposed_graph_review_gate",
+                }
+            )
+        autopilot_result = None
+        if graph_changed and body.get("trigger_autopilot", True) and self.reasoning_repository is not None:
+            autopilot_payload = {
+                "session_key": f"autopilot:{tenant.tenant_id}:continuous-enrichment:{_slug(run_key)}",
+                "objective": (
+                    body.get("autopilot_objective")
+                    or f"Re-run deep reasoning after new graph evidence from {run_key}; generate candidate findings only."
+                ),
+                "budget": body.get("autopilot_budget") or {
+                    "max_hypotheses": 6,
+                    "max_reasoning_tasks": 4,
+                    "max_tool_calls": 20,
+                    "max_runtime_seconds": 120,
+                },
+                "created_by": "Continuous Enrichment Agent",
+                "scope": {
+                    "tenant": tenant.tenant_id,
+                    "source_run_key": run_key,
+                    "event": "new_evidence_available",
+                    "candidate_findings_only": True,
+                    "canonical_writes": "disabled",
+                    "formal_graph_writes": "disabled",
+                },
+            }
+            try:
+                if tenant.tenant_id == "maritime-risk":
+                    autopilot_result = self.reasoning_repository.run_maritime_risk_autopilot_playbook(tenant, autopilot_payload)
+                elif tenant.tenant_id == "creditcardfraud":
+                    autopilot_result = self.reasoning_repository.run_creditcardfraud_autopilot_playbook(tenant, autopilot_payload)
+                else:
+                    autopilot_result = self.reasoning_repository.create_autopilot_session(tenant, autopilot_payload)
+                config["last_autopilot_session_key"] = (autopilot_result.get("session") or {}).get("session_key") or autopilot_payload["session_key"]
+                events.append(
+                    {
+                        "type": "autopilot_triggered",
+                        "source_event": "new_evidence_available",
+                        "source_run_key": run_key,
+                        "autopilot_session_key": config["last_autopilot_session_key"],
+                        "candidate_findings": len(autopilot_result.get("candidate_findings") or []),
+                        "auto_approve_findings": False,
+                        "created_at": datetime.utcnow().isoformat(),
+                    }
+                )
+            except Exception as exc:
+                events.append(
+                    {
+                        "type": "autopilot_trigger_failed",
+                        "source_event": "new_evidence_available",
+                        "source_run_key": run_key,
+                        "reason": _safe_error_message(exc),
+                        "created_at": datetime.utcnow().isoformat(),
+                    }
+                )
+        config["next_run_at"] = self._continuous_next_run_at(config)
+        self._continuous_append_events(config, events)
         with self.metadata_engine_for(tenant).begin() as conn:
             conn.execute(
                 text(
@@ -1903,22 +2139,35 @@ class InstanceRepository:
                     SET status = 'idle',
                         last_run_key = :run_key,
                         cycle_count = cycle_count + 1,
+                        config_json = :config_json,
+                        frontier_json = :frontier_json,
                         updated_at = CURRENT_TIMESTAMP
                     WHERE project_id = :tenant_id AND session_key = :session_key
                     """
                 ),
-                {"tenant_id": tenant.tenant_id, "session_key": session_key, "run_key": result["run"]["run_key"]},
+                {
+                    "tenant_id": tenant.tenant_id,
+                    "session_key": session_key,
+                    "run_key": run_key,
+                    "config_json": _json_dump(config),
+                    "frontier_json": _json_dump(next_frontier),
+                },
             )
         return {
             "tenant": tenant.public_dict(),
             "session": self.continuous_enrichment_session(tenant, session_key)["session"],
             "cycle": {
-                "run_key": result["run"]["run_key"],
+                "run_key": run_key,
                 "status": result["run"]["status"],
                 "proposed_count": result["run"]["proposed_count"],
                 "returned_element_count": len(result.get("proposed_graph") or []),
                 "finding_count": len([e for e in result.get("proposed_graph") or [] if e.get("element_type") == "finding"]),
                 "skipped_sources": result["run"].get("skipped_sources") or [],
+                "frontier_used": frontier_items,
+                "next_frontier_count": len(next_frontier),
+                "new_frontier": frontier_additions,
+                "events": events,
+                "autopilot_session_key": config.get("last_autopilot_session_key"),
                 "findings": [
                     {
                         "name": e.get("name"),
@@ -1935,6 +2184,7 @@ class InstanceRepository:
                 "formal_graph_write": False,
                 "target": "proposed_graph_space",
                 "findings": "candidate_only",
+                "autopilot_auto_approve": False,
             },
         }
 
@@ -3444,6 +3694,8 @@ class ReasoningRepository:
             },
             "created_by": payload.get("created_by") or "Creditcardfraud Discovery Playbook",
         }
+        if isinstance(payload.get("scope"), dict):
+            session_payload["scope"].update(payload["scope"])
         created = self.create_autopilot_session(tenant, session_payload)
         session_key = created["session"]["session_key"]
 
@@ -3553,6 +3805,8 @@ class ReasoningRepository:
             },
             "created_by": payload.get("created_by") or "Maritime-risk Graph Reasoning Playbook",
         }
+        if isinstance(payload.get("scope"), dict):
+            session_payload["scope"].update(payload["scope"])
         created = self.create_autopilot_session(tenant, session_payload)
         session_key = created["session"]["session_key"]
 
@@ -7583,6 +7837,19 @@ class ReviewWorkbenchHandler(BaseHTTPRequestHandler):
                 return
             self._send_json(result)
             return
+        if parsed.path.startswith("/api/enrichment/sessions/") and parsed.path.endswith("/configure"):
+            session_key = unquote(parsed.path.removeprefix("/api/enrichment/sessions/").removesuffix("/configure").rstrip("/"))
+            try:
+                body = self._read_json()
+                result = self.instance_repository.configure_continuous_enrichment_session(tenant, session_key, body)
+            except ValueError as exc:
+                self._send_error(HTTPStatus.BAD_REQUEST, str(exc))
+                return
+            if result is None:
+                self._send_error(HTTPStatus.NOT_FOUND, f"Continuous enrichment session not found: {session_key}")
+                return
+            self._send_json(result)
+            return
         if parsed.path.startswith("/api/enrichment/sessions/") and parsed.path.endswith(("/pause", "/resume", "/stop")):
             action = parsed.path.rstrip("/").rsplit("/", 1)[1]
             session_key = unquote(parsed.path.removeprefix("/api/enrichment/sessions/").removesuffix(f"/{action}").rstrip("/"))
@@ -8142,6 +8409,7 @@ def main():
         ReviewWorkbenchHandler.instance_repository,
         ensure_schema=args.ensure_schema,
     )
+    ReviewWorkbenchHandler.instance_repository.reasoning_repository = ReviewWorkbenchHandler.reasoning_repository
     ReviewWorkbenchHandler.agent_gateway_repository = AgentGatewayRepository(registry, ensure_schema=args.ensure_schema)
     server = LocalThreadingHTTPServer((args.host, args.port), ReviewWorkbenchHandler)
     scheme = "http"

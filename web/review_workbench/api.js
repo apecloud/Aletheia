@@ -332,6 +332,14 @@
       });
     },
 
+    async configureContinuousEnrichmentSession(tenant, sessionKey, body = {}) {
+      return await fetchJson(withTenantQs(
+        `/api/enrichment/sessions/${encodeURIComponent(sessionKey)}/configure`, tenant), {
+        method: "POST",
+        body: JSON.stringify(body || {}),
+      });
+    },
+
     async instanceTypes(tenant, { includeDraft = false } = {}) {
       const data = await fetchJson(withTenantQs("/api/instances/types", tenant, {
         include_draft: includeDraft ? "1" : "0",

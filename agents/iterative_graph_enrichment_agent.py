@@ -317,7 +317,12 @@ class IterativeGraphEnrichmentAgent:
         row.iteration = item.get("iteration", 1)
         return row
 
-    def run(self, objective: str, artifact_keys: list[str] | None = None) -> dict[str, Any]:
+    def run(
+        self,
+        objective: str,
+        artifact_keys: list[str] | None = None,
+        frontier_items: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
         session = self.Session()
         run_key = f"iterative-graph:{self.tenant}:{datetime.utcnow().strftime('%Y%m%d%H%M%S')}:{os.getpid()}"
         run = IterativeGraphEnrichmentRun(
@@ -347,7 +352,7 @@ class IterativeGraphEnrichmentAgent:
         session.add(run)
         session.flush()
         try:
-            frontier = self._frontier_from_artifacts(session, artifact_keys)
+            frontier = list(frontier_items or [])[: self.max_frontier] if frontier_items else self._frontier_from_artifacts(session, artifact_keys)
             trace = []
             skipped_sources = []
             next_frontier = list(frontier)

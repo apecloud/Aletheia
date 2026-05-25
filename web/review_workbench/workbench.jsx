@@ -301,6 +301,8 @@ function AgentRunsWorkspace({ tenantId, query }) {
     budget: "3",
     allowlist: "zenodo.org",
     cadence: "manual",
+    customInterval: "60",
+    stopCondition: "pause, stop, budget exhausted, or no new frontier",
     safety: "allowlist + proposed-only writes",
   });
   const filteredRuns = runs.filter(run => agentTab === "autopilot"
@@ -315,6 +317,18 @@ function AgentRunsWorkspace({ tenantId, query }) {
       return { ...prev, scope: defaultAgentScopeWB(tenantId) };
     });
   }, [tenantId]);
+
+  useEffectWB(() => {
+    if (!session?.config) return;
+    setAgentParams(prev => ({
+      ...prev,
+      allowlist: (session.config.allowed_domains || []).join(", ") || prev.allowlist,
+      cadence: session.config.cadence || prev.cadence,
+      customInterval: String(session.config.custom_interval_minutes || prev.customInterval || "60"),
+      budget: String(session.config.max_frontier || prev.budget || "3"),
+      stopCondition: session.config.stop_condition || prev.stopCondition,
+    }));
+  }, [session?.session_key, JSON.stringify(session?.config || {})]);
 
   useEffectWB(() => {
     if (!filteredRuns.length) {
@@ -381,8 +395,12 @@ function AgentRunsWorkspace({ tenantId, query }) {
         budget: Number(agentParams.budget) || 3,
         allowlist: agentParams.allowlist,
         cadence: agentParams.cadence,
+        custom_interval_minutes: Number(agentParams.customInterval) || 60,
+        stop_condition: agentParams.stopCondition,
+        trigger_autopilot: true,
       });
-      setMessage({ kind: "ok", text: `Run cycle queued: ${result?.run?.run_key || "completed"}` });
+      const eventText = (result?.cycle?.events || []).map(event => event.type).join(", ");
+      setMessage({ kind: "ok", text: `Run cycle completed: ${result?.cycle?.run_key || "completed"}${eventText ? ` · ${eventText}` : ""}` });
       window.dispatchEvent(new CustomEvent("aletheia:retry"));
     } catch (err) {
       setMessage({ kind: "error", text: err.message || String(err) });
@@ -403,6 +421,27 @@ function AgentRunsWorkspace({ tenantId, query }) {
     try {
       await AL_API.updateContinuousEnrichmentSession(tenantId, session.session_key, action);
       setMessage({ kind: "ok", text: `Agent session ${action}d.` });
+      window.dispatchEvent(new CustomEvent("aletheia:retry"));
+    } catch (err) {
+      setMessage({ kind: "error", text: err.message || String(err) });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function saveAgentSettings() {
+    if (!session?.session_key) return;
+    setBusy(true);
+    setMessage(null);
+    try {
+      await AL_API.configureContinuousEnrichmentSession(tenantId, session.session_key, {
+        cadence: agentParams.cadence,
+        custom_interval_minutes: Number(agentParams.customInterval) || 60,
+        allowlist: agentParams.allowlist,
+        budget: Number(agentParams.budget) || 3,
+        stop_condition: agentParams.stopCondition,
+      });
+      setMessage({ kind: "ok", text: "Auto enriching settings saved." });
       window.dispatchEvent(new CustomEvent("aletheia:retry"));
     } catch (err) {
       setMessage({ kind: "error", text: err.message || String(err) });
@@ -514,17 +553,29 @@ function AgentRunsWorkspace({ tenantId, query }) {
                   <option value="manual">Manual</option>
                   <option value="hourly">Hourly</option>
                   <option value="daily">Daily</option>
+                  <option value="custom">Custom interval</option>
                 </select>
+              </label>
+              <label>
+                <div className="eyebrow" style={{ marginBottom: 4 }}>Custom minutes</div>
+                <input className="input" value={agentParams.customInterval} onChange={e => updateAgentParam("customInterval", e.target.value)} />
+              </label>
+              <label>
+                <div className="eyebrow" style={{ marginBottom: 4 }}>Stop condition</div>
+                <input className="input" value={agentParams.stopCondition} onChange={e => updateAgentParam("stopCondition", e.target.value)} />
               </label>
             </div>
             <div style={{ marginTop: 10, fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--muted)" }}>
-              {agentParams.safety}
+              {agentParams.safety} · next run {session?.config?.next_run_at || "manual"}
             </div>
           </Panel>
 
           <Panel eyebrow="Controls" title="Run and pause from Workspace" style={{ marginTop: 16 }}>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
               <button className="btn primary" disabled={busy || (agentTab !== "autopilot" && !session)} onClick={runOnce}>Run once</button>
+              {agentTab !== "autopilot" && (
+                <button className="btn" disabled={busy || !session} onClick={saveAgentSettings}>Save settings</button>
+              )}
               <button className="btn ghost" disabled={busy || (agentTab !== "autopilot" && !session)} onClick={toggleSession}>
                 {agentTab === "autopilot" ? "Pause / Resume" : (["running", "active", "idle"].includes(String(session?.status || "").toLowerCase()) ? "Pause" : "Resume")}
               </button>
@@ -538,6 +589,23 @@ function AgentRunsWorkspace({ tenantId, query }) {
               </div>
             )}
           </Panel>
+
+          {agentTab !== "autopilot" && session?.config?.latest_events?.length > 0 && (
+            <Panel eyebrow="Agent chain" title="Latest enrichment events" style={{ marginTop: 16 }}>
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                {session.config.latest_events.slice(-6).reverse().map((event, index) => (
+                  <div key={`${event.type}-${index}`} style={{ border: "1px solid var(--line-soft)", background: "var(--bg-2)", padding: "8px 10px" }}>
+                    <div style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--accent)" }}>
+                      {event.type} · {event.created_at ? String(event.created_at).slice(0, 19) : "no time"}
+                    </div>
+                    <div style={{ marginTop: 4, fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--muted)" }}>
+                      {compactTextWB(event.autopilot_session_key || event.run_key || event.reason || "event recorded", 130)}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </Panel>
+          )}
 
           <Panel eyebrow="Selected run" title={selected ? agentObjectiveWB(selected) : "No run selected"} count={selected?.status || "—"} style={{ marginTop: 16 }}>
             {selected ? (
