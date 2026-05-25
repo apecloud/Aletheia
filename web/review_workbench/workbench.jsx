@@ -1,4 +1,4 @@
-/* Aletheia — lightweight Workspace / Case Inbox */
+/* Aletheia — lightweight Workspace / Work Queue */
 const { useState: useStateWB, useMemo: useMemoWB, useEffect: useEffectWB } = React;
 
 const FALLBACK_CASES = [
@@ -29,7 +29,7 @@ const FALLBACK_CASES = [
   },
   {
     canonical_key: "case:workspace-boundary",
-    question: "Keep Workspace as a lightweight Case Inbox while Ontology owns governance detail",
+    question: "Keep Workspace as a lightweight Work Queue while Ontology owns governance detail",
     status: "active",
     source: "product",
     scope: {
@@ -104,7 +104,7 @@ function Workbench({ data, tenant }) {
     <div className="canvas">
       <div className="subbar">
         <div className="tabs">
-          <div className={"tab" + (workspaceTab === "cases" && statusView === "open" ? " active" : "")} onClick={() => selectWorkspaceTab("cases", "open")}>Case Inbox <span className="ct">{counts.open}</span></div>
+          <div className={"tab" + (workspaceTab === "cases" && statusView === "open" ? " active" : "")} onClick={() => selectWorkspaceTab("cases", "open")}>Work Queue <span className="ct">{counts.open}</span></div>
           <div className={"tab" + (workspaceTab === "agents" ? " active" : "")} onClick={() => selectWorkspaceTab("agents")}>Agent Runs <span className="ct">{agentRuns.length}</span></div>
           <div className={"tab" + (workspaceTab === "cases" && statusView === "blocked" ? " active" : "")} onClick={() => selectWorkspaceTab("cases", "blocked")}>Blocked <span className="ct">{counts.blocked}</span></div>
           <div className={"tab" + (workspaceTab === "cases" && statusView === "done" ? " active" : "")} onClick={() => selectWorkspaceTab("cases", "done")}>Done <span className="ct">{counts.done}</span></div>
@@ -124,14 +124,18 @@ function Workbench({ data, tenant }) {
       <div className="wb">
         <div className="col">
           <div style={{ padding: "12px 14px", borderBottom: "1px solid var(--line)", background: "var(--bg-2)" }}>
-            <div style={{ position: "relative" }}>
+            <div className="eyebrow accent">Work Queue</div>
+            <div style={{ marginTop: 5, color: "var(--text-dim)", fontSize: 12, lineHeight: 1.45 }}>
+              Cases are business questions, findings, or review follow-ups that need human attention.
+            </div>
+            <div style={{ position: "relative", marginTop: 10 }}>
               <input className="input" value={search} onChange={e => setSearch(e.target.value)}
-                     placeholder="search case, owner, basis…"
+                     placeholder="search work item, owner, basis…"
                      style={{ paddingLeft: 28 }} />
               <span style={{ position: "absolute", left: 9, top: 7, color: "var(--dim)", fontFamily: "var(--font-mono)" }}>⌕</span>
             </div>
             <div className="row" style={{ marginTop: 10 }}>
-              <div className="stat"><span className="label">Open</span><span className="val mono">{counts.open}</span></div>
+              <div className="stat"><span className="label">Active</span><span className="val mono">{counts.open}</span></div>
               <div className="stat"><span className="label">Blocked</span><span className="val mono">{counts.blocked}</span></div>
               <div className="stat"><span className="label">Done</span><span className="val mono">{counts.done}</span></div>
             </div>
@@ -142,7 +146,7 @@ function Workbench({ data, tenant }) {
             <div className="artifact-list">
               {filtered.length === 0 && (
                 <div style={{ padding: 24, fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--muted)", textAlign: "center" }}>
-                  No cases match this view.
+                  No work items match this view.
                 </div>
               )}
               {filtered.map(c => (
@@ -152,7 +156,7 @@ function Workbench({ data, tenant }) {
                   <div className="ar-bar" />
                   <div className="ar-main">
                     <div className="ar-top">
-                      <span className="type">CASE</span>
+                      <span className="type">WORK ITEM</span>
                       <span>·</span>
                       <span className="key">{c.id}</span>
                     </div>
@@ -173,13 +177,13 @@ function Workbench({ data, tenant }) {
         <div className="col" style={{ display: "flex", flexDirection: "column" }}>
           {!selected ? (
             <div style={{ flex: 1, display: "grid", placeItems: "center", color: "var(--muted)", fontFamily: "var(--font-mono)", fontSize: 12 }}>
-              Select a Case from the inbox.
+              Select a work item from the queue.
             </div>
           ) : (
             <>
               <div className="art-header">
                 <div className="crumb">
-                  <span className="type">Case</span>
+                  <span className="type">Work item</span>
                   <span className="sep">/</span>
                   <span>{selected.id}</span>
                   <span className="sep">·</span>
@@ -208,7 +212,7 @@ function Workbench({ data, tenant }) {
               </div>
 
               <div style={{ flex: 1, overflow: "auto", padding: "var(--pad-4) var(--pad-5)" }}>
-                <Panel eyebrow="Case routing" title="What needs attention" count={selected.status}>
+                <Panel eyebrow="Work routing" title="What needs attention" count={selected.status}>
                   <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
                     <CaseField label="Scope" value={selected.scopeLabel} />
                     <CaseField label="Ontology basis" value={selected.basisLabel} />
@@ -230,26 +234,26 @@ function Workbench({ data, tenant }) {
 
         <div className="col inspector">
           <div className="section">
-            <div className="section-head"><span>Inbox summary</span><span className="ct">{cases.length}</span></div>
+            <div className="section-head"><span>Queue summary</span><span className="ct">{cases.length}</span></div>
             <div className="section-body">
-              <div className="hbar"><span className="lbl">open</span><span className="track"><i style={{ width: pct(counts.open, counts.all) }} /></span><span className="num">{counts.open}</span></div>
+              <div className="hbar"><span className="lbl">active</span><span className="track"><i style={{ width: pct(counts.open, counts.all) }} /></span><span className="num">{counts.open}</span></div>
               <div className="hbar"><span className="lbl">blocked</span><span className="track"><i style={{ width: pct(counts.blocked, counts.all) }} /></span><span className="num">{counts.blocked}</span></div>
               <div className="hbar"><span className="lbl">done</span><span className="track"><i style={{ width: pct(counts.done, counts.all) }} /></span><span className="num">{counts.done}</span></div>
             </div>
           </div>
 
           <div className="section">
-            <div className="section-head"><span>Selected Case</span></div>
+            <div className="section-head"><span>Selected work item</span></div>
             <div className="section-body" style={{ display: "flex", flexDirection: "column", gap: 8 }}>
               {selected ? (
                 <>
-                  <CaseField label="Case key" value={selected.id} />
+                  <CaseField label="Work item key" value={selected.id} />
                   <CaseField label="Status" value={selected.status} />
                   <CaseField label="Basis" value={selected.basisLabel} />
                   <CaseField label="Blocker" value={selected.blocker || "none"} />
                 </>
               ) : (
-                <div style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--muted)" }}>No Case selected.</div>
+                <div style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--muted)" }}>No work item selected.</div>
               )}
             </div>
           </div>

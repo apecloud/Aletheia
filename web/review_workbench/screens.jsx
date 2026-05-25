@@ -347,7 +347,7 @@ function Ontology({ data, tenant }) {
             <div style={{ display: "flex", flexDirection: "column", gap: 6, fontFamily: "var(--font-mono)", fontSize: 11 }}>
               <div style={{ display: "flex", gap: 8, color: "var(--approved)" }}><span>●</span><span>Ontology owns source/schema/review/canonical state</span></div>
               <div style={{ display: "flex", gap: 8, color: "var(--changes)" }}><span>●</span><span>Reasoning may cite this page as basis only</span></div>
-              <div style={{ display: "flex", gap: 8, color: "var(--muted)" }}><span>●</span><span>Workspace remains a lightweight Case inbox</span></div>
+              <div style={{ display: "flex", gap: 8, color: "var(--muted)" }}><span>●</span><span>Workspace remains a lightweight Work Queue</span></div>
             </div>
           </div>
         </div>
