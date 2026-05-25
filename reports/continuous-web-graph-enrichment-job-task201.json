@@ -1,0 +1,1547 @@
+{
+  "proposed_graph": [
+    {
+      "confidence": 0.7,
+      "element_key": "proposed-graph:maritime-risk:edge:071ed2b5fe353297",
+      "element_type": "edge",
+      "evidence_refs": [
+        "https://zenodo.org/records/13841882/task201-bab-el-mandeb"
+      ],
+      "iteration": 1,
+      "name": "CHN depends on Bab el-Mandeb Strait",
+      "payload": {
+        "metrics": [
+          "trade_at_risk_v",
+          "trade_impacted"
+        ],
+        "relation": "depends_on",
+        "source_label": "CHN",
+        "source_type": "Country",
+        "target_label": "Bab el-Mandeb Strait",
+        "target_type": "Chokepoint"
+      },
+      "source_url": "https://zenodo.org/records/13841882/task201-bab-el-mandeb",
+      "status": "draft"
+    },
+    {
+      "confidence": 0.7,
+      "element_key": "proposed-graph:maritime-risk:edge:29371c91fd1cb77d",
+      "element_type": "edge",
+      "evidence_refs": [
+        "https://zenodo.org/records/13841882/task201-malacca"
+      ],
+      "iteration": 1,
+      "name": "CHN depends on Malacca Strait",
+      "payload": {
+        "metrics": [
+          "trade_impacted",
+          "dependency_share"
+        ],
+        "relation": "depends_on",
+        "source_label": "CHN",
+        "source_type": "Country",
+        "target_label": "Malacca Strait",
+        "target_type": "Chokepoint"
+      },
+      "source_url": "https://zenodo.org/records/13841882/task201-malacca",
+      "status": "draft"
+    },
+    {
+      "confidence": 0.7,
+      "element_key": "proposed-graph:maritime-risk:edge:a17605ea92880eaf",
+      "element_type": "edge",
+      "evidence_refs": [
+        "https://zenodo.org/records/13841882/task201-bab-el-mandeb"
+      ],
+      "iteration": 1,
+      "name": "IND depends on Bab el-Mandeb Strait",
+      "payload": {
+        "metrics": [
+          "trade_at_risk_v",
+          "trade_impacted"
+        ],
+        "relation": "depends_on",
+        "source_label": "IND",
+        "source_type": "Country",
+        "target_label": "Bab el-Mandeb Strait",
+        "target_type": "Chokepoint"
+      },
+      "source_url": "https://zenodo.org/records/13841882/task201-bab-el-mandeb",
+      "status": "draft"
+    },
+    {
+      "confidence": 0.7,
+      "element_key": "proposed-graph:maritime-risk:edge:52e5f62b73f7c6fe",
+      "element_type": "edge",
+      "evidence_refs": [
+        "https://zenodo.org/records/13841882/task201-hormuz"
+      ],
+      "iteration": 1,
+      "name": "JPN depends on Hormuz Strait",
+      "payload": {
+        "metrics": [
+          "trade_at_risk_v",
+          "dependency_share",
+          "import exposure"
+        ],
+        "relation": "depends_on",
+        "source_label": "JPN",
+        "source_type": "Country",
+        "target_label": "Hormuz Strait",
+        "target_type": "Chokepoint"
+      },
+      "source_url": "https://zenodo.org/records/13841882/task201-hormuz",
+      "status": "draft"
+    },
+    {
+      "confidence": 0.7,
+      "element_key": "proposed-graph:maritime-risk:edge:b764123fcc138765",
+      "element_type": "edge",
+      "evidence_refs": [
+        "https://zenodo.org/records/13841882/task201-malacca"
+      ],
+      "iteration": 1,
+      "name": "JPN depends on Malacca Strait",
+      "payload": {
+        "metrics": [
+          "trade_impacted",
+          "dependency_share"
+        ],
+        "relation": "depends_on",
+        "source_label": "JPN",
+        "source_type": "Country",
+        "target_label": "Malacca Strait",
+        "target_type": "Chokepoint"
+      },
+      "source_url": "https://zenodo.org/records/13841882/task201-malacca",
+      "status": "draft"
+    },
+    {
+      "confidence": 0.7,
+      "element_key": "proposed-graph:maritime-risk:edge:f32ded736ab7521d",
+      "element_type": "edge",
+      "evidence_refs": [
+        "https://zenodo.org/records/13841882/task201-hormuz"
+      ],
+      "iteration": 1,
+      "name": "KOR depends on Hormuz Strait",
+      "payload": {
+        "metrics": [
+          "trade_at_risk_v",
+          "dependency_share",
+          "import exposure"
+        ],
+        "relation": "depends_on",
+        "source_label": "KOR",
+        "source_type": "Country",
+        "target_label": "Hormuz Strait",
+        "target_type": "Chokepoint"
+      },
+      "source_url": "https://zenodo.org/records/13841882/task201-hormuz",
+      "status": "draft"
+    },
+    {
+      "confidence": 0.7,
+      "element_key": "proposed-graph:maritime-risk:edge:fb70f3a669678c90",
+      "element_type": "edge",
+      "evidence_refs": [
+        "https://zenodo.org/records/13841882/task201-malacca"
+      ],
+      "iteration": 1,
+      "name": "KOR depends on Malacca Strait",
+      "payload": {
+        "metrics": [
+          "trade_impacted",
+          "dependency_share"
+        ],
+        "relation": "depends_on",
+        "source_label": "KOR",
+        "source_type": "Country",
+        "target_label": "Malacca Strait",
+        "target_type": "Chokepoint"
+      },
+      "source_url": "https://zenodo.org/records/13841882/task201-malacca",
+      "status": "draft"
+    },
+    {
+      "confidence": 0.7,
+      "element_key": "proposed-graph:maritime-risk:edge:13f2cb6e96918f14",
+      "element_type": "edge",
+      "evidence_refs": [
+        "https://zenodo.org/records/13841882/task201-bab-el-mandeb"
+      ],
+      "iteration": 1,
+      "name": "USA depends on Bab el-Mandeb Strait",
+      "payload": {
+        "metrics": [
+          "trade_at_risk_v",
+          "trade_impacted"
+        ],
+        "relation": "depends_on",
+        "source_label": "USA",
+        "source_type": "Country",
+        "target_label": "Bab el-Mandeb Strait",
+        "target_type": "Chokepoint"
+      },
+      "source_url": "https://zenodo.org/records/13841882/task201-bab-el-mandeb",
+      "status": "draft"
+    },
+    {
+      "confidence": 0.68,
+      "element_key": "proposed-graph:maritime-risk:edge:4e4e2ac907a65ee0",
+      "element_type": "edge",
+      "evidence_refs": [
+        "https://zenodo.org/records/13841882/task201-bab-el-mandeb"
+      ],
+      "iteration": 1,
+      "name": "likelihood_conflict -> Bab el-Mandeb Strait",
+      "payload": {
+        "relation": "raises_risk_for",
+        "source_label": "likelihood_conflict",
+        "source_type": "Hazard",
+        "target_label": "Bab el-Mandeb Strait",
+        "target_type": "Chokepoint"
+      },
+      "source_url": "https://zenodo.org/records/13841882/task201-bab-el-mandeb",
+      "status": "draft"
+    },
+    {
+      "confidence": 0.68,
+      "element_key": "proposed-graph:maritime-risk:edge:47935fb8bc13362f",
+      "element_type": "edge",
+      "evidence_refs": [
+        "https://zenodo.org/records/13841882/task201-malacca"
+      ],
+      "iteration": 1,
+      "name": "likelihood_geopolitical -> Malacca Strait",
+      "payload": {
+        "relation": "raises_risk_for",
+        "source_label": "likelihood_geopolitical",
+        "source_type": "Hazard",
+        "target_label": "Malacca Strait",
+        "target_type": "Chokepoint"
+      },
+      "source_url": "https://zenodo.org/records/13841882/task201-malacca",
+      "status": "draft"
+    },
+    {
+      "confidence": 0.68,
+      "element_key": "proposed-graph:maritime-risk:edge:43d34656691b05b2",
+      "element_type": "edge",
+      "evidence_refs": [
+        "https://zenodo.org/records/13841882/task201-hormuz"
+      ],
+      "iteration": 1,
+      "name": "shipping disruption -> Hormuz Strait",
+      "payload": {
+        "relation": "raises_risk_for",
+        "source_label": "shipping disruption",
+        "source_type": "Hazard",
+        "target_label": "Hormuz Strait",
+        "target_type": "Chokepoint"
+      },
+      "source_url": "https://zenodo.org/records/13841882/task201-hormuz",
+      "status": "draft"
+    },
+    {
+      "confidence": 0.73,
+      "element_key": "proposed-graph:maritime-risk:finding:d15ec669e962cc8a",
+      "element_type": "finding",
+      "evidence_refs": [
+        "https://zenodo.org/records/13841882/task201-bab-el-mandeb"
+      ],
+      "iteration": 1,
+      "name": "Bab el-Mandeb Strait risk propagates to CHN, IND, USA",
+      "payload": {
+        "conclusion": "likelihood_conflict and severity_conflict around Bab el-Mandeb Strait expose CHN IND USA to trade_at_risk_v and trade_impacted; analyst review action required.",
+        "deep_graph_profile": {
+          "finding_emphasis": "deep_graph_finding",
+          "hop_count": 4,
+          "missing_steps": [],
+          "multi_hop": true,
+          "observed_steps": [
+            "hazard",
+            "chokepoint",
+            "dependent_country",
+            "risk_metric",
+            "recommended_action"
+          ],
+          "path": [
+            {
+              "kind": "hazard",
+              "label": "likelihood_conflict",
+              "metric": "likelihood_conflict",
+              "source_ref": "https://zenodo.org/records/13841882/task201-bab-el-mandeb",
+              "step": "hazard"
+            },
+            {
+              "kind": "chokepoint",
+              "label": "Bab el-Mandeb Strait",
+              "metric": "canal",
+              "source_ref": "https://zenodo.org/records/13841882/task201-bab-el-mandeb",
+              "step": "chokepoint"
+            },
+            {
+              "kind": "dependent_countries",
+              "label": "CHN, IND, USA",
+              "metric": "iso3",
+              "source_ref": "https://zenodo.org/records/13841882/task201-bab-el-mandeb",
+              "step": "dependent_country"
+            },
+            {
+              "kind": "risk_metric",
+              "label": "trade_at_risk_v",
+              "metric": "trade_at_risk_v",
+              "source_ref": "https://zenodo.org/records/13841882/task201-bab-el-mandeb",
+              "step": "risk_metric"
+            },
+            {
+              "kind": "recommended_action",
+              "label": "Run analyst review on exposed country/chokepoint path",
+              "metric": null,
+              "source_ref": "Aletheia proposed graph playbook",
+              "step": "recommended_action"
+            }
+          ],
+          "path_label": "likelihood_conflict -> Bab el-Mandeb Strait -> CHN, IND, USA -> trade_at_risk_v -> Run analyst review on exposed country/chokepoint path",
+          "reasoning_type": "graph_multi_hop",
+          "required_steps": [
+            "hazard",
+            "chokepoint",
+            "dependent_country",
+            "risk_metric",
+            "recommended_action"
+          ]
+        },
+        "evidence_chain": [
+          {
+            "kind": "hazard",
+            "metric": "likelihood_conflict",
+            "source_ref": "https://zenodo.org/records/13841882/task201-bab-el-mandeb",
+            "value": "likelihood_conflict"
+          },
+          {
+            "kind": "chokepoint",
+            "metric": "canal",
+            "source_ref": "https://zenodo.org/records/13841882/task201-bab-el-mandeb",
+            "value": "Bab el-Mandeb Strait"
+          },
+          {
+            "kind": "dependent_countries",
+            "metric": "iso3",
+            "source_ref": "https://zenodo.org/records/13841882/task201-bab-el-mandeb",
+            "value": [
+              {
+                "iso3": "CHN"
+              },
+              {
+                "iso3": "IND"
+              },
+              {
+                "iso3": "USA"
+              }
+            ]
+          },
+          {
+            "kind": "risk_metric",
+            "metric": "trade_at_risk_v",
+            "source_ref": "https://zenodo.org/records/13841882/task201-bab-el-mandeb",
+            "value": "trade_at_risk_v"
+          },
+          {
+            "kind": "recommended_action",
+            "source_ref": "Aletheia proposed graph playbook",
+            "value": {
+              "label": "Run analyst review on exposed country/chokepoint path"
+            }
+          }
+        ],
+        "finding_type": "deep_graph_finding",
+        "recommended_action": "Run analyst review on exposed country/chokepoint path",
+        "title": "Bab el-Mandeb Strait risk propagates to dependent countries",
+        "writes_canonical": false
+      },
+      "source_url": "https://zenodo.org/records/13841882/task201-bab-el-mandeb",
+      "status": "draft"
+    },
+    {
+      "confidence": 0.73,
+      "element_key": "proposed-graph:maritime-risk:finding:23b6ab5325c6bcae",
+      "element_type": "finding",
+      "evidence_refs": [
+        "https://zenodo.org/records/13841882/task201-hormuz"
+      ],
+      "iteration": 1,
+      "name": "Hormuz Strait risk propagates to JPN, KOR",
+      "payload": {
+        "conclusion": "sanctions and shipping disruption around Hormuz Strait create import exposure for JPN KOR with trade_at_risk_v and dependency_share metrics; analyst review action required.",
+        "deep_graph_profile": {
+          "finding_emphasis": "deep_graph_finding",
+          "hop_count": 4,
+          "missing_steps": [],
+          "multi_hop": true,
+          "observed_steps": [
+            "hazard",
+            "chokepoint",
+            "dependent_country",
+            "risk_metric",
+            "recommended_action"
+          ],
+          "path": [
+            {
+              "kind": "hazard",
+              "label": "shipping disruption",
+              "metric": "shipping disruption",
+              "source_ref": "https://zenodo.org/records/13841882/task201-hormuz",
+              "step": "hazard"
+            },
+            {
+              "kind": "chokepoint",
+              "label": "Hormuz Strait",
+              "metric": "canal",
+              "source_ref": "https://zenodo.org/records/13841882/task201-hormuz",
+              "step": "chokepoint"
+            },
+            {
+              "kind": "dependent_countries",
+              "label": "JPN, KOR",
+              "metric": "iso3",
+              "source_ref": "https://zenodo.org/records/13841882/task201-hormuz",
+              "step": "dependent_country"
+            },
+            {
+              "kind": "risk_metric",
+              "label": "trade_at_risk_v",
+              "metric": "trade_at_risk_v",
+              "source_ref": "https://zenodo.org/records/13841882/task201-hormuz",
+              "step": "risk_metric"
+            },
+            {
+              "kind": "recommended_action",
+              "label": "Run analyst review on exposed country/chokepoint path",
+              "metric": null,
+              "source_ref": "Aletheia proposed graph playbook",
+              "step": "recommended_action"
+            }
+          ],
+          "path_label": "shipping disruption -> Hormuz Strait -> JPN, KOR -> trade_at_risk_v -> Run analyst review on exposed country/chokepoint path",
+          "reasoning_type": "graph_multi_hop",
+          "required_steps": [
+            "hazard",
+            "chokepoint",
+            "dependent_country",
+            "risk_metric",
+            "recommended_action"
+          ]
+        },
+        "evidence_chain": [
+          {
+            "kind": "hazard",
+            "metric": "shipping disruption",
+            "source_ref": "https://zenodo.org/records/13841882/task201-hormuz",
+            "value": "shipping disruption"
+          },
+          {
+            "kind": "chokepoint",
+            "metric": "canal",
+            "source_ref": "https://zenodo.org/records/13841882/task201-hormuz",
+            "value": "Hormuz Strait"
+          },
+          {
+            "kind": "dependent_countries",
+            "metric": "iso3",
+            "source_ref": "https://zenodo.org/records/13841882/task201-hormuz",
+            "value": [
+              {
+                "iso3": "JPN"
+              },
+              {
+                "iso3": "KOR"
+              }
+            ]
+          },
+          {
+            "kind": "risk_metric",
+            "metric": "trade_at_risk_v",
+            "source_ref": "https://zenodo.org/records/13841882/task201-hormuz",
+            "value": "trade_at_risk_v"
+          },
+          {
+            "kind": "recommended_action",
+            "source_ref": "Aletheia proposed graph playbook",
+            "value": {
+              "label": "Run analyst review on exposed country/chokepoint path"
+            }
+          }
+        ],
+        "finding_type": "deep_graph_finding",
+        "recommended_action": "Run analyst review on exposed country/chokepoint path",
+        "title": "Hormuz Strait risk propagates to dependent countries",
+        "writes_canonical": false
+      },
+      "source_url": "https://zenodo.org/records/13841882/task201-hormuz",
+      "status": "draft"
+    },
+    {
+      "confidence": 0.73,
+      "element_key": "proposed-graph:maritime-risk:finding:5946d19645958aa4",
+      "element_type": "finding",
+      "evidence_refs": [
+        "https://zenodo.org/records/13841882/task201-malacca"
+      ],
+      "iteration": 1,
+      "name": "Malacca Strait risk propagates to CHN, JPN, KOR",
+      "payload": {
+        "conclusion": "likelihood_geopolitical hazard at Malacca Strait affects CHN JPN KOR dependency_share and trade_impacted; analyst review action required.",
+        "deep_graph_profile": {
+          "finding_emphasis": "deep_graph_finding",
+          "hop_count": 4,
+          "missing_steps": [],
+          "multi_hop": true,
+          "observed_steps": [
+            "hazard",
+            "chokepoint",
+            "dependent_country",
+            "risk_metric",
+            "recommended_action"
+          ],
+          "path": [
+            {
+              "kind": "hazard",
+              "label": "likelihood_geopolitical",
+              "metric": "likelihood_geopolitical",
+              "source_ref": "https://zenodo.org/records/13841882/task201-malacca",
+              "step": "hazard"
+            },
+            {
+              "kind": "chokepoint",
+              "label": "Malacca Strait",
+              "metric": "canal",
+              "source_ref": "https://zenodo.org/records/13841882/task201-malacca",
+              "step": "chokepoint"
+            },
+            {
+              "kind": "dependent_countries",
+              "label": "CHN, JPN, KOR",
+              "metric": "iso3",
+              "source_ref": "https://zenodo.org/records/13841882/task201-malacca",
+              "step": "dependent_country"
+            },
+            {
+              "kind": "risk_metric",
+              "label": "trade_impacted",
+              "metric": "trade_impacted",
+              "source_ref": "https://zenodo.org/records/13841882/task201-malacca",
+              "step": "risk_metric"
+            },
+            {
+              "kind": "recommended_action",
+              "label": "Run analyst review on exposed country/chokepoint path",
+              "metric": null,
+              "source_ref": "Aletheia proposed graph playbook",
+              "step": "recommended_action"
+            }
+          ],
+          "path_label": "likelihood_geopolitical -> Malacca Strait -> CHN, JPN, KOR -> trade_impacted -> Run analyst review on exposed country/chokepoint path",
+          "reasoning_type": "graph_multi_hop",
+          "required_steps": [
+            "hazard",
+            "chokepoint",
+            "dependent_country",
+            "risk_metric",
+            "recommended_action"
+          ]
+        },
+        "evidence_chain": [
+          {
+            "kind": "hazard",
+            "metric": "likelihood_geopolitical",
+            "source_ref": "https://zenodo.org/records/13841882/task201-malacca",
+            "value": "likelihood_geopolitical"
+          },
+          {
+            "kind": "chokepoint",
+            "metric": "canal",
+            "source_ref": "https://zenodo.org/records/13841882/task201-malacca",
+            "value": "Malacca Strait"
+          },
+          {
+            "kind": "dependent_countries",
+            "metric": "iso3",
+            "source_ref": "https://zenodo.org/records/13841882/task201-malacca",
+            "value": [
+              {
+                "iso3": "CHN"
+              },
+              {
+                "iso3": "JPN"
+              },
+              {
+                "iso3": "KOR"
+              }
+            ]
+          },
+          {
+            "kind": "risk_metric",
+            "metric": "trade_impacted",
+            "source_ref": "https://zenodo.org/records/13841882/task201-malacca",
+            "value": "trade_impacted"
+          },
+          {
+            "kind": "recommended_action",
+            "source_ref": "Aletheia proposed graph playbook",
+            "value": {
+              "label": "Run analyst review on exposed country/chokepoint path"
+            }
+          }
+        ],
+        "finding_type": "deep_graph_finding",
+        "recommended_action": "Run analyst review on exposed country/chokepoint path",
+        "title": "Malacca Strait risk propagates to dependent countries",
+        "writes_canonical": false
+      },
+      "source_url": "https://zenodo.org/records/13841882/task201-malacca",
+      "status": "draft"
+    },
+    {
+      "confidence": 0.72,
+      "element_key": "proposed-graph:maritime-risk:node:15034d7c9ddeb80f",
+      "element_type": "node",
+      "evidence_refs": [
+        "https://zenodo.org/records/13841882/task201-bab-el-mandeb"
+      ],
+      "iteration": 1,
+      "name": "Bab el-Mandeb Strait",
+      "payload": {
+        "discovered_from": "link:risk_finding:n:m:evidence",
+        "label": "Bab el-Mandeb Strait",
+        "ontology_type": "Chokepoint"
+      },
+      "source_url": "https://zenodo.org/records/13841882/task201-bab-el-mandeb",
+      "status": "draft"
+    },
+    {
+      "confidence": 0.72,
+      "element_key": "proposed-graph:maritime-risk:node:68b0c4d79ae2d65e",
+      "element_type": "node",
+      "evidence_refs": [
+        "https://zenodo.org/records/13841882/task201-bab-el-mandeb"
+      ],
+      "iteration": 1,
+      "name": "Bab el-Mandeb Strait",
+      "payload": {
+        "discovered_from": "link:trade_dependency:n:1:country",
+        "label": "Bab el-Mandeb Strait",
+        "ontology_type": "Chokepoint"
+      },
+      "source_url": "https://zenodo.org/records/13841882/task201-bab-el-mandeb",
+      "status": "draft"
+    },
+    {
+      "confidence": 0.72,
+      "element_key": "proposed-graph:maritime-risk:node:e50448f1577136a1",
+      "element_type": "node",
+      "evidence_refs": [
+        "https://zenodo.org/records/13841882/task201-bab-el-mandeb"
+      ],
+      "iteration": 1,
+      "name": "Bab el-Mandeb Strait",
+      "payload": {
+        "discovered_from": "link:trade_dependency:n:1:chokepoint",
+        "label": "Bab el-Mandeb Strait",
+        "ontology_type": "Chokepoint"
+      },
+      "source_url": "https://zenodo.org/records/13841882/task201-bab-el-mandeb",
+      "status": "draft"
+    },
+    {
+      "confidence": 0.7,
+      "element_key": "proposed-graph:maritime-risk:node:c38017d3504f8bf5",
+      "element_type": "node",
+      "evidence_refs": [
+        "https://zenodo.org/records/13841882/task201-malacca"
+      ],
+      "iteration": 1,
+      "name": "CHN",
+      "payload": {
+        "discovered_from": "link:trade_dependency:n:1:chokepoint",
+        "iso3": "CHN",
+        "ontology_type": "Country"
+      },
+      "source_url": "https://zenodo.org/records/13841882/task201-malacca",
+      "status": "draft"
+    },
+    {
+      "confidence": 0.7,
+      "element_key": "proposed-graph:maritime-risk:node:7bfed29af78213a4",
+      "element_type": "node",
+      "evidence_refs": [
+        "https://zenodo.org/records/13841882/task201-malacca"
+      ],
+      "iteration": 1,
+      "name": "CHN",
+      "payload": {
+        "discovered_from": "link:trade_dependency:n:1:country",
+        "iso3": "CHN",
+        "ontology_type": "Country"
+      },
+      "source_url": "https://zenodo.org/records/13841882/task201-malacca",
+      "status": "draft"
+    },
+    {
+      "confidence": 0.7,
+      "element_key": "proposed-graph:maritime-risk:node:9e4c0fc8fe122cc7",
+      "element_type": "node",
+      "evidence_refs": [
+        "https://zenodo.org/records/13841882/task201-malacca"
+      ],
+      "iteration": 1,
+      "name": "CHN",
+      "payload": {
+        "discovered_from": "link:risk_finding:n:m:evidence",
+        "iso3": "CHN",
+        "ontology_type": "Country"
+      },
+      "source_url": "https://zenodo.org/records/13841882/task201-malacca",
+      "status": "draft"
+    },
+    {
+      "confidence": 0.72,
+      "element_key": "proposed-graph:maritime-risk:node:718b7440ab9d85a3",
+      "element_type": "node",
+      "evidence_refs": [
+        "https://zenodo.org/records/13841882/task201-hormuz"
+      ],
+      "iteration": 1,
+      "name": "Hormuz Strait",
+      "payload": {
+        "discovered_from": "link:trade_dependency:n:1:country",
+        "label": "Hormuz Strait",
+        "ontology_type": "Chokepoint"
+      },
+      "source_url": "https://zenodo.org/records/13841882/task201-hormuz",
+      "status": "draft"
+    },
+    {
+      "confidence": 0.72,
+      "element_key": "proposed-graph:maritime-risk:node:9808faacea1ac52b",
+      "element_type": "node",
+      "evidence_refs": [
+        "https://zenodo.org/records/13841882/task201-hormuz"
+      ],
+      "iteration": 1,
+      "name": "Hormuz Strait",
+      "payload": {
+        "discovered_from": "link:trade_dependency:n:1:chokepoint",
+        "label": "Hormuz Strait",
+        "ontology_type": "Chokepoint"
+      },
+      "source_url": "https://zenodo.org/records/13841882/task201-hormuz",
+      "status": "draft"
+    },
+    {
+      "confidence": 0.72,
+      "element_key": "proposed-graph:maritime-risk:node:26f1832d37ddb3bb",
+      "element_type": "node",
+      "evidence_refs": [
+        "https://zenodo.org/records/13841882/task201-hormuz"
+      ],
+      "iteration": 1,
+      "name": "Hormuz Strait",
+      "payload": {
+        "discovered_from": "link:risk_finding:n:m:evidence",
+        "label": "Hormuz Strait",
+        "ontology_type": "Chokepoint"
+      },
+      "source_url": "https://zenodo.org/records/13841882/task201-hormuz",
+      "status": "draft"
+    },
+    {
+      "confidence": 0.7,
+      "element_key": "proposed-graph:maritime-risk:node:e7589577a1f2811a",
+      "element_type": "node",
+      "evidence_refs": [
+        "https://zenodo.org/records/13841882/task201-bab-el-mandeb"
+      ],
+      "iteration": 1,
+      "name": "IND",
+      "payload": {
+        "discovered_from": "link:trade_dependency:n:1:country",
+        "iso3": "IND",
+        "ontology_type": "Country"
+      },
+      "source_url": "https://zenodo.org/records/13841882/task201-bab-el-mandeb",
+      "status": "draft"
+    },
+    {
+      "confidence": 0.7,
+      "element_key": "proposed-graph:maritime-risk:node:d06866fa0656a69e",
+      "element_type": "node",
+      "evidence_refs": [
+        "https://zenodo.org/records/13841882/task201-bab-el-mandeb"
+      ],
+      "iteration": 1,
+      "name": "IND",
+      "payload": {
+        "discovered_from": "link:trade_dependency:n:1:chokepoint",
+        "iso3": "IND",
+        "ontology_type": "Country"
+      },
+      "source_url": "https://zenodo.org/records/13841882/task201-bab-el-mandeb",
+      "status": "draft"
+    },
+    {
+      "confidence": 0.7,
+      "element_key": "proposed-graph:maritime-risk:node:2c3d01efc7d037f8",
+      "element_type": "node",
+      "evidence_refs": [
+        "https://zenodo.org/records/13841882/task201-bab-el-mandeb"
+      ],
+      "iteration": 1,
+      "name": "IND",
+      "payload": {
+        "discovered_from": "link:risk_finding:n:m:evidence",
+        "iso3": "IND",
+        "ontology_type": "Country"
+      },
+      "source_url": "https://zenodo.org/records/13841882/task201-bab-el-mandeb",
+      "status": "draft"
+    },
+    {
+      "confidence": 0.7,
+      "element_key": "proposed-graph:maritime-risk:node:20d80340a2182b47",
+      "element_type": "node",
+      "evidence_refs": [
+        "https://zenodo.org/records/13841882/task201-malacca"
+      ],
+      "iteration": 1,
+      "name": "JPN",
+      "payload": {
+        "discovered_from": "link:trade_dependency:n:1:chokepoint",
+        "iso3": "JPN",
+        "ontology_type": "Country"
+      },
+      "source_url": "https://zenodo.org/records/13841882/task201-malacca",
+      "status": "draft"
+    },
+    {
+      "confidence": 0.7,
+      "element_key": "proposed-graph:maritime-risk:node:d08d73b4c1a59e1f",
+      "element_type": "node",
+      "evidence_refs": [
+        "https://zenodo.org/records/13841882/task201-malacca"
+      ],
+      "iteration": 1,
+      "name": "JPN",
+      "payload": {
+        "discovered_from": "link:trade_dependency:n:1:country",
+        "iso3": "JPN",
+        "ontology_type": "Country"
+      },
+      "source_url": "https://zenodo.org/records/13841882/task201-malacca",
+      "status": "draft"
+    },
+    {
+      "confidence": 0.7,
+      "element_key": "proposed-graph:maritime-risk:node:1138fc3adbd5f7b3",
+      "element_type": "node",
+      "evidence_refs": [
+        "https://zenodo.org/records/13841882/task201-malacca"
+      ],
+      "iteration": 1,
+      "name": "JPN",
+      "payload": {
+        "discovered_from": "link:risk_finding:n:m:evidence",
+        "iso3": "JPN",
+        "ontology_type": "Country"
+      },
+      "source_url": "https://zenodo.org/records/13841882/task201-malacca",
+      "status": "draft"
+    },
+    {
+      "confidence": 0.7,
+      "element_key": "proposed-graph:maritime-risk:node:63e2c6f94700e3fb",
+      "element_type": "node",
+      "evidence_refs": [
+        "https://zenodo.org/records/13841882/task201-malacca"
+      ],
+      "iteration": 1,
+      "name": "KOR",
+      "payload": {
+        "discovered_from": "link:trade_dependency:n:1:country",
+        "iso3": "KOR",
+        "ontology_type": "Country"
+      },
+      "source_url": "https://zenodo.org/records/13841882/task201-malacca",
+      "status": "draft"
+    },
+    {
+      "confidence": 0.7,
+      "element_key": "proposed-graph:maritime-risk:node:a3b3f4e4b2c8c316",
+      "element_type": "node",
+      "evidence_refs": [
+        "https://zenodo.org/records/13841882/task201-malacca"
+      ],
+      "iteration": 1,
+      "name": "KOR",
+      "payload": {
+        "discovered_from": "link:trade_dependency:n:1:chokepoint",
+        "iso3": "KOR",
+        "ontology_type": "Country"
+      },
+      "source_url": "https://zenodo.org/records/13841882/task201-malacca",
+      "status": "draft"
+    },
+    {
+      "confidence": 0.7,
+      "element_key": "proposed-graph:maritime-risk:node:7011b76104ae7fa6",
+      "element_type": "node",
+      "evidence_refs": [
+        "https://zenodo.org/records/13841882/task201-malacca"
+      ],
+      "iteration": 1,
+      "name": "KOR",
+      "payload": {
+        "discovered_from": "link:risk_finding:n:m:evidence",
+        "iso3": "KOR",
+        "ontology_type": "Country"
+      },
+      "source_url": "https://zenodo.org/records/13841882/task201-malacca",
+      "status": "draft"
+    },
+    {
+      "confidence": 0.72,
+      "element_key": "proposed-graph:maritime-risk:node:f65f6f282c9f8b78",
+      "element_type": "node",
+      "evidence_refs": [
+        "https://zenodo.org/records/13841882/task201-malacca"
+      ],
+      "iteration": 1,
+      "name": "Malacca Strait",
+      "payload": {
+        "discovered_from": "link:trade_dependency:n:1:country",
+        "label": "Malacca Strait",
+        "ontology_type": "Chokepoint"
+      },
+      "source_url": "https://zenodo.org/records/13841882/task201-malacca",
+      "status": "draft"
+    },
+    {
+      "confidence": 0.72,
+      "element_key": "proposed-graph:maritime-risk:node:1a535894516b85ca",
+      "element_type": "node",
+      "evidence_refs": [
+        "https://zenodo.org/records/13841882/task201-malacca"
+      ],
+      "iteration": 1,
+      "name": "Malacca Strait",
+      "payload": {
+        "discovered_from": "link:risk_finding:n:m:evidence",
+        "label": "Malacca Strait",
+        "ontology_type": "Chokepoint"
+      },
+      "source_url": "https://zenodo.org/records/13841882/task201-malacca",
+      "status": "draft"
+    },
+    {
+      "confidence": 0.72,
+      "element_key": "proposed-graph:maritime-risk:node:f97de5a5c7a9937d",
+      "element_type": "node",
+      "evidence_refs": [
+        "https://zenodo.org/records/13841882/task201-malacca"
+      ],
+      "iteration": 1,
+      "name": "Malacca Strait",
+      "payload": {
+        "discovered_from": "link:trade_dependency:n:1:chokepoint",
+        "label": "Malacca Strait",
+        "ontology_type": "Chokepoint"
+      },
+      "source_url": "https://zenodo.org/records/13841882/task201-malacca",
+      "status": "draft"
+    },
+    {
+      "confidence": 0.7,
+      "element_key": "proposed-graph:maritime-risk:node:bfe6cf16b86d858a",
+      "element_type": "node",
+      "evidence_refs": [
+        "https://zenodo.org/records/13841882/task201-bab-el-mandeb"
+      ],
+      "iteration": 1,
+      "name": "USA",
+      "payload": {
+        "discovered_from": "link:risk_finding:n:m:evidence",
+        "iso3": "USA",
+        "ontology_type": "Country"
+      },
+      "source_url": "https://zenodo.org/records/13841882/task201-bab-el-mandeb",
+      "status": "draft"
+    },
+    {
+      "confidence": 0.7,
+      "element_key": "proposed-graph:maritime-risk:node:50b43452d1c78c33",
+      "element_type": "node",
+      "evidence_refs": [
+        "https://zenodo.org/records/13841882/task201-bab-el-mandeb"
+      ],
+      "iteration": 1,
+      "name": "USA",
+      "payload": {
+        "discovered_from": "link:trade_dependency:n:1:country",
+        "iso3": "USA",
+        "ontology_type": "Country"
+      },
+      "source_url": "https://zenodo.org/records/13841882/task201-bab-el-mandeb",
+      "status": "draft"
+    },
+    {
+      "confidence": 0.7,
+      "element_key": "proposed-graph:maritime-risk:node:d7b830f4c46b66d8",
+      "element_type": "node",
+      "evidence_refs": [
+        "https://zenodo.org/records/13841882/task201-bab-el-mandeb"
+      ],
+      "iteration": 1,
+      "name": "USA",
+      "payload": {
+        "discovered_from": "link:trade_dependency:n:1:chokepoint",
+        "iso3": "USA",
+        "ontology_type": "Country"
+      },
+      "source_url": "https://zenodo.org/records/13841882/task201-bab-el-mandeb",
+      "status": "draft"
+    },
+    {
+      "confidence": 0.66,
+      "element_key": "proposed-graph:maritime-risk:node:bd4f9b8cf9d73c93",
+      "element_type": "node",
+      "evidence_refs": [
+        "https://zenodo.org/records/13841882/task201-malacca"
+      ],
+      "iteration": 1,
+      "name": "hazard",
+      "payload": {
+        "discovered_from": "link:risk_finding:n:m:evidence",
+        "label": "hazard",
+        "ontology_type": "Hazard"
+      },
+      "source_url": "https://zenodo.org/records/13841882/task201-malacca",
+      "status": "draft"
+    },
+    {
+      "confidence": 0.66,
+      "element_key": "proposed-graph:maritime-risk:node:988ab1eff4f69811",
+      "element_type": "node",
+      "evidence_refs": [
+        "https://zenodo.org/records/13841882/task201-malacca"
+      ],
+      "iteration": 1,
+      "name": "hazard",
+      "payload": {
+        "discovered_from": "link:trade_dependency:n:1:country",
+        "label": "hazard",
+        "ontology_type": "Hazard"
+      },
+      "source_url": "https://zenodo.org/records/13841882/task201-malacca",
+      "status": "draft"
+    },
+    {
+      "confidence": 0.66,
+      "element_key": "proposed-graph:maritime-risk:node:cd70b3996923b12d",
+      "element_type": "node",
+      "evidence_refs": [
+        "https://zenodo.org/records/13841882/task201-malacca"
+      ],
+      "iteration": 1,
+      "name": "hazard",
+      "payload": {
+        "discovered_from": "link:trade_dependency:n:1:chokepoint",
+        "label": "hazard",
+        "ontology_type": "Hazard"
+      },
+      "source_url": "https://zenodo.org/records/13841882/task201-malacca",
+      "status": "draft"
+    },
+    {
+      "confidence": 0.66,
+      "element_key": "proposed-graph:maritime-risk:node:634336800d990ad4",
+      "element_type": "node",
+      "evidence_refs": [
+        "https://zenodo.org/records/13841882/task201-bab-el-mandeb"
+      ],
+      "iteration": 1,
+      "name": "likelihood_conflict",
+      "payload": {
+        "discovered_from": "link:risk_finding:n:m:evidence",
+        "label": "likelihood_conflict",
+        "ontology_type": "Hazard"
+      },
+      "source_url": "https://zenodo.org/records/13841882/task201-bab-el-mandeb",
+      "status": "draft"
+    },
+    {
+      "confidence": 0.66,
+      "element_key": "proposed-graph:maritime-risk:node:2a4ae42306a243f2",
+      "element_type": "node",
+      "evidence_refs": [
+        "https://zenodo.org/records/13841882/task201-bab-el-mandeb"
+      ],
+      "iteration": 1,
+      "name": "likelihood_conflict",
+      "payload": {
+        "discovered_from": "link:trade_dependency:n:1:chokepoint",
+        "label": "likelihood_conflict",
+        "ontology_type": "Hazard"
+      },
+      "source_url": "https://zenodo.org/records/13841882/task201-bab-el-mandeb",
+      "status": "draft"
+    },
+    {
+      "confidence": 0.66,
+      "element_key": "proposed-graph:maritime-risk:node:946cf95f099ed283",
+      "element_type": "node",
+      "evidence_refs": [
+        "https://zenodo.org/records/13841882/task201-bab-el-mandeb"
+      ],
+      "iteration": 1,
+      "name": "likelihood_conflict",
+      "payload": {
+        "discovered_from": "link:trade_dependency:n:1:country",
+        "label": "likelihood_conflict",
+        "ontology_type": "Hazard"
+      },
+      "source_url": "https://zenodo.org/records/13841882/task201-bab-el-mandeb",
+      "status": "draft"
+    },
+    {
+      "confidence": 0.66,
+      "element_key": "proposed-graph:maritime-risk:node:1fa36b7976db3704",
+      "element_type": "node",
+      "evidence_refs": [
+        "https://zenodo.org/records/13841882/task201-malacca"
+      ],
+      "iteration": 1,
+      "name": "likelihood_geopolitical",
+      "payload": {
+        "discovered_from": "link:trade_dependency:n:1:chokepoint",
+        "label": "likelihood_geopolitical",
+        "ontology_type": "Hazard"
+      },
+      "source_url": "https://zenodo.org/records/13841882/task201-malacca",
+      "status": "draft"
+    },
+    {
+      "confidence": 0.66,
+      "element_key": "proposed-graph:maritime-risk:node:72904afdb187d564",
+      "element_type": "node",
+      "evidence_refs": [
+        "https://zenodo.org/records/13841882/task201-malacca"
+      ],
+      "iteration": 1,
+      "name": "likelihood_geopolitical",
+      "payload": {
+        "discovered_from": "link:risk_finding:n:m:evidence",
+        "label": "likelihood_geopolitical",
+        "ontology_type": "Hazard"
+      },
+      "source_url": "https://zenodo.org/records/13841882/task201-malacca",
+      "status": "draft"
+    },
+    {
+      "confidence": 0.66,
+      "element_key": "proposed-graph:maritime-risk:node:6918559590fb7dfb",
+      "element_type": "node",
+      "evidence_refs": [
+        "https://zenodo.org/records/13841882/task201-malacca"
+      ],
+      "iteration": 1,
+      "name": "likelihood_geopolitical",
+      "payload": {
+        "discovered_from": "link:trade_dependency:n:1:country",
+        "label": "likelihood_geopolitical",
+        "ontology_type": "Hazard"
+      },
+      "source_url": "https://zenodo.org/records/13841882/task201-malacca",
+      "status": "draft"
+    },
+    {
+      "confidence": 0.66,
+      "element_key": "proposed-graph:maritime-risk:node:be8a4110cc219b7d",
+      "element_type": "node",
+      "evidence_refs": [
+        "https://zenodo.org/records/13841882/task201-hormuz"
+      ],
+      "iteration": 1,
+      "name": "sanctions",
+      "payload": {
+        "discovered_from": "link:trade_dependency:n:1:chokepoint",
+        "label": "sanctions",
+        "ontology_type": "Hazard"
+      },
+      "source_url": "https://zenodo.org/records/13841882/task201-hormuz",
+      "status": "draft"
+    },
+    {
+      "confidence": 0.66,
+      "element_key": "proposed-graph:maritime-risk:node:890d8f61762434fd",
+      "element_type": "node",
+      "evidence_refs": [
+        "https://zenodo.org/records/13841882/task201-hormuz"
+      ],
+      "iteration": 1,
+      "name": "sanctions",
+      "payload": {
+        "discovered_from": "link:trade_dependency:n:1:country",
+        "label": "sanctions",
+        "ontology_type": "Hazard"
+      },
+      "source_url": "https://zenodo.org/records/13841882/task201-hormuz",
+      "status": "draft"
+    },
+    {
+      "confidence": 0.66,
+      "element_key": "proposed-graph:maritime-risk:node:0898dc8da649670d",
+      "element_type": "node",
+      "evidence_refs": [
+        "https://zenodo.org/records/13841882/task201-hormuz"
+      ],
+      "iteration": 1,
+      "name": "sanctions",
+      "payload": {
+        "discovered_from": "link:risk_finding:n:m:evidence",
+        "label": "sanctions",
+        "ontology_type": "Hazard"
+      },
+      "source_url": "https://zenodo.org/records/13841882/task201-hormuz",
+      "status": "draft"
+    },
+    {
+      "confidence": 0.66,
+      "element_key": "proposed-graph:maritime-risk:node:483630409b50c929",
+      "element_type": "node",
+      "evidence_refs": [
+        "https://zenodo.org/records/13841882/task201-bab-el-mandeb"
+      ],
+      "iteration": 1,
+      "name": "severity_conflict",
+      "payload": {
+        "discovered_from": "link:trade_dependency:n:1:country",
+        "label": "severity_conflict",
+        "ontology_type": "Hazard"
+      },
+      "source_url": "https://zenodo.org/records/13841882/task201-bab-el-mandeb",
+      "status": "draft"
+    },
+    {
+      "confidence": 0.66,
+      "element_key": "proposed-graph:maritime-risk:node:f01d83da10135e00",
+      "element_type": "node",
+      "evidence_refs": [
+        "https://zenodo.org/records/13841882/task201-bab-el-mandeb"
+      ],
+      "iteration": 1,
+      "name": "severity_conflict",
+      "payload": {
+        "discovered_from": "link:trade_dependency:n:1:chokepoint",
+        "label": "severity_conflict",
+        "ontology_type": "Hazard"
+      },
+      "source_url": "https://zenodo.org/records/13841882/task201-bab-el-mandeb",
+      "status": "draft"
+    },
+    {
+      "confidence": 0.66,
+      "element_key": "proposed-graph:maritime-risk:node:3f9f6a1cee19a518",
+      "element_type": "node",
+      "evidence_refs": [
+        "https://zenodo.org/records/13841882/task201-bab-el-mandeb"
+      ],
+      "iteration": 1,
+      "name": "severity_conflict",
+      "payload": {
+        "discovered_from": "link:risk_finding:n:m:evidence",
+        "label": "severity_conflict",
+        "ontology_type": "Hazard"
+      },
+      "source_url": "https://zenodo.org/records/13841882/task201-bab-el-mandeb",
+      "status": "draft"
+    },
+    {
+      "confidence": 0.66,
+      "element_key": "proposed-graph:maritime-risk:node:f02c6f693d833f95",
+      "element_type": "node",
+      "evidence_refs": [
+        "https://zenodo.org/records/13841882/task201-hormuz"
+      ],
+      "iteration": 1,
+      "name": "shipping disruption",
+      "payload": {
+        "discovered_from": "link:risk_finding:n:m:evidence",
+        "label": "shipping disruption",
+        "ontology_type": "Hazard"
+      },
+      "source_url": "https://zenodo.org/records/13841882/task201-hormuz",
+      "status": "draft"
+    },
+    {
+      "confidence": 0.66,
+      "element_key": "proposed-graph:maritime-risk:node:d348b15eba675047",
+      "element_type": "node",
+      "evidence_refs": [
+        "https://zenodo.org/records/13841882/task201-hormuz"
+      ],
+      "iteration": 1,
+      "name": "shipping disruption",
+      "payload": {
+        "discovered_from": "link:trade_dependency:n:1:country",
+        "label": "shipping disruption",
+        "ontology_type": "Hazard"
+      },
+      "source_url": "https://zenodo.org/records/13841882/task201-hormuz",
+      "status": "draft"
+    },
+    {
+      "confidence": 0.66,
+      "element_key": "proposed-graph:maritime-risk:node:a91a120ef13e8f3e",
+      "element_type": "node",
+      "evidence_refs": [
+        "https://zenodo.org/records/13841882/task201-hormuz"
+      ],
+      "iteration": 1,
+      "name": "shipping disruption",
+      "payload": {
+        "discovered_from": "link:trade_dependency:n:1:chokepoint",
+        "label": "shipping disruption",
+        "ontology_type": "Hazard"
+      },
+      "source_url": "https://zenodo.org/records/13841882/task201-hormuz",
+      "status": "draft"
+    }
+  ],
+  "run": {
+    "budget": {
+      "max_frontier": 3,
+      "max_iterations": 1,
+      "max_results_per_query": 4
+    },
+    "expansion_trace": [
+      {
+        "extracted_candidates": [
+          "proposed-graph:maritime-risk:node:946cf95f099ed283",
+          "proposed-graph:maritime-risk:node:483630409b50c929",
+          "proposed-graph:maritime-risk:node:68b0c4d79ae2d65e",
+          "proposed-graph:maritime-risk:node:7bfed29af78213a4",
+          "proposed-graph:maritime-risk:node:e7589577a1f2811a",
+          "proposed-graph:maritime-risk:node:50b43452d1c78c33",
+          "proposed-graph:maritime-risk:edge:4e4e2ac907a65ee0",
+          "proposed-graph:maritime-risk:edge:071ed2b5fe353297",
+          "proposed-graph:maritime-risk:edge:a17605ea92880eaf",
+          "proposed-graph:maritime-risk:edge:13f2cb6e96918f14",
+          "proposed-graph:maritime-risk:finding:d15ec669e962cc8a",
+          "proposed-graph:maritime-risk:node:d348b15eba675047",
+          "proposed-graph:maritime-risk:node:890d8f61762434fd",
+          "proposed-graph:maritime-risk:node:718b7440ab9d85a3",
+          "proposed-graph:maritime-risk:node:d08d73b4c1a59e1f",
+          "proposed-graph:maritime-risk:node:63e2c6f94700e3fb",
+          "proposed-graph:maritime-risk:edge:43d34656691b05b2",
+          "proposed-graph:maritime-risk:edge:52e5f62b73f7c6fe",
+          "proposed-graph:maritime-risk:edge:f32ded736ab7521d",
+          "proposed-graph:maritime-risk:finding:23b6ab5325c6bcae",
+          "proposed-graph:maritime-risk:node:6918559590fb7dfb",
+          "proposed-graph:maritime-risk:node:988ab1eff4f69811",
+          "proposed-graph:maritime-risk:node:f65f6f282c9f8b78",
+          "proposed-graph:maritime-risk:node:7bfed29af78213a4",
+          "proposed-graph:maritime-risk:node:d08d73b4c1a59e1f",
+          "proposed-graph:maritime-risk:node:63e2c6f94700e3fb",
+          "proposed-graph:maritime-risk:edge:47935fb8bc13362f",
+          "proposed-graph:maritime-risk:edge:29371c91fd1cb77d",
+          "proposed-graph:maritime-risk:edge:b764123fcc138765",
+          "proposed-graph:maritime-risk:edge:fb70f3a669678c90",
+          "proposed-graph:maritime-risk:finding:5946d19645958aa4"
+        ],
+        "frontier": {
+          "artifact_type": "link",
+          "depth": 0,
+          "key": "link:trade_dependency:n:1:country",
+          "name": "TradeDependency N:1 Country",
+          "source": "ontology_artifact"
+        },
+        "iteration": 1,
+        "pruned": [
+          {
+            "reason": "blocked_domain_not_allowlisted",
+            "url": "https://example.org/task201-untrusted-maritime-risk"
+          }
+        ],
+        "query": "TradeDependency N:1 Country continuous crawl frontier discover hazard chokepoint country trade action paths graph evidence ontology",
+        "result_count": 4
+      },
+      {
+        "extracted_candidates": [
+          "proposed-graph:maritime-risk:node:2a4ae42306a243f2",
+          "proposed-graph:maritime-risk:node:f01d83da10135e00",
+          "proposed-graph:maritime-risk:node:e50448f1577136a1",
+          "proposed-graph:maritime-risk:node:c38017d3504f8bf5",
+          "proposed-graph:maritime-risk:node:d06866fa0656a69e",
+          "proposed-graph:maritime-risk:node:d7b830f4c46b66d8",
+          "proposed-graph:maritime-risk:edge:4e4e2ac907a65ee0",
+          "proposed-graph:maritime-risk:edge:071ed2b5fe353297",
+          "proposed-graph:maritime-risk:edge:a17605ea92880eaf",
+          "proposed-graph:maritime-risk:edge:13f2cb6e96918f14",
+          "proposed-graph:maritime-risk:finding:d15ec669e962cc8a",
+          "proposed-graph:maritime-risk:node:a91a120ef13e8f3e",
+          "proposed-graph:maritime-risk:node:be8a4110cc219b7d",
+          "proposed-graph:maritime-risk:node:9808faacea1ac52b",
+          "proposed-graph:maritime-risk:node:20d80340a2182b47",
+          "proposed-graph:maritime-risk:node:a3b3f4e4b2c8c316",
+          "proposed-graph:maritime-risk:edge:43d34656691b05b2",
+          "proposed-graph:maritime-risk:edge:52e5f62b73f7c6fe",
+          "proposed-graph:maritime-risk:edge:f32ded736ab7521d",
+          "proposed-graph:maritime-risk:finding:23b6ab5325c6bcae",
+          "proposed-graph:maritime-risk:node:1fa36b7976db3704",
+          "proposed-graph:maritime-risk:node:cd70b3996923b12d",
+          "proposed-graph:maritime-risk:node:f97de5a5c7a9937d",
+          "proposed-graph:maritime-risk:node:c38017d3504f8bf5",
+          "proposed-graph:maritime-risk:node:20d80340a2182b47",
+          "proposed-graph:maritime-risk:node:a3b3f4e4b2c8c316",
+          "proposed-graph:maritime-risk:edge:47935fb8bc13362f",
+          "proposed-graph:maritime-risk:edge:29371c91fd1cb77d",
+          "proposed-graph:maritime-risk:edge:b764123fcc138765",
+          "proposed-graph:maritime-risk:edge:fb70f3a669678c90",
+          "proposed-graph:maritime-risk:finding:5946d19645958aa4"
+        ],
+        "frontier": {
+          "artifact_type": "link",
+          "depth": 0,
+          "key": "link:trade_dependency:n:1:chokepoint",
+          "name": "TradeDependency N:1 Chokepoint",
+          "source": "ontology_artifact"
+        },
+        "iteration": 1,
+        "pruned": [
+          {
+            "reason": "blocked_domain_not_allowlisted",
+            "url": "https://example.org/task201-untrusted-maritime-risk"
+          }
+        ],
+        "query": "TradeDependency N:1 Chokepoint continuous crawl frontier discover hazard chokepoint country trade action paths graph evidence ontology",
+        "result_count": 4
+      },
+      {
+        "extracted_candidates": [
+          "proposed-graph:maritime-risk:node:634336800d990ad4",
+          "proposed-graph:maritime-risk:node:3f9f6a1cee19a518",
+          "proposed-graph:maritime-risk:node:15034d7c9ddeb80f",
+          "proposed-graph:maritime-risk:node:9e4c0fc8fe122cc7",
+          "proposed-graph:maritime-risk:node:2c3d01efc7d037f8",
+          "proposed-graph:maritime-risk:node:bfe6cf16b86d858a",
+          "proposed-graph:maritime-risk:edge:4e4e2ac907a65ee0",
+          "proposed-graph:maritime-risk:edge:071ed2b5fe353297",
+          "proposed-graph:maritime-risk:edge:a17605ea92880eaf",
+          "proposed-graph:maritime-risk:edge:13f2cb6e96918f14",
+          "proposed-graph:maritime-risk:finding:d15ec669e962cc8a",
+          "proposed-graph:maritime-risk:node:f02c6f693d833f95",
+          "proposed-graph:maritime-risk:node:0898dc8da649670d",
+          "proposed-graph:maritime-risk:node:26f1832d37ddb3bb",
+          "proposed-graph:maritime-risk:node:1138fc3adbd5f7b3",
+          "proposed-graph:maritime-risk:node:7011b76104ae7fa6",
+          "proposed-graph:maritime-risk:edge:43d34656691b05b2",
+          "proposed-graph:maritime-risk:edge:52e5f62b73f7c6fe",
+          "proposed-graph:maritime-risk:edge:f32ded736ab7521d",
+          "proposed-graph:maritime-risk:finding:23b6ab5325c6bcae",
+          "proposed-graph:maritime-risk:node:72904afdb187d564",
+          "proposed-graph:maritime-risk:node:bd4f9b8cf9d73c93",
+          "proposed-graph:maritime-risk:node:1a535894516b85ca",
+          "proposed-graph:maritime-risk:node:9e4c0fc8fe122cc7",
+          "proposed-graph:maritime-risk:node:1138fc3adbd5f7b3",
+          "proposed-graph:maritime-risk:node:7011b76104ae7fa6",
+          "proposed-graph:maritime-risk:edge:47935fb8bc13362f",
+          "proposed-graph:maritime-risk:edge:29371c91fd1cb77d",
+          "proposed-graph:maritime-risk:edge:b764123fcc138765",
+          "proposed-graph:maritime-risk:edge:fb70f3a669678c90",
+          "proposed-graph:maritime-risk:finding:5946d19645958aa4"
+        ],
+        "frontier": {
+          "artifact_type": "link",
+          "depth": 0,
+          "key": "link:risk_finding:n:m:evidence",
+          "name": "RiskFinding N:M Evidence",
+          "source": "ontology_artifact"
+        },
+        "iteration": 1,
+        "pruned": [
+          {
+            "reason": "blocked_domain_not_allowlisted",
+            "url": "https://example.org/task201-untrusted-maritime-risk"
+          }
+        ],
+        "query": "RiskFinding N:M Evidence continuous crawl frontier discover hazard chokepoint country trade action paths graph evidence ontology",
+        "result_count": 4
+      }
+    ],
+    "finding_count": 9,
+    "frontier": [
+      {
+        "artifact_type": "link",
+        "depth": 0,
+        "key": "link:trade_dependency:n:1:country",
+        "name": "TradeDependency N:1 Country",
+        "source": "ontology_artifact"
+      },
+      {
+        "artifact_type": "link",
+        "depth": 0,
+        "key": "link:trade_dependency:n:1:chokepoint",
+        "name": "TradeDependency N:1 Chokepoint",
+        "source": "ontology_artifact"
+      },
+      {
+        "artifact_type": "link",
+        "depth": 0,
+        "key": "link:risk_finding:n:m:evidence",
+        "name": "RiskFinding N:M Evidence",
+        "source": "ontology_artifact"
+      }
+    ],
+    "objective": "continuous crawl frontier discover hazard chokepoint country trade action paths",
+    "proposed_count": 93,
+    "pruned_count": 3,
+    "run_key": "iterative-graph:maritime-risk:20260525064811:73095",
+    "safety_profile": {
+      "allow_discovered_domains": false,
+      "allowed_domains": [
+        "zenodo.org"
+      ],
+      "baseline_writes_to_graph": "disabled",
+      "canonical_writes": "disabled",
+      "graph_writes": "disabled",
+      "private_or_sensitive_url_policy": "skip_and_audit",
+      "space": "proposed_graph"
+    },
+    "skipped_sources": [
+      {
+        "frontier_key": "link:trade_dependency:n:1:country",
+        "iteration": 1,
+        "reason": "blocked_domain_not_allowlisted",
+        "search_query": "TradeDependency N:1 Country continuous crawl frontier discover hazard chokepoint country trade action paths graph evidence ontology",
+        "url": "https://example.org/task201-untrusted-maritime-risk"
+      },
+      {
+        "frontier_key": "link:trade_dependency:n:1:chokepoint",
+        "iteration": 1,
+        "reason": "blocked_domain_not_allowlisted",
+        "search_query": "TradeDependency N:1 Chokepoint continuous crawl frontier discover hazard chokepoint country trade action paths graph evidence ontology",
+        "url": "https://example.org/task201-untrusted-maritime-risk"
+      },
+      {
+        "frontier_key": "link:risk_finding:n:m:evidence",
+        "iteration": 1,
+        "reason": "blocked_domain_not_allowlisted",
+        "search_query": "RiskFinding N:M Evidence continuous crawl frontier discover hazard chokepoint country trade action paths graph evidence ontology",
+        "url": "https://example.org/task201-untrusted-maritime-risk"
+      }
+    ],
+    "status": "completed"
+  },
+  "tenant": "maritime-risk"
+}
