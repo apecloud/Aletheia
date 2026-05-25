@@ -1,0 +1,129 @@
+{
+  "task": 193,
+  "status": "pass",
+  "commit": "35024af",
+  "url": "http://127.0.0.1:8772/?screen=graph&tenant=maritime-risk&graph_tab=proposed",
+  "api_validation": {
+    "file": "/tmp/task193-api-validation.json",
+    "element_count": 11,
+    "element_types": {
+      "node": 6,
+      "edge": 4,
+      "finding": 1
+    },
+    "cases": {
+      "approve_all_11": {
+        "ok_count": 11,
+        "failed_count": 0
+      },
+      "mixed_comment": {
+        "ok_count": 3,
+        "failed_count": 0,
+        "types": ["node", "edge", "finding"]
+      },
+      "partial_failure": {
+        "ok_count": 1,
+        "failed_count": 1
+      },
+      "reject_without_reason": {
+        "ok_count": 0,
+        "failed_count": 1
+      },
+      "ontology_required_block": {
+        "ok_count": 1,
+        "failed_count": 1
+      }
+    },
+    "write_boundary": {
+      "canonical_write": false,
+      "formal_graph_write": false,
+      "target": "proposed_graph_space",
+      "scope": "selected_proposed_graph_elements"
+    }
+  },
+  "browser_validation": {
+    "files": [
+      "/tmp/task193-browser-validation.json",
+      "/tmp/task193-browser-followup.json"
+    ],
+    "steps": {
+      "ui_approve_all_11": {
+        "selected_count_visible": true,
+        "success_message": true,
+        "formal_graph_unchanged_copy": true,
+        "screenshot": "/tmp/task193-ui-approve-all.png",
+        "dom": "/tmp/task193-ui-approve-all-dom.txt"
+      },
+      "ui_nodes_comment": {
+        "selected_count_visible": true,
+        "success_message": true,
+        "screenshot": "/tmp/task193-ui-nodes-comment.png",
+        "dom": "/tmp/task193-ui-nodes-comment-dom.txt"
+      },
+      "ui_mixed_comment": {
+        "selected_count_visible": true,
+        "success_message": true,
+        "screenshot": "/tmp/task193-ui-mixed-comment-followup.png",
+        "dom": "/tmp/task193-ui-mixed-comment-followup-dom.txt"
+      },
+      "ui_reason_gate": {
+        "error_visible": true
+      },
+      "ui_partial_failure": {
+        "selected_count_visible": true,
+        "failure_message_visible": true,
+        "failed_key_visible": true,
+        "screenshot": "/tmp/task193-ui-partial-failure-followup.png",
+        "dom": "/tmp/task193-ui-partial-failure-followup-dom.txt"
+      }
+    }
+  },
+  "fingerprints": {
+    "before": {
+      "canonical_ontology": {
+        "approved": 15,
+        "all": 20,
+        "status_counts": {
+          "draft": 5,
+          "approved": 15
+        }
+      },
+      "formal_graph": {
+        "approved": true,
+        "nodes": 1,
+        "edges": 0,
+        "center": null
+      }
+    },
+    "after": {
+      "canonical_ontology": {
+        "approved": 15,
+        "all": 20,
+        "status_counts": {
+          "draft": 5,
+          "approved": 15
+        }
+      },
+      "formal_graph": {
+        "approved": true,
+        "nodes": 1,
+        "edges": 0,
+        "center": null
+      }
+    },
+    "unchanged": true
+  },
+  "verification_commands": [
+    ".venv/bin/python /tmp/task193_validate.py",
+    "python3 /tmp/task193_browser.py",
+    "python3 /tmp/task193_browser_followup.py",
+    ".venv/bin/python -m py_compile review_workbench.py",
+    "node --check web/review_workbench/api.js",
+    ".venv/bin/python -m unittest tests/test_iterative_graph_enrichment.py tests/test_ontology_eval.py",
+    "git diff --check"
+  ],
+  "notes": [
+    "The existing proposed graph elements were already approved in proposal-review status when validation started due to task #192 smoke; batch approve was still validated by re-approving all 11 elements.",
+    "The panel header still says 11 draft as a proposed-space count while row-level statuses show approved. This is a non-blocking copy/layout polish item."
+  ]
+}

@@ -1,0 +1,145 @@
+{
+  "benchmark": {
+    "baseline_claim_count": 3,
+    "benchmark_key": "graph-benchmark:maritime-risk:iterative-graph-maritime-risk-20260523163823-17969:bda0ac8ea0d5f80c",
+    "boundary": {
+      "baseline_is_not_fact_source": true,
+      "baseline_rows_are_comparison_only": true,
+      "baseline_writes_to_canonical_graph": false,
+      "baseline_writes_to_proposed_graph": false
+    },
+    "comparison_dimensions": [
+      "coverage",
+      "hallucination_risk",
+      "multi_hop_path_completeness",
+      "reviewer_actionability",
+      "traceability",
+      "updateability"
+    ],
+    "comparison_required_dimensions_present": true,
+    "comparison_summary": {
+      "aletheia_complete_deep_graph_findings": 1,
+      "baseline_claim_count": 3,
+      "baseline_is_not_fact_source": true,
+      "graph_finding_count": 1
+    },
+    "enrichment_run_key": "iterative-graph:maritime-risk:20260523163823:17969",
+    "graph_finding_count": 1,
+    "status": "completed"
+  },
+  "finding_checks": [
+    {
+      "element_key": "proposed-graph:maritime-risk:finding:4f9ea5973be5caae",
+      "evidence_chain_length": 5,
+      "hop_count": 4,
+      "missing_steps": [],
+      "multi_hop": true,
+      "name": "Bab el-Mandeb Strait risk propagates to CHN, IND, USA",
+      "observed_steps": [
+        "hazard",
+        "chokepoint",
+        "dependent_country",
+        "risk_metric",
+        "recommended_action"
+      ],
+      "path_label": "likelihood_conflict -> Bab el-Mandeb Strait -> CHN, IND, USA -> trade_at_risk_v -> Run analyst review on exposed country/chokepoint path",
+      "title": "Bab el-Mandeb Strait risk propagates to dependent countries",
+      "writes_canonical": false
+    }
+  ],
+  "negative_boundaries": {
+    "baseline_writes_to_graph_disabled": true,
+    "canonical_writes_disabled": true,
+    "formal_graph_pollution_count": 0,
+    "graph_writes_disabled": true,
+    "non_allowlist_only_skipped": true,
+    "ontology_artifact_pollution_count": 0
+  },
+  "run": {
+    "all_elements_draft": true,
+    "all_elements_have_source_evidence_confidence": true,
+    "finding_count": 1,
+    "frontier": [
+      {
+        "artifact_type": "object",
+        "depth": 0,
+        "key": "object:chokepoint",
+        "name": "Chokepoint",
+        "source": "ontology_artifact"
+      }
+    ],
+    "objective": "discover hazard chokepoint country trade action paths",
+    "proposed_count": 11,
+    "provenance_missing": [],
+    "pruned_count": 1,
+    "run_key": "iterative-graph:maritime-risk:20260523163823:17969",
+    "run_proposed_count": 11,
+    "safety_profile": {
+      "allow_discovered_domains": false,
+      "allowed_domains": [
+        "zenodo.org"
+      ],
+      "baseline_writes_to_graph": "disabled",
+      "canonical_writes": "disabled",
+      "graph_writes": "disabled",
+      "private_or_sensitive_url_policy": "skip_and_audit",
+      "space": "proposed_graph"
+    },
+    "skipped_sources": [
+      {
+        "frontier_key": "object:chokepoint",
+        "iteration": 1,
+        "reason": "blocked_domain_not_allowlisted",
+        "search_query": "Chokepoint discover hazard chokepoint country trade action paths graph evidence ontology",
+        "url": "https://example.org/untrusted-maritime-risk-task178"
+      }
+    ],
+    "status": "completed",
+    "types": {
+      "edge": 4,
+      "finding": 1,
+      "node": 6
+    }
+  },
+  "status": "PASS",
+  "tenant": "maritime-risk",
+  "trace": {
+    "has_frontier_query_candidates": true,
+    "has_pruned_entries": true,
+    "iteration_count": 1,
+    "trace": [
+      {
+        "extracted_candidates": [
+          "proposed-graph:maritime-risk:node:85b36859e67f3bfe",
+          "proposed-graph:maritime-risk:node:328e1163a668e2a7",
+          "proposed-graph:maritime-risk:node:1b462fe4bce8b302",
+          "proposed-graph:maritime-risk:node:8129b8da149bf22c",
+          "proposed-graph:maritime-risk:node:79681b2109342ecb",
+          "proposed-graph:maritime-risk:node:f1dba696bc31a7b4",
+          "proposed-graph:maritime-risk:edge:4e4e2ac907a65ee0",
+          "proposed-graph:maritime-risk:edge:071ed2b5fe353297",
+          "proposed-graph:maritime-risk:edge:a17605ea92880eaf",
+          "proposed-graph:maritime-risk:edge:13f2cb6e96918f14",
+          "proposed-graph:maritime-risk:finding:4f9ea5973be5caae"
+        ],
+        "frontier": {
+          "artifact_type": "object",
+          "depth": 0,
+          "key": "object:chokepoint",
+          "name": "Chokepoint",
+          "source": "ontology_artifact"
+        },
+        "iteration": 1,
+        "pruned": [
+          {
+            "reason": "blocked_domain_not_allowlisted",
+            "url": "https://example.org/untrusted-maritime-risk-task178"
+          }
+        ],
+        "query": "Chokepoint discover hazard chokepoint country trade action paths graph evidence ontology",
+        "result_count": 2
+      }
+    ]
+  },
+  "validated_at": "2026-05-24T09:00:00+08:00"
+}

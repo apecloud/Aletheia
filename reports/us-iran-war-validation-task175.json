@@ -1,0 +1,41 @@
+{
+  "approved_count": 0,
+  "artifacts": [
+    {
+      "artifact_type": "link",
+      "count": 4,
+      "status": "draft"
+    },
+    {
+      "artifact_type": "object",
+      "count": 6,
+      "status": "draft"
+    }
+  ],
+  "country_exposure_fields": 9,
+  "country_exposure_schema_source": "live",
+  "graph_path": {
+    "action_id": "action_energy_importer_stress_test",
+    "channel_id": "channel_hormuz_oil_flow",
+    "country_id": "country_IND",
+    "event_id": "event_2025_june_us_iran_escalation",
+    "key_metric": "Asia receives about 69% of crude/condensate through Hormuz; India is a major destination."
+  },
+  "link_schema_source": "live",
+  "link_source_tables": [],
+  "table_counts": {
+    "us_iran_war_conflict_events": 2,
+    "us_iran_war_country_exposures": 8,
+    "us_iran_war_economic_channels": 4,
+    "us_iran_war_graph_edges": 15,
+    "us_iran_war_recommended_actions": 3,
+    "us_iran_war_web_sources": 6
+  },
+  "tenant": {
+    "display_name": "U.S.-Iran Conflict Economic Impact",
+    "graph_database": "us_iran_war",
+    "namespace": "us_iran_war",
+    "status": "active",
+    "tenant_id": "us-iran-war"
+  }
+}

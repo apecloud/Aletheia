@@ -269,6 +269,66 @@ SOURCE_TABLE_SCHEMAS = {
         "primary_key": "risk_result_id",
         "columns": ["risk_result_id", "iso3", "canal", "trade_at_risk_v", "trade_impacted"],
     },
+    "conflictevent": {
+        "table": "us_iran_war_conflict_events",
+        "primary_key": "event_id",
+        "columns": ["event_id", "event_date", "event_type", "actors", "location", "summary", "source_id", "confidence"],
+    },
+    "conflict_event": {
+        "table": "us_iran_war_conflict_events",
+        "primary_key": "event_id",
+        "columns": ["event_id", "event_date", "event_type", "actors", "location", "summary", "source_id", "confidence"],
+    },
+    "economicchannel": {
+        "table": "us_iran_war_economic_channels",
+        "primary_key": "channel_id",
+        "columns": ["channel_id", "channel_name", "mechanism", "primary_metric", "source_id", "confidence"],
+    },
+    "economic_channel": {
+        "table": "us_iran_war_economic_channels",
+        "primary_key": "channel_id",
+        "columns": ["channel_id", "channel_name", "mechanism", "primary_metric", "source_id", "confidence"],
+    },
+    "countryexposure": {
+        "table": "us_iran_war_country_exposures",
+        "primary_key": "country_id",
+        "columns": ["country_id", "iso3", "country_name", "exposure_type", "exposure_level", "impact_summary", "key_metric", "source_id", "confidence"],
+    },
+    "country_exposure": {
+        "table": "us_iran_war_country_exposures",
+        "primary_key": "country_id",
+        "columns": ["country_id", "iso3", "country_name", "exposure_type", "exposure_level", "impact_summary", "key_metric", "source_id", "confidence"],
+    },
+    "recommendedaction": {
+        "table": "us_iran_war_recommended_actions",
+        "primary_key": "action_id",
+        "columns": ["action_id", "action_name", "owner_role", "trigger", "recommended_action", "source_id", "confidence"],
+    },
+    "recommended_action": {
+        "table": "us_iran_war_recommended_actions",
+        "primary_key": "action_id",
+        "columns": ["action_id", "action_name", "owner_role", "trigger", "recommended_action", "source_id", "confidence"],
+    },
+    "sourcedocument": {
+        "table": "us_iran_war_web_sources",
+        "primary_key": "source_id",
+        "columns": ["source_id", "title", "publisher", "url", "query", "retrieved_at", "license_risk", "robots_risk", "summary", "confidence"],
+    },
+    "source_document": {
+        "table": "us_iran_war_web_sources",
+        "primary_key": "source_id",
+        "columns": ["source_id", "title", "publisher", "url", "query", "retrieved_at", "license_risk", "robots_risk", "summary", "confidence"],
+    },
+    "graphedge": {
+        "table": "us_iran_war_graph_edges",
+        "primary_key": "edge_id",
+        "columns": ["edge_id", "source_node", "relation", "target_node", "source_id", "confidence"],
+    },
+    "graph_edge": {
+        "table": "us_iran_war_graph_edges",
+        "primary_key": "edge_id",
+        "columns": ["edge_id", "source_node", "relation", "target_node", "source_id", "confidence"],
+    },
 }
 
 
@@ -402,6 +462,46 @@ SOURCE_LINK_SCHEMAS = {
         "cardinality": "N:1",
         "graph_edge": "MitigationAction -> RiskFinding",
         "source_ref": "maritime_chokepoint_systemic_risk_results.risk_result_id",
+    },
+    "link:conflict_event:1:n:economic_channel": {
+        "source_table": "us_iran_war_graph_edges",
+        "source_field": "us_iran_war_graph_edges.source_node",
+        "target_table": "us_iran_war_graph_edges",
+        "target_field": "us_iran_war_graph_edges.target_node",
+        "join_condition": "graph_edges.relation = 'raises_risk_of'",
+        "cardinality": "1:N",
+        "graph_edge": "ConflictEvent -> EconomicChannel",
+        "source_ref": "us_iran_war_graph_edges.relation",
+    },
+    "link:economic_channel:1:n:country_exposure": {
+        "source_table": "us_iran_war_graph_edges",
+        "source_field": "us_iran_war_graph_edges.source_node",
+        "target_table": "us_iran_war_graph_edges",
+        "target_field": "us_iran_war_graph_edges.target_node",
+        "join_condition": "graph_edges.relation = 'impacts'",
+        "cardinality": "1:N",
+        "graph_edge": "EconomicChannel -> CountryExposure",
+        "source_ref": "us_iran_war_graph_edges.relation",
+    },
+    "link:country_exposure:n:m:recommended_action": {
+        "source_table": "us_iran_war_graph_edges",
+        "source_field": "us_iran_war_graph_edges.source_node",
+        "target_table": "us_iran_war_graph_edges",
+        "target_field": "us_iran_war_graph_edges.target_node",
+        "join_condition": "graph_edges.relation = 'requires_action'",
+        "cardinality": "N:M",
+        "graph_edge": "CountryExposure -> RecommendedAction",
+        "source_ref": "us_iran_war_graph_edges.relation",
+    },
+    "link:source_document:n:m:evidence": {
+        "source_table": "us_iran_war_web_sources",
+        "source_field": "us_iran_war_web_sources.source_id",
+        "target_table": "us_iran_war_graph_edges",
+        "target_field": "us_iran_war_graph_edges.source_id",
+        "join_condition": "us_iran_war_web_sources.source_id = us_iran_war_graph_edges.source_id",
+        "cardinality": "N:M",
+        "graph_edge": "SourceDocument -> GraphEdge",
+        "source_ref": "us_iran_war_graph_edges.source_id",
     },
 }
 
