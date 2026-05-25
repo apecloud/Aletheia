@@ -1648,6 +1648,115 @@ class InstanceRepository:
             },
         }
 
+    def _proposed_graph_element_requires_ontology_review(self, payload):
+        payload = payload or {}
+        boundary = payload.get("review_boundary") or payload.get("write_boundary") or payload.get("governance") or {}
+        return any(
+            bool(value)
+            for value in (
+                payload.get("requires_ontology_proposal"),
+                payload.get("ontology_proposal_required"),
+                payload.get("requires_ontology_review"),
+                boundary.get("requires_ontology_proposal"),
+                boundary.get("ontology_proposal_required"),
+                boundary.get("requires_ontology_review"),
+            )
+        )
+
+    def review_proposed_graph_elements_batch(self, tenant, element_keys, action, body=None):
+        action = (action or "").replace("_", "-").lower()
+        body = body or {}
+        if action not in {"approve", "reject", "needs-evidence", "comment"}:
+            raise ValueError("Unsupported graph proposal review action")
+        if not isinstance(element_keys, list) or not element_keys:
+            raise ValueError("Batch review requires element_keys")
+        unique_keys = []
+        seen = set()
+        for key in element_keys:
+            key = str(key or "").strip()
+            if key and key not in seen:
+                seen.add(key)
+                unique_keys.append(key)
+        if not unique_keys:
+            raise ValueError("Batch review requires element_keys")
+        if len(unique_keys) > 200:
+            raise ValueError("Batch review is limited to 200 proposed graph elements")
+
+        reason = (body.get("reason") or body.get("note") or "").strip()
+        reviewer = (body.get("reviewer") or "Itachi").strip() or "Itachi"
+        results = []
+        for element_key in unique_keys:
+            with self.metadata_engine_for(tenant).connect() as conn:
+                row = conn.execute(
+                    text(
+                        """
+                        SELECT element_key, element_type, payload_json
+                        FROM aletheia_proposed_graph_elements
+                        WHERE project_id = :tenant_id AND element_key = :element_key
+                        """
+                    ),
+                    {"tenant_id": tenant.tenant_id, "element_key": element_key},
+                ).mappings().first()
+            if row is None:
+                results.append({"element_key": element_key, "ok": False, "error": "Proposed graph element not found"})
+                continue
+            payload = _load_json(row["payload_json"], {})
+            if action == "approve" and self._proposed_graph_element_requires_ontology_review(payload):
+                results.append(
+                    {
+                        "element_key": element_key,
+                        "element_type": row["element_type"],
+                        "ok": False,
+                        "error": "Requires ontology proposal review before graph approval",
+                    }
+                )
+                continue
+            try:
+                result = self.review_proposed_graph_element(
+                    tenant,
+                    element_key,
+                    action,
+                    {"reason": reason, "reviewer": reviewer},
+                )
+            except ValueError as exc:
+                results.append(
+                    {
+                        "element_key": element_key,
+                        "element_type": row["element_type"],
+                        "ok": False,
+                        "error": str(exc),
+                    }
+                )
+                continue
+            if result is None:
+                results.append({"element_key": element_key, "ok": False, "error": "Proposed graph element not found"})
+                continue
+            results.append(
+                {
+                    "element_key": element_key,
+                    "element_type": result["element"]["element_type"],
+                    "ok": True,
+                    "status": result["element"]["status"],
+                    "element": result["element"],
+                    "review": result["review"],
+                }
+            )
+        ok_count = sum(1 for item in results if item.get("ok"))
+        return {
+            "tenant": tenant.public_dict(),
+            "action": action,
+            "requested_count": len(unique_keys),
+            "ok_count": ok_count,
+            "failed_count": len(results) - ok_count,
+            "results": results,
+            "write_boundary": {
+                "canonical_write": False,
+                "formal_graph_write": False,
+                "target": "proposed_graph_space",
+                "scope": "selected_proposed_graph_elements",
+            },
+        }
+
     def _fetch_employee(self, tenant, employee_id):
         with self.source_engine_for(tenant).connect() as conn:
             return conn.execute(
@@ -6600,6 +6709,20 @@ class ReviewWorkbenchHandler(BaseHTTPRequestHandler):
             tenant = self._tenant(parsed)
         except (KeyError, ValueError) as exc:
             self._send_error(HTTPStatus.BAD_REQUEST, str(exc))
+            return
+        if parsed.path == "/api/graph/proposed-elements/batch-review":
+            try:
+                body = self._read_json()
+                result = self.instance_repository.review_proposed_graph_elements_batch(
+                    tenant,
+                    body.get("element_keys") or [],
+                    body.get("action") or "",
+                    body,
+                )
+            except ValueError as exc:
+                self._send_error(HTTPStatus.BAD_REQUEST, str(exc))
+                return
+            self._send_json(result)
             return
         if parsed.path.startswith("/api/graph/proposed-elements/"):
             parts = parsed.path.removeprefix("/api/graph/proposed-elements/").split("/")

@@ -410,6 +410,7 @@ function GraphExplorer({ data, tenant }) {
 function ProposedGraphPanel({ tenantId, proposed, loading, source }) {
   const [selectedElement, setSelectedElement] = useStateGX(null);
   const [kindFilter, setKindFilter] = useStateGX("all");
+  const [selectedKeys, setSelectedKeys] = useStateGX([]);
   const [reviewReason, setReviewReason] = useStateGX("");
   const [reviewBusy, setReviewBusy] = useStateGX(false);
   const [reviewMessage, setReviewMessage] = useStateGX(null);
@@ -424,11 +425,18 @@ function ProposedGraphPanel({ tenantId, proposed, loading, source }) {
     ? elements
     : elements.filter(item => item.element_type === kindFilter);
   const findings = filteredElements.filter(item => item.element_type === "finding");
+  const selectedSet = new Set(selectedKeys);
+  const selectedInFilter = filteredElements.filter(item => selectedSet.has(item.element_key));
   useEffectGX(() => {
     if (!selectedElement) return;
     const latest = elements.find(item => item.element_key === selectedElement.element_key);
     if (latest && latest !== selectedElement) setSelectedElement(latest);
   }, [JSON.stringify(elements.map(item => `${item.element_key}:${item.status}`))]);
+  useEffectGX(() => {
+    const valid = new Set(elements.map(item => item.element_key));
+    const nextKeys = selectedKeys.filter(key => valid.has(key));
+    if (nextKeys.length !== selectedKeys.length) setSelectedKeys(nextKeys);
+  }, [JSON.stringify(elements.map(item => item.element_key))]);
   function selectKind(nextKind) {
     setKindFilter(nextKind);
     setReviewMessage(null);
@@ -437,6 +445,60 @@ function ProposedGraphPanel({ tenantId, proposed, loading, source }) {
       : elements.filter(item => item.element_type === nextKind);
     if (!nextItems.some(item => item.element_key === selectedElement?.element_key)) {
       setSelectedElement(nextItems[0] || null);
+    }
+  }
+  function toggleSelection(key, checked) {
+    setSelectedKeys(keys => {
+      if (checked) return keys.includes(key) ? keys : [...keys, key];
+      return keys.filter(item => item !== key);
+    });
+  }
+  function selectVisible() {
+    setSelectedKeys(Array.from(new Set([...selectedKeys, ...filteredElements.map(item => item.element_key)])));
+    if (!selectedElement && filteredElements[0]) setSelectedElement(filteredElements[0]);
+    setReviewMessage(null);
+  }
+  function clearSelection() {
+    setSelectedKeys([]);
+    setReviewMessage(null);
+  }
+  async function reviewSelected(action) {
+    const reason = reviewReason.trim();
+    if (selectedKeys.length === 0) {
+      setReviewMessage({ kind: "error", text: "Select at least one proposed graph element." });
+      return;
+    }
+    if ((action === "reject" || action === "needs-evidence") && !reason) {
+      setReviewMessage({ kind: "error", text: "Review reason is required for batch reject / needs evidence." });
+      return;
+    }
+    setReviewBusy(true);
+    setReviewMessage(null);
+    try {
+      const result = await window.AL_API.reviewGraphProposedElementsBatch(tenantId, selectedKeys, action, {
+        reason,
+        reviewer: "Itachi",
+      });
+      const failed = result?.failed_count || 0;
+      const ok = result?.ok_count || 0;
+      const failedItems = (result?.results || []).filter(item => !item.ok);
+      const selectedResult = (result?.results || []).find(item => item.ok && item.element?.element_key === selectedElement?.element_key);
+      if (selectedResult?.element) setSelectedElement(selectedResult.element);
+      if (!failed) {
+        setSelectedKeys([]);
+        setReviewReason("");
+      }
+      setReviewMessage({
+        kind: failed ? "error" : "ok",
+        text: failed
+          ? `${ok} recorded, ${failed} failed · ${failedItems.map(item => item.element_key || item.error).slice(0, 2).join(", ")}`
+          : `${ok} graph proposal review decisions recorded · formal graph unchanged`,
+      });
+      window.dispatchEvent(new CustomEvent("aletheia:retry"));
+    } catch (err) {
+      setReviewMessage({ kind: "error", text: err.message || String(err) });
+    } finally {
+      setReviewBusy(false);
     }
   }
   async function reviewElement(action) {
@@ -479,6 +541,24 @@ function ProposedGraphPanel({ tenantId, proposed, loading, source }) {
           <Chip active={kindFilter === "edge"} onClick={() => selectKind("edge")} count={counts.edge || 0}>edges</Chip>
           <Chip active={kindFilter === "finding"} onClick={() => selectKind("finding")} count={counts.finding || 0}>findings</Chip>
         </div>
+        <div style={{ border: "1px solid var(--line-soft)", background: "var(--bg-2)", padding: 8, marginBottom: 10 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center", marginBottom: 8 }}>
+            <span className="eyebrow">Batch review</span>
+            <span className="ct">{selectedKeys.length} selected</span>
+          </div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+            <button className="btn xs" disabled={!filteredElements.length || reviewBusy} onClick={selectVisible}>Select visible</button>
+            <button className="btn xs" disabled={!selectedKeys.length || reviewBusy} onClick={clearSelection}>Clear</button>
+            <button className="btn xs approve" disabled={!selectedKeys.length || reviewBusy} onClick={() => reviewSelected("approve")}>Approve selected</button>
+            <button className="btn xs changes" disabled={!selectedKeys.length || reviewBusy} onClick={() => reviewSelected("needs-evidence")}>Needs evidence</button>
+            <button className="btn xs reject" disabled={!selectedKeys.length || reviewBusy} onClick={() => reviewSelected("reject")}>Reject</button>
+            <button className="btn xs ghost" disabled={!selectedKeys.length || reviewBusy} onClick={() => reviewSelected("comment")}>Comment</button>
+          </div>
+          <div style={{ marginTop: 6, fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--muted)" }}>
+            Scope: selected proposed graph elements only · review decision only · formal graph write disabled.
+            {selectedInFilter.length > 0 ? ` Current filter selected: ${selectedInFilter.length}.` : ""}
+          </div>
+        </div>
         {latestRun ? (
           <dl className="kv" style={{ marginBottom: 12 }}>
             <dt>Run</dt><dd>{latestRun.run_key}</dd>
@@ -512,16 +592,26 @@ function ProposedGraphPanel({ tenantId, proposed, loading, source }) {
         </div>
         <div style={{ maxHeight: 220, overflow: "auto", display: "flex", flexDirection: "column", gap: 6 }}>
           {filteredElements.map(item => (
-            <button key={item.element_key} type="button" onClick={() => { setSelectedElement(item); setReviewMessage(null); }}
-                    style={{ border: selectedElement?.element_key === item.element_key ? "1px solid var(--accent)" : "1px solid var(--line-soft)", borderLeft: selectedElement?.element_key === item.element_key ? "3px solid var(--accent)" : "1px solid var(--line-soft)", padding: 8, background: selectedElement?.element_key === item.element_key ? "var(--accent-bg)" : "transparent", textAlign: "left", cursor: "pointer" }}>
+            <div key={item.element_key} role="button" tabIndex={0}
+                 onClick={() => { setSelectedElement(item); setReviewMessage(null); }}
+                 onKeyDown={e => { if (e.key === "Enter" || e.key === " ") setSelectedElement(item); }}
+                 style={{ border: selectedElement?.element_key === item.element_key ? "1px solid var(--accent)" : "1px solid var(--line-soft)", borderLeft: selectedElement?.element_key === item.element_key ? "3px solid var(--accent)" : "1px solid var(--line-soft)", padding: 8, background: selectedElement?.element_key === item.element_key ? "var(--accent-bg)" : "transparent", textAlign: "left", cursor: "pointer" }}>
               <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
-                <span style={{ color: "var(--text)", fontSize: 12 }}>{item.name}</span>
+                <span style={{ color: "var(--text)", fontSize: 12, display: "flex", gap: 6, alignItems: "center" }}>
+                  <input
+                    type="checkbox"
+                    checked={selectedSet.has(item.element_key)}
+                    onClick={e => e.stopPropagation()}
+                    onChange={e => toggleSelection(item.element_key, e.target.checked)}
+                  />
+                  {item.name}
+                </span>
                 <span className="ct">{item.element_type}</span>
               </div>
               <div style={{ fontFamily: "var(--font-mono)", color: "var(--muted)", fontSize: 10 }}>
                 {item.status} · {item.source_url || "source unknown"}
               </div>
-            </button>
+            </div>
           ))}
           {filteredElements.length === 0 && (
             <div style={{ fontFamily: "var(--font-mono)", color: "var(--muted)", fontSize: 10, border: "1px solid var(--line-soft)", padding: 8 }}>

@@ -299,6 +299,13 @@
       });
     },
 
+    async reviewGraphProposedElementsBatch(tenant, elementKeys, action, body = {}) {
+      return await fetchJson(withTenantQs("/api/graph/proposed-elements/batch-review", tenant), {
+        method: "POST",
+        body: JSON.stringify({ ...(body || {}), element_keys: elementKeys || [], action }),
+      });
+    },
+
     async instanceTypes(tenant, { includeDraft = false } = {}) {
       const data = await fetchJson(withTenantQs("/api/instances/types", tenant, {
         include_draft: includeDraft ? "1" : "0",
