@@ -1,0 +1,50 @@
+{
+  "task": 207,
+  "scope": "workspace_agent_runs_console",
+  "url": "http://127.0.0.1:8772/?screen=workbench&tenant=maritime-risk&workspace_tab=agents",
+  "tenant": "maritime-risk",
+  "api": "GET /api/agent-runs/console",
+  "features": [
+    "workspace Agent Runs tab",
+    "compact run list",
+    "agent kind/status/last run/output/skipped summary",
+    "selected run compact timeline",
+    "Run once control",
+    "Pause or Resume control",
+    "Open results link",
+    "Full run log link",
+    "review destination links"
+  ],
+  "smoke": {
+    "dom_terms": [
+      "Agent Runs",
+      "Automatic agents",
+      "Automatic agent control",
+      "Run once",
+      "Open results",
+      "Full run log",
+      "Write boundary",
+      "Crawl",
+      "Graph enrich",
+      "Reasoning"
+    ],
+    "api_file": "/tmp/workspace-agent-runs-api-task207.json",
+    "dom_file": "/tmp/workspace-agent-runs-dom-task207.html"
+  },
+  "write_boundary": {
+    "ontology_candidates": "review_required",
+    "graph_facts": "proposed_graph_space",
+    "findings": "candidate_or_reviewed_only",
+    "canonical_write": false,
+    "formal_graph_write": false
+  },
+  "validation": [
+    "node --check web/review_workbench/api.js",
+    "npx esbuild web/review_workbench/workbench.jsx --bundle --outfile=/tmp/workbench-task207.js --format=iife --global-name=WorkbenchTask207 --log-level=warning",
+    ".venv/bin/python -m py_compile review_workbench.py",
+    ".venv/bin/python -m unittest tests/test_ontology_eval.py",
+    "git diff --check",
+    "GET /api/agent-runs/console?tenant=maritime-risk&limit=20",
+    "Chrome headless DOM smoke"
+  ]
+}
