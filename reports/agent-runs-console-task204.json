@@ -21,7 +21,12 @@
       "Run trace",
       "Visited / skipped sources",
       "Open graph review"
-    ]
+    ],
+    "web_enrichment_query_regression": {
+      "web_runs": 7,
+      "first_query": "Chokepoint Maritime chokepoint or strait that can concentrate trade disruption risk. ontology definition source evidence",
+      "first_extracted_candidate": "webenrichment:object_chokepoint:7cc8d880e94c218c"
+    }
   },
   "features": [
     "run timeline",

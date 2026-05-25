@@ -60,6 +60,14 @@ Browser DOM smoke:
   - `Visited / skipped sources`
   - `Open graph review`
 
+Regression after #205 review:
+
+- `web_enrichment_crawl` trace rows now surface the original crawl/search text from source provenance.
+- API evidence from `/tmp/agent-runs-console-fix.json`:
+  - `web_runs`: 7
+  - first query: `Chokepoint Maritime chokepoint or strait that can concentrate trade disruption risk. ontology definition source evidence`
+  - first extracted candidate: `webenrichment:object_chokepoint:7cc8d880e94c218c`
+
 ## Boundary
 
 The console is read/inspect/review navigation only.

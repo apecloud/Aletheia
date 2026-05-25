@@ -52,6 +52,46 @@ def _load_json(value, default):
     return json.loads(value)
 
 
+def _web_enrichment_query(raw_payload, target_artifact_key=None):
+    raw_payload = raw_payload or {}
+    candidates = []
+
+    top_level_search = raw_payload.get("search_query")
+    if isinstance(top_level_search, dict):
+        candidates.extend(
+            [
+                top_level_search.get("query"),
+                top_level_search.get("q"),
+                top_level_search.get("text"),
+            ]
+        )
+    elif isinstance(top_level_search, str):
+        candidates.append(top_level_search)
+
+    source = raw_payload.get("source") or {}
+    if isinstance(source, dict):
+        nested_search = source.get("search_query")
+        if isinstance(nested_search, dict):
+            candidates.extend(
+                [
+                    nested_search.get("query"),
+                    nested_search.get("q"),
+                    nested_search.get("text"),
+                ]
+            )
+        elif isinstance(nested_search, str):
+            candidates.append(nested_search)
+        candidates.extend([source.get("query"), source.get("q"), source.get("search_text")])
+
+    candidates.extend([raw_payload.get("query"), raw_payload.get("q"), raw_payload.get("search_text")])
+    for candidate in candidates:
+        if candidate:
+            return str(candidate)
+    if target_artifact_key:
+        return f"{target_artifact_key} web enrichment evidence"
+    return None
+
+
 def _json_dump(value):
     return json.dumps(value, ensure_ascii=False, sort_keys=True)
 
@@ -2029,10 +2069,14 @@ class InstanceRepository:
                             ],
                             "trace": [
                                 {
-                                    "query": (_load_json(p["raw_payload_json"], {}).get("search_query") or {}).get("query"),
+                                    "query": _web_enrichment_query(
+                                        _load_json(p["raw_payload_json"], {}),
+                                        p["target_artifact_key"],
+                                    ),
                                     "result_count": 1,
                                     "source_url": p["source_url"],
                                     "target": p["target_artifact_key"],
+                                    "extracted_candidates": [p["proposal_key"]],
                                 }
                                 for p in proposals
                             ],
