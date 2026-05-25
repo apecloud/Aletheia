@@ -44,35 +44,38 @@ function Workbench({ data, tenant }) {
   const tenantId = tenant ? tenant.id : "default";
   const tasksQ = useApiData("reasoningTasks", [tenantId], { fallback: FALLBACK_CASES });
   const agentRunsQ = useApiData("agentRunsConsole", [tenantId, { limit: 20 }], { fallback: { sessions: [], runs: [] } });
+  const artifactsQ = useApiData("artifacts", [tenantId, {}], { fallback: [] });
+  const graphProposedQ = useApiData("graphProposedElements", [tenantId, { limit: 100 }], { fallback: { runs: [], elements: [] } });
   const isStale = tasksQ.source === "live-stale";
   const isMock = tasksQ.source === "mock";
   const initialWorkspaceTab = (() => {
-    try { return new URLSearchParams(location.search).get("workspace_tab") === "agents" ? "agents" : "cases"; }
-    catch { return "cases"; }
+    try { return new URLSearchParams(location.search).get("workspace_tab") === "agents" ? "agents" : "workqueue"; }
+    catch { return "workqueue"; }
   })();
   const [workspaceTab, setWorkspaceTab] = useStateWB(initialWorkspaceTab);
   const [selectedKey, setSelectedKey] = useStateWB(null);
-  const [statusView, setStatusView] = useStateWB("all");
+  const [statusView, setStatusView] = useStateWB("active");
   const [search, setSearch] = useStateWB("");
 
-  const cases = useMemoWB(() => {
-    const live = (tasksQ.data || []).map(taskToCase);
-    const base = live.length ? live : FALLBACK_CASES.map(taskToCase);
-    return base.sort((a, b) => (b.updated || "").localeCompare(a.updated || ""));
-  }, [tasksQ.data]);
+  const reviewItems = useMemoWB(() => buildWorkspaceReviewItems({
+    tenantId,
+    artifacts: artifactsQ.data || [],
+    graphElements: graphProposedQ.data?.elements || [],
+    agentRuns: agentRunsQ.data?.runs || [],
+  }), [tenantId, artifactsQ.data, graphProposedQ.data, agentRunsQ.data]);
 
   const filtered = useMemoWB(() => {
     const q = search.trim().toLowerCase();
-    return cases.filter(c => {
+    return reviewItems.filter(c => {
       const statusOk =
         statusView === "all" ? true :
-        statusView === "done" ? c.status === "done" :
-        statusView === "blocked" ? c.status === "blocked" :
-        c.status !== "done";
-      const textOk = !q || [c.title, c.id, c.summary, c.owner, c.basisLabel].join(" ").toLowerCase().includes(q);
+        statusView === "done" ? c.statusGroup === "done" :
+        statusView === "blocked" ? c.statusGroup === "blocked" :
+        c.statusGroup === "active";
+      const textOk = !q || [c.title, c.id, c.summary, c.itemType, c.sourceRun, c.nextAction].join(" ").toLowerCase().includes(q);
       return statusOk && textOk;
     });
-  }, [cases, statusView, search]);
+  }, [reviewItems, statusView, search]);
 
   useEffectWB(() => {
     if (!filtered.length) { setSelectedKey(null); return; }
@@ -83,16 +86,15 @@ function Workbench({ data, tenant }) {
 
   const selected = filtered.find(c => c.id === selectedKey) || filtered[0] || null;
   const counts = {
-    open: cases.filter(c => c.status !== "done").length,
-    blocked: cases.filter(c => c.status === "blocked").length,
-    done: cases.filter(c => c.status === "done").length,
-    all: cases.length,
+    active: reviewItems.filter(c => c.statusGroup === "active").length,
+    blocked: reviewItems.filter(c => c.statusGroup === "blocked").length,
+    done: reviewItems.filter(c => c.statusGroup === "done").length,
+    all: reviewItems.length,
   };
   const agentRuns = agentRunsQ.data?.runs || [];
 
-  function selectWorkspaceTab(tab, nextStatus = statusView) {
+  function selectWorkspaceTab(tab) {
     setWorkspaceTab(tab);
-    setStatusView(nextStatus);
     try {
       const url = new URL(location.href);
       url.searchParams.set("workspace_tab", tab);
@@ -104,11 +106,8 @@ function Workbench({ data, tenant }) {
     <div className="canvas">
       <div className="subbar">
         <div className="tabs">
-          <div className={"tab" + (workspaceTab === "cases" && statusView === "open" ? " active" : "")} onClick={() => selectWorkspaceTab("cases", "open")}>Work Queue <span className="ct">{counts.open}</span></div>
-          <div className={"tab" + (workspaceTab === "agents" ? " active" : "")} onClick={() => selectWorkspaceTab("agents")}>Agent Runs <span className="ct">{agentRuns.length}</span></div>
-          <div className={"tab" + (workspaceTab === "cases" && statusView === "blocked" ? " active" : "")} onClick={() => selectWorkspaceTab("cases", "blocked")}>Blocked <span className="ct">{counts.blocked}</span></div>
-          <div className={"tab" + (workspaceTab === "cases" && statusView === "done" ? " active" : "")} onClick={() => selectWorkspaceTab("cases", "done")}>Done <span className="ct">{counts.done}</span></div>
-          <div className={"tab" + (workspaceTab === "cases" && statusView === "all" ? " active" : "")} onClick={() => selectWorkspaceTab("cases", "all")}>All <span className="ct">{counts.all}</span></div>
+          <div className={"tab" + (workspaceTab === "workqueue" ? " active" : "")} onClick={() => selectWorkspaceTab("workqueue")}>Work Queue <span className="ct">{counts.active}</span></div>
+          <div className={"tab" + (workspaceTab === "agents" ? " active" : "")} onClick={() => selectWorkspaceTab("agents")}>Agent <span className="ct">{agentRuns.length}</span></div>
         </div>
         <div className="spacer" />
         {isMock && <span className="pill changes" style={{ marginRight: 8 }}><span className="dot" />Mock fallback</span>}
@@ -126,16 +125,22 @@ function Workbench({ data, tenant }) {
           <div style={{ padding: "12px 14px", borderBottom: "1px solid var(--line)", background: "var(--bg-2)" }}>
             <div className="eyebrow accent">Work Queue</div>
             <div style={{ marginTop: 5, color: "var(--text-dim)", fontSize: 12, lineHeight: 1.45 }}>
-              Cases are business questions, findings, or review follow-ups that need human attention.
+              Review objects waiting for a human decision: ontology proposals, proposed graph nodes or edges, and candidate findings.
             </div>
             <div style={{ position: "relative", marginTop: 10 }}>
               <input className="input" value={search} onChange={e => setSearch(e.target.value)}
-                     placeholder="search work item, owner, basis…"
+                     placeholder="search review object, type, run…"
                      style={{ paddingLeft: 28 }} />
               <span style={{ position: "absolute", left: 9, top: 7, color: "var(--dim)", fontFamily: "var(--font-mono)" }}>⌕</span>
             </div>
+            <div className="tabs" style={{ marginTop: 10, height: 32, border: "1px solid var(--line)", display: "flex" }}>
+              <div className={"tab" + (statusView === "active" ? " active" : "")} onClick={() => setStatusView("active")}>Active <span className="ct">{counts.active}</span></div>
+              <div className={"tab" + (statusView === "blocked" ? " active" : "")} onClick={() => setStatusView("blocked")}>Blocked <span className="ct">{counts.blocked}</span></div>
+              <div className={"tab" + (statusView === "done" ? " active" : "")} onClick={() => setStatusView("done")}>Done <span className="ct">{counts.done}</span></div>
+              <div className={"tab" + (statusView === "all" ? " active" : "")} onClick={() => setStatusView("all")}>All <span className="ct">{counts.all}</span></div>
+            </div>
             <div className="row" style={{ marginTop: 10 }}>
-              <div className="stat"><span className="label">Active</span><span className="val mono">{counts.open}</span></div>
+              <div className="stat"><span className="label">Active</span><span className="val mono">{counts.active}</span></div>
               <div className="stat"><span className="label">Blocked</span><span className="val mono">{counts.blocked}</span></div>
               <div className="stat"><span className="label">Done</span><span className="val mono">{counts.done}</span></div>
             </div>
@@ -143,10 +148,13 @@ function Workbench({ data, tenant }) {
 
           <div style={{ flex: 1, overflow: "auto" }}>
             <ApiStatus q={tasksQ} what="cases" />
+            <ApiStatus q={artifactsQ} what="ontology proposals" />
+            <ApiStatus q={graphProposedQ} what="proposed graph" />
+            <ApiStatus q={agentRunsQ} what="agent findings" />
             <div className="artifact-list">
               {filtered.length === 0 && (
                 <div style={{ padding: 24, fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--muted)", textAlign: "center" }}>
-                  No work items match this view.
+                  No review objects match this view.
                 </div>
               )}
               {filtered.map(c => (
@@ -156,18 +164,18 @@ function Workbench({ data, tenant }) {
                   <div className="ar-bar" />
                   <div className="ar-main">
                     <div className="ar-top">
-                      <span className="type">WORK ITEM</span>
+                      <span className="type">{c.itemType}</span>
                       <span>·</span>
                       <span className="key">{c.id}</span>
                     </div>
                     <div className="ar-title">{c.title}</div>
                     <div className="ar-meta">
-                      <span>{c.owner}</span>
-                      <span>{c.basisLabel}</span>
+                      <span>{c.tenantId}</span>
+                      <span>{c.sourceRun}</span>
                       <span>{c.updatedLabel}</span>
                     </div>
                   </div>
-                  <div className="ar-right">{c.status}</div>
+                  <div className="ar-right">{c.statusLabel}</div>
                 </div>
               ))}
             </div>
@@ -183,26 +191,26 @@ function Workbench({ data, tenant }) {
             <>
               <div className="art-header">
                 <div className="crumb">
-                  <span className="type">Work item</span>
+                  <span className="type">{selected.itemType}</span>
                   <span className="sep">/</span>
                   <span>{selected.id}</span>
                   <span className="sep">·</span>
                   <span>{selected.updatedLabel}</span>
                   <span style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
-                    <Pill kind={caseTone(selected.status)}>{selected.status}</Pill>
-                    <Pill kind="accent">{selected.source}</Pill>
+                    <Pill kind={selected.tone}>{selected.statusLabel}</Pill>
+                    <Pill kind="accent">{selected.sourceRun}</Pill>
                   </span>
                 </div>
                 <h1>{selected.title}</h1>
                 <p className="desc">{selected.summary}</p>
                 <div className="row">
                   <div className="stat">
-                    <span className="label">Owner</span>
-                    <span className="val mono">{selected.owner}</span>
+                    <span className="label">Tenant</span>
+                    <span className="val mono">{selected.tenantId}</span>
                   </div>
                   <div className="stat">
-                    <span className="label">Current blocker</span>
-                    <span className="val" style={{ color: selected.blocker ? "var(--changes)" : "var(--approved)" }}>{selected.blocker || "none"}</span>
+                    <span className="label">Status</span>
+                    <span className="val" style={{ color: selected.statusGroup === "blocked" ? "var(--changes)" : "var(--approved)" }}>{selected.statusLabel}</span>
                   </div>
                   <div className="stat lg">
                     <span className="label">Next action</span>
@@ -212,19 +220,22 @@ function Workbench({ data, tenant }) {
               </div>
 
               <div style={{ flex: 1, overflow: "auto", padding: "var(--pad-4) var(--pad-5)" }}>
-                <Panel eyebrow="Work routing" title="What needs attention" count={selected.status}>
+                <Panel eyebrow="Work routing" title="What needs attention" count={selected.statusLabel}>
                   <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-                    <CaseField label="Scope" value={selected.scopeLabel} />
-                    <CaseField label="Ontology basis" value={selected.basisLabel} />
-                    <CaseField label="Owner" value={selected.owner} />
+                    <CaseField label="Object type" value={selected.itemType} />
+                    <CaseField label="Source / run" value={selected.sourceRun} />
+                    <CaseField label="Confidence" value={selected.confidenceLabel} />
                     <CaseField label="Next action" value={selected.nextAction} />
                   </div>
                 </Panel>
 
                 <Panel eyebrow="Boundary" title="Where to continue" style={{ marginTop: 16 }}>
                   <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                    <a className="btn" href={selected.reasoningHref}>Open reasoning</a>
-                    <a className="btn ghost" href={selected.ontologyHref}>Open ontology basis</a>
+                    <a className="btn primary" href={selected.reviewHref}>{selected.reviewLabel}</a>
+                    {selected.runHref && <a className="btn ghost" href={selected.runHref}>Open agent run</a>}
+                  </div>
+                  <div style={{ marginTop: 12, color: "var(--muted)", fontFamily: "var(--font-mono)", fontSize: 11, lineHeight: 1.5 }}>
+                    Workspace routes the decision. Approval, rejection, and evidence review still happen in the owning review surface.
                   </div>
                 </Panel>
               </div>
@@ -234,9 +245,9 @@ function Workbench({ data, tenant }) {
 
         <div className="col inspector">
           <div className="section">
-            <div className="section-head"><span>Queue summary</span><span className="ct">{cases.length}</span></div>
+            <div className="section-head"><span>Queue summary</span><span className="ct">{reviewItems.length}</span></div>
             <div className="section-body">
-              <div className="hbar"><span className="lbl">active</span><span className="track"><i style={{ width: pct(counts.open, counts.all) }} /></span><span className="num">{counts.open}</span></div>
+              <div className="hbar"><span className="lbl">active</span><span className="track"><i style={{ width: pct(counts.active, counts.all) }} /></span><span className="num">{counts.active}</span></div>
               <div className="hbar"><span className="lbl">blocked</span><span className="track"><i style={{ width: pct(counts.blocked, counts.all) }} /></span><span className="num">{counts.blocked}</span></div>
               <div className="hbar"><span className="lbl">done</span><span className="track"><i style={{ width: pct(counts.done, counts.all) }} /></span><span className="num">{counts.done}</span></div>
             </div>
@@ -248,9 +259,9 @@ function Workbench({ data, tenant }) {
               {selected ? (
                 <>
                   <CaseField label="Work item key" value={selected.id} />
-                  <CaseField label="Status" value={selected.status} />
-                  <CaseField label="Basis" value={selected.basisLabel} />
-                  <CaseField label="Blocker" value={selected.blocker || "none"} />
+                  <CaseField label="Status" value={selected.statusLabel} />
+                  <CaseField label="Source" value={selected.sourceRun} />
+                  <CaseField label="Boundary" value={selected.boundary} />
                 </>
               ) : (
                 <div style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--muted)" }}>No work item selected.</div>
@@ -263,7 +274,7 @@ function Workbench({ data, tenant }) {
             <div className="section-body" style={{ display: "flex", flexDirection: "column", gap: 6 }}>
               <a className="btn ghost" style={{ justifyContent: "flex-start" }} href={`/?screen=reasoning&tenant=${encodeURIComponent(tenantId)}`}>Open reasoning queue</a>
               <a className="btn ghost" style={{ justifyContent: "flex-start" }} href={`/?screen=ontology&tenant=${encodeURIComponent(tenantId)}`}>Open ontology catalog</a>
-              <a className="btn ghost" style={{ justifyContent: "flex-start" }} href={`/?screen=quality&tenant=${encodeURIComponent(tenantId)}`}>Open quality checks</a>
+              <a className="btn ghost" style={{ justifyContent: "flex-start" }} href={`/?screen=graph&tenant=${encodeURIComponent(tenantId)}&graph_tab=proposed`}>Open proposed graph</a>
             </div>
           </div>
         </div>
@@ -277,19 +288,41 @@ function AgentRunsWorkspace({ tenantId, query }) {
   const data = query.data || { sessions: [], runs: [] };
   const runs = data.runs || [];
   const sessions = data.sessions || [];
+  const initialAgentTab = (() => {
+    try { return new URLSearchParams(location.search).get("agent_tab") === "autopilot" ? "autopilot" : "enrichment"; }
+    catch { return "enrichment"; }
+  })();
+  const [agentTab, setAgentTab] = useStateWB(initialAgentTab);
   const [selectedRunKey, setSelectedRunKey] = useStateWB("");
   const [busy, setBusy] = useStateWB(false);
   const [message, setMessage] = useStateWB(null);
-  const selected = runs.find(run => run.run_key === selectedRunKey) || runs[0] || null;
+  const [agentParams, setAgentParams] = useStateWB({
+    scope: defaultAgentScopeWB(tenantId),
+    budget: "3",
+    allowlist: "zenodo.org",
+    cadence: "manual",
+    safety: "allowlist + proposed-only writes",
+  });
+  const filteredRuns = runs.filter(run => agentTab === "autopilot"
+    ? run.kind === "autopilot_deep_reasoning"
+    : run.kind === "web_enrichment_crawl" || run.kind === "iterative_graph_enrichment");
+  const selected = filteredRuns.find(run => run.run_key === selectedRunKey) || filteredRuns[0] || null;
   const session = sessions[0] || null;
 
   useEffectWB(() => {
-    if (!runs.length) {
+    setAgentParams(prev => {
+      if (prev.scope && prev.scope !== "—" && prev.scope !== "default") return prev;
+      return { ...prev, scope: defaultAgentScopeWB(tenantId) };
+    });
+  }, [tenantId]);
+
+  useEffectWB(() => {
+    if (!filteredRuns.length) {
       if (selectedRunKey) setSelectedRunKey("");
       return;
     }
-    if (!runs.some(run => run.run_key === selectedRunKey)) setSelectedRunKey(runs[0].run_key);
-  }, [runs.map(run => run.run_key).join("|")]);
+    if (!filteredRuns.some(run => run.run_key === selectedRunKey)) setSelectedRunKey(filteredRuns[0].run_key);
+  }, [agentTab, filteredRuns.map(run => run.run_key).join("|")]);
 
   const kindCounts = runs.reduce((acc, run) => {
     acc[run.kind] = (acc[run.kind] || 0) + 1;
@@ -298,7 +331,43 @@ function AgentRunsWorkspace({ tenantId, query }) {
   const pending = runs.reduce((acc, run) => acc + (run.elements || []).filter(item => ["draft", "candidate"].includes(item.status)).length, 0);
   const failed = runs.filter(run => run.status === "failed" || run.error).length;
 
+  function updateAgentParam(key, value) {
+    setAgentParams(prev => ({ ...prev, [key]: value }));
+  }
+
+  function selectAgentTab(tab) {
+    setAgentTab(tab);
+    try {
+      const url = new URL(location.href);
+      url.searchParams.set("agent_tab", tab);
+      history.replaceState(null, "", url.toString());
+    } catch {}
+  }
+
   async function runOnce() {
+    if (agentTab === "autopilot") {
+      setBusy(true);
+      setMessage(null);
+      try {
+        const body = {
+          objective: agentParams.scope,
+          created_by: "workspace",
+          budget: Number(agentParams.budget) || 3,
+          safety_profile: agentParams.safety,
+        };
+        let result = null;
+        if (tenantId === "maritime-risk") result = await AL_API.runMaritimeRiskAutopilotPlaybook(tenantId, body);
+        else if (tenantId === "creditcardfraud") result = await AL_API.runCreditcardfraudAutopilotPlaybook(tenantId, body);
+        else result = await AL_API.createAutopilotSession(tenantId, body);
+        setMessage({ kind: "ok", text: `Autopilot run queued: ${result?.session_key || result?.session?.session_key || result?.run_key || "created"}` });
+        window.dispatchEvent(new CustomEvent("aletheia:retry"));
+      } catch (err) {
+        setMessage({ kind: "error", text: err.message || String(err) });
+      } finally {
+        setBusy(false);
+      }
+      return;
+    }
     if (!session?.session_key) {
       setMessage({ kind: "error", text: "No continuous agent session available for this tenant." });
       return;
@@ -306,7 +375,13 @@ function AgentRunsWorkspace({ tenantId, query }) {
     setBusy(true);
     setMessage(null);
     try {
-      const result = await AL_API.runContinuousEnrichmentCycle(tenantId, session.session_key, { created_by: "workspace" });
+      const result = await AL_API.runContinuousEnrichmentCycle(tenantId, session.session_key, {
+        created_by: "workspace",
+        scope: agentParams.scope,
+        budget: Number(agentParams.budget) || 3,
+        allowlist: agentParams.allowlist,
+        cadence: agentParams.cadence,
+      });
       setMessage({ kind: "ok", text: `Run cycle queued: ${result?.run?.run_key || "completed"}` });
       window.dispatchEvent(new CustomEvent("aletheia:retry"));
     } catch (err) {
@@ -317,6 +392,10 @@ function AgentRunsWorkspace({ tenantId, query }) {
   }
 
   async function toggleSession() {
+    if (agentTab === "autopilot") {
+      setMessage({ kind: "ok", text: "Autopilot is run-on-demand from Workspace; use Run once or open Reasoning for candidate review." });
+      return;
+    }
     if (!session?.session_key) return;
     const action = ["running", "active", "idle"].includes(String(session.status || "").toLowerCase()) ? "pause" : "resume";
     setBusy(true);
@@ -336,9 +415,13 @@ function AgentRunsWorkspace({ tenantId, query }) {
     <div className="wb agent-workspace">
       <div className="col">
         <div style={{ padding: "12px 14px", borderBottom: "1px solid var(--line)", background: "var(--bg-2)" }}>
-          <div className="eyebrow accent">Automatic agents</div>
+          <div className="eyebrow accent">Agent</div>
           <div style={{ marginTop: 5, color: "var(--text-dim)", fontSize: 12, lineHeight: 1.45 }}>
-            Manage crawl, graph enrichment, and reasoning runs from Workspace.
+            Manage automatic reasoning and enrichment agents. Review stays in the owning surfaces.
+          </div>
+          <div className="tabs" style={{ marginTop: 10, height: 32, border: "1px solid var(--line)", display: "flex" }}>
+            <div className={"tab" + (agentTab === "enrichment" ? " active" : "")} onClick={() => selectAgentTab("enrichment")}>Auto enriching <span className="ct">{(kindCounts.web_enrichment_crawl || 0) + (kindCounts.iterative_graph_enrichment || 0)}</span></div>
+            <div className={"tab" + (agentTab === "autopilot" ? " active" : "")} onClick={() => selectAgentTab("autopilot")}>Autopilot reasoning <span className="ct">{kindCounts.autopilot_deep_reasoning || 0}</span></div>
           </div>
           <div className="row" style={{ marginTop: 10 }}>
             <div className="stat"><span className="label">Runs</span><span className="val mono">{runs.length}</span></div>
@@ -349,7 +432,7 @@ function AgentRunsWorkspace({ tenantId, query }) {
         <div style={{ flex: 1, overflow: "auto" }}>
           <ApiStatus q={query} what="agent runs" />
           <div className="artifact-list">
-            {runs.map(run => (
+            {filteredRuns.map(run => (
               <div key={run.run_key}
                    className={`artifact-row ${runToneWB(run.status)}` + (selected?.run_key === run.run_key ? " selected" : "")}
                    onClick={() => setSelectedRunKey(run.run_key)}>
@@ -370,9 +453,9 @@ function AgentRunsWorkspace({ tenantId, query }) {
                 <div className="ar-right">{runOutputCountWB(run)}</div>
               </div>
             ))}
-            {runs.length === 0 && (
+            {filteredRuns.length === 0 && (
               <div style={{ padding: 24, fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--muted)", textAlign: "center" }}>
-                No automatic agent runs for tenant {tenantId}.
+                No {agentTab === "autopilot" ? "Autopilot reasoning" : "Auto enriching"} runs for tenant {tenantId}.
               </div>
             )}
           </div>
@@ -382,24 +465,26 @@ function AgentRunsWorkspace({ tenantId, query }) {
       <div className="col" style={{ display: "flex", flexDirection: "column" }}>
         <div className="art-header">
           <div className="crumb">
-            <span className="type">Agent Runs</span>
+            <span className="type">Agent</span>
             <span className="sep">/</span>
-            <span>{tenantId}</span>
+            <span>{agentTab === "autopilot" ? "Autopilot reasoning" : "Auto enriching"}</span>
             <span style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
-              <Pill kind={session?.status === "running" ? "approved" : "proposed"}>{session?.status || "no session"}</Pill>
-              <Pill kind="accent">{runs.length} runs</Pill>
+              <Pill kind={agentTab === "autopilot" ? "accent" : (session?.status === "running" ? "approved" : "proposed")}>{agentTab === "autopilot" ? "run on demand" : (session?.status || "no session")}</Pill>
+              <Pill kind="accent">{filteredRuns.length} runs</Pill>
             </span>
           </div>
-          <h1>Automatic agent control</h1>
-          <p className="desc">One lightweight place to monitor crawl, graph enrichment, and deep reasoning agents. Detailed evidence stays in Graph, Ontology, and Reasoning.</p>
+          <h1>{agentTab === "autopilot" ? "Autopilot reasoning agent" : "Auto enriching agent"}</h1>
+          <p className="desc">{agentTab === "autopilot"
+            ? "Run bounded deep reasoning over the current tenant graph and send candidate findings to review."
+            : "Keep the graph enrichment loop visible and bounded while generated objects route to review."}</p>
           <div className="row">
             <div className="stat">
-              <span className="label">Session</span>
-              <span className="val mono">{compactTextWB(session?.session_key || "none", 42)}</span>
+              <span className="label">Scope</span>
+              <span className="val mono">{compactTextWB(agentParams.scope, 42)}</span>
             </div>
             <div className="stat">
-              <span className="label">Cycles</span>
-              <span className="val mono">{session?.cycle_count || 0}</span>
+              <span className="label">Budget</span>
+              <span className="val mono">{agentParams.budget}</span>
             </div>
             <div className="stat lg">
               <span className="label">Next action</span>
@@ -409,11 +494,39 @@ function AgentRunsWorkspace({ tenantId, query }) {
         </div>
 
         <div style={{ flex: 1, overflow: "auto", padding: "var(--pad-4) var(--pad-5)" }}>
-          <Panel eyebrow="Controls" title="Keep the loop visible and bounded">
+          <Panel eyebrow="Parameters" title="Agent settings">
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 120px", gap: 10 }}>
+              <label>
+                <div className="eyebrow" style={{ marginBottom: 4 }}>Scope</div>
+                <input className="input" value={agentParams.scope} onChange={e => updateAgentParam("scope", e.target.value)} />
+              </label>
+              <label>
+                <div className="eyebrow" style={{ marginBottom: 4 }}>Budget</div>
+                <input className="input" value={agentParams.budget} onChange={e => updateAgentParam("budget", e.target.value)} />
+              </label>
+              <label>
+                <div className="eyebrow" style={{ marginBottom: 4 }}>Allowlist / safety</div>
+                <input className="input" value={agentParams.allowlist} onChange={e => updateAgentParam("allowlist", e.target.value)} />
+              </label>
+              <label>
+                <div className="eyebrow" style={{ marginBottom: 4 }}>Cadence</div>
+                <select className="select" value={agentParams.cadence} onChange={e => updateAgentParam("cadence", e.target.value)}>
+                  <option value="manual">Manual</option>
+                  <option value="hourly">Hourly</option>
+                  <option value="daily">Daily</option>
+                </select>
+              </label>
+            </div>
+            <div style={{ marginTop: 10, fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--muted)" }}>
+              {agentParams.safety}
+            </div>
+          </Panel>
+
+          <Panel eyebrow="Controls" title="Run and pause from Workspace" style={{ marginTop: 16 }}>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              <button className="btn primary" disabled={busy || !session} onClick={runOnce}>Run once</button>
-              <button className="btn ghost" disabled={busy || !session} onClick={toggleSession}>
-                {["running", "active", "idle"].includes(String(session?.status || "").toLowerCase()) ? "Pause" : "Resume"}
+              <button className="btn primary" disabled={busy || (agentTab !== "autopilot" && !session)} onClick={runOnce}>Run once</button>
+              <button className="btn ghost" disabled={busy || (agentTab !== "autopilot" && !session)} onClick={toggleSession}>
+                {agentTab === "autopilot" ? "Pause / Resume" : (["running", "active", "idle"].includes(String(session?.status || "").toLowerCase()) ? "Pause" : "Resume")}
               </button>
               <a className="btn" href={`/?screen=graph&tenant=${encodeURIComponent(tenantId)}&graph_tab=proposed`}>Open results</a>
               <a className="btn ghost" href={`/?screen=graph&tenant=${encodeURIComponent(tenantId)}&graph_tab=runs`}>Full run log</a>
@@ -430,7 +543,7 @@ function AgentRunsWorkspace({ tenantId, query }) {
             {selected ? (
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
                 <CaseField label="Kind" value={agentKindLabelWB(selected.kind)} />
-                <CaseField label="Status" value={selected.status} />
+                <CaseField label="Status" value={selected.status || selected.statusLabel} />
                 <CaseField label="Started" value={selected.started_at ? String(selected.started_at).slice(0, 19) : "—"} />
                 <CaseField label="Outputs" value={`${runOutputCountWB(selected)} generated · ${runSkippedCountWB(selected)} skipped`} />
               </div>
@@ -490,6 +603,113 @@ function AgentRunsWorkspace({ tenantId, query }) {
       </div>
     </div>
   );
+}
+
+function buildWorkspaceReviewItems({ tenantId, artifacts, graphElements, agentRuns }) {
+  const items = [];
+  (artifacts || [])
+    .filter(a => ["proposed", "changes"].includes(a.status) || ["draft", "needs_changes"].includes(a.rawStatus))
+    .forEach(a => {
+      const statusGroup = a.status === "changes" || a.rawStatus === "needs_changes" ? "blocked" : "active";
+      items.push({
+        id: a.canonical_key || a.id,
+        title: a.title || a.key || a.canonical_key,
+        summary: a.desc || "Ontology candidate needs review before it can become canonical.",
+        itemType: "Ontology proposal",
+        tenantId,
+        statusGroup,
+        statusLabel: a.rawStatus || a.status || "draft",
+        tone: statusGroup === "blocked" ? "changes" : "proposed",
+        sourceRun: a.agent || "ontology pipeline",
+        updated: a.updated || a.created || "",
+        updatedLabel: fmtCaseTime(a.updated || a.created),
+        confidenceLabel: a.confidence != null ? String(a.confidence) : "—",
+        nextAction: statusGroup === "blocked" ? "Resolve review feedback in Ontology" : "Approve, reject, or request changes in Ontology",
+        reviewHref: `/?screen=ontology&tenant=${encodeURIComponent(tenantId)}&artifact=${encodeURIComponent(a.canonical_key || a.id || "")}`,
+        reviewLabel: "Review in ontology",
+        runHref: "",
+        boundary: "review required before canonical ontology",
+      });
+    });
+
+  (graphElements || [])
+    .filter(e => !["approved", "done"].includes(String(e.status || "").toLowerCase()))
+    .forEach(e => {
+      const type = String(e.element_type || e.type || "element").toLowerCase();
+      const status = String(e.status || "draft").toLowerCase();
+      const blocked = ["needs_evidence", "rejected", "failed", "blocked"].includes(status);
+      const itemType =
+        type.includes("edge") ? "Graph edge" :
+        type.includes("finding") ? "Candidate finding" :
+        type.includes("node") ? "Graph node" :
+        "Graph proposal";
+      const title = e.title || e.name || e.label || e.element_key || "Proposed graph element";
+      items.push({
+        id: e.element_key || e.canonical_key || title,
+        title,
+        summary: e.summary || e.description || "Proposed graph fact or finding waiting for graph review.",
+        itemType,
+        tenantId,
+        statusGroup: blocked ? "blocked" : "active",
+        statusLabel: status,
+        tone: blocked ? "changes" : "proposed",
+        sourceRun: compactTextWB(e.run_key || e.source || "proposed graph", 64),
+        updated: e.updated_at || e.created_at || "",
+        updatedLabel: fmtCaseTime(e.updated_at || e.created_at),
+        confidenceLabel: e.confidence != null ? String(e.confidence) : "—",
+        nextAction: blocked ? "Review evidence gap or rejection reason in Graph" : "Review proposed graph element",
+        reviewHref: `/?screen=graph&tenant=${encodeURIComponent(tenantId)}&graph_tab=proposed&proposed_key=${encodeURIComponent(e.element_key || "")}`,
+        reviewLabel: "Review in graph",
+        runHref: e.run_key ? `/?screen=graph&tenant=${encodeURIComponent(tenantId)}&graph_tab=runs&run_key=${encodeURIComponent(e.run_key)}` : "",
+        boundary: "proposed graph space; formal graph writes disabled",
+      });
+    });
+
+  (agentRuns || []).forEach(run => {
+    (run.elements || [])
+      .filter(e => {
+        const type = String(e.element_type || e.type || "").toLowerCase();
+        const status = String(e.status || "").toLowerCase();
+        return (type.includes("candidate") || type.includes("finding")) && ["draft", "candidate", "needs_evidence"].includes(status);
+      })
+      .forEach(e => {
+        const status = String(e.status || "candidate").toLowerCase();
+        const blocked = status === "needs_evidence";
+        items.push({
+          id: e.element_key || e.canonical_key || `${run.run_key}:finding`,
+          title: e.title || e.name || e.label || e.summary || "Candidate finding",
+          summary: e.summary || e.description || e.payload?.conclusion || "Candidate finding generated by an agent; approval remains human-gated.",
+          itemType: "Candidate finding",
+          tenantId,
+          statusGroup: blocked ? "blocked" : "active",
+          statusLabel: status,
+          tone: blocked ? "changes" : "proposed",
+          sourceRun: compactTextWB(run.run_key || run.kind || "autopilot", 64),
+          updated: run.completed_at || run.started_at || "",
+          updatedLabel: fmtCaseTime(run.completed_at || run.started_at),
+          confidenceLabel: e.confidence != null ? String(e.confidence) : "—",
+          nextAction: blocked ? "Add evidence or mark as rejected in Reasoning" : "Approve, reject, or request evidence in Reasoning",
+          reviewHref: `/?screen=reasoning&tenant=${encodeURIComponent(tenantId)}&active_tab=autopilot`,
+          reviewLabel: "Review finding",
+          runHref: `/?screen=graph&tenant=${encodeURIComponent(tenantId)}&graph_tab=runs&run_key=${encodeURIComponent(run.run_key || "")}`,
+          boundary: "candidate finding; no automatic approval",
+        });
+      });
+  });
+
+  const seen = new Set();
+  return items
+    .filter(item => {
+      if (seen.has(item.id)) return false;
+      seen.add(item.id);
+      return true;
+    })
+    .sort((a, b) => {
+      const au = a.updated || "";
+      const bu = b.updated || "";
+      if (au !== bu) return au < bu ? 1 : -1;
+      return a.title.localeCompare(b.title);
+    });
 }
 
 function taskToCase(task) {
@@ -618,6 +838,13 @@ function runToneWB(status) {
   if (["failed", "error", "rejected"].includes(normalized)) return "rejected";
   if (["running", "active", "draft"].includes(normalized)) return "proposed";
   return "changes";
+}
+
+function defaultAgentScopeWB(tenantId) {
+  if (tenantId === "maritime-risk") return "maritime-risk chokepoint impact";
+  if (tenantId === "creditcardfraud") return "creditcardfraud fraud risk patterns";
+  if (tenantId === "us-iran-war") return "US-Iran conflict impact network";
+  return tenantId || "tenant graph";
 }
 
 function compactTextWB(value, max = 80) {
