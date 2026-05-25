@@ -1898,6 +1898,313 @@ class InstanceRepository:
             },
         }
 
+    def agent_runs_console(self, tenant, limit=20):
+        limit = max(1, min(int(limit or 20), 100))
+
+        sessions = self.continuous_enrichment_sessions(tenant).get("sessions", [])
+        runs = []
+        degraded = []
+
+        try:
+            with self.metadata_engine_for(tenant).connect() as conn:
+                rows = conn.execute(
+                    text(
+                        """
+                        SELECT id, run_key, source_agent, status, objective, frontier_json,
+                               expansion_trace_json, safety_profile_json, budget_json,
+                               skipped_sources_json, proposed_count, pruned_count,
+                               finding_count, error, started_at, finished_at
+                        FROM aletheia_iterative_graph_enrichment_runs
+                        WHERE project_id = :tenant_id
+                        ORDER BY started_at DESC, id DESC
+                        LIMIT :limit
+                        """
+                    ),
+                    {"tenant_id": tenant.tenant_id, "limit": limit},
+                ).mappings().all()
+                for row in rows:
+                    elements = conn.execute(
+                        text(
+                            """
+                            SELECT element_key, element_type, name, payload_json,
+                                   evidence_refs_json, source_url, confidence,
+                                   status, iteration, created_at
+                            FROM aletheia_proposed_graph_elements
+                            WHERE project_id = :tenant_id AND run_id = :run_id
+                            ORDER BY iteration ASC, element_type ASC, name ASC
+                            LIMIT 200
+                            """
+                        ),
+                        {"tenant_id": tenant.tenant_id, "run_id": row["id"]},
+                    ).mappings().all()
+                    runs.append(
+                        {
+                            "kind": "iterative_graph_enrichment",
+                            "run_key": row["run_key"],
+                            "agent": row["source_agent"],
+                            "status": row["status"],
+                            "objective": row["objective"],
+                            "frontier": _load_json(row["frontier_json"], []),
+                            "trace": _load_json(row["expansion_trace_json"], []),
+                            "safety_profile": _load_json(row["safety_profile_json"], {}),
+                            "budget": _load_json(row["budget_json"], {}),
+                            "skipped_sources": _load_json(row["skipped_sources_json"], []),
+                            "counts": {
+                                "proposed": row["proposed_count"],
+                                "pruned": row["pruned_count"],
+                                "findings": row["finding_count"],
+                                "returned": len(elements),
+                            },
+                            "elements": [
+                                {
+                                    "element_key": e["element_key"],
+                                    "element_type": e["element_type"],
+                                    "name": e["name"],
+                                    "payload": _load_json(e["payload_json"], {}),
+                                    "evidence_refs": _load_json(e["evidence_refs_json"], []),
+                                    "source_url": e["source_url"],
+                                    "confidence": e["confidence"],
+                                    "status": e["status"],
+                                    "iteration": e["iteration"],
+                                    "created_at": _jsonable(e["created_at"]),
+                                }
+                                for e in elements
+                            ],
+                            "started_at": _jsonable(row["started_at"]),
+                            "finished_at": _jsonable(row["finished_at"]),
+                            "error": row["error"],
+                            "write_boundary": {
+                                "target": "proposed_graph_space",
+                                "canonical_write": False,
+                                "formal_graph_write": False,
+                                "findings": "candidate_only",
+                            },
+                        }
+                    )
+        except Exception as exc:
+            degraded.append({"kind": "iterative_graph_enrichment", "reason": _safe_error_message(exc)})
+
+        try:
+            with self.metadata_engine_for(tenant).connect() as conn:
+                rows = conn.execute(
+                    text(
+                        """
+                        SELECT id, run_key, source_agent, search_provider, status,
+                               target_artifacts_json, safety_profile_json, budget_json,
+                               skipped_sources_json, query_count, result_count,
+                               proposal_count, error, started_at, finished_at
+                        FROM aletheia_web_enrichment_runs
+                        WHERE project_id = :tenant_id
+                        ORDER BY started_at DESC, id DESC
+                        LIMIT :limit
+                        """
+                    ),
+                    {"tenant_id": tenant.tenant_id, "limit": limit},
+                ).mappings().all()
+                for row in rows:
+                    proposals = conn.execute(
+                        text(
+                            """
+                            SELECT proposal_key, target_artifact_key, source_url,
+                                   source_title, summary, raw_payload_json,
+                                   confidence, status, created_at
+                            FROM aletheia_web_enrichment_proposals
+                            WHERE project_id = :tenant_id AND run_id = :run_id
+                            ORDER BY created_at DESC, id DESC
+                            LIMIT 100
+                            """
+                        ),
+                        {"tenant_id": tenant.tenant_id, "run_id": row["id"]},
+                    ).mappings().all()
+                    runs.append(
+                        {
+                            "kind": "web_enrichment_crawl",
+                            "run_key": row["run_key"],
+                            "agent": row["source_agent"],
+                            "status": row["status"],
+                            "objective": f"Enrich ontology artifacts via {row['search_provider']} search/crawl",
+                            "frontier": [
+                                {"kind": "target_artifact", "target_key": key}
+                                for key in _load_json(row["target_artifacts_json"], [])
+                            ],
+                            "trace": [
+                                {
+                                    "query": (_load_json(p["raw_payload_json"], {}).get("search_query") or {}).get("query"),
+                                    "result_count": 1,
+                                    "source_url": p["source_url"],
+                                    "target": p["target_artifact_key"],
+                                }
+                                for p in proposals
+                            ],
+                            "safety_profile": _load_json(row["safety_profile_json"], {}),
+                            "budget": _load_json(row["budget_json"], {}),
+                            "skipped_sources": _load_json(row["skipped_sources_json"], []),
+                            "counts": {
+                                "queries": row["query_count"],
+                                "results": row["result_count"],
+                                "proposals": row["proposal_count"],
+                                "returned": len(proposals),
+                            },
+                            "elements": [
+                                {
+                                    "element_key": p["proposal_key"],
+                                    "element_type": "ontology_enrichment_proposal",
+                                    "name": p["source_title"] or p["target_artifact_key"],
+                                    "target_artifact_key": p["target_artifact_key"],
+                                    "payload": _load_json(p["raw_payload_json"], {}),
+                                    "evidence_refs": [p["source_url"]] if p["source_url"] else [],
+                                    "source_url": p["source_url"],
+                                    "confidence": p["confidence"],
+                                    "status": p["status"],
+                                    "summary": p["summary"],
+                                    "created_at": _jsonable(p["created_at"]),
+                                }
+                                for p in proposals
+                            ],
+                            "started_at": _jsonable(row["started_at"]),
+                            "finished_at": _jsonable(row["finished_at"]),
+                            "error": row["error"],
+                            "write_boundary": {
+                                "target": "ontology_review_queue",
+                                "canonical_write": False,
+                                "formal_graph_write": False,
+                                "ontology_review_required": True,
+                            },
+                        }
+                    )
+        except Exception as exc:
+            degraded.append({"kind": "web_enrichment_crawl", "reason": _safe_error_message(exc)})
+
+        try:
+            with self.metadata_engine_for(tenant).connect() as conn:
+                rows = conn.execute(
+                    text(
+                        """
+                        SELECT id, session_key, objective, scope_json, budget_json,
+                               safety_profile_json, status, created_by,
+                               created_at, updated_at
+                        FROM aletheia_autopilot_sessions
+                        WHERE project_id = :tenant_id
+                        ORDER BY updated_at DESC, id DESC
+                        LIMIT :limit
+                        """
+                    ),
+                    {"tenant_id": tenant.tenant_id, "limit": limit},
+                ).mappings().all()
+                for row in rows:
+                    hypotheses = conn.execute(
+                        text(
+                            """
+                            SELECT hypothesis_key, title, rationale, status, priority,
+                                   evidence_plan_json, reasoning_task_keys_json, pruned_reason,
+                                   created_at, updated_at
+                            FROM aletheia_autopilot_hypotheses
+                            WHERE project_id = :tenant_id AND session_id = :session_id
+                            ORDER BY priority ASC, id ASC
+                            LIMIT 100
+                            """
+                        ),
+                        {"tenant_id": tenant.tenant_id, "session_id": row["id"]},
+                    ).mappings().all()
+                    candidates = conn.execute(
+                        text(
+                            """
+                            SELECT canonical_key, title, conclusion, value_score,
+                                   confidence, novelty_score, impact_score,
+                                   evidence_chain_json, evidence_limits_json,
+                                   suggested_action_json, status, created_at, updated_at
+                            FROM aletheia_autopilot_candidate_findings
+                            WHERE project_id = :tenant_id AND session_id = :session_id
+                            ORDER BY value_score DESC, confidence DESC, id ASC
+                            LIMIT 100
+                            """
+                        ),
+                        {"tenant_id": tenant.tenant_id, "session_id": row["id"]},
+                    ).mappings().all()
+                    runs.append(
+                        {
+                            "kind": "autopilot_deep_reasoning",
+                            "run_key": row["session_key"],
+                            "agent": row["created_by"],
+                            "status": row["status"],
+                            "objective": row["objective"],
+                            "frontier": [_load_json(row["scope_json"], {})],
+                            "trace": [
+                                {
+                                    "hypothesis_key": h["hypothesis_key"],
+                                    "title": h["title"],
+                                    "status": h["status"],
+                                    "priority": h["priority"],
+                                    "evidence_plan": _load_json(h["evidence_plan_json"], []),
+                                    "reasoning_task_keys": _load_json(h["reasoning_task_keys_json"], []),
+                                    "pruned_reason": h["pruned_reason"],
+                                }
+                                for h in hypotheses
+                            ],
+                            "safety_profile": _load_json(row["safety_profile_json"], {}),
+                            "budget": _load_json(row["budget_json"], {}),
+                            "skipped_sources": [
+                                {"reason": h["pruned_reason"], "hypothesis": h["hypothesis_key"]}
+                                for h in hypotheses
+                                if h["pruned_reason"]
+                            ],
+                            "counts": {
+                                "hypotheses": len(hypotheses),
+                                "candidate_findings": len(candidates),
+                                "pruned": sum(1 for h in hypotheses if h["status"] == "pruned"),
+                            },
+                            "elements": [
+                                {
+                                    "element_key": c["canonical_key"],
+                                    "element_type": "candidate_finding",
+                                    "name": c["title"],
+                                    "payload": {
+                                        "conclusion": c["conclusion"],
+                                        "value_score": c["value_score"],
+                                        "novelty_score": c["novelty_score"],
+                                        "impact_score": c["impact_score"],
+                                        "suggested_action": _load_json(c["suggested_action_json"], {}),
+                                    },
+                                    "evidence_refs": [
+                                        item.get("source_ref") or item.get("source") or item.get("metric") or item.get("kind")
+                                        for item in _load_json(c["evidence_chain_json"], [])
+                                    ],
+                                    "evidence_chain": _load_json(c["evidence_chain_json"], []),
+                                    "confidence": c["confidence"],
+                                    "status": c["status"],
+                                    "created_at": _jsonable(c["created_at"]),
+                                }
+                                for c in candidates
+                            ],
+                            "started_at": _jsonable(row["created_at"]),
+                            "finished_at": _jsonable(row["updated_at"]),
+                            "error": None,
+                            "write_boundary": {
+                                "target": "candidate_findings",
+                                "canonical_write": False,
+                                "formal_graph_write": False,
+                                "auto_approve_findings": False,
+                            },
+                        }
+                    )
+        except Exception as exc:
+            degraded.append({"kind": "autopilot_deep_reasoning", "reason": _safe_error_message(exc)})
+
+        runs.sort(key=lambda item: item.get("started_at") or item.get("finished_at") or "", reverse=True)
+        return {
+            "tenant": tenant.public_dict(),
+            "sessions": sessions,
+            "runs": runs[: limit * 3],
+            "degraded": degraded,
+            "write_boundary": {
+                "ontology_candidates_require_review": True,
+                "graph_fact_target": "proposed_graph_space",
+                "candidate_findings_only": True,
+                "canonical_write": False,
+                "formal_graph_write": False,
+            },
+        }
+
     def proposed_graph_elements(self, tenant, run_key=None, limit=50):
         limit = max(1, min(int(limit), 200))
         where = "e.project_id = :tenant_id"
@@ -7013,6 +7320,11 @@ class ReviewWorkbenchHandler(BaseHTTPRequestHandler):
             run_key = query.get("run_key", [""])[0] or None
             limit = int(query.get("limit", ["50"])[0])
             self._send_json(self.instance_repository.proposed_graph_elements(tenant, run_key=run_key, limit=limit))
+            return
+        if parsed.path == "/api/agent-runs/console":
+            query = parse_qs(parsed.query)
+            limit = int(query.get("limit", ["20"])[0])
+            self._send_json(self.instance_repository.agent_runs_console(tenant, limit=limit))
             return
         if parsed.path == "/api/enrichment/sessions":
             self._send_json(self.instance_repository.continuous_enrichment_sessions(tenant))

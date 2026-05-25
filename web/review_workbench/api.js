@@ -291,6 +291,11 @@
       return data || { runs: [], elements: [] };
     },
 
+    async agentRunsConsole(tenant, { limit = 20 } = {}) {
+      const data = await fetchJson(withTenantQs("/api/agent-runs/console", tenant, { limit: String(limit) }));
+      return data || { sessions: [], runs: [] };
+    },
+
     async reviewGraphProposedElement(tenant, elementKey, action, body = {}) {
       return await fetchJson(withTenantQs(
         `/api/graph/proposed-elements/${encodeURIComponent(elementKey)}/${encodeURIComponent(action)}`, tenant), {
