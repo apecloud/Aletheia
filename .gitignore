@@ -5,5 +5,4 @@ __pycache__/
 run_reasoning_result.md
 datasets/
 .env
-reports/*.log
-reports/screenshots/*.png
+reports/
