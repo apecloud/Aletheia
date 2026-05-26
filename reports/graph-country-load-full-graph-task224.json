@@ -1,0 +1,56 @@
+{
+  "task": 224,
+  "title": "Graph Country Load Full Graph Fix",
+  "tenant": "maritime-risk",
+  "status": "passed",
+  "root_causes": [
+    "view_all_sampling_could_omit_selected_country_center",
+    "center_type_change_kept_stale_center_id_temporarily",
+    "deep_link_center_scope_could_be_overridden_before_tenant_metadata_loaded"
+  ],
+  "changes": [
+    "view_all_api_forces_selected_center_node_into_full_graph",
+    "center_type_change_clears_stale_center_id",
+    "load_full_graph_requires_valid_center_and_focuses_after_refresh",
+    "direct_graph_link_preserves_requested_center_after_tenant_load",
+    "focus_status_message_added_for_visible_feedback"
+  ],
+  "api_smoke": {
+    "url": "http://127.0.0.1:8772/api/graph/context?tenant=maritime-risk&type=Country&id=CHN&view=all&limit=80",
+    "approved": true,
+    "scope_view": "all",
+    "center_id": "Country:CHN",
+    "includes_country_chn": true,
+    "nodes": 81,
+    "edges": 94
+  },
+  "browser_smoke": {
+    "url": "http://127.0.0.1:8772/?screen=graph&tenant=maritime-risk&type=Country&id=CHN",
+    "contains": [
+      "Center</dt><dd>Country:CHN",
+      "Load full graph",
+      "Focus center in full graph",
+      "All approved tenant graph nodes are visible"
+    ],
+    "not_contains": [
+      "Empty graph"
+    ]
+  },
+  "verification": [
+    "node --check web/review_workbench/api.js",
+    "npx esbuild web/review_workbench/graph.jsx --bundle --outfile=/tmp/graph-task224.js --format=iife --global-name=GraphTask224 --log-level=warning",
+    ".venv/bin/python -m py_compile review_workbench.py agents/iterative_graph_enrichment_agent.py",
+    ".venv/bin/python -m unittest tests/test_iterative_graph_enrichment.py tests/test_ontology_eval.py",
+    "git diff --check"
+  ],
+  "write_boundary": {
+    "proposed_graph_review_changed": false,
+    "agent_execution_changed": false,
+    "ontology_approval_changed": false,
+    "formal_graph_write": false
+  },
+  "evidence_files": [
+    "/tmp/task224-country-api.json",
+    "/tmp/task224-country-dom.html"
+  ]
+}

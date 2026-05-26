@@ -68,6 +68,9 @@ function GraphExplorer({ data, tenant }) {
   const agentRunsRequested = requestedGraphTab === "runs";
   const normalizeGraphTab = (tab) => ["approved", "proposed", "saved"].includes(tab) ? tab : (tab === "runs" ? "proposed" : "approved");
   const graphView = "all";
+  const requestedTenantId = initialParams.get("tenant") || "";
+  const requestedCenterType = initialParams.get("type") || "";
+  const requestedCenterNodeId = initialParams.get("id") || "";
   const [centerType, setCenterType] = useStateGX(initialParams.get("type") || "");
   const [centerNodeId, setCenterNodeId] = useStateGX(initialParams.get("id") || "");
   const [depth, setDepth] = useStateGX(Math.max(1, Math.min(Number(initialParams.get("depth") || 1), 3)));
@@ -76,6 +79,7 @@ function GraphExplorer({ data, tenant }) {
   const [leftTab, setLeftTab] = useStateGX(normalizeGraphTab(requestedGraphTab));
   const [showAgentRunsMoved, setShowAgentRunsMoved] = useStateGX(agentRunsRequested);
   const [focusElementKey, setFocusElementKey] = useStateGX(initialParams.get("proposed_key") || "");
+  const [initialScopeApplied, setInitialScopeApplied] = useStateGX(false);
 
   const typesQ = useApiData("instanceTypes", [tenantId, { includeDraft: true }], { fallback: [] });
   const centerTypes = Array.isArray(typesQ.data) ? typesQ.data : [];
@@ -99,6 +103,18 @@ function GraphExplorer({ data, tenant }) {
 
   useEffectGX(() => {
     if (typesQ.source === "loading") return;
+    if (
+      !initialScopeApplied &&
+      requestedCenterType &&
+      requestedCenterNodeId &&
+      (!requestedTenantId || requestedTenantId === tenantId) &&
+      centerTypes.some(t => t.type === requestedCenterType)
+    ) {
+      setCenterType(requestedCenterType);
+      setCenterNodeId(requestedCenterNodeId);
+      setInitialScopeApplied(true);
+      return;
+    }
     if (centerTypes.length === 0) {
       if (centerType) setCenterType("");
       if (centerNodeId) setCenterNodeId("");
@@ -118,9 +134,20 @@ function GraphExplorer({ data, tenant }) {
     }
     const expectedId = `${centerType}:${centerNodeId}`;
     const match = centerNodeId && candidates.some(c => c.id === expectedId || String(c.id || "").endsWith(`:${centerNodeId}`));
-    if (!match) {
+    if (
+      !centerNodeId &&
+      requestedCenterType === centerType &&
+      requestedCenterNodeId &&
+      (!requestedTenantId || requestedTenantId === tenantId)
+    ) {
+      setCenterNodeId(requestedCenterNodeId);
+      return;
+    }
+    if (!centerNodeId) {
       const first = candidates[0];
       setCenterNodeId(String(first.id || "").split(":").slice(1).join(":"));
+    } else if (!match) {
+      setFocusMessage(`${expectedId} is outside the visible center list; Load full graph will still include it if it exists.`);
     }
   }, [tenantId, centerType, candidatesQ.source, JSON.stringify(candidates.map(c => c.id))]);
 
@@ -150,9 +177,13 @@ function GraphExplorer({ data, tenant }) {
   const graph = useMemoGX(() => normalizeGraph(graphQ.data, { nodes: [], edges: [] }), [graphQ.data]);
 
   const [selected, setSelected] = useStateGX(null);
+  const [pendingCenterFocus, setPendingCenterFocus] = useStateGX("");
+  const [focusMessage, setFocusMessage] = useStateGX("");
   useEffectGX(() => {
     setSelected(null);
     setHoverId(null);
+    setPendingCenterFocus("");
+    setFocusMessage("");
   }, [tenantId]);
   useEffectGX(() => {
     if (!graph.nodes.length) {
@@ -172,11 +203,39 @@ function GraphExplorer({ data, tenant }) {
     return acc;
   }, {});
   const centerLabel = centerType && centerNodeId ? `${centerType}:${centerNodeId}` : "No tenant center";
+  const centerKey = centerType && centerNodeId ? `${centerType}:${centerNodeId}` : "";
   const focusCenterNode = () => {
-    const key = centerType && centerNodeId ? `${centerType}:${centerNodeId}` : "";
-    const match = graph.nodes.find(node => node.id === key);
-    if (match) setSelected(match);
+    if (!centerKey) return false;
+    const match = graph.nodes.find(node => node.id === centerKey);
+    if (match) {
+      setSelected(match);
+      setFocusMessage(`Focused ${centerKey}`);
+      return true;
+    }
+    setFocusMessage(`${centerKey} is not in the current graph sample yet.`);
+    return false;
   };
+  const loadAndFocusCenter = () => {
+    if (!centerKey) {
+      setFocusMessage("Select a center node first.");
+      return;
+    }
+    setPendingCenterFocus(centerKey);
+    setFocusMessage(`Loading full graph for ${centerKey}…`);
+    window.dispatchEvent(new CustomEvent("aletheia:retry"));
+  };
+  useEffectGX(() => {
+    if (!pendingCenterFocus || graphQ.loading) return;
+    const match = graph.nodes.find(node => node.id === pendingCenterFocus);
+    if (match) {
+      setSelected(match);
+      setFocusMessage(`Focused ${pendingCenterFocus}`);
+      setPendingCenterFocus("");
+    } else if (graphQ.source !== "loading") {
+      setFocusMessage(`${pendingCenterFocus} is not in the loaded full graph.`);
+      setPendingCenterFocus("");
+    }
+  }, [pendingCenterFocus, graphQ.loading, graphQ.source, graph.nodes.map(n => n.id).join("|")]);
 
   return (
     <div className="canvas">
@@ -228,7 +287,7 @@ function GraphExplorer({ data, tenant }) {
             <div>
               <div className="eyebrow" style={{ marginBottom: 4 }}>Center</div>
               <div style={{ display: "flex", gap: 6 }}>
-                <select className="select" style={{ width: 110 }} value={centerType} onChange={e => setCenterType(e.target.value)}>
+                <select className="select" style={{ width: 110 }} value={centerType} onChange={e => { setCenterType(e.target.value); setCenterNodeId(""); setSelected(null); setFocusMessage(""); }}>
                   {centerTypes.length === 0 && <option value="">No tenant types</option>}
                   {centerTypes.map(t => <option key={t.type} value={t.type}>{t.label || t.type}{t.approved ? "" : " · draft"}</option>)}
                 </select>
@@ -243,7 +302,7 @@ function GraphExplorer({ data, tenant }) {
               <div style={{ marginTop: 6, fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--muted)" }}>
                 {activeType ? `${activeType.table} · ${activeType.ontology_artifact} · ${activeType.artifact_status || "unknown"}` : "No tenant graph center types for this tenant."}
               </div>
-              <button className="btn ghost" style={{ marginTop: 8, width: "100%" }} disabled={!graph.nodes.some(node => node.id === `${centerType}:${centerNodeId}`)} onClick={focusCenterNode}>
+              <button className="btn ghost" style={{ marginTop: 8, width: "100%" }} disabled={!centerKey || !graph.nodes.some(node => node.id === centerKey)} onClick={focusCenterNode}>
                 Focus center in full graph
               </button>
               <div style={{ marginTop: 6, fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--muted)", lineHeight: 1.45 }}>
@@ -260,7 +319,12 @@ function GraphExplorer({ data, tenant }) {
                 <input className="input" value={limit} onChange={e => setLimit(+e.target.value)} type="number" />
               </div>
             </div>
-            <button className="btn primary" onClick={() => window.dispatchEvent(new CustomEvent("aletheia:retry"))}>Reload full graph</button>
+            <button className="btn primary" disabled={!centerKey || graphQ.loading} onClick={loadAndFocusCenter}>Load full graph</button>
+            {focusMessage && (
+              <div style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: focusMessage.includes("not in") ? "var(--changes)" : "var(--muted)", lineHeight: 1.4 }}>
+                {focusMessage}
+              </div>
+            )}
           </div>
 
           <div style={{ padding: "var(--pad-3) var(--pad-4)", borderBottom: "1px solid var(--line)" }}>

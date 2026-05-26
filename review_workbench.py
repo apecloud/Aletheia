@@ -1598,7 +1598,7 @@ class InstanceRepository:
             },
         }
 
-    def full_graph(self, tenant, limit=200):
+    def full_graph(self, tenant, object_type=None, instance_id=None, limit=200):
         requested_limit = int(limit)
         limit = max(1, min(requested_limit, 300))
         cfg_items = list(self.ENTITY_CONFIG.items())
@@ -1618,6 +1618,14 @@ class InstanceRepository:
         per_type_limit = max(1, min(40, limit // max(len(approved_cfgs), 1) + 1))
         nodes = []
         seen_nodes = set()
+
+        def remember_node(node):
+            if node and node["id"] not in seen_nodes:
+                nodes.append(node)
+                seen_nodes.add(node["id"])
+                return True
+            return False
+
         with self.source_engine_for(tenant).connect() as conn:
             for cfg_key, cfg in approved_cfgs:
                 type_name = self._cfg_type(cfg, cfg_key)
@@ -1629,13 +1637,27 @@ class InstanceRepository:
                 rows = conn.execute(text(sql), {"lim": per_type_limit}).mappings().all()
                 for row in rows:
                     node = self._entity_node(tenant, type_name, dict(row))
-                    if node and node["id"] not in seen_nodes:
-                        nodes.append(node)
-                        seen_nodes.add(node["id"])
+                    if node:
+                        remember_node(node)
                     if len(nodes) >= limit:
                         break
                 if len(nodes) >= limit:
                     break
+
+        center = None
+        if object_type and instance_id:
+            center_row = self._fetch_entity(tenant, object_type, instance_id)
+            cfg = self.ENTITY_CONFIG.get(self._cfg_key(object_type))
+            if center_row and cfg:
+                center_type = self._cfg_type(cfg, self._cfg_key(object_type))
+                center = self._entity_node(tenant, center_type, center_row)
+                if center:
+                    center["center"] = True
+                    if not remember_node(center):
+                        for idx, node in enumerate(nodes):
+                            if node["id"] == center["id"]:
+                                nodes[idx] = {**node, "center": True}
+                                break
         node_ids = {node["id"] for node in nodes}
         edges = []
         seen_edges = set()
@@ -1716,7 +1738,7 @@ class InstanceRepository:
             "depth": 0,
             "limit": limit,
             "limits": {"requested_limit": requested_limit, "applied_limit": limit, "hard_limit": 300, "truncated": requested_limit > limit or len(nodes) >= limit},
-            "center": None,
+            "center": center,
             "nodes": nodes,
             "edges": edges[: limit * 3],
             "scope": {
@@ -7734,7 +7756,7 @@ class ReviewWorkbenchHandler(BaseHTTPRequestHandler):
             limit = int(query.get("limit", ["200"])[0])
             view = query.get("view", ["scope"])[0]
             graph = (
-                self.instance_repository.full_graph(tenant, limit=limit)
+                self.instance_repository.full_graph(tenant, object_type, instance_id, limit=limit)
                 if view == "all"
                 else self.instance_repository.neighborhood(tenant, object_type, instance_id, depth=depth, limit=limit)
             )
