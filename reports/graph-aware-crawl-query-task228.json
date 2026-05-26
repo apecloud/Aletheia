@@ -1,0 +1,64 @@
+{
+  "task": 228,
+  "status": "implemented",
+  "sample_frontier": {
+    "key": "proposed-graph:edge:chn-bab-el-mandeb",
+    "name": "CHN depends on Bab el-Mandeb Strait",
+    "path": "CHN -> depends_on -> Bab el-Mandeb Strait -> trade_at_risk_v"
+  },
+  "sample_query": "CHN China Bab el-Mandeb Strait CHN depends on Bab el-Mandeb Strait depends_on depends on trade dependency maritime chokepoint trade_at_risk_v trade at risk trade exposure trade disruption shipping disruption trade route risk discover maritime trade exposure",
+  "trace_fields": [
+    "query_terms",
+    "graph_context_used",
+    "path_context_used",
+    "excluded_terms"
+  ],
+  "query_terms": {
+    "countries": [
+      "CHN",
+      "China"
+    ],
+    "nodes": [
+      "Bab el-Mandeb Strait",
+      "CHN depends on Bab el-Mandeb Strait",
+      "CHN"
+    ],
+    "relations": [
+      "depends_on",
+      "depends on",
+      "trade dependency",
+      "maritime chokepoint"
+    ],
+    "metrics": [
+      "trade_at_risk_v",
+      "trade at risk",
+      "trade exposure",
+      "trade disruption"
+    ],
+    "domain": [
+      "maritime chokepoint",
+      "shipping disruption",
+      "trade route risk"
+    ],
+    "objective": [
+      "discover",
+      "maritime",
+      "trade",
+      "exposure"
+    ]
+  },
+  "boundaries": {
+    "allowlist_policy": "unchanged",
+    "private_url_policy": "skip_and_audit",
+    "ontology_approval": "manual_review_required",
+    "canonical_writes": false,
+    "formal_graph_writes": false
+  },
+  "validation": [
+    ".venv/bin/python -m py_compile agents/iterative_graph_enrichment_agent.py review_workbench.py",
+    ".venv/bin/python -m unittest tests/test_iterative_graph_enrichment.py",
+    ".venv/bin/python -m unittest tests/test_ontology_eval.py",
+    "node --check web/review_workbench/api.js",
+    "npx esbuild web/review_workbench/workbench.jsx --bundle --outfile=/tmp/workbench-task228.js --format=iife --global-name=WorkbenchTask228 --log-level=warning"
+  ]
+}

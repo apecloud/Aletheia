@@ -1998,6 +1998,7 @@ class InstanceRepository:
             if not key or key in existing or key in visited:
                 continue
             payload = element.get("payload") or {}
+            deep_profile = payload.get("deep_graph_profile") if isinstance(payload.get("deep_graph_profile"), dict) else {}
             item = {
                 "kind": f"proposed_{element.get('element_type')}",
                 "key": key,
@@ -2010,6 +2011,9 @@ class InstanceRepository:
                 "evidence_refs": element.get("evidence_refs") or [],
                 "source_url": element.get("source_url"),
                 "ontology_type": payload.get("ontology_type") or payload.get("source_type") or payload.get("relation"),
+                "payload": payload,
+                "path": deep_profile.get("path_label") or payload.get("path_label"),
+                "relation": payload.get("relation"),
             }
             next_frontier.append(item)
             additions.append(item)

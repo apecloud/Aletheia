@@ -118,7 +118,12 @@ function Workbench({ data, tenant }) {
       </div>
 
       {workspaceTab === "agents" ? (
-        <AgentRunsWorkspace tenantId={tenantId} query={agentRunsQ} />
+        <AgentRunsWorkspace
+          tenantId={tenantId}
+          query={agentRunsQ}
+          artifacts={artifactsQ.data || []}
+          graphElements={graphProposedQ.data?.elements || []}
+        />
       ) : (
       <div className="wb">
         <div className="col">
@@ -284,7 +289,7 @@ function Workbench({ data, tenant }) {
   );
 }
 
-function AgentRunsWorkspace({ tenantId, query }) {
+function AgentRunsWorkspace({ tenantId, query, artifacts = [], graphElements = [] }) {
   const data = query.data || { sessions: [], runs: [] };
   const runs = data.runs || [];
   const sessions = data.sessions || [];
@@ -308,6 +313,13 @@ function AgentRunsWorkspace({ tenantId, query }) {
   const filteredRuns = runs.filter(run => agentTab === "autopilot"
     ? run.kind === "autopilot_deep_reasoning"
     : run.kind === "web_enrichment_crawl" || run.kind === "iterative_graph_enrichment");
+  const outputGroups = useMemoWB(() => buildAgentOutputGroups({
+    agentTab,
+    tenantId,
+    runs: filteredRuns,
+    artifacts,
+    graphElements,
+  }), [agentTab, tenantId, filteredRuns.map(run => run.run_key).join("|"), JSON.stringify(artifacts.map(a => [a.canonical_key, a.status, a.confidence])), JSON.stringify(graphElements.map(e => [e.element_key, e.element_type, e.status, e.confidence]))]);
   const selected = filteredRuns.find(run => run.run_key === selectedRunKey) || filteredRuns[0] || null;
   const session = sessions[0] || null;
 
@@ -470,6 +482,9 @@ function AgentRunsWorkspace({ tenantId, query }) {
         </div>
         <div style={{ flex: 1, overflow: "auto" }}>
           <ApiStatus q={query} what="agent runs" />
+          <div style={{ padding: "10px 14px 4px", fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--accent)", textTransform: "uppercase", letterSpacing: "0.08em" }}>
+            Agent run history
+          </div>
           <div className="artifact-list">
             {filteredRuns.map(run => (
               <div key={run.run_key}
@@ -590,6 +605,8 @@ function AgentRunsWorkspace({ tenantId, query }) {
             )}
           </Panel>
 
+          <AgentOutputsPanel groups={outputGroups} agentTab={agentTab} />
+
           {agentTab !== "autopilot" && session?.config?.latest_events?.length > 0 && (
             <Panel eyebrow="Agent chain" title="Latest enrichment events" style={{ marginTop: 16 }}>
               <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
@@ -607,13 +624,15 @@ function AgentRunsWorkspace({ tenantId, query }) {
             </Panel>
           )}
 
-          <Panel eyebrow="Selected run" title={selected ? agentObjectiveWB(selected) : "No run selected"} count={selected?.status || "—"} style={{ marginTop: 16 }}>
+          <Panel eyebrow="Agent run log" title={selected ? agentObjectiveWB(selected) : "No run selected"} count={selected?.status || "—"} style={{ marginTop: 16 }}>
             {selected ? (
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
                 <CaseField label="Kind" value={agentKindLabelWB(selected.kind)} />
                 <CaseField label="Status" value={selected.status || selected.statusLabel} />
                 <CaseField label="Started" value={selected.started_at ? String(selected.started_at).slice(0, 19) : "—"} />
                 <CaseField label="Outputs" value={`${runOutputCountWB(selected)} generated · ${runSkippedCountWB(selected)} skipped`} />
+                <CaseField label="Run key" value={compactTextWB(selected.run_key, 72)} />
+                <CaseField label="Trace rows" value={(selected.trace || []).length} />
               </div>
             ) : (
               <div style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--muted)" }}>Select a run from the list.</div>
@@ -621,7 +640,7 @@ function AgentRunsWorkspace({ tenantId, query }) {
           </Panel>
 
           {selected && (
-            <Panel eyebrow="Compact timeline" title="What happened" style={{ marginTop: 16 }}>
+            <Panel eyebrow="Agent run log" title="Timeline and trace" style={{ marginTop: 16 }}>
               <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                 {(selected.trace || []).slice(0, 5).map((step, index) => (
                   <div key={index} style={{ border: "1px solid var(--line-soft)", background: "var(--bg-2)", padding: "8px 10px" }}>
@@ -631,6 +650,19 @@ function AgentRunsWorkspace({ tenantId, query }) {
                     <div style={{ marginTop: 4, fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--muted)" }}>
                       results {step.result_count ?? "—"} · extracted {(step.extracted_candidates || []).length || (step.reasoning_task_keys || []).length || 0}
                     </div>
+                    {(step.query_terms || step.graph_context_used || step.path_context_used) && (
+                      <div style={{ marginTop: 6, display: "grid", gap: 4, fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--muted)" }}>
+                        {step.query_terms && (
+                          <div>query terms · {compactTextWB(flatQueryTermsWB(step.query_terms), 150)}</div>
+                        )}
+                        {step.graph_context_used && (
+                          <div>graph context · {compactTextWB(graphContextLabelWB(step.graph_context_used), 150)}</div>
+                        )}
+                        {step.path_context_used && (
+                          <div>path context · {compactTextWB(pathContextLabelWB(step.path_context_used), 150)}</div>
+                        )}
+                      </div>
+                    )}
                   </div>
                 ))}
                 {!(selected.trace || []).length && (
@@ -906,6 +938,26 @@ function runToneWB(status) {
   if (["failed", "error", "rejected"].includes(normalized)) return "rejected";
   if (["running", "active", "draft"].includes(normalized)) return "proposed";
   return "changes";
+}
+
+function flatQueryTermsWB(queryTerms) {
+  if (!queryTerms || typeof queryTerms !== "object") return "";
+  return Object.entries(queryTerms)
+    .flatMap(([group, values]) => (Array.isArray(values) ? values.map(value => `${group}:${value}`) : []))
+    .join(" · ");
+}
+
+function graphContextLabelWB(context) {
+  if (!context || typeof context !== "object") return "";
+  const neighbors = Array.isArray(context.neighbor_nodes) ? context.neighbor_nodes.filter(Boolean).join(" -> ") : "";
+  const metrics = Array.isArray(context.metrics) ? context.metrics.filter(Boolean).join(", ") : "";
+  return [context.frontier_name || context.frontier_key, context.relation, neighbors, metrics].filter(Boolean).join(" · ");
+}
+
+function pathContextLabelWB(context) {
+  if (!context || typeof context !== "object") return "";
+  const metrics = Array.isArray(context.metrics) ? context.metrics.filter(Boolean).join(", ") : "";
+  return [context.path_label, context.source_label, context.relation, context.target_label, metrics].filter(Boolean).join(" · ");
 }
 
 function defaultAgentScopeWB(tenantId) {

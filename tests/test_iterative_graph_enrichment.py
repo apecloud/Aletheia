@@ -119,6 +119,83 @@ class IterativeGraphEnrichmentTest(unittest.TestCase):
             self.assertIn("traceability", benchmark["comparison"]["dimensions"])
             self.assertGreaterEqual(benchmark["comparison"]["summary"]["aletheia_complete_deep_graph_findings"], 1)
 
+    def test_graph_context_query_plan_uses_frontier_path_terms(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_url, _ = self._seed_db(tmpdir)
+            frontier = {
+                "key": "proposed-graph:edge:chn-bab-el-mandeb",
+                "name": "CHN depends on Bab el-Mandeb Strait",
+                "artifact_type": "proposed_edge",
+                "source": "proposed_graph",
+                "path": "CHN -> depends_on -> Bab el-Mandeb Strait -> trade_at_risk_v",
+                "payload": {
+                    "source_type": "Country",
+                    "target_type": "Chokepoint",
+                    "source_label": "CHN",
+                    "target_label": "Bab el-Mandeb Strait",
+                    "relation": "depends_on",
+                    "metrics": ["trade_at_risk_v"],
+                },
+            }
+            agent = IterativeGraphEnrichmentAgent(
+                db_url,
+                tenant="maritime-risk",
+                search_results_json=self._fixture(tmpdir),
+                allowed_domains=["zenodo.org"],
+                max_iterations=1,
+                max_frontier=1,
+                max_results_per_query=2,
+            )
+
+            plan = agent._query_plan_for_frontier(frontier, "discover maritime trade exposure")
+            query = plan["query"]
+            self.assertIn("CHN", query)
+            self.assertIn("China", query)
+            self.assertIn("Bab el-Mandeb Strait", query)
+            self.assertIn("maritime chokepoint", query)
+            self.assertIn("trade disruption", query)
+            self.assertEqual(plan["graph_context_used"]["relation"], "depends_on")
+            self.assertIn("CHN", plan["graph_context_used"]["neighbor_nodes"])
+            self.assertIn("Bab el-Mandeb Strait", plan["path_context_used"]["path_label"])
+            self.assertIn("trade_at_risk_v", plan["query_terms"]["metrics"])
+
+    def test_run_trace_records_graph_aware_query_provenance(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_url, _ = self._seed_db(tmpdir)
+            frontier = {
+                "key": "proposed-graph:edge:chn-bab-el-mandeb",
+                "name": "CHN depends on Bab el-Mandeb Strait",
+                "artifact_type": "proposed_edge",
+                "source": "proposed_graph",
+                "path": "CHN -> depends_on -> Bab el-Mandeb Strait -> trade_at_risk_v",
+                "payload": {
+                    "source_type": "Country",
+                    "target_type": "Chokepoint",
+                    "source_label": "CHN",
+                    "target_label": "Bab el-Mandeb Strait",
+                    "relation": "depends_on",
+                    "metrics": ["trade_at_risk_v"],
+                },
+            }
+            agent = IterativeGraphEnrichmentAgent(
+                db_url,
+                tenant="maritime-risk",
+                search_results_json=self._fixture(tmpdir),
+                allowed_domains=["zenodo.org"],
+                max_iterations=1,
+                max_frontier=1,
+                max_results_per_query=2,
+            )
+            result = agent.run("discover maritime trade exposure", frontier_items=[frontier])
+            trace = result["run"]["expansion_trace"][0]
+
+            self.assertIn("China", trace["query"])
+            self.assertIn("trade disruption", trace["query"])
+            self.assertEqual(trace["graph_context_used"]["relation"], "depends_on")
+            self.assertEqual(trace["path_context_used"]["source_label"], "CHN")
+            self.assertIn("query_terms", result["run"]["skipped_sources"][0])
+            self.assertIn("CHN", result["run"]["skipped_sources"][0]["query_terms"]["countries"])
+
 
 if __name__ == "__main__":
     unittest.main()

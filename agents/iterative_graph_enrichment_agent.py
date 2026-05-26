@@ -24,6 +24,34 @@ from web_enrichment_agent import StaticSearchProvider, _clean_text, _is_crawl_al
 
 DEEP_GRAPH_REQUIRED_STEPS = ("hazard", "chokepoint", "dependent_country", "risk_metric", "recommended_action")
 
+COUNTRY_ALIASES = {
+    "CHN": "China",
+    "IND": "India",
+    "USA": "United States",
+    "JPN": "Japan",
+    "KOR": "South Korea",
+    "GMB": "Gambia",
+    "IRN": "Iran",
+    "SAU": "Saudi Arabia",
+    "ARE": "United Arab Emirates",
+}
+
+METRIC_TERMS = {
+    "trade_at_risk_v": ["trade at risk", "trade exposure", "trade disruption"],
+    "trade_impacted": ["trade impacted", "trade disruption", "supply chain impact"],
+    "v_canal": ["canal volume", "shipping volume"],
+    "dependency_share": ["dependency share", "trade dependency"],
+    "import exposure": ["import exposure", "trade exposure"],
+}
+
+RELATION_TERMS = {
+    "depends_on": ["depends on", "trade dependency", "maritime chokepoint"],
+    "raises_risk_for": ["risk propagation", "hazard", "maritime disruption"],
+    "dependency_chokepoint": ["chokepoint dependency", "trade route"],
+    "risk_country": ["country exposure", "risk exposure"],
+    "risk_chokepoint": ["chokepoint risk", "maritime risk"],
+}
+
 
 def _json_load(value: str | None, default: Any) -> Any:
     if not value:
@@ -84,6 +112,116 @@ def _extract_terms(text: str) -> dict[str, list[str]]:
         "chokepoints": list(dict.fromkeys(chokepoint_terms)),
         "countries": list(dict.fromkeys(country_terms)),
         "metrics": list(dict.fromkeys(metric_terms)),
+    }
+
+
+def _append_unique(items: list[str], value: Any, *, excluded: list[dict[str, str]] | None = None, reason: str = "low_signal") -> None:
+    if value is None:
+        return
+    text = str(value).strip()
+    if not text:
+        return
+    low_signal = {"proposed", "graph", "node", "edge", "finding", "frontier", "object", "link", "artifact", "source"}
+    normalized = text.lower().replace("_", " ").replace("-", " ")
+    if normalized in low_signal or normalized.startswith("proposed graph"):
+        if excluded is not None:
+            excluded.append({"term": text, "reason": reason})
+        return
+    if text not in items:
+        items.append(text)
+
+
+def _graph_context_query_plan(item: dict[str, Any], objective: str, tenant: str) -> dict[str, Any]:
+    payload = item.get("payload") if isinstance(item.get("payload"), dict) else {}
+    context_text = " ".join(
+        str(value)
+        for value in [
+            item.get("key"),
+            item.get("name"),
+            item.get("artifact_type"),
+            item.get("ontology_type"),
+            item.get("path"),
+            payload.get("label"),
+            payload.get("source_label"),
+            payload.get("target_label"),
+            payload.get("relation"),
+            " ".join(map(str, payload.get("metrics") or [])) if isinstance(payload.get("metrics"), list) else payload.get("metrics"),
+            objective,
+        ]
+        if value
+    )
+    extracted = _extract_terms(context_text)
+    excluded_terms: list[dict[str, str]] = []
+    country_terms: list[str] = []
+    node_terms: list[str] = []
+    relation_terms: list[str] = []
+    metric_terms: list[str] = []
+    domain_terms: list[str] = []
+
+    for term in extracted["countries"]:
+        _append_unique(country_terms, term)
+        _append_unique(country_terms, COUNTRY_ALIASES.get(term))
+    for term in extracted["chokepoints"]:
+        _append_unique(node_terms, term)
+    for term in extracted["hazards"]:
+        _append_unique(node_terms, term)
+    for raw in [item.get("name"), payload.get("source_label"), payload.get("target_label"), payload.get("label")]:
+        if raw:
+            # Keep useful multi-word labels such as "Bab el-Mandeb Strait" and
+            # edge labels such as "CHN depends on Bab el-Mandeb Strait".
+            _append_unique(node_terms, raw, excluded=excluded_terms)
+    relation = str(payload.get("relation") or item.get("relation") or "").strip()
+    _append_unique(relation_terms, relation, excluded=excluded_terms)
+    for term in RELATION_TERMS.get(relation, []):
+        _append_unique(relation_terms, term)
+    raw_metrics = payload.get("metrics") or extracted["metrics"]
+    if not isinstance(raw_metrics, list):
+        raw_metrics = [raw_metrics] if raw_metrics else []
+    for metric in raw_metrics:
+        _append_unique(metric_terms, metric)
+        for term in METRIC_TERMS.get(str(metric), []):
+            _append_unique(metric_terms, term)
+    if tenant == "maritime-risk":
+        for term in ["maritime chokepoint", "shipping disruption", "trade route risk"]:
+            _append_unique(domain_terms, term)
+    objective_terms = []
+    for term in re.split(r"[^A-Za-z0-9_/-]+", objective or ""):
+        if len(term) >= 4:
+            _append_unique(objective_terms, term, excluded=excluded_terms)
+
+    query_terms = {
+        "countries": country_terms[:4],
+        "nodes": node_terms[:6],
+        "relations": relation_terms[:5],
+        "metrics": metric_terms[:6],
+        "domain": domain_terms[:4],
+        "objective": objective_terms[:6],
+    }
+    flat_terms: list[str] = []
+    for group in ("countries", "nodes", "relations", "metrics", "domain", "objective"):
+        for term in query_terms[group]:
+            _append_unique(flat_terms, term, excluded=excluded_terms)
+    query = " ".join(flat_terms[:18]).strip() or f"{item.get('name') or item.get('key')} {objective} graph evidence"
+    return {
+        "query": query,
+        "query_terms": query_terms,
+        "graph_context_used": {
+            "frontier_key": item.get("key"),
+            "frontier_name": item.get("name"),
+            "frontier_type": item.get("artifact_type") or item.get("kind"),
+            "ontology_type": item.get("ontology_type") or payload.get("ontology_type") or payload.get("source_type"),
+            "neighbor_nodes": [value for value in [payload.get("source_label"), payload.get("target_label")] if value],
+            "relation": relation or None,
+            "metrics": raw_metrics,
+        },
+        "path_context_used": {
+            "path_label": item.get("path") or payload.get("path_label"),
+            "source_label": payload.get("source_label"),
+            "target_label": payload.get("target_label"),
+            "relation": relation or None,
+            "metrics": raw_metrics,
+        },
+        "excluded_terms": excluded_terms,
     }
 
 
@@ -191,7 +329,10 @@ class IterativeGraphEnrichmentAgent:
         return frontier
 
     def _query_for_frontier(self, item: dict[str, Any], objective: str) -> str:
-        return f"{item.get('name') or item.get('key')} {objective} graph evidence ontology"
+        return self._query_plan_for_frontier(item, objective)["query"]
+
+    def _query_plan_for_frontier(self, item: dict[str, Any], objective: str) -> dict[str, Any]:
+        return _graph_context_query_plan(item, objective, self.tenant)
 
     def _candidate_elements(self, frontier_item: dict[str, Any], result, summary: str, iteration: int) -> list[dict[str, Any]]:
         terms = _extract_terms(" ".join([result.title, result.snippet, summary]))
@@ -363,20 +504,21 @@ class IterativeGraphEnrichmentAgent:
                 current_frontier = next_frontier[: self.max_frontier]
                 next_frontier = []
                 for item in current_frontier:
-                    query = self._query_for_frontier(item, objective)
+                    query_plan = self._query_plan_for_frontier(item, objective)
+                    query = query_plan["query"]
                     results = self.provider.search(query, self.max_results_per_query)
                     extracted_keys = []
                     pruned = []
                     for result in results:
                         if not result.url or not _is_public_web_url(result.url):
                             reason = "blocked_non_public_or_sensitive_url"
-                            skipped_sources.append({"iteration": iteration, "frontier_key": item.get("key"), "url": result.url, "reason": reason, "search_query": query})
+                            skipped_sources.append({"iteration": iteration, "frontier_key": item.get("key"), "url": result.url, "reason": reason, "search_query": query, "query_terms": query_plan["query_terms"]})
                             pruned.append({"url": result.url, "reason": reason})
                             pruned_count += 1
                             continue
                         allowed, blocked_reason = _is_crawl_allowed(result.url, self.allowed_domains, self.allow_discovered_domains)
                         if not allowed:
-                            skipped_sources.append({"iteration": iteration, "frontier_key": item.get("key"), "url": result.url, "reason": blocked_reason, "search_query": query})
+                            skipped_sources.append({"iteration": iteration, "frontier_key": item.get("key"), "url": result.url, "reason": blocked_reason, "search_query": query, "query_terms": query_plan["query_terms"]})
                             pruned.append({"url": result.url, "reason": blocked_reason})
                             pruned_count += 1
                             continue
@@ -407,6 +549,10 @@ class IterativeGraphEnrichmentAgent:
                             "iteration": iteration,
                             "frontier": item,
                             "query": query,
+                            "query_terms": query_plan["query_terms"],
+                            "graph_context_used": query_plan["graph_context_used"],
+                            "path_context_used": query_plan["path_context_used"],
+                            "excluded_terms": query_plan["excluded_terms"],
                             "result_count": len(results),
                             "extracted_candidates": extracted_keys,
                             "pruned": pruned,
