@@ -845,7 +845,7 @@ a { color: inherit; text-decoration: none; }
    ==================================================== */
 .wb {
   display: grid;
-  grid-template-columns: 340px minmax(0, 1fr) var(--inspector-w);
+  grid-template-columns: 510px minmax(0, 1fr) var(--inspector-w);
   min-height: 0;
   flex: 1;
 }
@@ -889,6 +889,19 @@ a { color: inherit; text-decoration: none; }
   background: var(--bg-2);
 }
 .wb .tabs .tab.active .ct { color: var(--accent); border-color: var(--accent-line); background: var(--bg-1); }
+
+@media (max-width: 1180px) {
+  .wb {
+    grid-template-columns: 1fr;
+    overflow: auto;
+  }
+  .wb .col {
+    min-height: 420px;
+    border-right: none;
+    border-bottom: 1px solid var(--line);
+  }
+  .wb .col:last-child { border-bottom: none; }
+}
 
 /* artifact header in workspace */
 .art-header {
