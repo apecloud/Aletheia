@@ -137,6 +137,30 @@
   }
 
   // ---------- artifact normalizers ----------
+  function compactArtifactText(value, maxLen) {
+    const text = String(value || "").replace(/\s+/g, " ").trim();
+    if (!text) return "";
+    return text.length > maxLen ? text.slice(0, Math.max(0, maxLen - 1)).trimEnd() + "…" : text;
+  }
+  function hostFromUrl(value) {
+    try { return new URL(value).hostname.replace(/^www\./, ""); }
+    catch { return ""; }
+  }
+  function webEnrichmentArtifactTitle(a) {
+    const payload = a?.payload || {};
+    const source = payload.source || {};
+    const target = payload.target_name || payload.target_artifact_key || "ontology artifact";
+    const evidence = payload.proposed_enrichment || source.snippet || source.title || source.url || a?.canonical_key;
+    return `${target} enrichment · ${compactArtifactText(evidence, 72)}`;
+  }
+  function webEnrichmentArtifactDescription(a) {
+    const payload = a?.payload || {};
+    const source = payload.source || {};
+    const sourceLabel = source.title || hostFromUrl(source.url) || source.url || "external source";
+    const retrieved = source.retrieved_at ? String(source.retrieved_at).slice(0, 10) : "";
+    const query = source.search_query ? ` Query: ${compactArtifactText(source.search_query, 100)}` : "";
+    return `Review external evidence from ${sourceLabel}${retrieved ? ` (${retrieved})` : ""}.${query}`;
+  }
   // Convert real artifact (snake_case) → the prototype's shape.
   function normalizeArtifact(a) {
     if (!a) return null;
@@ -151,13 +175,16 @@
       rejected: "rejected",
       draft: "proposed",
     };
+    const isWebEnrichment = String(a.artifact_type || "").toLowerCase() === "webenrichment";
+    const title = isWebEnrichment ? webEnrichmentArtifactTitle(a) : (a.name || a.canonical_key || "Untitled");
+    const desc = isWebEnrichment ? webEnrichmentArtifactDescription(a) : (a.description || "");
     return {
       id: a.canonical_key || a.id,
       canonical_key: a.canonical_key || a.id,
       type: typeMap[a.artifact_type] || a.artifact_type || "ObjectType",
       key: a.name || a.canonical_key || "",
-      title: a.name || a.canonical_key || "Untitled",
-      desc: a.description || "",
+      title,
+      desc,
       status: statusMap[a.status] || a.status || "proposed",
       rawStatus: a.status,
       confidence: typeof a.confidence === "number" ? a.confidence : (a.confidence ? parseFloat(a.confidence) : 0),

@@ -1,0 +1,31 @@
+{
+  "task": 247,
+  "status": "implemented",
+  "summary": "WebEnrichment ontology proposals now render with evidence-specific titles instead of duplicate generic labels.",
+  "files_changed": [
+    "web/review_workbench/api.js",
+    "agents/web_enrichment_agent.py"
+  ],
+  "display_smoke": {
+    "tenant": "maritime-risk",
+    "web_enrichment_count": 2,
+    "duplicate_title_count": 0,
+    "titles": [
+      "Chokepoint enrichment \u00b7 Maritime chokepoint disruption risk data released under CC-BY-4.0; incl\u2026",
+      "Chokepoint enrichment \u00b7 CC-BY-4.0 maritime chokepoint risk data"
+    ]
+  },
+  "validation": [
+    "node --check web/review_workbench/api.js",
+    ".venv/bin/python -m py_compile agents/web_enrichment_agent.py",
+    ".venv/bin/python -m unittest tests/test_web_enrichment.py",
+    ".venv/bin/python -m unittest tests/test_ontology_eval.py",
+    "npx esbuild web/review_workbench/workbench.jsx --bundle --outfile=/tmp/aletheia-workbench-task247.js --format=iife --global-name=AletheiaWorkbench --log-level=warning",
+    "git diff --check"
+  ],
+  "unrelated_dirty_files_left_untouched": [
+    "review_workbench.py",
+    "web/review_workbench/api.js",
+    "web/review_workbench/graph.jsx"
+  ]
+}

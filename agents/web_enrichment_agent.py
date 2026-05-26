@@ -574,7 +574,7 @@ class WebEnrichmentAgent:
                         session,
                         artifact_type="WebEnrichment",
                         natural_key=natural_key,
-                        name=f"Web enrichment for {artifact.name}",
+                        name=self._proposal_artifact_name(artifact, proposal),
                         description=(
                             f"External web source proposes additional context for {artifact.name}. "
                             "Review is required before any ontology update."
@@ -666,6 +666,19 @@ class WebEnrichmentAgent:
             raise
         finally:
             session.close()
+
+    def _proposal_artifact_name(self, artifact: OntologyArtifact, proposal: dict[str, Any]) -> str:
+        source_hint = str(
+            proposal.get("source_summary")
+            or proposal.get("source_title")
+            or proposal.get("source_url")
+            or proposal.get("content_hash")
+            or ""
+        )
+        source_hint = " ".join(source_hint.split())
+        if len(source_hint) > 72:
+            source_hint = source_hint[:71].rstrip() + "..."
+        return f"{artifact.name} enrichment · {source_hint}"
 
 
 def _parse_csv(value: str | None) -> set[str]:
