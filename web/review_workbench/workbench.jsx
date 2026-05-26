@@ -624,6 +624,24 @@ function AgentRunsWorkspace({ tenantId, query, artifacts = [], graphElements = [
             </Panel>
           )}
 
+          {agentTab !== "autopilot" && session?.frontier?.length > 0 && (
+            <Panel eyebrow="Frontier priority" title="Next enrichment seeds" count={`${session.frontier.length} queued`} style={{ marginTop: 16 }}>
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                {session.frontier.slice(0, 8).map((item, index) => (
+                  <div key={`${item.key || item.target_key || index}`} style={{ border: "1px solid var(--line-soft)", background: "var(--bg-2)", padding: "8px 10px" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", gap: 10 }}>
+                      <strong style={{ fontSize: 12 }}>{compactTextWB(item.name || item.target_key || item.key, 80)}</strong>
+                      <span className="chip">{item.source_kind || item.source || "frontier"}</span>
+                    </div>
+                    <div style={{ marginTop: 4, fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--muted)" }}>
+                      priority {item.priority ?? "—"} · {compactTextWB(item.reason || item.path || item.key, 140)}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </Panel>
+          )}
+
           <Panel eyebrow="Agent run log" title={selected ? agentObjectiveWB(selected) : "No run selected"} count={selected?.status || "—"} style={{ marginTop: 16 }}>
             {selected ? (
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>

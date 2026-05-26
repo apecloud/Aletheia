@@ -1842,6 +1842,14 @@ class InstanceRepository:
             "max_frontier": 4,
             "max_results_per_query": 4,
             "visited_frontier_keys": [],
+            "frontier_cooldown_minutes": 360,
+            "frontier_priority_policy": [
+                "new_graph_node_or_edge",
+                "user_question_scope",
+                "reasoning_finding_seed",
+                "graph_coverage",
+            ],
+            "frontier_state": {"last_enriched_at": {}, "selected_count": {}, "coverage_cursor": 0},
             "latest_events": [],
             "canonical_writes": "disabled",
             "formal_graph_writes": "disabled",
@@ -1937,6 +1945,8 @@ class InstanceRepository:
         for key in ("max_iterations", "max_frontier", "max_results_per_query", "rate_limit_per_cycle"):
             if key in body:
                 config[key] = max(1, min(int(body.get(key) or config.get(key) or 1), 50))
+        if "frontier_cooldown_minutes" in body:
+            config["frontier_cooldown_minutes"] = max(0, min(int(body.get("frontier_cooldown_minutes") or 0), 10080))
         if "stop_condition" in body:
             config["stop_condition"] = (body.get("stop_condition") or "").strip() or config.get("stop_condition")
         return config
@@ -1957,19 +1967,80 @@ class InstanceRepository:
             return None
         return datetime.utcfromtimestamp(time.time() + seconds).isoformat()
 
+    def _continuous_frontier_state(self, config):
+        state = config.get("frontier_state") if isinstance(config.get("frontier_state"), dict) else {}
+        state.setdefault("last_enriched_at", {})
+        state.setdefault("selected_count", {})
+        state.setdefault("coverage_cursor", 0)
+        return state
+
+    def _continuous_frontier_cooldown_seconds(self, config):
+        minutes = int((config or {}).get("frontier_cooldown_minutes") or 360)
+        return max(0, min(minutes, 10080)) * 60
+
+    def _continuous_parse_iso_ts(self, value):
+        if not value:
+            return None
+        try:
+            parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+            if parsed.tzinfo is not None:
+                return parsed.timestamp()
+            return (parsed - datetime(1970, 1, 1)).total_seconds()
+        except Exception:
+            return None
+
     def _continuous_frontier_key(self, item):
         return str(item.get("key") or item.get("target_key") or item.get("name") or "").strip()
 
     def _continuous_frontier_name(self, item):
         return str(item.get("name") or item.get("target_key") or item.get("key") or "frontier").strip()
 
+    def _continuous_source_priority(self, source_kind):
+        return {
+            "new_graph_node": 100,
+            "new_graph_edge": 100,
+            "user_question_scope": 80,
+            "reasoning_finding_seed": 60,
+            "graph_coverage": 20,
+        }.get(source_kind or "", 10)
+
+    def _continuous_source_reason(self, source_kind):
+        return {
+            "new_graph_node": "new proposed graph node has not been enriched yet",
+            "new_graph_edge": "new proposed graph edge/path has not been enriched yet",
+            "user_question_scope": "user scoped reasoning question is an active research focus",
+            "reasoning_finding_seed": "reasoning finding suggests a path that needs more evidence or expansion",
+            "graph_coverage": "coverage fallback is rotating through graph items after higher-priority seeds",
+        }.get(source_kind or "", "continuous enrichment frontier")
+
+    def _continuous_normalize_frontier_item(self, item, *, source_kind=None, priority=None, reason=None):
+        item = dict(item or {})
+        if source_kind is None:
+            source_kind = item.get("source_kind")
+        if source_kind is None:
+            kind = str(item.get("kind") or item.get("artifact_type") or "").lower()
+            if kind == "proposed_node":
+                source_kind = "new_graph_node"
+            elif kind == "proposed_edge":
+                source_kind = "new_graph_edge"
+            else:
+                source_kind = "graph_coverage"
+        item["source_kind"] = source_kind
+        if priority is not None:
+            normalized_priority = float(priority)
+        else:
+            normalized_priority = max(float(item.get("priority") or 0), float(self._continuous_source_priority(source_kind)))
+        item["priority"] = normalized_priority
+        item["reason"] = reason or item.get("reason") or self._continuous_source_reason(source_kind)
+        return item
+
     def _hydrate_continuous_frontier_item(self, tenant, item):
         key = self._continuous_frontier_key(item)
         payload = item.get("payload") if isinstance(item.get("payload"), dict) else None
         if payload or not key:
-            return dict(item)
+            return self._continuous_normalize_frontier_item(item)
         if not key.startswith("proposed-graph:"):
-            return dict(item)
+            return self._continuous_normalize_frontier_item(item)
         try:
             with self.metadata_engine_for(tenant).connect() as conn:
                 row = conn.execute(
@@ -1987,9 +2058,9 @@ class InstanceRepository:
                     {"tenant_id": tenant.tenant_id, "element_key": key},
                 ).mappings().first()
         except Exception:
-            return dict(item)
+            return self._continuous_normalize_frontier_item(item)
         if not row:
-            return dict(item)
+            return self._continuous_normalize_frontier_item(item)
         hydrated = dict(item)
         payload = _load_json(row["payload_json"], {})
         deep_profile = payload.get("deep_graph_profile") if isinstance(payload.get("deep_graph_profile"), dict) else {}
@@ -2018,21 +2089,273 @@ class InstanceRepository:
                 "relation": hydrated.get("relation") or payload.get("relation"),
             }
         )
-        return hydrated
+        source_kind = hydrated.get("source_kind")
+        if not source_kind:
+            source_kind = "new_graph_edge" if row["element_type"] == "edge" else "new_graph_node"
+        return self._continuous_normalize_frontier_item(hydrated, source_kind=source_kind)
+
+    def _continuous_row_to_frontier_item(self, row, source_kind):
+        payload = _load_json(row["payload_json"], {})
+        deep_profile = payload.get("deep_graph_profile") if isinstance(payload.get("deep_graph_profile"), dict) else {}
+        item = {
+            "key": row["element_key"],
+            "name": row["name"] or row["element_key"],
+            "artifact_type": f"proposed_{row['element_type']}",
+            "kind": f"proposed_{row['element_type']}",
+            "source": "proposed_graph",
+            "source_kind": source_kind,
+            "source_run_key": row.get("run_key"),
+            "confidence": row.get("confidence"),
+            "depth": int(row.get("iteration") or 0),
+            "evidence_refs": _load_json(row.get("evidence_refs_json"), []),
+            "source_url": row.get("source_url"),
+            "ontology_type": payload.get("ontology_type") or payload.get("source_type") or payload.get("relation"),
+            "payload": payload,
+            "path": deep_profile.get("path_label")
+            or payload.get("path_label")
+            or (
+                f"{payload.get('source_label')} -> {payload.get('relation') or 'related_to'} -> {payload.get('target_label')}"
+                if payload.get("source_label") and payload.get("target_label")
+                else None
+            ),
+            "relation": payload.get("relation"),
+        }
+        return self._continuous_normalize_frontier_item(item, source_kind=source_kind)
+
+    def _continuous_proposed_graph_frontier(self, tenant, config, limit=50):
+        state = self._continuous_frontier_state(config)
+        enriched = state.get("last_enriched_at") or {}
+        try:
+            with self.metadata_engine_for(tenant).connect() as conn:
+                rows = conn.execute(
+                    text(
+                        """
+                        SELECT e.element_key, e.element_type, e.name, e.payload_json,
+                               e.evidence_refs_json, e.source_url, e.confidence,
+                               e.status, e.iteration, r.run_key
+                        FROM aletheia_proposed_graph_elements e
+                        LEFT JOIN aletheia_iterative_graph_enrichment_runs r
+                          ON e.run_id = r.id AND e.project_id = r.project_id
+                        WHERE e.project_id = :tenant_id
+                          AND e.element_type IN ('node', 'edge')
+                          AND e.status IN ('draft', 'needs_more_evidence', 'approved')
+                        ORDER BY e.created_at DESC, e.id DESC
+                        LIMIT :limit
+                        """
+                    ),
+                    {"tenant_id": tenant.tenant_id, "limit": int(limit)},
+                ).mappings().all()
+        except Exception:
+            return []
+        items = []
+        for row in rows:
+            is_new = row["element_key"] not in enriched
+            if is_new:
+                source_kind = "new_graph_edge" if row["element_type"] == "edge" else "new_graph_node"
+            else:
+                source_kind = "graph_coverage"
+            items.append(self._continuous_row_to_frontier_item(row, source_kind))
+        return items
+
+    def _continuous_question_scope_frontier(self, tenant, limit=10):
+        try:
+            with self.metadata_engine_for(tenant).connect() as conn:
+                rows = conn.execute(
+                    text(
+                        """
+                        SELECT canonical_key, question, scope_json, status, updated_at
+                        FROM aletheia_reasoning_tasks
+                        WHERE project_id = :tenant_id
+                          AND status NOT IN ('closed', 'deleted')
+                        ORDER BY updated_at DESC, id DESC
+                        LIMIT :limit
+                        """
+                    ),
+                    {"tenant_id": tenant.tenant_id, "limit": int(limit)},
+                ).mappings().all()
+        except Exception:
+            return []
+        items = []
+        for row in rows:
+            scope = _load_json(row["scope_json"], {})
+            graph_node = scope.get("graph_node") if isinstance(scope.get("graph_node"), dict) else {}
+            graph_edge = scope.get("graph_edge") if isinstance(scope.get("graph_edge"), dict) else {}
+            center_node = scope.get("center_node")
+            center_type = scope.get("center_type") or scope.get("type") or graph_node.get("type")
+            center_id = scope.get("center_id") or scope.get("id") or graph_node.get("id")
+            if center_node and ":" in str(center_node) and not (center_type and center_id):
+                center_type, center_id = str(center_node).split(":", 1)
+            source_label = graph_edge.get("source_label") or graph_edge.get("source")
+            target_label = graph_edge.get("target_label") or graph_edge.get("target")
+            relation = graph_edge.get("relation")
+            name = graph_edge.get("name") or graph_node.get("label") or (f"{center_type}:{center_id}" if center_type and center_id else row["question"])
+            payload = {
+                "label": graph_node.get("label") or name,
+                "source_label": source_label,
+                "target_label": target_label,
+                "relation": relation,
+                "ontology_type": center_type,
+                "question": row["question"],
+            }
+            item = {
+                "key": f"user-question:{row['canonical_key']}",
+                "name": name,
+                "artifact_type": "user_question_scope",
+                "kind": "question_scope",
+                "source": "reasoning_task",
+                "source_kind": "user_question_scope",
+                "related_question_key": row["canonical_key"],
+                "payload": {key: value for key, value in payload.items() if value},
+                "path": graph_edge.get("path_label") or scope.get("path_label"),
+                "ontology_type": center_type,
+            }
+            items.append(self._continuous_normalize_frontier_item(item, source_kind="user_question_scope"))
+        return items
+
+    def _continuous_reasoning_finding_frontier(self, tenant, limit=20):
+        items = []
+        try:
+            with self.metadata_engine_for(tenant).connect() as conn:
+                rows = conn.execute(
+                    text(
+                        """
+                        SELECT f.canonical_key, f.title, f.conclusion, f.confidence,
+                               f.supporting_evidence_json, f.recommended_action_json,
+                               f.status, t.canonical_key AS task_key
+                        FROM aletheia_reasoning_findings f
+                        JOIN aletheia_reasoning_runs r ON f.run_id = r.id
+                        JOIN aletheia_reasoning_tasks t ON r.task_id = t.id
+                        WHERE f.project_id = :tenant_id
+                          AND f.status IN ('draft', 'approved', 'needs_more_evidence', 'reaffirmed')
+                        ORDER BY f.confidence DESC, f.updated_at DESC, f.id DESC
+                        LIMIT :limit
+                        """
+                    ),
+                    {"tenant_id": tenant.tenant_id, "limit": int(limit)},
+                ).mappings().all()
+        except Exception:
+            rows = []
+        for row in rows:
+            evidence = _load_json(row["supporting_evidence_json"], [])
+            action = _load_json(row["recommended_action_json"], {})
+            first_path = evidence[0] if evidence and isinstance(evidence[0], dict) else {}
+            item = {
+                "key": f"reasoning-finding:{row['canonical_key']}",
+                "name": row["title"],
+                "artifact_type": "reasoning_finding_seed",
+                "kind": "finding_seed",
+                "source": "reasoning_finding",
+                "source_kind": "reasoning_finding_seed",
+                "related_finding_key": row["canonical_key"],
+                "related_question_key": row.get("task_key"),
+                "confidence": row.get("confidence"),
+                "payload": {
+                    "label": row["title"],
+                    "summary": row["conclusion"],
+                    "metrics": first_path.get("metrics") or first_path.get("metric"),
+                    "source_label": first_path.get("source_label"),
+                    "target_label": first_path.get("target_label"),
+                    "relation": first_path.get("relation"),
+                    "recommended_action": action,
+                },
+                "path": first_path.get("path_label") or first_path.get("path"),
+                "evidence_refs": evidence,
+            }
+            items.append(self._continuous_normalize_frontier_item(item, source_kind="reasoning_finding_seed"))
+        try:
+            with self.metadata_engine_for(tenant).connect() as conn:
+                rows = conn.execute(
+                    text(
+                        """
+                        SELECT c.canonical_key, c.title, c.summary, c.value_score,
+                               c.evidence_chain_json, c.status, s.session_key
+                        FROM aletheia_autopilot_candidate_findings c
+                        JOIN aletheia_autopilot_sessions s ON c.session_id = s.id
+                        WHERE c.project_id = :tenant_id
+                          AND c.status IN ('draft', 'needs_more_evidence')
+                        ORDER BY c.value_score DESC, c.updated_at DESC, c.id DESC
+                        LIMIT :limit
+                        """
+                    ),
+                    {"tenant_id": tenant.tenant_id, "limit": int(limit)},
+                ).mappings().all()
+        except Exception:
+            rows = []
+        for row in rows:
+            evidence = _load_json(row["evidence_chain_json"], [])
+            first_path = evidence[0] if evidence and isinstance(evidence[0], dict) else {}
+            item = {
+                "key": f"reasoning-finding:{row['canonical_key']}",
+                "name": row["title"],
+                "artifact_type": "reasoning_finding_seed",
+                "kind": "candidate_finding_seed",
+                "source": "autopilot_candidate_finding",
+                "source_kind": "reasoning_finding_seed",
+                "related_finding_key": row["canonical_key"],
+                "related_run": row.get("session_key"),
+                "confidence": row.get("value_score"),
+                "payload": {
+                    "label": row["title"],
+                    "summary": row["summary"],
+                    "metrics": first_path.get("metrics") or first_path.get("metric"),
+                    "source_label": first_path.get("source_label"),
+                    "target_label": first_path.get("target_label"),
+                    "relation": first_path.get("relation"),
+                },
+                "path": first_path.get("path_label") or first_path.get("path"),
+                "evidence_refs": evidence,
+            }
+            items.append(self._continuous_normalize_frontier_item(item, source_kind="reasoning_finding_seed"))
+        return items
+
+    def _continuous_frontier_available(self, item, config, now_ts):
+        key = self._continuous_frontier_key(item)
+        if not key:
+            return False
+        state = self._continuous_frontier_state(config)
+        last_ts = self._continuous_parse_iso_ts((state.get("last_enriched_at") or {}).get(key))
+        if last_ts is None:
+            return True
+        return now_ts - last_ts >= self._continuous_frontier_cooldown_seconds(config)
+
+    def _continuous_frontier_candidates(self, tenant, stored_frontier, config):
+        candidates = []
+        for item in stored_frontier or []:
+            candidates.append(self._hydrate_continuous_frontier_item(tenant, item))
+        candidates.extend(self._continuous_proposed_graph_frontier(tenant, config, limit=75))
+        candidates.extend(self._continuous_question_scope_frontier(tenant, limit=10))
+        candidates.extend(self._continuous_reasoning_finding_frontier(tenant, limit=20))
+        deduped = {}
+        for item in candidates:
+            normalized = self._continuous_normalize_frontier_item(item)
+            key = self._continuous_frontier_key(normalized)
+            if not key:
+                continue
+            existing = deduped.get(key)
+            if existing is None or normalized.get("priority", 0) > existing.get("priority", 0):
+                deduped[key] = normalized
+        return list(deduped.values())
 
     def _continuous_frontier_for_cycle(self, tenant, stored_frontier, config, max_frontier):
-        visited = set(config.get("visited_frontier_keys") or [])
+        now_ts = time.time()
         selected = []
-        for item in stored_frontier or []:
-            key = self._continuous_frontier_key(item)
-            if not key or key in visited:
+        candidates = [self._continuous_normalize_frontier_item(item) for item in self._continuous_frontier_candidates(tenant, stored_frontier, config)]
+        available_candidates = [item for item in candidates if self._continuous_frontier_available(item, config, now_ts)]
+        if not available_candidates:
+            available_candidates = [item for item in candidates if item.get("source_kind") == "graph_coverage"]
+        available_candidates.sort(key=lambda item: (-float(item.get("priority") or 0), int(item.get("depth") or 0), self._continuous_frontier_key(item)))
+        for hydrated in available_candidates:
+            key = self._continuous_frontier_key(hydrated)
+            if not key:
                 continue
-            hydrated = self._hydrate_continuous_frontier_item(tenant, item)
             selected_item = {
                 "key": key,
                 "name": self._continuous_frontier_name(hydrated),
                 "artifact_type": hydrated.get("artifact_type") or hydrated.get("kind") or "frontier_item",
                 "source": hydrated.get("source") or "continuous_frontier",
+                "source_kind": hydrated.get("source_kind") or "graph_coverage",
+                "priority": float(hydrated.get("priority") or self._continuous_source_priority(hydrated.get("source_kind"))),
+                "reason": hydrated.get("reason") or self._continuous_source_reason(hydrated.get("source_kind")),
                 "depth": int(hydrated.get("depth") or 0),
             }
             for field in (
@@ -2045,18 +2368,16 @@ class InstanceRepository:
                 "source_run_key",
                 "source_url",
                 "confidence",
+                "related_finding_key",
+                "related_question_key",
+                "related_run",
             ):
                 if hydrated.get(field) is not None:
                     selected_item[field] = hydrated.get(field)
             selected.append(selected_item)
             if len(selected) >= max_frontier:
                 break
-        if selected:
-            return selected
-        # If a session has exhausted its synthetic seed frontier, let the
-        # agent fall back to ontology artifacts while preserving the next
-        # frontier discovered from proposed graph outputs.
-        return []
+        return selected
 
     def _continuous_next_frontier(self, previous_frontier, result, config):
         visited = set(config.get("visited_frontier_keys") or [])
@@ -2077,6 +2398,7 @@ class InstanceRepository:
                 "name": element.get("name") or key,
                 "artifact_type": f"proposed_{element.get('element_type')}",
                 "source": "proposed_graph",
+                "source_kind": "new_graph_edge" if element.get("element_type") == "edge" else "new_graph_node",
                 "source_run_key": result.get("run", {}).get("run_key"),
                 "confidence": element.get("confidence"),
                 "depth": int(element.get("iteration") or 1),
@@ -2087,6 +2409,7 @@ class InstanceRepository:
                 "path": deep_profile.get("path_label") or payload.get("path_label"),
                 "relation": payload.get("relation"),
             }
+            item = self._continuous_normalize_frontier_item(item, source_kind=item["source_kind"])
             next_frontier.append(item)
             additions.append(item)
             existing.add(key)
@@ -2278,6 +2601,16 @@ class InstanceRepository:
         next_frontier, frontier_additions = self._continuous_next_frontier(stored_frontier, result, config)
         visited = list(dict.fromkeys([*(config.get("visited_frontier_keys") or []), *[self._continuous_frontier_key(item) for item in frontier_items if self._continuous_frontier_key(item)]]))
         config["visited_frontier_keys"] = visited[-500:]
+        frontier_state = self._continuous_frontier_state(config)
+        now_iso = datetime.utcnow().isoformat()
+        for item in frontier_items:
+            key = self._continuous_frontier_key(item)
+            if not key:
+                continue
+            frontier_state["last_enriched_at"][key] = now_iso
+            frontier_state["selected_count"][key] = int(frontier_state["selected_count"].get(key) or 0) + 1
+        frontier_state["coverage_cursor"] = int(frontier_state.get("coverage_cursor") or 0) + len(frontier_items)
+        config["frontier_state"] = frontier_state
         events = []
         graph_changed = bool(proposed_graph)
         if graph_changed:
@@ -2396,6 +2729,22 @@ class InstanceRepository:
                 "new_frontier": frontier_additions,
                 "events": events,
                 "autopilot_session_key": config.get("last_autopilot_session_key"),
+                "frontier_priority_summary": {
+                    "selected": [
+                        {
+                            "key": item.get("key"),
+                            "name": item.get("name"),
+                            "source_kind": item.get("source_kind"),
+                            "priority": item.get("priority"),
+                            "reason": item.get("reason"),
+                            "related_finding_key": item.get("related_finding_key"),
+                            "related_question_key": item.get("related_question_key"),
+                        }
+                        for item in frontier_items
+                    ],
+                    "coverage_cursor": frontier_state.get("coverage_cursor"),
+                    "cooldown_minutes": config.get("frontier_cooldown_minutes"),
+                },
                 "findings": [
                     {
                         "name": e.get("name"),
@@ -4953,6 +5302,7 @@ class ReasoningRepository:
         }
         if scope.get("nonce"):
             inner_scope["nonce"] = scope["nonce"]
+        inner_scope["question"] = question
         return self.create_scoped_task_from_graph(
             tenant,
             {
@@ -5032,6 +5382,7 @@ class ReasoningRepository:
             "evidence_paths": evidence_paths,
             "review_gate": "draft_only",
             "graph_url": payload.get("graph_url"),
+            "question": question,
         }
         prior_findings = self.active_prior_findings(tenant, limit=5)
         if prior_findings:
