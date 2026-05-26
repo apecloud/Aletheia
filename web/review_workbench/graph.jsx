@@ -80,6 +80,7 @@ function GraphExplorer({ data, tenant }) {
   const [showAgentRunsMoved, setShowAgentRunsMoved] = useStateGX(agentRunsRequested);
   const [focusElementKey, setFocusElementKey] = useStateGX(initialParams.get("proposed_key") || "");
   const [initialScopeApplied, setInitialScopeApplied] = useStateGX(false);
+  const [centerSearch, setCenterSearch] = useStateGX(initialParams.get("id") || "");
 
   const typesQ = useApiData("instanceTypes", [tenantId, { includeDraft: true }], { fallback: [] });
   const centerTypes = Array.isArray(typesQ.data) ? typesQ.data : [];
@@ -88,7 +89,7 @@ function GraphExplorer({ data, tenant }) {
   const typesLoaded = typesQ.source !== "loading";
   const candidatesQ = useApiData(
     "instanceSearch",
-    [tenantId, centerType, "", 25, { includeDraft: true }],
+    [tenantId, centerType, centerSearch, 50, { includeDraft: true }],
     { enabled: typesLoaded && !!activeType, fallback: [] }
   );
   const candidates = Array.isArray(candidatesQ.data) ? candidatesQ.data : [];
@@ -118,11 +119,13 @@ function GraphExplorer({ data, tenant }) {
     if (centerTypes.length === 0) {
       if (centerType) setCenterType("");
       if (centerNodeId) setCenterNodeId("");
+      if (centerSearch) setCenterSearch("");
       return;
     }
     if (!centerType || !centerTypes.some(t => t.type === centerType)) {
       setCenterType(centerTypes[0].type);
       setCenterNodeId("");
+      setCenterSearch("");
     }
   }, [tenantId, typesQ.source, JSON.stringify(centerTypeNames)]);
 
@@ -149,7 +152,7 @@ function GraphExplorer({ data, tenant }) {
     } else if (!match) {
       setFocusMessage(`${expectedId} is outside the visible center list; Load full graph will still include it if it exists.`);
     }
-  }, [tenantId, centerType, candidatesQ.source, JSON.stringify(candidates.map(c => c.id))]);
+  }, [tenantId, centerType, centerSearch, candidatesQ.source, JSON.stringify(candidates.map(c => c.id))]);
 
   useEffectGX(() => {
     try {
@@ -287,11 +290,11 @@ function GraphExplorer({ data, tenant }) {
             <div>
               <div className="eyebrow" style={{ marginBottom: 4 }}>Center</div>
               <div style={{ display: "flex", gap: 6 }}>
-                <select className="select" style={{ width: 110 }} value={centerType} onChange={e => { setCenterType(e.target.value); setCenterNodeId(""); setSelected(null); setFocusMessage(""); }}>
+                <select className="select" style={{ width: 110 }} value={centerType} onChange={e => { setCenterType(e.target.value); setCenterNodeId(""); setCenterSearch(""); setSelected(null); setFocusMessage(""); }}>
                   {centerTypes.length === 0 && <option value="">No tenant types</option>}
                   {centerTypes.map(t => <option key={t.type} value={t.type}>{t.label || t.type}{t.approved ? "" : " · draft"}</option>)}
                 </select>
-                <select className="select" value={centerNodeId} onChange={e => setCenterNodeId(e.target.value)} disabled={!centerType || candidates.length === 0}>
+                <select className="select" value={centerNodeId} onChange={e => { setCenterNodeId(e.target.value); setCenterSearch(e.target.value); }} disabled={!centerType || candidates.length === 0}>
                   {candidates.length === 0 && <option value="">No center nodes</option>}
                   {candidates.map(c => {
                     const id = String(c.id || "").split(":").slice(1).join(":");
@@ -299,8 +302,16 @@ function GraphExplorer({ data, tenant }) {
                   })}
                 </select>
               </div>
+              <input
+                className="input"
+                value={centerSearch}
+                onChange={e => { setCenterSearch(e.target.value); setCenterNodeId(e.target.value.trim()); setFocusMessage(""); }}
+                placeholder={centerType === "Country" ? "Search or type ISO3, e.g. CHN" : "Search or type center id"}
+                disabled={!centerType}
+                style={{ marginTop: 6 }}
+              />
               <div style={{ marginTop: 6, fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--muted)" }}>
-                {activeType ? `${activeType.table} · ${activeType.ontology_artifact} · ${activeType.artifact_status || "unknown"}` : "No tenant graph center types for this tenant."}
+                {activeType ? `${activeType.table} · ${activeType.ontology_artifact} · ${activeType.artifact_status || "unknown"} · ${candidates.length} candidate${candidates.length === 1 ? "" : "s"}` : "No tenant graph center types for this tenant."}
               </div>
               <button className="btn ghost" style={{ marginTop: 8, width: "100%" }} disabled={!centerKey || !graph.nodes.some(node => node.id === centerKey)} onClick={focusCenterNode}>
                 Focus center in full graph
@@ -872,6 +883,7 @@ function BigGraph({ data, selected, onSelect, hoverId, setHoverId }) {
         const isNeighbor = neighborIds.has(n.id);
         const isHover = n.id === hoverId;
         const dimmed = focusActive && !isSel && !isNeighbor;
+        const showLabel = isSel;
         const stroke = n.flag ? "var(--rejected)" : (isSel ? "var(--accent)" : isNeighbor ? "var(--accent-dim)" : (n.muted ? "var(--faint)" : typeColors[n.type] || "var(--text-dim)"));
         return (
           <g key={i} onClick={() => onSelect(n)}
@@ -886,20 +898,24 @@ function BigGraph({ data, selected, onSelect, hoverId, setHoverId }) {
                     fill={isSel ? "var(--accent)" : "var(--bg-2)"}
                     stroke={stroke} strokeWidth={isSel ? 2 : 1.4} />
             {isSel && <circle cx={n.x} cy={n.y} r={n.r - 7} fill="var(--bg-1)" />}
-            <text x={n.x} y={n.y + n.r + 14}
-                  textAnchor="middle"
-                  fontSize="11" fontFamily="var(--font-mono)"
-                  fill={isSel ? "var(--accent)" : dimmed ? "var(--dim)" : "var(--text-dim)"}
-                  style={{ pointerEvents: "none" }}>
-              {n.id}
-            </text>
-            <text x={n.x} y={n.y + n.r + 26}
-                  textAnchor="middle"
-                  fontSize="9.5" fontFamily="var(--font-mono)"
-                  fill={dimmed ? "var(--faint)" : "var(--dim)"}
-                  style={{ pointerEvents: "none", letterSpacing: "0.04em" }}>
-              {n.label}
-            </text>
+            {showLabel && (
+              <>
+                <text x={n.x} y={n.y + n.r + 14}
+                      textAnchor="middle"
+                      fontSize="11" fontFamily="var(--font-mono)"
+                      fill="var(--accent)"
+                      style={{ pointerEvents: "none" }}>
+                  {n.id}
+                </text>
+                <text x={n.x} y={n.y + n.r + 26}
+                      textAnchor="middle"
+                      fontSize="9.5" fontFamily="var(--font-mono)"
+                      fill="var(--dim)"
+                      style={{ pointerEvents: "none", letterSpacing: "0.04em" }}>
+                  {n.label}
+                </text>
+              </>
+            )}
           </g>
         );
       })}
