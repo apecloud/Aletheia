@@ -1,0 +1,677 @@
+{
+  "task": 232,
+  "rules": [
+    "remove draft WebEnrichment ontology artifacts and linked web enrichment proposal rows only when key/source/payload contains smoke/test/tmp/validation/taskNNN/example.org/untrusted markers",
+    "remove Autopilot sessions whose session key/objective/creator contains smoke/test/tmp/validation/taskNNN markers; candidate findings/hypotheses cascade with the session",
+    "do not delete proposed graph elements, approved ontology artifacts, formal findings, or continuous/scope sessions without test markers"
+  ],
+  "before": {
+    "draft_web_enrichment": 5,
+    "autopilot_sessions": 40,
+    "candidate_findings": 158,
+    "nonapproved_proposed_graph_elements": 32,
+    "candidate_findings_by_project": {
+      "creditcardfraud": 122,
+      "maritime-risk": 36
+    },
+    "nonapproved_graph_by_type": {
+      "node": 32
+    }
+  },
+  "removed": {
+    "web_enrichment_artifacts": [
+      {
+        "project_id": "maritime-risk",
+        "canonical_key": "webenrichment:object_chokepoint:1335ee8212e3bc49",
+        "name": "Web enrichment for Chokepoint",
+        "status": "draft"
+      },
+      {
+        "project_id": "maritime-risk",
+        "canonical_key": "webenrichment:object_chokepoint:07853c45d2d5f915",
+        "name": "Web enrichment for Chokepoint",
+        "status": "draft"
+      },
+      {
+        "project_id": "maritime-risk",
+        "canonical_key": "webenrichment:object_chokepoint:7cc8d880e94c218c",
+        "name": "Web enrichment for Chokepoint",
+        "status": "draft"
+      }
+    ],
+    "autopilot_sessions": [
+      {
+        "project_id": "creditcardfraud",
+        "session_key": "autopilot:creditcardfraud:task142-playbook-smoke",
+        "objective": "Task142 playbook smoke: fraud pattern discovery",
+        "status": "draft"
+      },
+      {
+        "project_id": "creditcardfraud",
+        "session_key": "autopilot:creditcardfraud:task145-same-env-smoke:1779415104225",
+        "objective": "task145 same-env smoke",
+        "status": "draft"
+      },
+      {
+        "project_id": "creditcardfraud",
+        "session_key": "autopilot:creditcardfraud:task145-fresh-8772-smoke:1779415162579",
+        "objective": "task145 fresh 8772 smoke",
+        "status": "draft"
+      },
+      {
+        "project_id": "creditcardfraud",
+        "session_key": "autopilot:creditcardfraud:task141-ui-smoke-discover-valuable-draft-findings:1779412527347",
+        "objective": "Task141 UI smoke: discover valuable draft findings",
+        "status": "draft"
+      },
+      {
+        "project_id": "creditcardfraud",
+        "session_key": "autopilot:creditcardfraud:task141-ui-smoke-discover-valuable-draft-findings:1779412545571",
+        "objective": "Task141 UI smoke: discover valuable draft findings",
+        "status": "draft"
+      },
+      {
+        "project_id": "creditcardfraud",
+        "session_key": "autopilot:creditcardfraud:task141-ui-smoke-discover-valuable-draft-findings:1779412564113",
+        "objective": "Task141 UI smoke: discover valuable draft findings",
+        "status": "draft"
+      },
+      {
+        "project_id": "creditcardfraud",
+        "session_key": "autopilot:creditcardfraud:task145-smoke-assertion:1779415270411",
+        "objective": "task145 smoke assertion",
+        "status": "draft"
+      },
+      {
+        "project_id": "creditcardfraud",
+        "session_key": "autopilot:creditcardfraud:task146-smoke",
+        "objective": "task146 smoke playbook",
+        "status": "draft"
+      },
+      {
+        "project_id": "creditcardfraud",
+        "session_key": "autopilot:creditcardfraud:task150-smoke-1779419141",
+        "objective": "task150 finding approval smoke",
+        "status": "draft"
+      },
+      {
+        "project_id": "creditcardfraud",
+        "session_key": "autopilot:creditcardfraud:task150-negative-1779419184",
+        "objective": "task150 canonical negative smoke",
+        "status": "draft"
+      },
+      {
+        "project_id": "creditcardfraud",
+        "session_key": "autopilot:creditcardfraud:task151-1779419543",
+        "objective": "task151 validation 1779419543",
+        "status": "draft"
+      },
+      {
+        "project_id": "creditcardfraud",
+        "session_key": "autopilot:creditcardfraud:task151-1779419556",
+        "objective": "task151 validation 1779419556",
+        "status": "draft"
+      },
+      {
+        "project_id": "creditcardfraud",
+        "session_key": "autopilot:creditcardfraud:task151-needs-1779419556",
+        "objective": "task151 needs",
+        "status": "draft"
+      },
+      {
+        "project_id": "creditcardfraud",
+        "session_key": "autopilot:creditcardfraud:task151-reject-1779419556",
+        "objective": "task151 reject",
+        "status": "draft"
+      },
+      {
+        "project_id": "creditcardfraud",
+        "session_key": "autopilot:creditcardfraud:task151-1779419584",
+        "objective": "task151 validation 1779419584",
+        "status": "draft"
+      },
+      {
+        "project_id": "creditcardfraud",
+        "session_key": "autopilot:creditcardfraud:task151-needs-1779419584",
+        "objective": "task151 needs",
+        "status": "draft"
+      },
+      {
+        "project_id": "creditcardfraud",
+        "session_key": "autopilot:creditcardfraud:task151-reject-1779419584",
+        "objective": "task151 reject",
+        "status": "draft"
+      },
+      {
+        "project_id": "creditcardfraud",
+        "session_key": "autopilot:creditcardfraud:task151-extra-superseded-1779419737",
+        "objective": "task151 extra superseded",
+        "status": "draft"
+      },
+      {
+        "project_id": "creditcardfraud",
+        "session_key": "autopilot:creditcardfraud:task151-extra-reaffirm-1779419737",
+        "objective": "task151 extra reaffirm",
+        "status": "draft"
+      },
+      {
+        "project_id": "creditcardfraud",
+        "session_key": "autopilot:creditcardfraud:task154-smoke-1779420504",
+        "objective": "task154 experience smoke",
+        "status": "draft"
+      },
+      {
+        "project_id": "creditcardfraud",
+        "session_key": "autopilot:creditcardfraud:task155-action-1779420848",
+        "objective": "task155 action",
+        "status": "draft"
+      },
+      {
+        "project_id": "creditcardfraud",
+        "session_key": "autopilot:creditcardfraud:task155-stale-1779420848",
+        "objective": "task155 stale",
+        "status": "draft"
+      },
+      {
+        "project_id": "creditcardfraud",
+        "session_key": "autopilot:creditcardfraud:task155-reaffirm-1779420848",
+        "objective": "task155 reaffirm",
+        "status": "draft"
+      },
+      {
+        "project_id": "creditcardfraud",
+        "session_key": "autopilot:creditcardfraud:task155-owner-1779420848",
+        "objective": "task155 owner",
+        "status": "draft"
+      },
+      {
+        "project_id": "creditcardfraud",
+        "session_key": "autopilot:creditcardfraud:task156-smoke-1779422605",
+        "objective": "task156 approve button smoke",
+        "status": "draft"
+      },
+      {
+        "project_id": "creditcardfraud",
+        "session_key": "autopilot:creditcardfraud:task159-empty-note-smoke",
+        "objective": "Discover high-value credit card fraud risk findings",
+        "status": "draft"
+      },
+      {
+        "project_id": "creditcardfraud",
+        "session_key": "autopilot:creditcardfraud:task159-note-and-evidence-smoke",
+        "objective": "Discover high-value credit card fraud risk findings",
+        "status": "draft"
+      },
+      {
+        "project_id": "maritime-risk",
+        "session_key": "autopilot:maritime-risk:task166-smoke",
+        "objective": "Discover graph reasoning findings for maritime chokepoint risk",
+        "status": "draft"
+      },
+      {
+        "project_id": "maritime-risk",
+        "session_key": "autopilot:maritime-risk:task166-smoke-v2",
+        "objective": "Discover graph reasoning findings for maritime chokepoint risk",
+        "status": "draft"
+      },
+      {
+        "project_id": "maritime-risk",
+        "session_key": "autopilot:maritime-risk:task166-validation",
+        "objective": "Discover graph reasoning findings for maritime chokepoint risk",
+        "status": "draft"
+      },
+      {
+        "project_id": "maritime-risk",
+        "session_key": "autopilot:maritime-risk:task167-validation",
+        "objective": "Discover graph reasoning findings for maritime chokepoint risk",
+        "status": "draft"
+      },
+      {
+        "project_id": "maritime-risk",
+        "session_key": "autopilot:maritime-risk:task167-fix-validation",
+        "objective": "Discover graph reasoning findings for maritime chokepoint risk",
+        "status": "draft"
+      },
+      {
+        "project_id": "maritime-risk",
+        "session_key": "autopilot:maritime-risk:task167-fix-validation-v2",
+        "objective": "Discover graph reasoning findings for maritime chokepoint risk",
+        "status": "draft"
+      },
+      {
+        "project_id": "maritime-risk",
+        "session_key": "autopilot:maritime-risk:task167-validation-pass",
+        "objective": "Discover graph reasoning findings for maritime chokepoint risk",
+        "status": "draft"
+      },
+      {
+        "project_id": "maritime-risk",
+        "session_key": "autopilot:maritime-risk:task174-smoke",
+        "objective": "Discover graph reasoning findings for maritime chokepoint risk",
+        "status": "draft"
+      }
+    ],
+    "candidate_findings_via_session_count": 146,
+    "candidate_findings_via_session_samples": [
+      {
+        "project_id": "creditcardfraud",
+        "canonical_key": "candidate:autopilot:autopilot-creditcardfraud-task141-ui-smoke-discover-valuable-draft-findings-1779412564113:missing-pos-entry-mode-has-elevated-fraud-rate",
+        "session_key": "autopilot:creditcardfraud:task141-ui-smoke-discover-valuable-draft-findings:1779412564113",
+        "title": "Missing POS entry mode has elevated fraud rate",
+        "status": "needs_more_evidence"
+      },
+      {
+        "project_id": "creditcardfraud",
+        "canonical_key": "candidate:autopilot:autopilot-creditcardfraud-task142-playbook-smoke:card-not-present-transactions-carry-elevated-fraud-risk",
+        "session_key": "autopilot:creditcardfraud:task142-playbook-smoke",
+        "title": "Card-not-present transactions carry elevated fraud risk",
+        "status": "draft"
+      },
+      {
+        "project_id": "creditcardfraud",
+        "canonical_key": "candidate:autopilot:autopilot-creditcardfraud-task142-playbook-smoke:verification-mismatch-is-a-compact-fraud-risk-signal",
+        "session_key": "autopilot:creditcardfraud:task142-playbook-smoke",
+        "title": "Verification mismatch is a compact fraud-risk signal",
+        "status": "draft"
+      },
+      {
+        "project_id": "creditcardfraud",
+        "canonical_key": "candidate:autopilot:autopilot-creditcardfraud-task142-playbook-smoke:merchant-category-concentration-reveals-high-yield-fraud-review-segments",
+        "session_key": "autopilot:creditcardfraud:task142-playbook-smoke",
+        "title": "Merchant category concentration reveals high-yield fraud review segments",
+        "status": "draft"
+      },
+      {
+        "project_id": "creditcardfraud",
+        "canonical_key": "candidate:autopilot:autopilot-creditcardfraud-task142-playbook-smoke:same-day-duplicate-transaction-clusters-need-multi-swipe-review",
+        "session_key": "autopilot:creditcardfraud:task142-playbook-smoke",
+        "title": "Same-day duplicate transaction clusters need multi-swipe review",
+        "status": "draft"
+      },
+      {
+        "project_id": "creditcardfraud",
+        "canonical_key": "candidate:autopilot:autopilot-creditcardfraud-task142-playbook-smoke:missing-pos-entry-mode-should-be-reviewed-as-a-weak-control-pattern",
+        "session_key": "autopilot:creditcardfraud:task142-playbook-smoke",
+        "title": "Missing POS entry mode should be reviewed as a weak-control pattern",
+        "status": "needs_more_evidence"
+      },
+      {
+        "project_id": "creditcardfraud",
+        "canonical_key": "candidate:autopilot:autopilot-creditcardfraud-task145-same-env-smoke-1779415104225:card-not-present-transactions-carry-elevated-fraud-risk",
+        "session_key": "autopilot:creditcardfraud:task145-same-env-smoke:1779415104225",
+        "title": "Card-not-present transactions carry elevated fraud risk",
+        "status": "draft"
+      },
+      {
+        "project_id": "creditcardfraud",
+        "canonical_key": "candidate:autopilot:autopilot-creditcardfraud-task145-same-env-smoke-1779415104225:missing-pos-entry-mode-should-be-reviewed-as-a-weak-control-pattern",
+        "session_key": "autopilot:creditcardfraud:task145-same-env-smoke:1779415104225",
+        "title": "Missing POS entry mode should be reviewed as a weak-control pattern",
+        "status": "draft"
+      },
+      {
+        "project_id": "creditcardfraud",
+        "canonical_key": "candidate:autopilot:autopilot-creditcardfraud-task145-same-env-smoke-1779415104225:verification-mismatch-is-a-compact-fraud-risk-signal",
+        "session_key": "autopilot:creditcardfraud:task145-same-env-smoke:1779415104225",
+        "title": "Verification mismatch is a compact fraud-risk signal",
+        "status": "draft"
+      },
+      {
+        "project_id": "creditcardfraud",
+        "canonical_key": "candidate:autopilot:autopilot-creditcardfraud-task145-same-env-smoke-1779415104225:merchant-category-concentration-reveals-high-yield-fraud-review-segments",
+        "session_key": "autopilot:creditcardfraud:task145-same-env-smoke:1779415104225",
+        "title": "Merchant category concentration reveals high-yield fraud review segments",
+        "status": "draft"
+      },
+      {
+        "project_id": "creditcardfraud",
+        "canonical_key": "candidate:autopilot:autopilot-creditcardfraud-task145-same-env-smoke-1779415104225:same-day-duplicate-transaction-clusters-need-multi-swipe-review",
+        "session_key": "autopilot:creditcardfraud:task145-same-env-smoke:1779415104225",
+        "title": "Same-day duplicate transaction clusters need multi-swipe review",
+        "status": "draft"
+      },
+      {
+        "project_id": "creditcardfraud",
+        "canonical_key": "candidate:autopilot:autopilot-creditcardfraud-task145-fresh-8772-smoke-1779415162579:card-not-present-transactions-carry-elevated-fraud-risk",
+        "session_key": "autopilot:creditcardfraud:task145-fresh-8772-smoke:1779415162579",
+        "title": "Card-not-present transactions carry elevated fraud risk",
+        "status": "draft"
+      },
+      {
+        "project_id": "creditcardfraud",
+        "canonical_key": "candidate:autopilot:autopilot-creditcardfraud-task145-fresh-8772-smoke-1779415162579:verification-mismatch-is-a-compact-fraud-risk-signal",
+        "session_key": "autopilot:creditcardfraud:task145-fresh-8772-smoke:1779415162579",
+        "title": "Verification mismatch is a compact fraud-risk signal",
+        "status": "draft"
+      },
+      {
+        "project_id": "creditcardfraud",
+        "canonical_key": "candidate:autopilot:autopilot-creditcardfraud-task145-fresh-8772-smoke-1779415162579:missing-pos-entry-mode-should-be-reviewed-as-a-weak-control-pattern",
+        "session_key": "autopilot:creditcardfraud:task145-fresh-8772-smoke:1779415162579",
+        "title": "Missing POS entry mode should be reviewed as a weak-control pattern",
+        "status": "draft"
+      },
+      {
+        "project_id": "creditcardfraud",
+        "canonical_key": "candidate:autopilot:autopilot-creditcardfraud-task145-fresh-8772-smoke-1779415162579:merchant-category-concentration-reveals-high-yield-fraud-review-segments",
+        "session_key": "autopilot:creditcardfraud:task145-fresh-8772-smoke:1779415162579",
+        "title": "Merchant category concentration reveals high-yield fraud review segments",
+        "status": "draft"
+      },
+      {
+        "project_id": "creditcardfraud",
+        "canonical_key": "candidate:autopilot:autopilot-creditcardfraud-task145-fresh-8772-smoke-1779415162579:same-day-duplicate-transaction-clusters-need-multi-swipe-review",
+        "session_key": "autopilot:creditcardfraud:task145-fresh-8772-smoke:1779415162579",
+        "title": "Same-day duplicate transaction clusters need multi-swipe review",
+        "status": "draft"
+      },
+      {
+        "project_id": "creditcardfraud",
+        "canonical_key": "candidate:autopilot:autopilot-creditcardfraud-task145-smoke-assertion-1779415270411:card-not-present-transactions-carry-elevated-fraud-risk",
+        "session_key": "autopilot:creditcardfraud:task145-smoke-assertion:1779415270411",
+        "title": "Card-not-present transactions carry elevated fraud risk",
+        "status": "draft"
+      },
+      {
+        "project_id": "creditcardfraud",
+        "canonical_key": "candidate:autopilot:autopilot-creditcardfraud-task145-smoke-assertion-1779415270411:verification-mismatch-is-a-compact-fraud-risk-signal",
+        "session_key": "autopilot:creditcardfraud:task145-smoke-assertion:1779415270411",
+        "title": "Verification mismatch is a compact fraud-risk signal",
+        "status": "draft"
+      },
+      {
+        "project_id": "creditcardfraud",
+        "canonical_key": "candidate:autopilot:autopilot-creditcardfraud-task145-smoke-assertion-1779415270411:missing-pos-entry-mode-should-be-reviewed-as-a-weak-control-pattern",
+        "session_key": "autopilot:creditcardfraud:task145-smoke-assertion:1779415270411",
+        "title": "Missing POS entry mode should be reviewed as a weak-control pattern",
+        "status": "draft"
+      },
+      {
+        "project_id": "creditcardfraud",
+        "canonical_key": "candidate:autopilot:autopilot-creditcardfraud-task145-smoke-assertion-1779415270411:merchant-category-concentration-reveals-high-yield-fraud-review-segments",
+        "session_key": "autopilot:creditcardfraud:task145-smoke-assertion:1779415270411",
+        "title": "Merchant category concentration reveals high-yield fraud review segments",
+        "status": "draft"
+      }
+    ]
+  },
+  "kept_samples": {
+    "proposed_graph_nonapproved": [
+      {
+        "id": 29,
+        "project_id": "maritime-risk",
+        "element_key": "proposed-graph:maritime-risk:node:988ab1eff4f69811",
+        "element_type": "node",
+        "name": "hazard",
+        "status": "draft"
+      },
+      {
+        "id": 30,
+        "project_id": "maritime-risk",
+        "element_key": "proposed-graph:maritime-risk:node:f65f6f282c9f8b78",
+        "element_type": "node",
+        "name": "Malacca Strait",
+        "status": "draft"
+      },
+      {
+        "id": 37,
+        "project_id": "maritime-risk",
+        "element_key": "proposed-graph:maritime-risk:node:f01d83da10135e00",
+        "element_type": "node",
+        "name": "severity_conflict",
+        "status": "draft"
+      },
+      {
+        "id": 41,
+        "project_id": "maritime-risk",
+        "element_key": "proposed-graph:maritime-risk:node:d7b830f4c46b66d8",
+        "element_type": "node",
+        "name": "USA",
+        "status": "draft"
+      },
+      {
+        "id": 47,
+        "project_id": "maritime-risk",
+        "element_key": "proposed-graph:maritime-risk:node:1fa36b7976db3704",
+        "element_type": "node",
+        "name": "likelihood_geopolitical",
+        "status": "draft"
+      },
+      {
+        "id": 19,
+        "project_id": "maritime-risk",
+        "element_key": "proposed-graph:maritime-risk:node:d348b15eba675047",
+        "element_type": "node",
+        "name": "shipping disruption",
+        "status": "draft"
+      },
+      {
+        "id": 20,
+        "project_id": "maritime-risk",
+        "element_key": "proposed-graph:maritime-risk:node:890d8f61762434fd",
+        "element_type": "node",
+        "name": "sanctions",
+        "status": "draft"
+      },
+      {
+        "id": 61,
+        "project_id": "maritime-risk",
+        "element_key": "proposed-graph:maritime-risk:node:72904afdb187d564",
+        "element_type": "node",
+        "name": "likelihood_geopolitical",
+        "status": "draft"
+      },
+      {
+        "id": 63,
+        "project_id": "maritime-risk",
+        "element_key": "proposed-graph:maritime-risk:node:1a535894516b85ca",
+        "element_type": "node",
+        "name": "Malacca Strait",
+        "status": "draft"
+      },
+      {
+        "id": 72,
+        "project_id": "maritime-risk",
+        "element_key": "proposed-graph:maritime-risk:node:c527162456d686f0",
+        "element_type": "node",
+        "name": "likelihood_conflict",
+        "status": "draft"
+      },
+      {
+        "id": 73,
+        "project_id": "maritime-risk",
+        "element_key": "proposed-graph:maritime-risk:node:94af45137dca98a0",
+        "element_type": "node",
+        "name": "severity_conflict",
+        "status": "draft"
+      },
+      {
+        "id": 77,
+        "project_id": "maritime-risk",
+        "element_key": "proposed-graph:maritime-risk:node:c33a037b49f3c9e5",
+        "element_type": "node",
+        "name": "USA",
+        "status": "draft"
+      }
+    ],
+    "candidate_findings_non_test": [
+      {
+        "project_id": "maritime-risk",
+        "canonical_key": "candidate:autopilot:autopilot-maritime-risk-scope-1779676666880:single-chokepoint-dependency-creates-concentrated-country-exposure",
+        "session_key": "autopilot:maritime-risk:scope:1779676666880",
+        "title": "Single chokepoint dependency creates concentrated country exposure",
+        "status": "draft"
+      },
+      {
+        "project_id": "maritime-risk",
+        "canonical_key": "candidate:autopilot:autopilot-maritime-risk-scope-1779676666880:hazard-adjusted-chokepoint-risk-should-drive-review-priority",
+        "session_key": "autopilot:maritime-risk:scope:1779676666880",
+        "title": "Hazard-adjusted chokepoint risk should drive review priority",
+        "status": "draft"
+      },
+      {
+        "project_id": "maritime-risk",
+        "canonical_key": "candidate:autopilot:autopilot-maritime-risk-scope-1779676666880:bab-el-mandeb-risk-propagation-identifies-countries-for-immediate-review",
+        "session_key": "autopilot:maritime-risk:scope:1779676666880",
+        "title": "Bab el-Mandeb risk propagation identifies countries for immediate review",
+        "status": "draft"
+      },
+      {
+        "project_id": "maritime-risk",
+        "canonical_key": "candidate:autopilot:autopilot-maritime-risk-scope-1779702201563:single-chokepoint-dependency-creates-concentrated-country-exposure",
+        "session_key": "autopilot:maritime-risk:scope:1779702201563",
+        "title": "Single chokepoint dependency creates concentrated country exposure",
+        "status": "draft"
+      },
+      {
+        "project_id": "maritime-risk",
+        "canonical_key": "candidate:autopilot:autopilot-maritime-risk-scope-1779702201563:hazard-adjusted-chokepoint-risk-should-drive-review-priority",
+        "session_key": "autopilot:maritime-risk:scope:1779702201563",
+        "title": "Hazard-adjusted chokepoint risk should drive review priority",
+        "status": "draft"
+      },
+      {
+        "project_id": "maritime-risk",
+        "canonical_key": "candidate:autopilot:autopilot-maritime-risk-scope-1779702201563:bab-el-mandeb-risk-propagation-identifies-countries-for-immediate-review",
+        "session_key": "autopilot:maritime-risk:scope:1779702201563",
+        "title": "Bab el-Mandeb risk propagation identifies countries for immediate review",
+        "status": "draft"
+      },
+      {
+        "project_id": "maritime-risk",
+        "canonical_key": "candidate:autopilot:autopilot-maritime-risk-continuous-enrichment-iterative-graph-maritime-risk-20260525164853-98165:single-chokepoint-dependency-creates-concentrated-country-exposure",
+        "session_key": "autopilot:maritime-risk:continuous-enrichment:iterative-graph-maritime-risk-20260525164853-98165",
+        "title": "Single chokepoint dependency creates concentrated country exposure",
+        "status": "draft"
+      },
+      {
+        "project_id": "maritime-risk",
+        "canonical_key": "candidate:autopilot:autopilot-maritime-risk-continuous-enrichment-iterative-graph-maritime-risk-20260525164853-98165:hazard-adjusted-chokepoint-risk-should-drive-review-priority",
+        "session_key": "autopilot:maritime-risk:continuous-enrichment:iterative-graph-maritime-risk-20260525164853-98165",
+        "title": "Hazard-adjusted chokepoint risk should drive review priority",
+        "status": "draft"
+      },
+      {
+        "project_id": "maritime-risk",
+        "canonical_key": "candidate:autopilot:autopilot-maritime-risk-continuous-enrichment-iterative-graph-maritime-risk-20260525164853-98165:bab-el-mandeb-risk-propagation-identifies-countries-for-immediate-review",
+        "session_key": "autopilot:maritime-risk:continuous-enrichment:iterative-graph-maritime-risk-20260525164853-98165",
+        "title": "Bab el-Mandeb risk propagation identifies countries for immediate review",
+        "status": "draft"
+      },
+      {
+        "project_id": "maritime-risk",
+        "canonical_key": "candidate:autopilot:autopilot-maritime-risk-continuous-enrichment-iterative-graph-maritime-risk-20260525164903-98165:single-chokepoint-dependency-creates-concentrated-country-exposure",
+        "session_key": "autopilot:maritime-risk:continuous-enrichment:iterative-graph-maritime-risk-20260525164903-98165",
+        "title": "Single chokepoint dependency creates concentrated country exposure",
+        "status": "draft"
+      },
+      {
+        "project_id": "maritime-risk",
+        "canonical_key": "candidate:autopilot:autopilot-maritime-risk-continuous-enrichment-iterative-graph-maritime-risk-20260525164903-98165:hazard-adjusted-chokepoint-risk-should-drive-review-priority",
+        "session_key": "autopilot:maritime-risk:continuous-enrichment:iterative-graph-maritime-risk-20260525164903-98165",
+        "title": "Hazard-adjusted chokepoint risk should drive review priority",
+        "status": "draft"
+      },
+      {
+        "project_id": "maritime-risk",
+        "canonical_key": "candidate:autopilot:autopilot-maritime-risk-continuous-enrichment-iterative-graph-maritime-risk-20260525164903-98165:bab-el-mandeb-risk-propagation-identifies-countries-for-immediate-review",
+        "session_key": "autopilot:maritime-risk:continuous-enrichment:iterative-graph-maritime-risk-20260525164903-98165",
+        "title": "Bab el-Mandeb risk propagation identifies countries for immediate review",
+        "status": "draft"
+      }
+    ]
+  },
+  "after": {
+    "ontology_artifacts": [
+      {
+        "project_id": "creditcardfraud",
+        "artifact_type": "link",
+        "status": "approved",
+        "n": 3
+      },
+      {
+        "project_id": "creditcardfraud",
+        "artifact_type": "object",
+        "status": "approved",
+        "n": 4
+      },
+      {
+        "project_id": "default",
+        "artifact_type": "link",
+        "status": "approved",
+        "n": 3
+      },
+      {
+        "project_id": "default",
+        "artifact_type": "object",
+        "status": "approved",
+        "n": 5
+      },
+      {
+        "project_id": "maritime-risk",
+        "artifact_type": "WebEnrichment",
+        "status": "draft",
+        "n": 2
+      },
+      {
+        "project_id": "maritime-risk",
+        "artifact_type": "link",
+        "status": "approved",
+        "n": 7
+      },
+      {
+        "project_id": "maritime-risk",
+        "artifact_type": "object",
+        "status": "approved",
+        "n": 8
+      },
+      {
+        "project_id": "us-iran-war",
+        "artifact_type": "link",
+        "status": "draft",
+        "n": 4
+      },
+      {
+        "project_id": "us-iran-war",
+        "artifact_type": "object",
+        "status": "draft",
+        "n": 6
+      }
+    ],
+    "candidate_findings": [
+      {
+        "project_id": "maritime-risk",
+        "status": "draft",
+        "n": 12
+      }
+    ],
+    "proposed_graph_elements": [
+      {
+        "project_id": "maritime-risk",
+        "element_type": "edge",
+        "status": "approved",
+        "n": 11
+      },
+      {
+        "project_id": "maritime-risk",
+        "element_type": "finding",
+        "status": "approved",
+        "n": 16
+      },
+      {
+        "project_id": "maritime-risk",
+        "element_type": "node",
+        "status": "approved",
+        "n": 86
+      },
+      {
+        "project_id": "maritime-risk",
+        "element_type": "node",
+        "status": "draft",
+        "n": 32
+      }
+    ],
+    "remaining_test_marker_candidate_findings": [],
+    "remaining_test_marker_web_enrichment": []
+  }
+}
