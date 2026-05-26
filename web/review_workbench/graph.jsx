@@ -64,12 +64,16 @@ function GraphExplorer({ data, tenant }) {
     try { return new URLSearchParams(location.search); } catch { return new URLSearchParams(); }
   }, []);
   const tenantId = tenant ? tenant.id : "default";
+  const requestedGraphTab = initialParams.get("graph_tab") || "approved";
+  const agentRunsRequested = requestedGraphTab === "runs";
+  const normalizeGraphTab = (tab) => ["approved", "proposed", "saved"].includes(tab) ? tab : (tab === "runs" ? "proposed" : "approved");
   const [centerType, setCenterType] = useStateGX(initialParams.get("type") || "");
   const [centerNodeId, setCenterNodeId] = useStateGX(initialParams.get("id") || "");
   const [depth, setDepth] = useStateGX(Math.max(1, Math.min(Number(initialParams.get("depth") || 1), 3)));
   const [limit, setLimit] = useStateGX(Math.max(1, Number(initialParams.get("limit") || 200)));
   const [hoverId, setHoverId] = useStateGX(null);
-  const [leftTab, setLeftTab] = useStateGX(initialParams.get("graph_tab") || "approved");
+  const [leftTab, setLeftTab] = useStateGX(normalizeGraphTab(requestedGraphTab));
+  const [showAgentRunsMoved, setShowAgentRunsMoved] = useStateGX(agentRunsRequested);
   const [focusElementKey, setFocusElementKey] = useStateGX(initialParams.get("proposed_key") || "");
 
   const typesQ = useApiData("instanceTypes", [tenantId, { includeDraft: true }], { fallback: [] });
@@ -91,10 +95,10 @@ function GraphExplorer({ data, tenant }) {
     fallback: { sessions: [] },
   });
   const enrichment = enrichmentQ.data || { sessions: [] };
-  const agentRunsQ = useApiData("agentRunsConsole", [tenantId, { limit: 20 }], {
-    fallback: { sessions: [], runs: [] },
-  });
-  const agentRuns = agentRunsQ.data || { sessions: [], runs: [] };
+  const selectGraphTab = (tab) => {
+    setShowAgentRunsMoved(false);
+    setLeftTab(normalizeGraphTab(tab));
+  };
 
   useEffectGX(() => {
     if (typesQ.source === "loading") return;
@@ -189,19 +193,27 @@ function GraphExplorer({ data, tenant }) {
               tenant <span style={{ color: "var(--accent)" }}>{tenant ? tenant.id : "default"}</span> · graph spaces
             </div>
             <div className="side-tabs" style={{ marginTop: 10 }}>
-              <button className={"side-tab" + (leftTab === "approved" ? " active" : "")} onClick={() => setLeftTab("approved")}>
+              <button className={"side-tab" + (leftTab === "approved" ? " active" : "")} onClick={() => selectGraphTab("approved")}>
                 Approved graph <span className="ct">{graph.nodes.length}</span>
               </button>
-              <button className={"side-tab" + (leftTab === "proposed" ? " active" : "")} onClick={() => setLeftTab("proposed")}>
+              <button className={"side-tab" + (leftTab === "proposed" ? " active" : "")} onClick={() => selectGraphTab("proposed")}>
                 Proposed graph <span className="ct">{(proposed.elements || []).length}</span>
               </button>
-              <button className={"side-tab" + (leftTab === "runs" ? " active" : "")} onClick={() => setLeftTab("runs")}>
-                Agent runs <span className="ct">{(agentRuns.runs || []).length}</span>
-              </button>
-              <button className={"side-tab" + (leftTab === "saved" ? " active" : "")} onClick={() => setLeftTab("saved")}>
+              <button className={"side-tab" + (leftTab === "saved" ? " active" : "")} onClick={() => selectGraphTab("saved")}>
                 Saved views <span className="ct">0</span>
               </button>
             </div>
+            {showAgentRunsMoved && (
+              <div style={{ marginTop: 10, border: "1px solid var(--accent-line)", background: "var(--accent-bg)", padding: 10 }}>
+                <div className="eyebrow accent">Automatic runs moved</div>
+                <div style={{ marginTop: 5, fontSize: 12, color: "var(--text-dim)", lineHeight: 1.45 }}>
+                  Crawl, enrichment, and reasoning runs are managed from Workspace.
+                </div>
+                <a className="btn ghost" style={{ marginTop: 8 }} href={`/?screen=workbench&tenant=${encodeURIComponent(tenantId)}&workspace_tab=agents`}>
+                  Open Workspace agents
+                </a>
+              </div>
+            )}
           </div>
 
           {leftTab === "approved" && <>
@@ -272,21 +284,6 @@ function GraphExplorer({ data, tenant }) {
           {leftTab === "proposed" && (
             <div style={{ flex: 1, minHeight: 0, overflow: "auto" }}>
               <ProposedGraphPanel tenantId={tenantId} proposed={proposed} enrichment={enrichment} loading={proposedQ.loading} source={proposedQ.source} focusElementKey={focusElementKey} compact />
-            </div>
-          )}
-
-          {leftTab === "runs" && (
-            <div style={{ flex: 1, minHeight: 0, overflow: "auto" }}>
-              <AgentRunsConsole
-                tenantId={tenantId}
-                data={agentRuns}
-                loading={agentRunsQ.loading}
-                source={agentRunsQ.source}
-                onOpenElement={(key) => {
-                  setFocusElementKey(key);
-                  setLeftTab("proposed");
-                }}
-              />
             </div>
           )}
 
@@ -725,207 +722,6 @@ function ProposedGraphPanel({ tenantId, proposed, enrichment, loading, source, f
   );
 }
 
-function AgentRunsConsole({ tenantId, data, loading, source, onOpenElement }) {
-  const [selectedRunKey, setSelectedRunKey] = useStateGX("");
-  const runs = data?.runs || [];
-  const sessions = data?.sessions || [];
-  const activeRun = runs.find(run => run.run_key === selectedRunKey) || runs[0] || null;
-  useEffectGX(() => {
-    if (!runs.length) {
-      if (selectedRunKey) setSelectedRunKey("");
-      return;
-    }
-    if (!runs.some(run => run.run_key === selectedRunKey)) setSelectedRunKey(runs[0].run_key);
-  }, [JSON.stringify(runs.map(run => run.run_key))]);
-  const countsByKind = runs.reduce((acc, run) => {
-    acc[run.kind] = (acc[run.kind] || 0) + 1;
-    return acc;
-  }, {});
-  const runElements = activeRun?.elements || [];
-  const elementCounts = runElements.reduce((acc, item) => {
-    acc[item.element_type] = (acc[item.element_type] || 0) + 1;
-    return acc;
-  }, {});
-  const findings = runElements.filter(item => /finding/.test(item.element_type || ""));
-  const sources = Array.from(new Set(runElements.map(item => item.source_url).filter(Boolean))).slice(0, 12);
-  const trace = activeRun?.trace || [];
-  const boundary = activeRun?.write_boundary || data?.write_boundary || {};
-  return (
-    <div className="section">
-      <div className="section-head">
-        <span>Agent Runs Console</span>
-        <span className="ct">{loading ? "loading" : `${runs.length} runs`}</span>
-      </div>
-      <div className="section-body">
-        <div style={{ border: "1px solid var(--accent-line)", background: "var(--accent-bg)", padding: 10, marginBottom: 10 }}>
-          <div className="eyebrow accent">Unified run timeline</div>
-          <div style={{ marginTop: 5, fontSize: 12, color: "var(--text-dim)", lineHeight: 1.45 }}>
-            Crawl / web enrichment, graph expansion, and deep reasoning results are shown here in one place.
-          </div>
-          <div style={{ marginTop: 8, display: "flex", gap: 6, flexWrap: "wrap" }}>
-            <span className="pill">web {countsByKind.web_enrichment_crawl || 0}</span>
-            <span className="pill">graph {countsByKind.iterative_graph_enrichment || 0}</span>
-            <span className="pill">reasoning {countsByKind.autopilot_deep_reasoning || 0}</span>
-          </div>
-          {sessions[0] && (
-            <div style={{ marginTop: 8, fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--muted)", lineHeight: 1.45 }}>
-              session {sessions[0].session_key} · {sessions[0].status} · cycles {sessions[0].cycle_count || 0}
-            </div>
-          )}
-        </div>
-
-        <div style={{ display: "grid", gridTemplateColumns: "minmax(180px, 0.8fr) minmax(260px, 1.2fr)", gap: 10 }}>
-          <div style={{ minWidth: 0 }}>
-            <div className="eyebrow" style={{ marginBottom: 8 }}>Runs</div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 6, maxHeight: 360, overflow: "auto" }}>
-              {runs.map(run => (
-                <button key={run.run_key} type="button"
-                        onClick={() => setSelectedRunKey(run.run_key)}
-                        style={{ border: activeRun?.run_key === run.run_key ? "1px solid var(--accent)" : "1px solid var(--line-soft)", background: activeRun?.run_key === run.run_key ? "var(--accent-bg)" : "transparent", padding: 8, textAlign: "left", cursor: "pointer" }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", gap: 6 }}>
-                    <span className="eyebrow accent">{run.kind}</span>
-                    <span className="ct">{run.status}</span>
-                  </div>
-                  <div style={{ color: "var(--text)", fontSize: 12, marginTop: 4 }}>{compactText(run.run_key, 52)}</div>
-                  <div style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--muted)", marginTop: 4 }}>
-                    {run.started_at || "no start time"} · findings {(run.counts || {}).findings || (run.counts || {}).candidate_findings || 0}
-                  </div>
-                </button>
-              ))}
-              {runs.length === 0 && (
-                <div style={{ border: "1px solid var(--line-soft)", padding: 10, fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--muted)" }}>
-                  No agent runs for tenant {tenantId}.
-                </div>
-              )}
-            </div>
-          </div>
-
-          <div style={{ minWidth: 0 }}>
-            {!activeRun ? (
-              <div style={{ border: "1px solid var(--line-soft)", padding: 12, fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--muted)" }}>
-                Select a run to inspect crawl, graph expansion, and reasoning output.
-              </div>
-            ) : (
-              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                <div style={{ border: "1px solid var(--line-soft)", background: "var(--bg-2)", padding: 10 }}>
-                  <div className="eyebrow accent">{activeRun.agent || activeRun.kind}</div>
-                  <div style={{ color: "var(--text)", fontWeight: 600, marginTop: 4 }}>{activeRun.run_key}</div>
-                  <div style={{ color: "var(--text-dim)", fontSize: 12, lineHeight: 1.45, marginTop: 6 }}>{compactText(activeRun.objective, 220)}</div>
-                  <dl className="kv" style={{ marginTop: 10 }}>
-                    <dt>Status</dt><dd>{activeRun.status}</dd>
-                    <dt>Time</dt><dd>{activeRun.started_at || "—"} → {activeRun.finished_at || "running"}</dd>
-                    <dt>Counts</dt><dd>{Object.entries(activeRun.counts || {}).map(([k, v]) => `${k}=${v}`).join(" · ") || "—"}</dd>
-                    <dt>Boundary</dt><dd>{boundary.canonical_write === false ? "canonical disabled" : "canonical disabled"} · {boundary.formal_graph_write === false ? "formal graph disabled" : "formal graph disabled"} · {boundary.target || "review gated"}</dd>
-                  </dl>
-                </div>
-
-                <div style={{ border: "1px solid var(--line-soft)", padding: 10 }}>
-                  <div className="eyebrow" style={{ marginBottom: 8 }}>Frontier</div>
-                  {(activeRun.frontier || []).slice(0, 6).map((item, index) => (
-                    <div key={index} style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--muted)", borderBottom: "1px solid var(--line-soft)", padding: "4px 0" }}>
-                      {item.key || item.target_key || item.kind || "scope"} · {item.name || item.artifact_type || item.type || ""}
-                    </div>
-                  ))}
-                  {(activeRun.frontier || []).length === 0 && <div style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--muted)" }}>No frontier recorded.</div>}
-                </div>
-
-                <div style={{ border: "1px solid var(--line-soft)", padding: 10 }}>
-                  <div className="eyebrow" style={{ marginBottom: 8 }}>Run trace</div>
-                  <div style={{ display: "flex", flexDirection: "column", gap: 8, maxHeight: 260, overflow: "auto" }}>
-                    {trace.slice(0, 10).map((step, index) => (
-                      <div key={index} style={{ border: "1px solid var(--line-soft)", padding: 8, background: "var(--bg-2)" }}>
-                        <div style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--accent)" }}>
-                          {step.query || step.title || step.hypothesis_key || `step ${index + 1}`}
-                        </div>
-                        <div style={{ marginTop: 5, fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--muted)", lineHeight: 1.45 }}>
-                          frontier {step.frontier?.key || step.frontier?.name || step.target || "—"} · results {step.result_count ?? "—"} · extracted {(step.extracted_candidates || []).length || (step.reasoning_task_keys || []).length || 0}
-                        </div>
-                        {(step.pruned || []).length > 0 && (
-                          <div style={{ marginTop: 5, color: "var(--changes)", fontFamily: "var(--font-mono)", fontSize: 10 }}>
-                            skipped {(step.pruned || []).map(item => `${item.reason || "skipped"} ${item.url || ""}`).join(" · ")}
-                          </div>
-                        )}
-                        {step.pruned_reason && (
-                          <div style={{ marginTop: 5, color: "var(--changes)", fontFamily: "var(--font-mono)", fontSize: 10 }}>
-                            pruned: {step.pruned_reason}
-                          </div>
-                        )}
-                      </div>
-                    ))}
-                    {trace.length === 0 && <div style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--muted)" }}>No trace rows recorded.</div>}
-                  </div>
-                </div>
-
-                <div style={{ border: "1px solid var(--line-soft)", padding: 10 }}>
-                  <div className="eyebrow" style={{ marginBottom: 8 }}>Visited / skipped sources</div>
-                  {sources.map(url => (
-                    <div key={url} style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--text-dim)", borderBottom: "1px solid var(--line-soft)", padding: "3px 0" }}>{url}</div>
-                  ))}
-                  {(activeRun.skipped_sources || []).slice(0, 8).map((item, index) => (
-                    <div key={index} style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--changes)", borderBottom: "1px solid var(--line-soft)", padding: "3px 0" }}>
-                      skipped · {item.reason || item.pruned_reason || "policy"} · {item.url || item.hypothesis || ""}
-                    </div>
-                  ))}
-                  {sources.length === 0 && !(activeRun.skipped_sources || []).length && <div style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--muted)" }}>No source audit rows.</div>}
-                </div>
-
-                <div style={{ border: "1px solid var(--line-soft)", padding: 10 }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", gap: 8, marginBottom: 8 }}>
-                    <span className="eyebrow">Results</span>
-                    <span className="ct">{Object.entries(elementCounts).map(([k, v]) => `${k} ${v}`).join(" · ") || "0"}</span>
-                  </div>
-                  {findings.slice(0, 5).map(item => {
-                    const profile = item.payload?.deep_graph_profile || {};
-                    return (
-                      <div key={item.element_key} style={{ border: "1px solid var(--line-soft)", padding: 8, marginBottom: 8, background: "var(--bg-2)" }}>
-                        <div style={{ color: "var(--text)", fontWeight: 600 }}>{item.name}</div>
-                        <div style={{ marginTop: 4, fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--muted)" }}>
-                          {profile.path_label || compactText(item.payload?.conclusion, 140)}
-                        </div>
-                        <div style={{ marginTop: 6, display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
-                          <span className="ct">{item.status}</span>
-                          <span className="ct">{Math.round((item.confidence || 0) * 100)}%</span>
-                          {item.element_type === "finding" && (
-                            <button className="btn xs" onClick={() => onOpenElement(item.element_key)}>Open graph review</button>
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })}
-                  <div style={{ display: "flex", flexDirection: "column", gap: 5, maxHeight: 180, overflow: "auto" }}>
-                    {runElements.slice(0, 60).map(item => (
-                      <div key={item.element_key} style={{ display: "flex", justifyContent: "space-between", gap: 8, fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--muted)", borderTop: "1px solid var(--line-soft)", paddingTop: 5 }}>
-                        <span>{item.element_type} · {compactText(item.name, 52)}</span>
-                        <span style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                          <span>{item.status}</span>
-                          {["node", "edge", "finding"].includes(item.element_type) && (
-                            <button className="btn xs ghost" onClick={() => onOpenElement(item.element_key)}>Review</button>
-                          )}
-                        </span>
-                      </div>
-                    ))}
-                    {runElements.length === 0 && <div style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--muted)" }}>No run results.</div>}
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-        {source === "error" && (
-          <div style={{ marginTop: 8, fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--rejected)" }}>
-            Agent run console API unavailable.
-          </div>
-        )}
-        {(data?.degraded || []).length > 0 && (
-          <div style={{ marginTop: 8, fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--changes)" }}>
-            Degraded: {(data.degraded || []).map(item => `${item.kind}: ${item.reason}`).join(" · ")}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
 function ProposedGraphDetail({ item, reason, setReason, busy, message, onReview }) {
   const payload = item.payload || {};
   const profile = payload.deep_graph_profile || {};
@@ -1084,4 +880,4 @@ function BigGraph({ data, selected, onSelect, hoverId, setHoverId }) {
   );
 }
 
-Object.assign(window, { GraphExplorer, BigGraph, ProposedGraphPanel, AgentRunsConsole, ProposedGraphDetail });
+Object.assign(window, { GraphExplorer, BigGraph, ProposedGraphPanel, ProposedGraphDetail });

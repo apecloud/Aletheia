@@ -1,0 +1,65 @@
+{
+  "task": 219,
+  "title": "Graph IA Cleanup: remove Agent Runs from Graph page",
+  "tenant": "maritime-risk",
+  "status": "passed",
+  "changes": [
+    "removed_graph_agent_runs_tab",
+    "removed_graph_agent_runs_console_rendering",
+    "handled_legacy_graph_tab_runs_with_workspace_link",
+    "updated_workspace_run_links_to_workspace_agent"
+  ],
+  "urls": {
+    "graph_legacy_runs": "http://127.0.0.1:8772/?screen=graph&tenant=maritime-risk&graph_tab=runs",
+    "workspace_agent": "http://127.0.0.1:8772/?screen=workbench&tenant=maritime-risk&workspace_tab=agents&agent_tab=enrichment"
+  },
+  "browser_smoke": {
+    "graph_app_body": {
+      "contains": [
+        "Approved graph",
+        "Proposed graph",
+        "Saved views",
+        "Automatic runs moved",
+        "Open Workspace agents"
+      ],
+      "not_contains": [
+        "Agent runs",
+        "Agent Runs Console",
+        "RUN TRACE",
+        "web_enrichment_crawl"
+      ]
+    },
+    "workspace_agent_app_body": {
+      "contains": [
+        "Auto enriching",
+        "Autopilot reasoning",
+        "Run once",
+        "Full run log"
+      ]
+    }
+  },
+  "api_smoke": {
+    "agent_runs_console_kept": true,
+    "proposed_graph_elements_kept": true
+  },
+  "verification": [
+    "node --check web/review_workbench/api.js",
+    "npx esbuild web/review_workbench/graph.jsx --bundle --outfile=/tmp/graph-task219.js --format=iife --global-name=GraphTask219 --log-level=warning",
+    "npx esbuild web/review_workbench/workbench.jsx --bundle --outfile=/tmp/workbench-task219.js --format=iife --global-name=WorkbenchTask219 --log-level=warning",
+    ".venv/bin/python -m py_compile review_workbench.py agents/iterative_graph_enrichment_agent.py",
+    ".venv/bin/python -m unittest tests/test_iterative_graph_enrichment.py tests/test_ontology_eval.py",
+    "git diff --check"
+  ],
+  "write_boundary": {
+    "backend_agent_runs_console_deleted": false,
+    "canonical_ontology_write": false,
+    "formal_graph_write": false,
+    "proposed_graph_review_behavior_changed": false
+  },
+  "evidence_files": [
+    "/tmp/task219-graph-runs-dom.html",
+    "/tmp/task219-workspace-agent-dom.html",
+    "/tmp/task219-agent-runs-api.json",
+    "/tmp/task219-proposed-api.json"
+  ]
+}

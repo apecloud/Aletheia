@@ -580,7 +580,7 @@ function AgentRunsWorkspace({ tenantId, query }) {
                 {agentTab === "autopilot" ? "Pause / Resume" : (["running", "active", "idle"].includes(String(session?.status || "").toLowerCase()) ? "Pause" : "Resume")}
               </button>
               <a className="btn" href={`/?screen=graph&tenant=${encodeURIComponent(tenantId)}&graph_tab=proposed`}>Open results</a>
-              <a className="btn ghost" href={`/?screen=graph&tenant=${encodeURIComponent(tenantId)}&graph_tab=runs`}>Full run log</a>
+              <a className="btn ghost" href={`/?screen=workbench&tenant=${encodeURIComponent(tenantId)}&workspace_tab=agents&agent_tab=${encodeURIComponent(agentTab)}`}>Full run log</a>
               <a className="btn ghost" href={`/?screen=reasoning&tenant=${encodeURIComponent(tenantId)}`}>Open reasoning</a>
             </div>
             {message && (
@@ -728,7 +728,7 @@ function buildWorkspaceReviewItems({ tenantId, artifacts, graphElements, agentRu
         nextAction: blocked ? "Review evidence gap or rejection reason in Graph" : "Review proposed graph element",
         reviewHref: `/?screen=graph&tenant=${encodeURIComponent(tenantId)}&graph_tab=proposed&proposed_key=${encodeURIComponent(e.element_key || "")}`,
         reviewLabel: "Review in graph",
-        runHref: e.run_key ? `/?screen=graph&tenant=${encodeURIComponent(tenantId)}&graph_tab=runs&run_key=${encodeURIComponent(e.run_key)}` : "",
+        runHref: e.run_key ? `/?screen=workbench&tenant=${encodeURIComponent(tenantId)}&workspace_tab=agents&agent_tab=enrichment&run_key=${encodeURIComponent(e.run_key)}` : "",
         boundary: "proposed graph space; formal graph writes disabled",
       });
     });
@@ -759,7 +759,7 @@ function buildWorkspaceReviewItems({ tenantId, artifacts, graphElements, agentRu
           nextAction: blocked ? "Add evidence or mark as rejected in Reasoning" : "Approve, reject, or request evidence in Reasoning",
           reviewHref: `/?screen=reasoning&tenant=${encodeURIComponent(tenantId)}&active_tab=autopilot`,
           reviewLabel: "Review finding",
-          runHref: `/?screen=graph&tenant=${encodeURIComponent(tenantId)}&graph_tab=runs&run_key=${encodeURIComponent(run.run_key || "")}`,
+          runHref: `/?screen=workbench&tenant=${encodeURIComponent(tenantId)}&workspace_tab=agents&agent_tab=autopilot&run_key=${encodeURIComponent(run.run_key || "")}`,
           boundary: "candidate finding; no automatic approval",
         });
       });
