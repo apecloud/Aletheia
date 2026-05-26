@@ -1,63 +1,214 @@
 # Aletheia
 
-> Unveiling the semantic truth hidden within legacy data.
+> A review-gated ontology, graph, and reasoning workspace for legacy data.
 
-Aletheia is a multi-agent framework that transforms relational databases into business ontologies. It extracts latent semantics from legacy schemas, reconstructs them as typed objects and links in a knowledge graph, and reasons over the result.
+Aletheia turns relational datasets into tenant-scoped ontology artifacts, proposed
+graph facts, and reviewable reasoning findings. The product loop is:
 
-## Architecture
+1. import or connect data
+2. extract ontology candidates and graph facts
+3. enrich with controlled web/search evidence
+4. reason over approved/proposed graph context
+5. route ontology, graph, and finding proposals through human review gates
 
-```
-Source DB (MySQL)  -->  Agent Pipeline  -->  Ontology (PostGIS)  -->  Graph (Nebula)
-                                                                        |
-                                                                  Reasoning Workspace
-```
+The current demo has three main tenants:
 
-### Agents
+- `default`: Northwind demo data
+- `creditcardfraud`: fraud discovery and finding approval workflow
+- `maritime-risk`: chokepoint, country dependency, enrichment, and multi-hop graph reasoning
 
-The pipeline is a sequence of Python agents powered by `litellm` + `instructor` (default model: `gemini/gemini-3.1-pro-preview`).
+## What Is In This Repo
 
-| Phase | Agent | What it does |
-|-------|-------|-------------|
-| Extract | `metadata_scraper_agent` | Scans DDLs, constraints, comments into PostGIS |
-| Extract | `data_profiler_agent` | Profiles distributions to infer semantic types |
-| Extract | `business_context_agent` | Aligns tables with business terminology from `./docs/` |
-| Extract | `data_scraper_agent` | Ingests CSV/JSON/JSONL from URLs or local paths |
-| Enrich | `web_enrichment_agent` | Searches/crawls public web sources to attach draft ontology enrichment evidence |
-| Model | `object_modeler_agent` | Collapses normalized tables into business objects |
-| Model | `link_weaver_agent` | Discovers explicit and implicit relationships |
-| Model | `action_synthesizer_agent` | Maps stored procedures/triggers to safe actions |
-| Validate | `semantic_consistency_agent` | Checks for contradictions, orphans, missing links |
-| Reason | `ontology_reasoning_agent` | Multi-hop graph reasoning over live subgraphs |
+| Path | Purpose |
+| --- | --- |
+| `agents/` | Import, ontology modeling, graph ingestion, web enrichment, and reasoning agents |
+| `config/` | Tenant configuration examples |
+| `datasets/` | Local sample datasets used by demos and smoke tests |
+| `docker/` | Local MySQL, PostGIS, and Nebula Graph compose stack |
+| `docs/` | Business context documents consumed by agents |
+| `evals/` | Ontology evaluation helpers |
+| `reports/` | Generated implementation and validation reports |
+| `scripts/` | Dataset import, bootstrap, and pipeline runner scripts |
+| `tests/` | Unit and integration-style regression tests |
+| `web/review_workbench/` | Browser UI for Workspace, Ontology, Graph, Reasoning, and Settings |
+| `review_workbench.py` | Local API server and metadata/review backend |
+| `query_artifacts.py`, `query_graph.py`, `query_metadata.py` | CLI inspection tools |
 
-Supporting modules: `graph_db_client` (Nebula client), `ontology_artifacts` (artifact schema), `tenant_registry` (multi-tenant routing), `hf_dataset_scraper` (HuggingFace dataset loader).
+## Core Concepts
 
-### Optional Web Enrichment During Ingestion
+| Concept | Meaning |
+| --- | --- |
+| Tenant | Isolated namespace, metadata DB routing, source DB routing, and graph space |
+| Ontology artifact | Object/link/action/property candidate or approved ontology element |
+| Proposed graph element | Draft graph node, edge, or graph-level finding with provenance |
+| Finding | Reviewable reasoning conclusion with evidence and action context |
+| Work Queue | Workspace tab for human review of ontology, graph, and finding proposals |
+| Agent | Workspace tab for automatic enrichment and reasoning agent settings/history |
+| Review gate | The owning approval API for ontology, graph proposals, or findings |
 
-Web enrichment can be run after a dataset import to collect outside context for
-current ontology candidates. It is deliberately draft-only:
+Important boundary: automatic agents may create draft/proposed objects, but they
+do not bypass review gates. Canonical ontology writes, formal graph writes, and
+finding approvals remain separately controlled.
 
-- writes only `WebEnrichment` draft artifacts plus `web_source` evidence
-- records query, URL, retrieval time, summary, confidence, robots/license risk,
-  and field-level provenance
-- never approves ontology artifacts and never writes canonical graph state
-- blocks localhost/private-network URLs, secret-bearing URLs, and crawling
-  outside the configured domain policy
+## Install Smoke Test
 
-Deterministic/offline fixture mode is the recommended CI path:
+Use this path first on a new machine. It installs dependencies and runs tests
+that do not require Docker databases or an LLM API key.
+
+### 1. Create a clean Python environment
 
 ```bash
-.venv/bin/python agents/web_enrichment_agent.py \
+python3.11 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+```
+
+If `python3.11` is not available, use any Python 3.11+ interpreter:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+```
+
+### 2. Install dependencies
+
+```bash
+pip install -r requirements.txt
+```
+
+### 3. Run the fast validation suite
+
+```bash
+python -m py_compile review_workbench.py agents/iterative_graph_enrichment_agent.py agents/web_enrichment_agent.py
+python -m unittest \
+  tests/test_ontology_eval.py \
+  tests/test_web_enrichment.py \
+  tests/test_iterative_graph_enrichment.py \
+  tests/test_continuous_enrichment_frontier.py \
+  tests/test_reasoning_deep_graph.py \
+  tests/test_us_iran_war_import.py
+```
+
+### 4. Check frontend bundles
+
+The repo does not require a checked-in `node_modules` directory. Use `npx` for
+one-off bundle checks:
+
+```bash
+node --check web/review_workbench/api.js
+npx esbuild web/review_workbench/workbench.jsx --bundle --outfile=/tmp/aletheia-workbench.js --format=iife --global-name=AletheiaWorkbench --log-level=warning
+npx esbuild web/review_workbench/graph.jsx --bundle --outfile=/tmp/aletheia-graph.js --format=iife --global-name=AletheiaGraph --log-level=warning
+npx esbuild web/review_workbench/reasoning.jsx --bundle --outfile=/tmp/aletheia-reasoning.js --format=iife --global-name=AletheiaReasoning --log-level=warning
+```
+
+## Full Local Demo
+
+This path starts the local databases and launches the browser workspace.
+
+### 1. Start infrastructure
+
+```bash
+docker compose -f docker/docker-compose.yml up -d
+```
+
+This starts:
+
+- MySQL 8.0 on `127.0.0.1:3306`
+- PostGIS 15 on `127.0.0.1:5432`
+- Nebula Graph 3.6 on `127.0.0.1:9669`
+
+### 2. Configure optional LLM access
+
+LLM-backed modeling and reasoning scripts use LiteLLM. Set one API key before
+running those scripts:
+
+```bash
+export GEMINI_API_KEY="your-key"
+# or
+export OPENAI_API_KEY="your-key"
+```
+
+The deterministic tests and most review UI smoke tests do not require an API key.
+
+### 3. Bootstrap demo metadata
+
+```bash
+source .venv/bin/activate
+python scripts/bootstrap_demo_environment.py
+```
+
+The bootstrap creates metadata/review tables, registers demo tenants, and seeds
+repeatable ontology artifacts for the local review server.
+
+### 4. Start the review server
+
+```bash
+python review_workbench.py --host 127.0.0.1 --port 8772 --ensure-schema
+```
+
+Open <http://127.0.0.1:8772>.
+
+Useful direct links:
+
+- Workspace: <http://127.0.0.1:8772/?screen=workbench&tenant=maritime-risk>
+- Workspace Work Queue: <http://127.0.0.1:8772/?screen=workbench&tenant=maritime-risk&workspace_tab=workqueue>
+- Workspace Agent settings/history: <http://127.0.0.1:8772/?screen=workbench&tenant=maritime-risk&workspace_tab=agents>
+- Ontology: <http://127.0.0.1:8772/?screen=ontology&tenant=maritime-risk>
+- Graph: <http://127.0.0.1:8772/?screen=graph&tenant=maritime-risk>
+- Proposed graph review: <http://127.0.0.1:8772/?screen=graph&tenant=maritime-risk&graph_tab=proposed>
+- Reasoning: <http://127.0.0.1:8772/?screen=reasoning&tenant=maritime-risk>
+- Settings: <http://127.0.0.1:8772/?screen=settings&tenant=maritime-risk>
+
+## Data Import And Enrichment
+
+### Relational pipeline
+
+```bash
+./scripts/load_complex_ecommerce_dataset.sh
+./scripts/run_metadata_scraper.sh
+./scripts/run_data_profiler.sh
+./scripts/run_business_context.sh
+./scripts/run_design_modeling.sh
+./scripts/run_action_synthesizer.sh
+./scripts/run_graph_ingestion.sh all
+./scripts/run_semantic_consistency.sh
+./scripts/run_ontology_reasoning.sh
+```
+
+### Maritime-risk dataset
+
+```bash
+python scripts/import_maritime_risk_dataset.py --tenant maritime-risk
+```
+
+### Web enrichment
+
+Web enrichment collects external evidence for ontology candidates. It is
+draft-only and review-gated:
+
+- writes `WebEnrichment` draft artifacts and `web_source` evidence
+- records query, URL, retrieval time, summary, confidence, robots/license risk,
+  and field-level provenance
+- blocks localhost/private-network URLs, secret-bearing URLs, and domains outside
+  the allowlist
+- never auto-approves ontology artifacts and never writes the formal graph
+
+Offline fixture mode is the recommended CI path:
+
+```bash
+python agents/web_enrichment_agent.py \
   --tenant maritime-risk \
   --artifact object:chokepoint \
-  --search-results-json reports/web-enrichment-fixture.json \
+  --search-results-json datasets/maritime_web_enrichment_fixture.json \
   --allowed-domain zenodo.org \
   --json
 ```
 
-Live search must be explicitly enabled and should stay bounded:
+Live search must be explicitly enabled and bounded:
 
 ```bash
-.venv/bin/python agents/web_enrichment_agent.py \
+python agents/web_enrichment_agent.py \
   --tenant maritime-risk \
   --artifact object:chokepoint \
   --enable-live-search \
@@ -67,129 +218,60 @@ Live search must be explicitly enabled and should stay bounded:
   --max-crawl-pages 1
 ```
 
-`data_scraper_agent.py` also accepts `--enrich-web` with the same safety
-options, so ingestion can import a CSV/JSON dataset and then create reviewable
-web enrichment proposals in the same run.
+## Test Case Map
 
-## Quick Start
+| Test file | What it protects |
+| --- | --- |
+| `tests/test_ontology_eval.py` | Required/optional ontology evaluation behavior |
+| `tests/test_web_enrichment.py` | Web enrichment safety, provenance, and draft-only boundaries |
+| `tests/test_iterative_graph_enrichment.py` | Proposed graph expansion, evidence refs, and no canonical writes |
+| `tests/test_continuous_enrichment_frontier.py` | Enrich agent frontier priority, cooldown, and graph coverage fallback |
+| `tests/test_reasoning_deep_graph.py` | Multi-hop reasoning finding shape and evidence path requirements |
+| `tests/test_us_iran_war_import.py` | US-Iran impact dataset import fixtures and graph-reasoning inputs |
 
-### Prerequisites
-
-- Python 3.11+
-- Docker (for databases)
-- Gemini API key
-
-### 1. Start infrastructure
-
-```bash
-docker compose -f docker/docker-compose.yml up -d
-export GEMINI_API_KEY="your-key"
-```
-
-This starts MySQL 8.0 (source data), PostGIS 15 (ontology store), and Nebula Graph 3.6 (knowledge graph).
-
-### 2. Install dependencies
+Run all current tests:
 
 ```bash
-python -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
+python -m unittest discover -s tests -p 'test_*.py'
 ```
 
-### 3. Run the pipeline
+## CLI Inspection
 
 ```bash
-# Load test data (Northwind/TPC-H style)
-./scripts/load_complex_ecommerce_dataset.sh
-
-# Extract
-./scripts/run_metadata_scraper.sh
-./scripts/run_data_profiler.sh
-./scripts/run_business_context.sh
-
-# Model
-./scripts/run_design_modeling.sh
-./scripts/run_action_synthesizer.sh
-
-# Ingest into graph
-./scripts/run_graph_ingestion.sh all
-
-# Validate
-./scripts/run_semantic_consistency.sh
-
-# Reason
-./scripts/run_ontology_reasoning.sh
+python query_metadata.py --all
+python query_artifacts.py
+python query_graph.py
 ```
 
-### 4. Inspect results
+## Multi-Tenant Configuration
+
+Tenants are loaded from metadata and can be initialized from
+`config/tenants.example.json`. The local demo primarily uses:
+
+- `default`
+- `creditcardfraud`
+- `maritime-risk`
+
+Common override environment variables:
 
 ```bash
-cat run_reasoning_result.md                 # reasoning output
-.venv/bin/python query_metadata.py --all    # ontology in PostGIS
-.venv/bin/python query_artifacts.py         # artifact status
-.venv/bin/python query_graph.py             # graph queries
+export ALETHEIA_MYSQL_DB="tenant_raw_data"
+export ALETHEIA_PG_DB="aletheia_ontology"
+export ALETHEIA_GRAPH_SPACE="tenant_graph_space"
 ```
 
-See [EXAMPLE_REASONING_RESULT.md](./EXAMPLE_REASONING_RESULT.md) for a pre-computed sample.
+## Troubleshooting
 
-## Multi-Tenant Support
-
-Aletheia isolates tenants across source databases, ontology schemas, and graph spaces. Configure tenants in `config/tenants.example.json` or override per-run with environment variables:
-
-```bash
-export ALETHEIA_MYSQL_DB="tenant_b_raw_data"
-export ALETHEIA_PG_DB="tenant_b_ontology"
-export ALETHEIA_GRAPH_SPACE="tenant_b_graph_space"
-```
-
-## Review Workbench
-
-A browser-based workspace for ontology review and reasoning.
-
-```bash
-.venv/bin/python review_workbench.py --host 127.0.0.1 --port 8765
-```
-
-Open <http://127.0.0.1:8765>. The workbench connects to PostGIS via `ALETHEIA_PG_URL` or `ALETHEIA_PG_DB` and to the source database via `ALETHEIA_MYSQL_URL` or `ALETHEIA_MYSQL_DB`.
-
-Views:
-
-| Path | Purpose |
-|------|---------|
-| `/` | Reasoning workspace -- ontology-driven question/evidence/conclusion workflow |
-| `/ontology.html` | Browse and review ontology artifacts (objects, links, actions) |
-| `/instances.html` | Explore live instance data through approved ontology |
-| `/graph.html` | Interactive graph explorer with subgraph navigation |
-| `/quality.html` | Data quality and consistency checks |
-| `/reasoning.html` | Standalone reasoning session view |
-| `/settings.html` | Runtime configuration and tenant management |
-
-For a fresh database, run the demo metadata bootstrap before starting the server:
-
-```bash
-.venv/bin/python scripts/bootstrap_demo_environment.py
-.venv/bin/python review_workbench.py --host 127.0.0.1 --port 8772 --ensure-schema
-```
-
-The bootstrap creates/migrates the metadata tables, registers demo tenants, seeds
-the default Northwind ontology artifacts, and makes `creditcardfraud` visible for
-Autopilot review. `--ensure-schema` remains useful on server startup as a final
-guard, but it does not seed demo tenants or artifacts by itself.
-
-## Project Layout
-
-```
-agents/          LLM agent implementations
-config/          Tenant configuration
-datasets/        Sample/test datasets
-docker/          docker-compose for MySQL, PostGIS, Nebula
-docs/            Business context documents for agents
-evals/           Ontology evaluation suite
-reports/         Generated reports
-scripts/         Pipeline runner scripts
-tests/           Test suite
-web/             Review workbench frontend
-```
+- Missing `requirements.txt`: use the top-level `requirements.txt`, not the old
+  split files. The split `requirements_*.txt` files are retained only for legacy
+  agent-specific installs.
+- `ERR_CONNECTION_REFUSED`: ensure `review_workbench.py` is running on the port
+  you opened, usually `8772`.
+- Empty demo pages on a fresh DB: run `python scripts/bootstrap_demo_environment.py`
+  and restart the server with `--ensure-schema`.
+- Docker ports already in use: either stop the conflicting local service or set
+  explicit `ALETHEIA_MYSQL_URL` / `ALETHEIA_PG_URL` values.
 
 ## License
 
-Apache 2.0 -- see `LICENSE`.
+Apache 2.0. See `LICENSE`.
