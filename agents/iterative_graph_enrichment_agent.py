@@ -202,6 +202,18 @@ def _graph_context_query_plan(item: dict[str, Any], objective: str, tenant: str)
         for term in query_terms[group]:
             _append_unique(flat_terms, term, excluded=excluded_terms)
     query = " ".join(flat_terms[:18]).strip() or f"{item.get('name') or item.get('key')} {objective} graph evidence"
+    derived_path_label = item.get("path") or payload.get("path_label")
+    if not derived_path_label and payload.get("source_label") and payload.get("target_label"):
+        metric_suffix = f" -> {', '.join(map(str, raw_metrics))}" if raw_metrics else ""
+        derived_path_label = f"{payload.get('source_label')} -> {relation or 'related_to'} -> {payload.get('target_label')}{metric_suffix}"
+    has_path_context = bool(derived_path_label)
+    has_structured_context = bool(
+        payload.get("source_label")
+        or payload.get("target_label")
+        or relation
+        or raw_metrics
+    )
+    fallback_reason = None if has_path_context or has_structured_context else "node_or_type_only_no_path_context"
     return {
         "query": query,
         "query_terms": query_terms,
@@ -213,13 +225,15 @@ def _graph_context_query_plan(item: dict[str, Any], objective: str, tenant: str)
             "neighbor_nodes": [value for value in [payload.get("source_label"), payload.get("target_label")] if value],
             "relation": relation or None,
             "metrics": raw_metrics,
+            "fallback_reason": fallback_reason,
         },
         "path_context_used": {
-            "path_label": item.get("path") or payload.get("path_label"),
+            "path_label": derived_path_label,
             "source_label": payload.get("source_label"),
             "target_label": payload.get("target_label"),
             "relation": relation or None,
             "metrics": raw_metrics,
+            "fallback_reason": fallback_reason,
         },
         "excluded_terms": excluded_terms,
     }

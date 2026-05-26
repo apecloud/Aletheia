@@ -60,5 +60,37 @@
     ".venv/bin/python -m unittest tests/test_ontology_eval.py",
     "node --check web/review_workbench/api.js",
     "npx esbuild web/review_workbench/workbench.jsx --bundle --outfile=/tmp/workbench-task228.js --format=iife --global-name=WorkbenchTask228 --log-level=warning"
-  ]
+  ],
+  "fix_after_task229_fail": {
+    "reason": "continuous frontier selection was dropping payload/path/relation fields before invoking the agent",
+    "fix": "hydrate proposed-graph frontier items from aletheia_proposed_graph_elements and preserve payload/path/relation/ontology_type/evidence_refs/source_run_key/source_url/confidence",
+    "regression_run_key": "iterative-graph:maritime-risk:20260526030654:13746",
+    "regression_query": "CHN China Bab el-Mandeb Strait CHN depends on Bab el-Mandeb Strait depends_on depends on trade dependency maritime chokepoint trade_at_risk_v trade at risk trade exposure trade disruption trade_impacted trade impacted shipping disruption trade route risk Regression enrich",
+    "graph_context_used": {
+      "frontier_key": "proposed-graph:maritime-risk:edge:071ed2b5fe353297",
+      "frontier_name": "CHN depends on Bab el-Mandeb Strait",
+      "frontier_type": "proposed_edge",
+      "neighbor_nodes": [
+        "CHN",
+        "Bab el-Mandeb Strait"
+      ],
+      "relation": "depends_on",
+      "metrics": [
+        "trade_at_risk_v",
+        "trade_impacted"
+      ],
+      "fallback_reason": null
+    },
+    "path_context_used": {
+      "path_label": "CHN -> depends_on -> Bab el-Mandeb Strait",
+      "source_label": "CHN",
+      "target_label": "Bab el-Mandeb Strait",
+      "relation": "depends_on",
+      "metrics": [
+        "trade_at_risk_v",
+        "trade_impacted"
+      ],
+      "fallback_reason": null
+    }
+  }
 }

@@ -1963,20 +1963,92 @@ class InstanceRepository:
     def _continuous_frontier_name(self, item):
         return str(item.get("name") or item.get("target_key") or item.get("key") or "frontier").strip()
 
-    def _continuous_frontier_for_cycle(self, stored_frontier, config, max_frontier):
+    def _hydrate_continuous_frontier_item(self, tenant, item):
+        key = self._continuous_frontier_key(item)
+        payload = item.get("payload") if isinstance(item.get("payload"), dict) else None
+        if payload or not key:
+            return dict(item)
+        if not key.startswith("proposed-graph:"):
+            return dict(item)
+        try:
+            with self.metadata_engine_for(tenant).connect() as conn:
+                row = conn.execute(
+                    text(
+                        """
+                        SELECT e.element_key, e.element_type, e.name, e.payload_json,
+                               e.evidence_refs_json, e.source_url, e.confidence,
+                               e.status, e.iteration, r.run_key
+                        FROM aletheia_proposed_graph_elements e
+                        LEFT JOIN aletheia_iterative_graph_enrichment_runs r
+                          ON e.run_id = r.id AND e.project_id = r.project_id
+                        WHERE e.project_id = :tenant_id AND e.element_key = :element_key
+                        """
+                    ),
+                    {"tenant_id": tenant.tenant_id, "element_key": key},
+                ).mappings().first()
+        except Exception:
+            return dict(item)
+        if not row:
+            return dict(item)
+        hydrated = dict(item)
+        payload = _load_json(row["payload_json"], {})
+        deep_profile = payload.get("deep_graph_profile") if isinstance(payload.get("deep_graph_profile"), dict) else {}
+        hydrated.update(
+            {
+                "key": row["element_key"],
+                "name": row["name"] or hydrated.get("name") or row["element_key"],
+                "artifact_type": f"proposed_{row['element_type']}",
+                "kind": f"proposed_{row['element_type']}",
+                "source": hydrated.get("source") or "proposed_graph",
+                "source_run_key": hydrated.get("source_run_key") or row["run_key"],
+                "confidence": hydrated.get("confidence") if hydrated.get("confidence") is not None else row["confidence"],
+                "depth": int(hydrated.get("depth") or row["iteration"] or 0),
+                "evidence_refs": hydrated.get("evidence_refs") or _load_json(row["evidence_refs_json"], []),
+                "source_url": hydrated.get("source_url") or row["source_url"],
+                "ontology_type": hydrated.get("ontology_type") or payload.get("ontology_type") or payload.get("source_type") or payload.get("relation"),
+                "payload": payload,
+                "path": hydrated.get("path")
+                or deep_profile.get("path_label")
+                or payload.get("path_label")
+                or (
+                    f"{payload.get('source_label')} -> {payload.get('relation') or 'related_to'} -> {payload.get('target_label')}"
+                    if payload.get("source_label") and payload.get("target_label")
+                    else None
+                ),
+                "relation": hydrated.get("relation") or payload.get("relation"),
+            }
+        )
+        return hydrated
+
+    def _continuous_frontier_for_cycle(self, tenant, stored_frontier, config, max_frontier):
         visited = set(config.get("visited_frontier_keys") or [])
         selected = []
         for item in stored_frontier or []:
             key = self._continuous_frontier_key(item)
             if not key or key in visited:
                 continue
-            selected.append({
+            hydrated = self._hydrate_continuous_frontier_item(tenant, item)
+            selected_item = {
                 "key": key,
-                "name": self._continuous_frontier_name(item),
-                "artifact_type": item.get("artifact_type") or item.get("kind") or "frontier_item",
-                "source": item.get("source") or "continuous_frontier",
-                "depth": int(item.get("depth") or 0),
-            })
+                "name": self._continuous_frontier_name(hydrated),
+                "artifact_type": hydrated.get("artifact_type") or hydrated.get("kind") or "frontier_item",
+                "source": hydrated.get("source") or "continuous_frontier",
+                "depth": int(hydrated.get("depth") or 0),
+            }
+            for field in (
+                "kind",
+                "payload",
+                "path",
+                "relation",
+                "ontology_type",
+                "evidence_refs",
+                "source_run_key",
+                "source_url",
+                "confidence",
+            ):
+                if hydrated.get(field) is not None:
+                    selected_item[field] = hydrated.get(field)
+            selected.append(selected_item)
             if len(selected) >= max_frontier:
                 break
         if selected:
@@ -2169,7 +2241,7 @@ class InstanceRepository:
         allowed_domains = config.get("allowed_domains") or ["zenodo.org"]
         max_frontier = int(config.get("max_frontier") or config.get("rate_limit_per_cycle") or 4)
         stored_frontier = _load_json(row["frontier_json"], [])
-        frontier_items = self._continuous_frontier_for_cycle(stored_frontier, config, max_frontier)
+        frontier_items = self._continuous_frontier_for_cycle(tenant, stored_frontier, config, max_frontier)
         fixture_path = Path("/tmp") / f"aletheia-continuous-{_slug(session_key)}-{int(time.time())}.json"
         fixture_path.write_text(_json_dump(body.get("search_results") or self._continuous_source_fixture(session_key)), encoding="utf-8")
         objective = body.get("objective") or row["objective"]
