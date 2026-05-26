@@ -274,12 +274,13 @@
       return data;
     },
 
-    async graphContext(tenant, { type, id, depth = 1, limit = 200 } = {}) {
+    async graphContext(tenant, { type, id, depth = 1, limit = 200, view = "" } = {}) {
       const data = await fetchJson(withTenantQs("/api/graph/context", tenant, {
         type: type || "",
         id: id || "",
         depth: String(depth),
         limit: String(limit),
+        view: view || "",
       }));
       return data;
     },

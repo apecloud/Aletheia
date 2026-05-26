@@ -67,6 +67,7 @@ function GraphExplorer({ data, tenant }) {
   const requestedGraphTab = initialParams.get("graph_tab") || "approved";
   const agentRunsRequested = requestedGraphTab === "runs";
   const normalizeGraphTab = (tab) => ["approved", "proposed", "saved"].includes(tab) ? tab : (tab === "runs" ? "proposed" : "approved");
+  const graphView = "all";
   const [centerType, setCenterType] = useStateGX(initialParams.get("type") || "");
   const [centerNodeId, setCenterNodeId] = useStateGX(initialParams.get("id") || "");
   const [depth, setDepth] = useStateGX(Math.max(1, Math.min(Number(initialParams.get("depth") || 1), 3)));
@@ -91,10 +92,6 @@ function GraphExplorer({ data, tenant }) {
     fallback: { runs: [], elements: [] },
   });
   const proposed = proposedQ.data || { runs: [], elements: [] };
-  const enrichmentQ = useApiData("continuousEnrichmentSessions", [tenantId], {
-    fallback: { sessions: [] },
-  });
-  const enrichment = enrichmentQ.data || { sessions: [] };
   const selectGraphTab = (tab) => {
     setShowAgentRunsMoved(false);
     setLeftTab(normalizeGraphTab(tab));
@@ -134,18 +131,19 @@ function GraphExplorer({ data, tenant }) {
       url.searchParams.set("tenant", tenantId);
       if (centerType) url.searchParams.set("type", centerType); else url.searchParams.delete("type");
       if (centerNodeId) url.searchParams.set("id", centerNodeId); else url.searchParams.delete("id");
+      url.searchParams.set("view", graphView);
       url.searchParams.set("depth", String(depth));
       url.searchParams.set("limit", String(limit));
       url.searchParams.set("graph_tab", leftTab);
       if (focusElementKey) url.searchParams.set("proposed_key", focusElementKey); else url.searchParams.delete("proposed_key");
       history.replaceState(null, "", url.toString());
     } catch {}
-  }, [tenantId, centerType, centerNodeId, depth, limit, leftTab, focusElementKey]);
+  }, [tenantId, centerType, centerNodeId, depth, limit, leftTab, focusElementKey, graphView]);
 
   const graphQ = useApiData(
     "graphContext",
-    [tenantId, { type: centerType, id: centerNodeId, depth, limit }],
-    { enabled: typesLoaded && !!activeType && !!centerNodeId, fallback: null }
+    [tenantId, { type: centerType, id: centerNodeId, depth, limit, view: graphView }],
+    { enabled: typesLoaded, fallback: null }
   );
   const isStaleG = graphQ.source === "live-stale";
   const isMockG  = graphQ.source === "mock";
@@ -153,11 +151,15 @@ function GraphExplorer({ data, tenant }) {
 
   const [selected, setSelected] = useStateGX(null);
   useEffectGX(() => {
+    setSelected(null);
+    setHoverId(null);
+  }, [tenantId]);
+  useEffectGX(() => {
     if (!graph.nodes.length) {
       if (selected) setSelected(null);
       return;
     }
-    setSelected(prev => graph.nodes.find(n => prev && n.id === prev.id) || graph.nodes[0]);
+    setSelected(prev => graph.nodes.find(n => prev && n.id === prev.id) || null);
   }, [graph]);
 
   const map = Object.fromEntries(graph.nodes.map(n => [n.id, n]));
@@ -170,6 +172,11 @@ function GraphExplorer({ data, tenant }) {
     return acc;
   }, {});
   const centerLabel = centerType && centerNodeId ? `${centerType}:${centerNodeId}` : "No tenant center";
+  const focusCenterNode = () => {
+    const key = centerType && centerNodeId ? `${centerType}:${centerNodeId}` : "";
+    const match = graph.nodes.find(node => node.id === key);
+    if (match) setSelected(match);
+  };
 
   return (
     <div className="canvas">
@@ -236,6 +243,12 @@ function GraphExplorer({ data, tenant }) {
               <div style={{ marginTop: 6, fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--muted)" }}>
                 {activeType ? `${activeType.table} · ${activeType.ontology_artifact} · ${activeType.artifact_status || "unknown"}` : "No tenant graph center types for this tenant."}
               </div>
+              <button className="btn ghost" style={{ marginTop: 8, width: "100%" }} disabled={!graph.nodes.some(node => node.id === `${centerType}:${centerNodeId}`)} onClick={focusCenterNode}>
+                Focus center in full graph
+              </button>
+              <div style={{ marginTop: 6, fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--muted)", lineHeight: 1.45 }}>
+                Default view shows all approved tenant graph nodes. Selecting a node only changes focus contrast.
+              </div>
             </div>
             <div style={{ display: "flex", gap: 6 }}>
               <div style={{ flex: 1 }}>
@@ -247,7 +260,7 @@ function GraphExplorer({ data, tenant }) {
                 <input className="input" value={limit} onChange={e => setLimit(+e.target.value)} type="number" />
               </div>
             </div>
-            <button className="btn primary" disabled={!centerType || !centerNodeId} onClick={() => window.dispatchEvent(new CustomEvent("aletheia:retry"))}>Load graph</button>
+            <button className="btn primary" onClick={() => window.dispatchEvent(new CustomEvent("aletheia:retry"))}>Reload full graph</button>
           </div>
 
           <div style={{ padding: "var(--pad-3) var(--pad-4)", borderBottom: "1px solid var(--line)" }}>
@@ -256,7 +269,7 @@ function GraphExplorer({ data, tenant }) {
               <dt>Center</dt><dd>{centerLabel}</dd>
               <dt>Nodes</dt><dd>{graph.nodes.length}</dd>
               <dt>Edges</dt><dd>{graph.edges.length}</dd>
-              <dt>Depth</dt><dd>{depth}</dd>
+              <dt>View</dt><dd>all approved nodes</dd>
               <dt>Limit</dt><dd>{limit}</dd>
             </dl>
           </div>
@@ -273,9 +286,9 @@ function GraphExplorer({ data, tenant }) {
             <div style={{ padding: "var(--pad-3) var(--pad-4)" }}>
               <div className="eyebrow" style={{ marginBottom: 8 }}>Expand history</div>
               <div style={{ display: "flex", flexDirection: "column", gap: 6, fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--muted)" }}>
-                <div>current — load {centerLabel} · depth {depth} · {graph.nodes.length} nodes</div>
+                <div>current — all approved tenant graph · {graph.nodes.length} nodes</div>
                 <div>tenant — {tenantId} · {tenant?.graph || "graph db unknown"}</div>
-                <div>source — tenant center list from `/api/instances/types?include_draft=1`</div>
+                <div>focus — {selected ? selected.id : "none; full graph contrast"}</div>
               </div>
             </div>
           </div>
@@ -283,7 +296,7 @@ function GraphExplorer({ data, tenant }) {
 
           {leftTab === "proposed" && (
             <div style={{ flex: 1, minHeight: 0, overflow: "auto" }}>
-              <ProposedGraphPanel tenantId={tenantId} proposed={proposed} enrichment={enrichment} loading={proposedQ.loading} source={proposedQ.source} focusElementKey={focusElementKey} compact />
+              <ProposedGraphPanel tenantId={tenantId} proposed={proposed} loading={proposedQ.loading} source={proposedQ.source} focusElementKey={focusElementKey} compact />
             </div>
           )}
 
@@ -297,15 +310,11 @@ function GraphExplorer({ data, tenant }) {
         {/* CENTER — canvas */}
         <div className="col" style={{ overflow: "hidden" }}>
           <div className="graph-canvas">
-            {!centerType || !centerNodeId ? (
-              <div style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", color: "var(--muted)", fontFamily: "var(--font-mono)", fontSize: 12 }}>
-                No tenant center nodes for tenant {tenantId}.
-              </div>
-            ) : graphQ.source === "error" || graphQ.source === "loading" ? (
+            {graphQ.source === "error" || graphQ.source === "loading" ? (
               <div style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center" }}>
                 <ApiStatus q={graphQ} what="graph context" />
               </div>
-            ) : graph.nodes.length === 0 || !selected ? (
+            ) : graph.nodes.length === 0 ? (
               <div style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", color: "var(--muted)", fontFamily: "var(--font-mono)", fontSize: 12 }}>
                 Empty graph for this scope.
               </div>
@@ -317,7 +326,7 @@ function GraphExplorer({ data, tenant }) {
               <div className="row">
                 <div><span style={{ color: "var(--dim)" }}>NODES</span><span className="v">{graph.nodes.length}</span></div>
                 <div><span style={{ color: "var(--dim)" }}>EDGES</span><span className="v">{graph.edges.length}</span></div>
-                <div><span style={{ color: "var(--dim)" }}>DEPTH</span><span className="v">{depth}</span></div>
+                <div><span style={{ color: "var(--dim)" }}>FOCUS</span><span className="v">{selected ? "ON" : "ALL"}</span></div>
                 <div><span style={{ color: "var(--dim)" }}>SOURCE</span><span className="v" style={{ color: graphQ.source === "live" ? "var(--approved)" : graphQ.source === "live-stale" ? "var(--changes)" : "var(--rejected)" }}>{graphQ.source === "live" ? "LIVE" : graphQ.source === "live-stale" ? "STALE" : graphQ.source === "loading" ? "…" : "NONE"}</span></div>
               </div>
             </div>
@@ -337,7 +346,7 @@ function GraphExplorer({ data, tenant }) {
               <button className="icon-btn" title="Zoom in">+</button>
               <button className="icon-btn" title="Zoom out">−</button>
               <button className="icon-btn" title="Fit view">⌖</button>
-              <button className="icon-btn" title="Focus selected">◎</button>
+              <button className="icon-btn" title="Clear focus" disabled={!selected} onClick={() => setSelected(null)}>◎</button>
               <button className="icon-btn" title="Expand">⊕</button>
               <button className="icon-btn" title="Collapse">⊖</button>
             </div>
@@ -362,7 +371,7 @@ function GraphExplorer({ data, tenant }) {
         <div className="col inspector">
           {!selected ? (
             <div style={{ padding: 24, fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--muted)" }}>
-              No node selected. Load a graph from the left panel.
+              All approved tenant graph nodes are visible. Select a node to highlight its local context and dim unrelated nodes and edges.
             </div>
           ) : (
           <>
@@ -379,8 +388,8 @@ function GraphExplorer({ data, tenant }) {
               </div>
               <div style={{ marginTop: 14 }}>
                 <dl className="kv">
-                  <dt>Approved</dt><dd>v3 · 2026-05-10</dd>
-                  <dt>Source row</dt><dd>hr.employees#{selected.id.split(":")[1]}</dd>
+                  <dt>Status</dt><dd>{selected._raw?.status || "approved"}</dd>
+                  <dt>Source row</dt><dd>{selected._raw?.source_table || "source"}#{selected._raw?.source_pk || selected.id.split(":").slice(1).join(":")}</dd>
                   <dt>Edges in</dt><dd>{graph.edges.filter(e => e.t === selected.id).length}</dd>
                   <dt>Edges out</dt><dd>{graph.edges.filter(e => e.s === selected.id).length}</dd>
                 </dl>
@@ -432,18 +441,15 @@ function GraphExplorer({ data, tenant }) {
   );
 }
 
-function ProposedGraphPanel({ tenantId, proposed, enrichment, loading, source, focusElementKey }) {
+function ProposedGraphPanel({ tenantId, proposed, loading, source, focusElementKey }) {
   const [selectedElement, setSelectedElement] = useStateGX(null);
   const [kindFilter, setKindFilter] = useStateGX("all");
   const [selectedKeys, setSelectedKeys] = useStateGX([]);
   const [reviewReason, setReviewReason] = useStateGX("");
   const [reviewBusy, setReviewBusy] = useStateGX(false);
   const [reviewMessage, setReviewMessage] = useStateGX(null);
-  const [cycleBusy, setCycleBusy] = useStateGX(false);
   const runs = proposed?.runs || [];
   const elements = proposed?.elements || [];
-  const sessions = enrichment?.sessions || [];
-  const activeSession = sessions[0] || null;
   const counts = elements.reduce((acc, item) => {
     acc[item.element_type] = (acc[item.element_type] || 0) + 1;
     return acc;
@@ -564,27 +570,6 @@ function ProposedGraphPanel({ tenantId, proposed, enrichment, loading, source, f
       setReviewBusy(false);
     }
   }
-  async function runContinuousCycle() {
-    if (!activeSession) {
-      setReviewMessage({ kind: "error", text: "No continuous enrichment session for this tenant." });
-      return;
-    }
-    setCycleBusy(true);
-    setReviewMessage(null);
-    try {
-      const result = await window.AL_API.runContinuousEnrichmentCycle(tenantId, activeSession.session_key, {});
-      const cycle = result?.cycle || {};
-      setReviewMessage({
-        kind: "ok",
-        text: `Cycle completed · ${cycle.returned_element_count || cycle.proposed_count || 0} proposed elements · ${cycle.finding_count || 0} findings`,
-      });
-      window.dispatchEvent(new CustomEvent("aletheia:retry"));
-    } catch (err) {
-      setReviewMessage({ kind: "error", text: err.message || String(err) });
-    } finally {
-      setCycleBusy(false);
-    }
-  }
   return (
     <div className="section">
       <div className="section-head">
@@ -592,32 +577,6 @@ function ProposedGraphPanel({ tenantId, proposed, enrichment, loading, source, f
         <span className="ct">{loading ? "loading" : `${elements.length} draft`}</span>
       </div>
       <div className="section-body">
-        <div style={{ border: "1px solid var(--accent-line)", background: "var(--accent-bg)", padding: 10, marginBottom: 10 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "flex-start" }}>
-            <div>
-              <div className="eyebrow accent">Continuous enrichment agent</div>
-              <div style={{ marginTop: 4, color: "var(--text)", fontSize: 12, fontWeight: 600 }}>
-                {activeSession ? activeSession.session_key : "No session"}
-              </div>
-              <div style={{ marginTop: 4, fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--muted)", lineHeight: 1.45 }}>
-                {activeSession
-                  ? `${activeSession.status} · cycles ${activeSession.cycle_count || 0} · last ${activeSession.last_run_key || "none"}`
-                  : "Create or load a continuous enrichment session to run crawl/reason cycles."}
-              </div>
-            </div>
-            <button className="btn xs primary" disabled={!activeSession || cycleBusy} onClick={runContinuousCycle}>
-              {cycleBusy ? "Running…" : "Run cycle"}
-            </button>
-          </div>
-          {activeSession?.latest?.findings?.length > 0 && (
-            <div style={{ marginTop: 8, fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--text-dim)" }}>
-              Latest findings: {activeSession.latest.findings.map(f => f.name).slice(0, 2).join(" · ")}
-            </div>
-          )}
-          <div style={{ marginTop: 6, fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--muted)" }}>
-            Boundary: ontology candidates require review · graph facts stay proposed · findings stay candidate.
-          </div>
-        </div>
         <div className="chip-row" style={{ marginBottom: 10 }}>
           <Chip active={kindFilter === "all"} onClick={() => selectKind("all")} count={elements.length}>all</Chip>
           <Chip active={kindFilter === "node"} onClick={() => selectKind("node")} count={counts.node || 0}>nodes</Chip>
@@ -799,6 +758,7 @@ function BigGraph({ data, selected, onSelect, hoverId, setHoverId }) {
   const graphTypes = Array.from(new Set(data.nodes.map(n => n.type).filter(Boolean)));
   const typeColors = Object.fromEntries(graphTypes.map((t, i) => [t, palette[i % palette.length]]));
   const sel = selected ? selected.id : null;
+  const focusActive = !!sel;
   const neighborIds = new Set();
   data.edges.forEach(e => {
     if (e.s === sel) neighborIds.add(e.t);
@@ -822,8 +782,9 @@ function BigGraph({ data, selected, onSelect, hoverId, setHoverId }) {
         const s = map[e.s], t = map[e.t];
         if (!s || !t) return null;
         const involved = e.s === sel || e.t === sel;
+        const dimmed = focusActive && !involved;
         return (
-          <g key={i}>
+          <g key={i} opacity={dimmed ? 0.16 : 1}>
             <line x1={s.x} y1={s.y} x2={t.x} y2={t.y}
                   stroke={e.flag ? "oklch(0.66 0.18 25 / 0.7)" : (involved ? "var(--accent)" : e.muted ? "var(--faint)" : "var(--line-strong)")}
                   strokeWidth={involved ? 1.8 : 1}
@@ -846,12 +807,14 @@ function BigGraph({ data, selected, onSelect, hoverId, setHoverId }) {
         const isSel = n.id === sel;
         const isNeighbor = neighborIds.has(n.id);
         const isHover = n.id === hoverId;
+        const dimmed = focusActive && !isSel && !isNeighbor;
         const stroke = n.flag ? "var(--rejected)" : (isSel ? "var(--accent)" : isNeighbor ? "var(--accent-dim)" : (n.muted ? "var(--faint)" : typeColors[n.type] || "var(--text-dim)"));
         return (
           <g key={i} onClick={() => onSelect(n)}
                  onMouseEnter={() => setHoverId(n.id)}
                  onMouseLeave={() => setHoverId(null)}
-                 style={{ cursor: "pointer" }}>
+                 opacity={dimmed ? 0.24 : 1}
+                 style={{ cursor: "pointer", transition: "opacity 120ms ease" }}>
             {(isSel || isHover) && (
               <circle cx={n.x} cy={n.y} r={n.r + 10} fill="var(--accent-bg)" stroke="var(--accent-line)" strokeWidth="1" />
             )}
@@ -862,14 +825,14 @@ function BigGraph({ data, selected, onSelect, hoverId, setHoverId }) {
             <text x={n.x} y={n.y + n.r + 14}
                   textAnchor="middle"
                   fontSize="11" fontFamily="var(--font-mono)"
-                  fill={isSel ? "var(--accent)" : "var(--text-dim)"}
+                  fill={isSel ? "var(--accent)" : dimmed ? "var(--dim)" : "var(--text-dim)"}
                   style={{ pointerEvents: "none" }}>
               {n.id}
             </text>
             <text x={n.x} y={n.y + n.r + 26}
                   textAnchor="middle"
                   fontSize="9.5" fontFamily="var(--font-mono)"
-                  fill="var(--dim)"
+                  fill={dimmed ? "var(--faint)" : "var(--dim)"}
                   style={{ pointerEvents: "none", letterSpacing: "0.04em" }}>
               {n.label}
             </text>

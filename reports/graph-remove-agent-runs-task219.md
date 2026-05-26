@@ -8,6 +8,8 @@ Remove Agent Runs from the Graph page and keep automatic crawl / enrichment / re
 
 - Removed the Graph page `Agent runs` tab and in-page Agent Runs Console rendering.
 - Kept Graph page focused on `Approved graph`, `Proposed graph`, and `Saved views`.
+- Removed the embedded `Continuous enrichment agent` operation block from `Proposed graph`.
+- Removed Graph-page `Run cycle`, session/cycle counters, and latest-finding agent status controls.
 - Added explicit handling for legacy `graph_tab=runs` deep links:
   - The page falls back to `Proposed graph`.
   - A lightweight notice points users to Workspace Agent management.
@@ -30,6 +32,10 @@ Remove Agent Runs from the Graph page and keep automatic crawl / enrichment / re
   - Rendered `Approved graph`, `Proposed graph`, `Saved views`.
   - Rendered `Automatic runs moved` and `Open Workspace agents`.
   - Did not render `Agent runs`, `Agent Runs Console`, `RUN TRACE`, or `web_enrichment_crawl` in the app body.
+- Proposed graph URL:
+  - `<http://127.0.0.1:8772/?screen=graph&tenant=maritime-risk&graph_tab=proposed>`
+  - Rendered proposed graph review controls such as `Proposed graph space` and `Batch review`.
+  - Did not render `Continuous enrichment agent`, `Run cycle`, `Latest findings`, `session`, or `cycles` in the app body.
 - Workspace Agent URL:
   - `<http://127.0.0.1:8772/?screen=workbench&tenant=maritime-risk&workspace_tab=agents&agent_tab=enrichment>`
   - Rendered `Auto enriching`, `Autopilot reasoning`, `Run once`, and `Full run log`.
@@ -41,4 +47,4 @@ Remove Agent Runs from the Graph page and keep automatic crawl / enrichment / re
 
 ## Boundary
 
-This is an IA cleanup only. No backend run data was deleted; no ontology, proposed graph review, batch review, canonical graph, or formal graph write behavior was changed.
+This is an IA cleanup only. No backend run data was deleted; Graph only links to Workspace Agent management and no longer hosts agent operation controls. No ontology, proposed graph review, batch review, canonical graph, or formal graph write behavior was changed.

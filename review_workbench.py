@@ -1598,6 +1598,136 @@ class InstanceRepository:
             },
         }
 
+    def full_graph(self, tenant, limit=200):
+        requested_limit = int(limit)
+        limit = max(1, min(requested_limit, 300))
+        cfg_items = list(self.ENTITY_CONFIG.items())
+        artifact_keys = [cfg["artifact"] for _, cfg in cfg_items]
+        artifacts = self._approved_artifacts(tenant, artifact_keys)
+        approved_cfgs = [(key, cfg) for key, cfg in cfg_items if cfg["artifact"] in artifacts]
+        if not approved_cfgs:
+            return {
+                "approved": False,
+                "tenant": tenant.public_dict(),
+                "graph_database": tenant.graph_database,
+                "center": None,
+                "nodes": [],
+                "edges": [],
+                "missing_approved_artifacts": artifact_keys,
+            }
+        per_type_limit = max(1, min(40, limit // max(len(approved_cfgs), 1) + 1))
+        nodes = []
+        seen_nodes = set()
+        with self.source_engine_for(tenant).connect() as conn:
+            for cfg_key, cfg in approved_cfgs:
+                type_name = self._cfg_type(cfg, cfg_key)
+                if cfg.get("distinct"):
+                    select_cols = list(dict.fromkeys([cfg["pk"], *cfg["label_cols"]]))
+                    sql = f"SELECT DISTINCT {', '.join(select_cols)} FROM {cfg['table']} ORDER BY {cfg['pk']} LIMIT :lim"
+                else:
+                    sql = f"SELECT * FROM {cfg['table']} ORDER BY {cfg['pk']} LIMIT :lim"
+                rows = conn.execute(text(sql), {"lim": per_type_limit}).mappings().all()
+                for row in rows:
+                    node = self._entity_node(tenant, type_name, dict(row))
+                    if node and node["id"] not in seen_nodes:
+                        nodes.append(node)
+                        seen_nodes.add(node["id"])
+                    if len(nodes) >= limit:
+                        break
+                if len(nodes) >= limit:
+                    break
+        node_ids = {node["id"] for node in nodes}
+        edges = []
+        seen_edges = set()
+
+        def add_edge(source, target, link_key, label=None, row_id=None):
+            if source not in node_ids or target not in node_ids or source == target:
+                return
+            edge_id = f"{source}->{target}:{link_key}"
+            if edge_id in seen_edges:
+                return
+            seen_edges.add(edge_id)
+            edges.append({
+                "id": edge_id,
+                "tenant_id": tenant.tenant_id,
+                "source": source,
+                "target": target,
+                "link_key": link_key,
+                "label": label or link_key,
+                "source_row": row_id,
+                "status": "approved",
+            })
+
+        link_artifacts = self._approved_artifacts(tenant, [lc["link"] for lc in self.LINK_CONFIG])
+        with self.source_engine_for(tenant).connect() as conn:
+            for lc in self.LINK_CONFIG:
+                if lc["link"] not in link_artifacts:
+                    continue
+                from_cfg = self.ENTITY_CONFIG.get(lc["from"])
+                to_cfg = self.ENTITY_CONFIG.get(lc["to"])
+                if not from_cfg or not to_cfg:
+                    continue
+                from_type = self._cfg_type(from_cfg, lc["from"])
+                to_type = self._cfg_type(to_cfg, lc["to"])
+                try:
+                    if lc.get("target_fk"):
+                        rows = conn.execute(
+                            text(f"SELECT {lc['fk_col']} AS source_pk, {lc['target_fk']} AS target_pk FROM {lc['fk_table']} LIMIT :lim"),
+                            {"lim": limit * 2},
+                        ).mappings().all()
+                    elif lc.get("reverse"):
+                        rows = conn.execute(
+                            text(f"SELECT {lc['fk_col']} AS source_pk, {from_cfg['pk']} AS target_pk FROM {lc['fk_table']} WHERE {lc['fk_col']} IS NOT NULL LIMIT :lim"),
+                            {"lim": limit * 2},
+                        ).mappings().all()
+                    else:
+                        rows = conn.execute(
+                            text(f"SELECT {lc['fk_col']} AS source_pk, {to_cfg['pk']} AS target_pk FROM {lc['fk_table']} WHERE {lc['fk_col']} IS NOT NULL LIMIT :lim"),
+                            {"lim": limit * 2},
+                        ).mappings().all()
+                except Exception:
+                    rows = []
+                for row in rows:
+                    add_edge(f"{from_type}:{row['source_pk']}", f"{to_type}:{row['target_pk']}", lc["link"])
+
+        if tenant.tenant_id == "maritime-risk":
+            with self.source_engine_for(tenant).connect() as conn:
+                risk_rows = conn.execute(text("SELECT risk_indicator_id, canal FROM maritime_chokepoint_risk_indicators LIMIT :lim"), {"lim": limit}).mappings().all()
+                dep_rows = conn.execute(text("SELECT dependency_id, iso3, canal FROM maritime_chokepoint_country_dependencies LIMIT :lim"), {"lim": limit}).mappings().all()
+                result_rows = conn.execute(text("SELECT risk_result_id, iso3, canal FROM maritime_chokepoint_systemic_risk_results LIMIT :lim"), {"lim": limit}).mappings().all()
+            for row in risk_rows:
+                chokepoint = f"Chokepoint:{row['risk_indicator_id']}"
+                add_edge(f"Hazard:{row['risk_indicator_id']}", chokepoint, "hazard_at_chokepoint", "hazard at")
+                add_edge(f"RiskIndicator:{row['risk_indicator_id']}", chokepoint, "risk_indicator_for_chokepoint", "risk indicator")
+            for row in dep_rows:
+                dep = f"TradeDependency:{row['dependency_id']}"
+                add_edge(dep, f"Country:{row['iso3']}", "dependency_country", "country")
+                add_edge(dep, f"Chokepoint:{row['canal']}", "dependency_chokepoint", "chokepoint")
+            for row in result_rows:
+                for source_type in ("SystemicRiskResult", "RiskFinding", "MitigationAction"):
+                    source = f"{source_type}:{row['risk_result_id']}"
+                    add_edge(source, f"Country:{row['iso3']}", "risk_country", "country")
+                    add_edge(source, f"Chokepoint:{row['canal']}", "risk_chokepoint", "chokepoint")
+
+        return {
+            "approved": True,
+            "tenant": tenant.public_dict(),
+            "graph_database": tenant.graph_database,
+            "depth": 0,
+            "limit": limit,
+            "limits": {"requested_limit": requested_limit, "applied_limit": limit, "hard_limit": 300, "truncated": requested_limit > limit or len(nodes) >= limit},
+            "center": None,
+            "nodes": nodes,
+            "edges": edges[: limit * 3],
+            "scope": {
+                "tenant_id": tenant.tenant_id,
+                "view": "all",
+                "node_limit": limit,
+                "edge_limit": limit * 3,
+                "approved_only": True,
+            },
+        }
+
     def edge_detail(self, tenant, source, target):
         if not source.startswith("Employee:") or not target.startswith("Order:"):
             return None
@@ -7602,15 +7732,23 @@ class ReviewWorkbenchHandler(BaseHTTPRequestHandler):
             instance_id = query.get("id", ["4"])[0]
             depth = int(query.get("depth", ["1"])[0])
             limit = int(query.get("limit", ["200"])[0])
-            graph = self.instance_repository.neighborhood(tenant, object_type, instance_id, depth=depth, limit=limit)
+            view = query.get("view", ["scope"])[0]
+            graph = (
+                self.instance_repository.full_graph(tenant, limit=limit)
+                if view == "all"
+                else self.instance_repository.neighborhood(tenant, object_type, instance_id, depth=depth, limit=limit)
+            )
             if graph is None:
                 self._send_error(HTTPStatus.NOT_FOUND, "Graph context not found")
                 return
             if graph.get("approved"):
-                graph["graph_url"] = (
-                    f"/graph.html?tenant={quote(tenant.tenant_id)}&type={quote(object_type)}"
-                    f"&id={quote(str(instance_id))}&depth={graph.get('depth', depth)}&limit={graph.get('limit', limit)}"
-                )
+                if view == "all":
+                    graph["graph_url"] = f"/graph.html?tenant={quote(tenant.tenant_id)}&view=all&limit={graph.get('limit', limit)}"
+                else:
+                    graph["graph_url"] = (
+                        f"/graph.html?tenant={quote(tenant.tenant_id)}&type={quote(object_type)}"
+                        f"&id={quote(str(instance_id))}&depth={graph.get('depth', depth)}&limit={graph.get('limit', limit)}"
+                    )
             self._send_json(graph)
             return
         if parsed.path == "/api/graph/proposed-elements":

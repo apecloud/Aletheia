@@ -6,6 +6,8 @@
   "changes": [
     "removed_graph_agent_runs_tab",
     "removed_graph_agent_runs_console_rendering",
+    "removed_proposed_graph_embedded_continuous_enrichment_agent_controls",
+    "removed_graph_run_cycle_and_session_status_controls",
     "handled_legacy_graph_tab_runs_with_workspace_link",
     "updated_workspace_run_links_to_workspace_agent"
   ],
@@ -27,6 +29,19 @@
         "Agent Runs Console",
         "RUN TRACE",
         "web_enrichment_crawl"
+      ]
+    },
+    "proposed_graph_app_body": {
+      "contains": [
+        "Proposed graph space",
+        "Batch review"
+      ],
+      "not_contains": [
+        "Continuous enrichment agent",
+        "Run cycle",
+        "Latest findings",
+        "session",
+        "cycles"
       ]
     },
     "workspace_agent_app_body": {
@@ -52,12 +67,15 @@
   ],
   "write_boundary": {
     "backend_agent_runs_console_deleted": false,
+    "graph_agent_operation_controls_removed": true,
     "canonical_ontology_write": false,
     "formal_graph_write": false,
     "proposed_graph_review_behavior_changed": false
   },
   "evidence_files": [
     "/tmp/task219-graph-runs-dom.html",
+    "/tmp/task219-graph-runs-dom-2.html",
+    "/tmp/task219-proposed-no-agent-dom.html",
     "/tmp/task219-workspace-agent-dom.html",
     "/tmp/task219-agent-runs-api.json",
     "/tmp/task219-proposed-api.json"
