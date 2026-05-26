@@ -181,6 +181,8 @@ function GraphExplorer({ data, tenant }) {
   const graph = useMemoGX(() => normalizeGraph(graphQ.data, { nodes: [], edges: [] }), [graphQ.data]);
 
   const [selected, setSelected] = useStateGX(null);
+  const [nodePositions, setNodePositions] = useStateGX({});
+  const [hideUnrelated, setHideUnrelated] = useStateGX(false);
   const [pendingCenterFocus, setPendingCenterFocus] = useStateGX("");
   const [focusMessage, setFocusMessage] = useStateGX("");
   useEffectGX(() => {
@@ -188,20 +190,32 @@ function GraphExplorer({ data, tenant }) {
     setHoverId(null);
     setPendingCenterFocus("");
     setFocusMessage("");
+    setNodePositions({});
+    setHideUnrelated(false);
   }, [tenantId]);
+  const graphWithPositions = useMemoGX(() => {
+    const nodes = graph.nodes.map(node => {
+      const pos = nodePositions[node.id];
+      return pos ? { ...node, x: pos.x, y: pos.y } : node;
+    });
+    return { ...graph, nodes };
+  }, [graph, nodePositions]);
   useEffectGX(() => {
-    if (!graph.nodes.length) {
+    if (!graphWithPositions.nodes.length) {
       if (selected) setSelected(null);
       return;
     }
-    setSelected(prev => graph.nodes.find(n => prev && n.id === prev.id) || null);
-  }, [graph]);
+    setSelected(prev => graphWithPositions.nodes.find(n => prev && n.id === prev.id) || null);
+  }, [graphWithPositions]);
+  useEffectGX(() => {
+    if (!selected && hideUnrelated) setHideUnrelated(false);
+  }, [selected, hideUnrelated]);
 
-  const map = Object.fromEntries(graph.nodes.map(n => [n.id, n]));
+  const map = Object.fromEntries(graphWithPositions.nodes.map(n => [n.id, n]));
   const palette = ["var(--accent)", "var(--changes)", "var(--proposed)", "var(--approved)", "var(--dim)"];
-  const graphTypes = Array.from(new Set(graph.nodes.map(n => n.type).filter(Boolean)));
+  const graphTypes = Array.from(new Set(graphWithPositions.nodes.map(n => n.type).filter(Boolean)));
   const typeColors = Object.fromEntries(graphTypes.map((t, i) => [t, palette[i % palette.length]]));
-  const edgeCounts = graph.edges.reduce((acc, e) => {
+  const edgeCounts = graphWithPositions.edges.reduce((acc, e) => {
     const key = e.kind || "edge";
     acc[key] = (acc[key] || 0) + 1;
     return acc;
@@ -210,7 +224,7 @@ function GraphExplorer({ data, tenant }) {
   const centerKey = centerType && centerNodeId ? `${centerType}:${centerNodeId}` : "";
   const focusCenterNode = () => {
     if (!centerKey) return false;
-    const match = graph.nodes.find(node => node.id === centerKey);
+    const match = graphWithPositions.nodes.find(node => node.id === centerKey);
     if (match) {
       setSelected(match);
       setFocusMessage(`Focused ${centerKey}`);
@@ -230,7 +244,7 @@ function GraphExplorer({ data, tenant }) {
   };
   useEffectGX(() => {
     if (!pendingCenterFocus || graphQ.loading) return;
-    const match = graph.nodes.find(node => node.id === pendingCenterFocus);
+    const match = graphWithPositions.nodes.find(node => node.id === pendingCenterFocus);
     if (match) {
       setSelected(match);
       setFocusMessage(`Focused ${pendingCenterFocus}`);
@@ -239,7 +253,17 @@ function GraphExplorer({ data, tenant }) {
       setFocusMessage(`${pendingCenterFocus} is not in the loaded full graph.`);
       setPendingCenterFocus("");
     }
-  }, [pendingCenterFocus, graphQ.loading, graphQ.source, graph.nodes.map(n => n.id).join("|")]);
+  }, [pendingCenterFocus, graphQ.loading, graphQ.source, graphWithPositions.nodes.map(n => n.id).join("|")]);
+
+  const updateNodePosition = (nodeId, point) => {
+    const x = Math.max(18, Math.min(982, point.x));
+    const y = Math.max(18, Math.min(582, point.y));
+    setNodePositions(prev => ({ ...prev, [nodeId]: { x, y } }));
+    setSelected(prev => {
+      if (!prev || prev.id !== nodeId) return prev;
+      return { ...prev, x, y };
+    });
+  };
 
   return (
     <div className="canvas">
@@ -264,7 +288,7 @@ function GraphExplorer({ data, tenant }) {
             </div>
             <div className="side-tabs" style={{ marginTop: 10 }}>
               <button className={"side-tab" + (leftTab === "approved" ? " active" : "")} onClick={() => selectGraphTab("approved")}>
-                Approved graph <span className="ct">{graph.nodes.length}</span>
+                Approved graph <span className="ct">{graphWithPositions.nodes.length}</span>
               </button>
               <button className={"side-tab" + (leftTab === "proposed" ? " active" : "")} onClick={() => selectGraphTab("proposed")}>
                 Proposed graph <span className="ct">{proposedTotalCount}</span>
@@ -314,7 +338,7 @@ function GraphExplorer({ data, tenant }) {
               <div style={{ marginTop: 6, fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--muted)" }}>
                 {activeType ? `${activeType.table} · ${activeType.ontology_artifact} · ${activeType.artifact_status || "unknown"} · ${candidates.length} candidate${candidates.length === 1 ? "" : "s"}` : "No tenant graph center types for this tenant."}
               </div>
-              <button className="btn ghost" style={{ marginTop: 8, width: "100%" }} disabled={!centerKey || !graph.nodes.some(node => node.id === centerKey)} onClick={focusCenterNode}>
+              <button className="btn ghost" style={{ marginTop: 8, width: "100%" }} disabled={!centerKey || !graphWithPositions.nodes.some(node => node.id === centerKey)} onClick={focusCenterNode}>
                 Focus center in full graph
               </button>
               <div style={{ marginTop: 6, fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--muted)", lineHeight: 1.45 }}>
@@ -343,11 +367,18 @@ function GraphExplorer({ data, tenant }) {
             <div className="eyebrow" style={{ marginBottom: 8 }}>Current scope</div>
             <dl className="kv">
               <dt>Center</dt><dd>{centerLabel}</dd>
-              <dt>Nodes</dt><dd>{graph.nodes.length}</dd>
-              <dt>Edges</dt><dd>{graph.edges.length}</dd>
+              <dt>Nodes</dt><dd>{graphWithPositions.nodes.length}</dd>
+              <dt>Edges</dt><dd>{graphWithPositions.edges.length}</dd>
               <dt>View</dt><dd>all approved nodes</dd>
               <dt>Limit</dt><dd>{limit}</dd>
             </dl>
+            <button
+              className="btn ghost"
+              style={{ marginTop: 10, width: "100%" }}
+              disabled={!selected}
+              onClick={() => setHideUnrelated(v => !v)}>
+              {hideUnrelated ? "Show all graph nodes" : "Hide unrelated nodes"}
+            </button>
           </div>
 
           <div style={{ padding: "var(--pad-3) var(--pad-4)", borderBottom: "1px solid var(--line)" }}>
@@ -362,9 +393,10 @@ function GraphExplorer({ data, tenant }) {
             <div style={{ padding: "var(--pad-3) var(--pad-4)" }}>
               <div className="eyebrow" style={{ marginBottom: 8 }}>Expand history</div>
               <div style={{ display: "flex", flexDirection: "column", gap: 6, fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--muted)" }}>
-                <div>current — all approved tenant graph · {graph.nodes.length} nodes</div>
+                <div>current — all approved tenant graph · {graphWithPositions.nodes.length} nodes</div>
                 <div>tenant — {tenantId} · {tenant?.graph || "graph db unknown"}</div>
                 <div>focus — {selected ? selected.id : "none; full graph contrast"}</div>
+                <div>visibility — {hideUnrelated && selected ? "selected context only" : "all graph nodes"}</div>
               </div>
             </div>
           </div>
@@ -390,19 +422,28 @@ function GraphExplorer({ data, tenant }) {
               <div style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center" }}>
                 <ApiStatus q={graphQ} what="graph context" />
               </div>
-            ) : graph.nodes.length === 0 ? (
+            ) : graphWithPositions.nodes.length === 0 ? (
               <div style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", color: "var(--muted)", fontFamily: "var(--font-mono)", fontSize: 12 }}>
                 Empty graph for this scope.
               </div>
             ) : (
-            <BigGraph data={graph} selected={selected} onSelect={setSelected} hoverId={hoverId} setHoverId={setHoverId} />
+            <BigGraph
+              data={graphWithPositions}
+              selected={selected}
+              onSelect={setSelected}
+              hoverId={hoverId}
+              setHoverId={setHoverId}
+              hideUnrelated={hideUnrelated}
+              onNodePositionChange={updateNodePosition}
+            />
             )}
 
             <div className="graph-overlay-tl">
               <div className="row">
-                <div><span style={{ color: "var(--dim)" }}>NODES</span><span className="v">{graph.nodes.length}</span></div>
-                <div><span style={{ color: "var(--dim)" }}>EDGES</span><span className="v">{graph.edges.length}</span></div>
+                <div><span style={{ color: "var(--dim)" }}>NODES</span><span className="v">{graphWithPositions.nodes.length}</span></div>
+                <div><span style={{ color: "var(--dim)" }}>EDGES</span><span className="v">{graphWithPositions.edges.length}</span></div>
                 <div><span style={{ color: "var(--dim)" }}>FOCUS</span><span className="v">{selected ? "ON" : "ALL"}</span></div>
+                <div><span style={{ color: "var(--dim)" }}>VISIBLE</span><span className="v">{hideUnrelated && selected ? "LOCAL" : "ALL"}</span></div>
                 <div><span style={{ color: "var(--dim)" }}>SOURCE</span><span className="v" style={{ color: graphQ.source === "live" ? "var(--approved)" : graphQ.source === "live-stale" ? "var(--changes)" : "var(--rejected)" }}>{graphQ.source === "live" ? "LIVE" : graphQ.source === "live-stale" ? "STALE" : graphQ.source === "loading" ? "…" : "NONE"}</span></div>
               </div>
             </div>
@@ -422,7 +463,14 @@ function GraphExplorer({ data, tenant }) {
               <button className="icon-btn" title="Zoom in">+</button>
               <button className="icon-btn" title="Zoom out">−</button>
               <button className="icon-btn" title="Fit view">⌖</button>
-              <button className="icon-btn" title="Clear focus" disabled={!selected} onClick={() => setSelected(null)}>◎</button>
+              <button className="icon-btn" title="Clear focus" disabled={!selected} onClick={() => { setSelected(null); setHideUnrelated(false); }}>◎</button>
+              <button
+                className="icon-btn"
+                title={hideUnrelated ? "Show all nodes" : "Hide unrelated nodes"}
+                disabled={!selected}
+                onClick={() => setHideUnrelated(v => !v)}>
+                {hideUnrelated ? "◉" : "◌"}
+              </button>
               <button className="icon-btn" title="Expand">⊕</button>
               <button className="icon-btn" title="Collapse">⊖</button>
             </div>
@@ -447,7 +495,7 @@ function GraphExplorer({ data, tenant }) {
         <div className="col inspector">
           {!selected ? (
             <div style={{ padding: 24, fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--muted)" }}>
-              All approved tenant graph nodes are visible. Select a node to highlight its local context and dim unrelated nodes and edges.
+              All approved tenant graph nodes are visible. Select a node to focus its local context; selected nodes can be dragged to rearrange the canvas.
             </div>
           ) : (
           <>
@@ -466,8 +514,8 @@ function GraphExplorer({ data, tenant }) {
                 <dl className="kv">
                   <dt>Status</dt><dd>{selected._raw?.status || "approved"}</dd>
                   <dt>Source row</dt><dd>{selected._raw?.source_table || "source"}#{selected._raw?.source_pk || selected.id.split(":").slice(1).join(":")}</dd>
-                  <dt>Edges in</dt><dd>{graph.edges.filter(e => e.t === selected.id).length}</dd>
-                  <dt>Edges out</dt><dd>{graph.edges.filter(e => e.s === selected.id).length}</dd>
+                  <dt>Edges in</dt><dd>{graphWithPositions.edges.filter(e => e.t === selected.id).length}</dd>
+                  <dt>Edges out</dt><dd>{graphWithPositions.edges.filter(e => e.s === selected.id).length}</dd>
                 </dl>
               </div>
               {selected.flag && (
@@ -479,9 +527,9 @@ function GraphExplorer({ data, tenant }) {
           </div>
 
           <div className="section">
-            <div className="section-head"><span>Connected edges</span><span className="ct">{graph.edges.filter(e => e.s === selected.id || e.t === selected.id).length}</span></div>
+            <div className="section-head"><span>Connected edges</span><span className="ct">{graphWithPositions.edges.filter(e => e.s === selected.id || e.t === selected.id).length}</span></div>
             <div className="section-body" style={{ padding: 0 }}>
-              {graph.edges.filter(e => e.s === selected.id || e.t === selected.id).map((e, i) => {
+              {graphWithPositions.edges.filter(e => e.s === selected.id || e.t === selected.id).map((e, i) => {
                 const other = e.s === selected.id ? e.t : e.s;
                 const dir = e.s === selected.id ? "→" : "←";
                 return (
@@ -830,7 +878,9 @@ function ProposedGraphDetail({ item, reason, setReason, busy, message, onReview 
   );
 }
 
-function BigGraph({ data, selected, onSelect, hoverId, setHoverId }) {
+function BigGraph({ data, selected, onSelect, hoverId, setHoverId, hideUnrelated, onNodePositionChange }) {
+  const svgRef = useRefGX(null);
+  const [dragging, setDragging] = useStateGX(null);
   const map = Object.fromEntries(data.nodes.map(n => [n.id, n]));
   const palette = ["var(--accent)", "var(--changes)", "var(--proposed)", "var(--approved)", "var(--dim)"];
   const graphTypes = Array.from(new Set(data.nodes.map(n => n.type).filter(Boolean)));
@@ -842,10 +892,43 @@ function BigGraph({ data, selected, onSelect, hoverId, setHoverId }) {
     if (e.s === sel) neighborIds.add(e.t);
     if (e.t === sel) neighborIds.add(e.s);
   });
+  const visibleNodeIds = new Set();
+  if (focusActive && hideUnrelated) {
+    visibleNodeIds.add(sel);
+    neighborIds.forEach(id => visibleNodeIds.add(id));
+  }
+
+  const eventPoint = (event) => {
+    const svg = svgRef.current;
+    if (!svg) return null;
+    const ctm = svg.getScreenCTM();
+    if (!ctm) return null;
+    const point = new DOMPoint(event.clientX, event.clientY).matrixTransform(ctm.inverse());
+    return { x: point.x, y: point.y };
+  };
+  const startDrag = (event, node) => {
+    event.preventDefault();
+    event.stopPropagation();
+    onSelect(node);
+    setHoverId(node.id);
+    setDragging({ id: node.id, pointerId: event.pointerId });
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+  };
+  const moveDrag = (event) => {
+    if (!dragging || dragging.pointerId !== event.pointerId) return;
+    const point = eventPoint(event);
+    if (point) onNodePositionChange(dragging.id, point);
+  };
+  const endDrag = (event) => {
+    if (dragging && dragging.pointerId === event.pointerId) {
+      event.currentTarget.releasePointerCapture?.(event.pointerId);
+      setDragging(null);
+    }
+  };
 
   return (
-    <svg viewBox="0 0 1000 600" preserveAspectRatio="xMidYMid meet"
-         style={{ width: "100%", height: "100%", display: "block" }}>
+    <svg ref={svgRef} viewBox="0 0 1000 600" preserveAspectRatio="xMidYMid meet"
+         style={{ width: "100%", height: "100%", display: "block", touchAction: "none", userSelect: "none" }}>
       <defs>
         <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
           <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--line-strong)" />
@@ -860,6 +943,7 @@ function BigGraph({ data, selected, onSelect, hoverId, setHoverId }) {
         const s = map[e.s], t = map[e.t];
         if (!s || !t) return null;
         const involved = e.s === sel || e.t === sel;
+        if (focusActive && hideUnrelated && !involved) return null;
         const dimmed = focusActive && !involved;
         return (
           <g key={i} opacity={dimmed ? 0.16 : 1}>
@@ -884,16 +968,20 @@ function BigGraph({ data, selected, onSelect, hoverId, setHoverId }) {
       {data.nodes.map((n, i) => {
         const isSel = n.id === sel;
         const isNeighbor = neighborIds.has(n.id);
+        if (focusActive && hideUnrelated && !visibleNodeIds.has(n.id)) return null;
         const isHover = n.id === hoverId;
         const dimmed = focusActive && !isSel && !isNeighbor;
         const showLabel = isSel;
         const stroke = n.flag ? "var(--rejected)" : (isSel ? "var(--accent)" : isNeighbor ? "var(--accent-dim)" : (n.muted ? "var(--faint)" : typeColors[n.type] || "var(--text-dim)"));
         return (
-          <g key={i} onClick={() => onSelect(n)}
+          <g key={i} onPointerDown={(event) => startDrag(event, n)}
+                 onPointerMove={moveDrag}
+                 onPointerUp={endDrag}
+                 onPointerCancel={endDrag}
                  onMouseEnter={() => setHoverId(n.id)}
                  onMouseLeave={() => setHoverId(null)}
                  opacity={dimmed ? 0.24 : 1}
-                 style={{ cursor: "pointer", transition: "opacity 120ms ease" }}>
+                 style={{ cursor: dragging?.id === n.id ? "grabbing" : "grab", transition: "opacity 120ms ease" }}>
             {(isSel || isHover) && (
               <circle cx={n.x} cy={n.y} r={n.r + 10} fill="var(--accent-bg)" stroke="var(--accent-line)" strokeWidth="1" />
             )}
