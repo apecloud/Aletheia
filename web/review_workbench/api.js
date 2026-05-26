@@ -312,9 +312,10 @@
       return data;
     },
 
-    async graphProposedElements(tenant, { runKey = "", limit = 50 } = {}) {
+    async graphProposedElements(tenant, { runKey = "", limit = 50, status = "pending" } = {}) {
       const qs = { limit: String(limit) };
       if (runKey) qs.run_key = runKey;
+      if (status) qs.status = status;
       const data = await fetchJson(withTenantQs("/api/graph/proposed-elements", tenant, qs));
       return data || { runs: [], elements: [] };
     },

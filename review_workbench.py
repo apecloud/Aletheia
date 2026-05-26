@@ -3076,14 +3076,49 @@ class InstanceRepository:
             },
         }
 
-    def proposed_graph_elements(self, tenant, run_key=None, limit=50):
+    def proposed_graph_elements(self, tenant, run_key=None, limit=50, status_filter="pending"):
         limit = max(1, min(int(limit), 200))
         where = "e.project_id = :tenant_id"
         params = {"tenant_id": tenant.tenant_id, "limit": limit}
         if run_key:
             where += " AND r.run_key = :run_key"
             params["run_key"] = run_key
+        status_filter = (status_filter or "pending").replace("-", "_").lower()
+        if status_filter in {"pending", "active", "draft"}:
+            where += " AND e.status IN ('draft', 'needs_more_evidence')"
+        elif status_filter in {"reviewed", "closed"}:
+            where += " AND e.status IN ('approved', 'rejected')"
+        elif status_filter in {"approved", "rejected", "needs_more_evidence"}:
+            where += " AND e.status = :status_filter"
+            params["status_filter"] = status_filter
+        elif status_filter in {"all", "*"}:
+            pass
+        else:
+            raise ValueError("Unsupported proposed graph status filter")
         with self.metadata_engine_for(tenant).connect() as conn:
+            summary = conn.execute(
+                text(
+                    f"""
+                    SELECT COUNT(*) AS total_count
+                    FROM aletheia_proposed_graph_elements e
+                    JOIN aletheia_iterative_graph_enrichment_runs r ON r.id = e.run_id
+                    WHERE {where}
+                    """
+                ),
+                params,
+            ).mappings().first()
+            type_rows = conn.execute(
+                text(
+                    f"""
+                    SELECT e.element_type, COUNT(*) AS count
+                    FROM aletheia_proposed_graph_elements e
+                    JOIN aletheia_iterative_graph_enrichment_runs r ON r.id = e.run_id
+                    WHERE {where}
+                    GROUP BY e.element_type
+                    """
+                ),
+                params,
+            ).mappings().all()
             rows = conn.execute(
                 text(
                     f"""
@@ -3136,7 +3171,14 @@ class InstanceRepository:
                     "run_key": run["run_key"],
                 }
             )
-        return {"tenant": tenant.public_dict(), "runs": list(runs.values()), "elements": elements}
+        return {
+            "tenant": tenant.public_dict(),
+            "runs": list(runs.values()),
+            "elements": elements,
+            "total_count": int(summary["total_count"] or 0) if summary else len(elements),
+            "element_type_counts": {row["element_type"]: int(row["count"] or 0) for row in type_rows},
+            "status_filter": status_filter,
+        }
 
     def review_proposed_graph_element(self, tenant, element_key, action, body=None):
         action = (action or "").replace("_", "-").lower()
@@ -8204,7 +8246,11 @@ class ReviewWorkbenchHandler(BaseHTTPRequestHandler):
             query = parse_qs(parsed.query)
             run_key = query.get("run_key", [""])[0] or None
             limit = int(query.get("limit", ["50"])[0])
-            self._send_json(self.instance_repository.proposed_graph_elements(tenant, run_key=run_key, limit=limit))
+            status_filter = query.get("status", ["pending"])[0]
+            try:
+                self._send_json(self.instance_repository.proposed_graph_elements(tenant, run_key=run_key, limit=limit, status_filter=status_filter))
+            except ValueError as exc:
+                self._send_error(HTTPStatus.BAD_REQUEST, str(exc))
             return
         if parsed.path == "/api/agent-runs/console":
             query = parse_qs(parsed.query)

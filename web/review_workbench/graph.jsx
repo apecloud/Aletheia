@@ -97,6 +97,7 @@ function GraphExplorer({ data, tenant }) {
     fallback: { runs: [], elements: [] },
   });
   const proposed = proposedQ.data || { runs: [], elements: [] };
+  const proposedTotalCount = proposed?.total_count ?? (proposed.elements || []).length;
   const selectGraphTab = (tab) => {
     setShowAgentRunsMoved(false);
     setLeftTab(normalizeGraphTab(tab));
@@ -266,7 +267,7 @@ function GraphExplorer({ data, tenant }) {
                 Approved graph <span className="ct">{graph.nodes.length}</span>
               </button>
               <button className={"side-tab" + (leftTab === "proposed" ? " active" : "")} onClick={() => selectGraphTab("proposed")}>
-                Proposed graph <span className="ct">{(proposed.elements || []).length}</span>
+                Proposed graph <span className="ct">{proposedTotalCount}</span>
               </button>
               <button className={"side-tab" + (leftTab === "saved" ? " active" : "")} onClick={() => selectGraphTab("saved")}>
                 Saved views <span className="ct">0</span>
@@ -525,7 +526,8 @@ function ProposedGraphPanel({ tenantId, proposed, loading, source, focusElementK
   const [reviewMessage, setReviewMessage] = useStateGX(null);
   const runs = proposed?.runs || [];
   const elements = proposed?.elements || [];
-  const counts = elements.reduce((acc, item) => {
+  const totalCount = proposed?.total_count ?? elements.length;
+  const counts = proposed?.element_type_counts || elements.reduce((acc, item) => {
     acc[item.element_type] = (acc[item.element_type] || 0) + 1;
     return acc;
   }, {});
@@ -540,6 +542,7 @@ function ProposedGraphPanel({ tenantId, proposed, loading, source, focusElementK
     if (!selectedElement) return;
     const latest = elements.find(item => item.element_key === selectedElement.element_key);
     if (latest && latest !== selectedElement) setSelectedElement(latest);
+    if (!latest) setSelectedElement(filteredElements[0] || null);
   }, [JSON.stringify(elements.map(item => `${item.element_key}:${item.status}`))]);
   useEffectGX(() => {
     const valid = new Set(elements.map(item => item.element_key));
@@ -649,11 +652,11 @@ function ProposedGraphPanel({ tenantId, proposed, loading, source, focusElementK
     <div className="section">
       <div className="section-head">
         <span>Proposed graph space</span>
-        <span className="ct">{loading ? "loading" : `${elements.length} draft`}</span>
+        <span className="ct">{loading ? "loading" : `${totalCount} pending`}</span>
       </div>
       <div className="section-body">
         <div className="chip-row" style={{ marginBottom: 10 }}>
-          <Chip active={kindFilter === "all"} onClick={() => selectKind("all")} count={elements.length}>all</Chip>
+          <Chip active={kindFilter === "all"} onClick={() => selectKind("all")} count={totalCount}>all</Chip>
           <Chip active={kindFilter === "node"} onClick={() => selectKind("node")} count={counts.node || 0}>nodes</Chip>
           <Chip active={kindFilter === "edge"} onClick={() => selectKind("edge")} count={counts.edge || 0}>edges</Chip>
           <Chip active={kindFilter === "finding"} onClick={() => selectKind("finding")} count={counts.finding || 0}>findings</Chip>
