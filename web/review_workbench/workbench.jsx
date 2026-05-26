@@ -56,6 +56,9 @@ function Workbench({ data, tenant }) {
   const [selectedKey, setSelectedKey] = useStateWB(null);
   const [statusView, setStatusView] = useStateWB("active");
   const [search, setSearch] = useStateWB("");
+  const [reviewNote, setReviewNote] = useStateWB("");
+  const [reviewBusy, setReviewBusy] = useStateWB(false);
+  const [reviewMessage, setReviewMessage] = useStateWB(null);
 
   const reviewItems = useMemoWB(() => buildWorkspaceReviewItems({
     tenantId,
@@ -100,6 +103,76 @@ function Workbench({ data, tenant }) {
       url.searchParams.set("workspace_tab", tab);
       history.replaceState(null, "", url.toString());
     } catch {}
+  }
+
+  useEffectWB(() => {
+    setReviewNote("");
+    setReviewMessage(null);
+  }, [selected?.id]);
+
+  async function submitInlineReview(action) {
+    if (!selected || !selected.reviewKind || reviewBusy) return;
+    const requiresReason = action !== "approve";
+    const reason = reviewNote.trim();
+    if (requiresReason && !reason) {
+      setReviewMessage({ tone: "changes", text: "Add a short review note before this action." });
+      return;
+    }
+    const body = {
+      reviewer: "Workspace",
+      reason: reason || "Workspace inline review",
+    };
+    const actionMap = {
+      ontology: {
+        approve: "approve",
+        reject: "reject",
+        needs: "needs-changes",
+        comment: "comment",
+      },
+      graph: {
+        approve: "approve",
+        reject: "reject",
+        needs: "needs-evidence",
+        comment: "comment",
+      },
+      autopilot_candidate: {
+        approve: "approve",
+        reject: "reject",
+        needs: "needs-more-evidence",
+        comment: "comment",
+      },
+      reasoning_finding: {
+        approve: "approve",
+        reject: "reject",
+        needs: "needs-more-evidence",
+        comment: "comment",
+      },
+    };
+    const apiAction = actionMap[selected.reviewKind]?.[action];
+    if (!apiAction) {
+      setReviewMessage({ tone: "changes", text: "This work item does not support inline review yet." });
+      return;
+    }
+    setReviewBusy(true);
+    setReviewMessage(null);
+    try {
+      if (selected.reviewKind === "ontology") {
+        await AL_API.reviewAction(selected.id, apiAction, body, tenantId);
+      } else if (selected.reviewKind === "graph") {
+        await AL_API.reviewGraphProposedElement(tenantId, selected.id, apiAction, body);
+      } else if (selected.reviewKind === "autopilot_candidate") {
+        await AL_API.reviewAutopilotCandidate(selected.id, apiAction, body, tenantId);
+      } else if (selected.reviewKind === "reasoning_finding") {
+        await AL_API.reviewFinding(selected.id, apiAction, body, tenantId);
+      }
+      setReviewNote("");
+      setReviewMessage({ tone: "approved", text: `Review action recorded: ${inlineActionLabel(action)}.` });
+      window.dispatchEvent(new CustomEvent("aletheia:retry"));
+    } catch (err) {
+      setReviewMessage({ tone: "changes", text: err?.message || String(err) });
+    } finally {
+      setReviewBusy(false);
+    }
   }
 
   return (
@@ -231,6 +304,34 @@ function Workbench({ data, tenant }) {
                     <CaseField label="Source / run" value={selected.sourceRun} />
                     <CaseField label="Confidence" value={selected.confidenceLabel} />
                     <CaseField label="Next action" value={selected.nextAction} />
+                  </div>
+                </Panel>
+
+                <Panel eyebrow="Inline review" title="Review this proposed draft" count={selected.reviewKindLabel || selected.itemType} style={{ marginTop: 16 }}>
+                  <InlineReviewDetails item={selected} />
+                  <div style={{ marginTop: 12 }}>
+                    <div className="eyebrow" style={{ marginBottom: 6 }}>Review note</div>
+                    <textarea
+                      className="input"
+                      value={reviewNote}
+                      onChange={e => setReviewNote(e.target.value)}
+                      placeholder="Optional for approve. Required for reject, needs evidence/changes, or comment."
+                      style={{ minHeight: 72, resize: "vertical", lineHeight: 1.45 }}
+                    />
+                  </div>
+                  {reviewMessage && (
+                    <div className={`pill ${reviewMessage.tone || ""}`} style={{ marginTop: 10, maxWidth: "100%", whiteSpace: "normal", lineHeight: 1.45 }}>
+                      <span className="dot" />{reviewMessage.text}
+                    </div>
+                  )}
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 12 }}>
+                    <button className="btn primary" disabled={reviewBusy} onClick={() => submitInlineReview("approve")}>Approve</button>
+                    <button className="btn ghost" disabled={reviewBusy} onClick={() => submitInlineReview("needs")}>{selected.reviewKind === "ontology" ? "Needs changes" : "Needs evidence"}</button>
+                    <button className="btn ghost" disabled={reviewBusy} onClick={() => submitInlineReview("reject")}>Reject</button>
+                    <button className="btn ghost" disabled={reviewBusy} onClick={() => submitInlineReview("comment")}>Comment</button>
+                  </div>
+                  <div style={{ marginTop: 10, color: "var(--muted)", fontFamily: "var(--font-mono)", fontSize: 11, lineHeight: 1.5 }}>
+                    Inline review calls the owning review gate. It does not create a second workflow and does not bypass canonical ontology, formal graph, or finding evidence boundaries.
                   </div>
                 </Panel>
 
@@ -744,9 +845,12 @@ function buildWorkspaceReviewItems({ tenantId, artifacts, graphElements, agentRu
         confidenceLabel: a.confidence != null ? String(a.confidence) : "—",
         nextAction: statusGroup === "blocked" ? "Resolve review feedback in Ontology" : "Approve, reject, or request changes in Ontology",
         reviewHref: `/?screen=ontology&tenant=${encodeURIComponent(tenantId)}&artifact=${encodeURIComponent(a.canonical_key || a.id || "")}`,
-        reviewLabel: "Review in ontology",
+        reviewLabel: "Open in Ontology",
+        reviewKind: "ontology",
+        reviewKindLabel: "Ontology review gate",
         runHref: "",
         boundary: "review required before canonical ontology",
+        raw: a,
       });
     });
 
@@ -777,9 +881,12 @@ function buildWorkspaceReviewItems({ tenantId, artifacts, graphElements, agentRu
         confidenceLabel: e.confidence != null ? String(e.confidence) : "—",
         nextAction: blocked ? "Review evidence gap or rejection reason in Graph" : "Review proposed graph element",
         reviewHref: `/?screen=graph&tenant=${encodeURIComponent(tenantId)}&graph_tab=proposed&proposed_key=${encodeURIComponent(e.element_key || "")}`,
-        reviewLabel: "Review in graph",
+        reviewLabel: "Open in Graph",
+        reviewKind: "graph",
+        reviewKindLabel: "Proposed graph review gate",
         runHref: e.run_key ? `/?screen=workbench&tenant=${encodeURIComponent(tenantId)}&workspace_tab=agents&agent_tab=enrichment&run_key=${encodeURIComponent(e.run_key)}` : "",
         boundary: "proposed graph space; formal graph writes disabled",
+        raw: e,
       });
     });
 
@@ -808,9 +915,12 @@ function buildWorkspaceReviewItems({ tenantId, artifacts, graphElements, agentRu
           confidenceLabel: e.confidence != null ? String(e.confidence) : "—",
           nextAction: blocked ? "Add evidence or mark as rejected in Reasoning" : "Approve, reject, or request evidence in Reasoning",
           reviewHref: `/?screen=reasoning&tenant=${encodeURIComponent(tenantId)}&active_tab=autopilot`,
-          reviewLabel: "Review finding",
+          reviewLabel: "Open in Reasoning",
+          reviewKind: "autopilot_candidate",
+          reviewKindLabel: "Finding review gate",
           runHref: `/?screen=workbench&tenant=${encodeURIComponent(tenantId)}&workspace_tab=agents&agent_tab=autopilot&run_key=${encodeURIComponent(run.run_key || "")}`,
           boundary: "candidate finding; no automatic approval",
+          raw: { ...e, source_run_key: run.run_key, source_kind: run.kind },
         });
       });
   });
@@ -828,6 +938,105 @@ function buildWorkspaceReviewItems({ tenantId, artifacts, graphElements, agentRu
       if (au !== bu) return au < bu ? 1 : -1;
       return a.title.localeCompare(b.title);
     });
+}
+
+function InlineReviewDetails({ item }) {
+  const raw = item?.raw || {};
+  const payload = raw.payload || {};
+  const sourceUrl = raw.source_url || payload.source?.url || payload.source_url || "";
+  const evidenceRefs = workspaceEvidenceRefs(item);
+  const path = workspacePathLabel(item);
+  const boundary = workspaceBoundaryFacts(item);
+  return (
+    <div style={{ display: "grid", gap: 10 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+        <CaseField label="Review gate" value={item.reviewKindLabel || item.reviewKind || "—"} />
+        <CaseField label="Current status" value={item.statusLabel} />
+        <CaseField label="Confidence" value={item.confidenceLabel} />
+        <CaseField label="Source run" value={item.sourceRun} />
+      </div>
+      {path && <CaseField label="Path / relation" value={path} />}
+      {sourceUrl && <CaseField label="Source URL" value={sourceUrl} />}
+      {evidenceRefs.length > 0 && (
+        <div style={{ border: "1px solid var(--line-soft)", background: "var(--bg-2)", padding: "10px 12px" }}>
+          <div className="eyebrow" style={{ marginBottom: 6 }}>Evidence refs</div>
+          <div style={{ display: "grid", gap: 4 }}>
+            {evidenceRefs.slice(0, 5).map((ref, idx) => (
+              <div key={`${ref}-${idx}`} style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text)", overflowWrap: "anywhere" }}>{ref}</div>
+            ))}
+            {evidenceRefs.length > 5 && <div style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--muted)" }}>+{evidenceRefs.length - 5} more</div>}
+          </div>
+        </div>
+      )}
+      <div style={{ border: "1px solid var(--line-soft)", background: "var(--bg-2)", padding: "10px 12px" }}>
+        <div className="eyebrow" style={{ marginBottom: 6 }}>Write boundary</div>
+        <div style={{ display: "grid", gap: 4, fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text)" }}>
+          {boundary.map(line => <div key={line}>{line}</div>)}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function workspaceEvidenceRefs(item) {
+  const raw = item?.raw || {};
+  const payload = raw.payload || {};
+  const chain = payload.evidence_chain || raw.evidence_chain || [];
+  const refs = [
+    ...(raw.evidence_refs || []),
+    ...(raw.sourceRefs || []),
+    ...(raw.source_refs || []),
+    ...(payload.evidence_refs || []),
+    ...(Array.isArray(chain) ? chain.map(e => e.source_url || e.source_ref || e.url || e.summary || e.metric).filter(Boolean) : []),
+  ];
+  return Array.from(new Set(refs.map(ref => String(ref)).filter(Boolean)));
+}
+
+function workspacePathLabel(item) {
+  const raw = item?.raw || {};
+  const payload = raw.payload || {};
+  const source = payload.source_label || payload.source || payload.country || "";
+  const relation = payload.relation || payload.edge_type || payload.path_relation || "";
+  const target = payload.target_label || payload.target || payload.chokepoint || "";
+  if (source || relation || target) {
+    return [source, relation, target].filter(Boolean).join(" -> ");
+  }
+  const pathLabel = payload.path_label || payload.deep_graph_profile?.path_label || payload.analysis_path || raw.path_label;
+  if (pathLabel) return Array.isArray(pathLabel) ? pathLabel.join(" -> ") : String(pathLabel);
+  if (payload.metrics && payload.metrics.length) return `metrics: ${payload.metrics.join(", ")}`;
+  return "";
+}
+
+function workspaceBoundaryFacts(item) {
+  if (item?.reviewKind === "ontology") {
+    return [
+      "canonical ontology write: review gate only",
+      "graph write: disabled",
+      "target: ontology artifact review",
+    ];
+  }
+  if (item?.reviewKind === "graph") {
+    return [
+      "canonical ontology write: false",
+      "formal graph write: false",
+      "target: proposed_graph_space",
+    ];
+  }
+  return [
+    "canonical write: false",
+    "formal graph write: false",
+    "target: candidate finding review gate",
+  ];
+}
+
+function inlineActionLabel(action) {
+  const labels = {
+    approve: "approve",
+    reject: "reject",
+    needs: "needs evidence / changes",
+    comment: "comment",
+  };
+  return labels[action] || action;
 }
 
 function buildAgentOutputGroups({ agentTab, tenantId, runs, artifacts, graphElements }) {
