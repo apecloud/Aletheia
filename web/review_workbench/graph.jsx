@@ -2,6 +2,40 @@
 
 const { useState: useStateGX, useRef: useRefGX, useEffect: useEffectGX, useMemo: useMemoGX } = React;
 
+function isZhGX(language) {
+  return typeof isZhUI === "function" ? isZhUI(language) : String(language || "").startsWith("zh");
+}
+
+function tGX(language, en, zh) {
+  return typeof tUI === "function" ? tUI(language, en, zh) : (isZhGX(language) ? zh : en);
+}
+
+function labelGX(value, language) {
+  return typeof displayLabelUI === "function" ? displayLabelUI(value, language) : value;
+}
+
+function countryLabelGX(value, language) {
+  return typeof countryNameUI === "function" ? countryNameUI(value, language) : value;
+}
+
+function statusLabelGraphGX(status, language) {
+  if (!isZhGX(language)) return status || "—";
+  const map = {
+    approved: "已批准",
+    blocked: "已阻塞",
+    candidate: "候选",
+    changes: "需修改",
+    done: "已完成",
+    draft: "草稿",
+    failed: "失败",
+    needs_evidence: "需补证据",
+    proposed: "待审核",
+    rejected: "已拒绝",
+    running: "运行中",
+  };
+  return map[String(status || "").toLowerCase()] || status || "—";
+}
+
 // radial layout for nodes that don't already have x/y
 function layoutRadial(nodes, edges, opts = {}) {
   const W = opts.width || 1000, H = opts.height || 600;
@@ -28,11 +62,13 @@ function layoutRadial(nodes, edges, opts = {}) {
 }
 
 // normalize /api/graph/context response into the prototype's graph shape
-function normalizeGraph(raw, fallback) {
+function normalizeGraph(raw, fallback, language) {
   if (!raw || !raw.nodes) return fallback;
   const nodes = raw.nodes.map(n => ({
     id: n.id, type: n.type,
-    label: n.label || (n.key_properties && (n.key_properties.name || n.key_properties.title)) || n.id,
+    label: n.type === "Country"
+      ? countryLabelGX(n.label || n.id, language)
+      : labelGX(n.label || (n.key_properties && (n.key_properties.name || n.key_properties.title)) || n.id, language),
     x: n.x, y: n.y, r: n.r,
     center: raw.center && raw.center.id === n.id,
     flag: !!n.flag,
@@ -59,7 +95,7 @@ function compactText(value, limit = 96) {
   return text.length > limit ? text.slice(0, limit - 1) + "…" : text;
 }
 
-function GraphExplorer({ data, tenant }) {
+function GraphExplorer({ data, tenant, language }) {
   const initialParams = useMemoGX(() => {
     try { return new URLSearchParams(location.search); } catch { return new URLSearchParams(); }
   }, []);
@@ -178,7 +214,7 @@ function GraphExplorer({ data, tenant }) {
   );
   const isStaleG = graphQ.source === "live-stale";
   const isMockG  = graphQ.source === "mock";
-  const graph = useMemoGX(() => normalizeGraph(graphQ.data, { nodes: [], edges: [] }), [graphQ.data]);
+  const graph = useMemoGX(() => normalizeGraph(graphQ.data, { nodes: [], edges: [] }, language), [graphQ.data, language]);
 
   const [selected, setSelected] = useStateGX(null);
   const [nodePositions, setNodePositions] = useStateGX({});
@@ -268,43 +304,43 @@ function GraphExplorer({ data, tenant }) {
   return (
     <div className="canvas">
       <div className="subbar">
-        <div className="eyebrow accent">Graph Explorer</div>
+        <div className="eyebrow accent">{tGX(language, "Graph Explorer", "图谱探索")}</div>
         <div className="spacer" />
-        {isMockG  && <span className="pill changes" style={{ marginRight: 8 }}><span className="dot" />Mock fallback</span>}
-        {isStaleG && <span className="pill changes" style={{ marginRight: 8 }}><span className="dot" />Stale · last fetch failed</span>}
-        {graphQ.loading && graphQ.data && <span className="pill"><span className="dot" />Refreshing…</span>}
-        <button className="tool" onClick={() => window.dispatchEvent(new CustomEvent("aletheia:retry"))}>⟲ Reload</button>
-        <button className="tool">⤓ Snapshot</button>
-        <button className="tool primary">↗ Open reasoning</button>
+        {isMockG  && <span className="pill changes" style={{ marginRight: 8 }}><span className="dot" />{tGX(language, "Mock fallback", "模拟回退")}</span>}
+        {isStaleG && <span className="pill changes" style={{ marginRight: 8 }}><span className="dot" />{tGX(language, "Stale · last fetch failed", "数据陈旧 · 最近拉取失败")}</span>}
+        {graphQ.loading && graphQ.data && <span className="pill"><span className="dot" />{tGX(language, "Refreshing…", "刷新中…")}</span>}
+        <button className="tool" onClick={() => window.dispatchEvent(new CustomEvent("aletheia:retry"))}>⟲ {tGX(language, "Reload", "重新加载")}</button>
+        <button className="tool">⤓ {tGX(language, "Snapshot", "快照")}</button>
+        <button className="tool primary">↗ {tGX(language, "Open reasoning", "打开推理")}</button>
       </div>
 
       <div className="gx">
         {/* LEFT — scope */}
         <div className="col">
           <div style={{ padding: "var(--pad-3) var(--pad-4)", borderBottom: "1px solid var(--line)" }}>
-            <div className="eyebrow accent">Graph Catalog</div>
+            <div className="eyebrow accent">{tGX(language, "Graph Catalog", "图谱目录")}</div>
             <div style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text)", marginTop: 4 }}>
-              tenant <span style={{ color: "var(--accent)" }}>{tenant ? tenant.id : "default"}</span> · graph spaces
+              {tGX(language, "tenant", "租户")} <span style={{ color: "var(--accent)" }}>{tenant ? tenant.id : "default"}</span> · {tGX(language, "graph spaces", "图空间")}
             </div>
             <div className="side-tabs" style={{ marginTop: 10 }}>
               <button className={"side-tab" + (leftTab === "approved" ? " active" : "")} onClick={() => selectGraphTab("approved")}>
-                Approved graph <span className="ct">{graphWithPositions.nodes.length}</span>
+                {tGX(language, "Approved graph", "已批准图谱")} <span className="ct">{graphWithPositions.nodes.length}</span>
               </button>
               <button className={"side-tab" + (leftTab === "proposed" ? " active" : "")} onClick={() => selectGraphTab("proposed")}>
-                Proposed graph <span className="ct">{proposedTotalCount}</span>
+                {tGX(language, "Proposed graph", "候选图谱")} <span className="ct">{proposedTotalCount}</span>
               </button>
               <button className={"side-tab" + (leftTab === "saved" ? " active" : "")} onClick={() => selectGraphTab("saved")}>
-                Saved views <span className="ct">0</span>
+                {tGX(language, "Saved views", "保存视图")} <span className="ct">0</span>
               </button>
             </div>
             {showAgentRunsMoved && (
               <div style={{ marginTop: 10, border: "1px solid var(--accent-line)", background: "var(--accent-bg)", padding: 10 }}>
-                <div className="eyebrow accent">Automatic runs moved</div>
+                <div className="eyebrow accent">{tGX(language, "Automatic runs moved", "自动运行已迁移")}</div>
                 <div style={{ marginTop: 5, fontSize: 12, color: "var(--text-dim)", lineHeight: 1.45 }}>
-                  Crawl, enrichment, and reasoning runs are managed from Workspace.
+                  {tGX(language, "Crawl, enrichment, and reasoning runs are managed from Workspace.", "爬取、信息增益和推理运行已统一由 Workspace 管理。")}
                 </div>
                 <a className="btn ghost" style={{ marginTop: 8 }} href={`/?screen=workbench&tenant=${encodeURIComponent(tenantId)}&workspace_tab=agents`}>
-                  Open Workspace agents
+                  {tGX(language, "Open Workspace agents", "打开 Workspace Agent")}
                 </a>
               </div>
             )}
@@ -313,17 +349,17 @@ function GraphExplorer({ data, tenant }) {
           {leftTab === "approved" && <>
           <div style={{ padding: "var(--pad-3) var(--pad-4)", borderBottom: "1px solid var(--line)", display: "flex", flexDirection: "column", gap: 10 }}>
             <div>
-              <div className="eyebrow" style={{ marginBottom: 4 }}>Center</div>
+              <div className="eyebrow" style={{ marginBottom: 4 }}>{tGX(language, "Center", "中心")}</div>
               <div style={{ display: "flex", gap: 6 }}>
                 <select className="select" style={{ width: 110 }} value={centerType} onChange={e => { setCenterType(e.target.value); setCenterNodeId(""); setCenterSearch(""); setSelected(null); setFocusMessage(""); }}>
-                  {centerTypes.length === 0 && <option value="">No tenant types</option>}
+                  {centerTypes.length === 0 && <option value="">{tGX(language, "No tenant types", "无租户类型")}</option>}
                   {centerTypes.map(t => <option key={t.type} value={t.type}>{t.label || t.type}{t.approved ? "" : " · draft"}</option>)}
                 </select>
                 <select className="select" value={centerNodeId} onChange={e => { setCenterNodeId(e.target.value); setCenterSearch(e.target.value); }} disabled={!centerType || candidates.length === 0}>
-                  {candidates.length === 0 && <option value="">No center nodes</option>}
+                  {candidates.length === 0 && <option value="">{tGX(language, "No center nodes", "无中心节点")}</option>}
                   {candidates.map(c => {
                     const id = String(c.id || "").split(":").slice(1).join(":");
-                    return <option key={c.id} value={id}>{c.label || c.id}</option>;
+                    return <option key={c.id} value={id}>{centerType === "Country" ? countryLabelGX(c.label || c.id, language) : labelGX(c.label || c.id, language)}</option>;
                   })}
                 </select>
               </div>
@@ -331,31 +367,31 @@ function GraphExplorer({ data, tenant }) {
                 className="input"
                 value={centerSearch}
                 onChange={e => { setCenterSearch(e.target.value); setCenterNodeId(e.target.value.trim()); setFocusMessage(""); }}
-                placeholder={centerType === "Country" ? "Search or type ISO3, e.g. CHN" : "Search or type center id"}
+                placeholder={centerType === "Country" ? tGX(language, "Search or type country, e.g. China or CHN", "搜索或输入国家，例如 China 或 CHN") : tGX(language, "Search or type center id", "搜索或输入中心 ID")}
                 disabled={!centerType}
                 style={{ marginTop: 6 }}
               />
               <div style={{ marginTop: 6, fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--muted)" }}>
-                {activeType ? `${activeType.table} · ${activeType.ontology_artifact} · ${activeType.artifact_status || "unknown"} · ${candidates.length} candidate${candidates.length === 1 ? "" : "s"}` : "No tenant graph center types for this tenant."}
+                {activeType ? `${activeType.table} · ${activeType.ontology_artifact} · ${activeType.artifact_status || "unknown"} · ${candidates.length} ${tGX(language, "candidates", "候选")}` : tGX(language, "No tenant graph center types for this tenant.", "该租户没有可用的图谱中心类型。")}
               </div>
               <button className="btn ghost" style={{ marginTop: 8, width: "100%" }} disabled={!centerKey || !graphWithPositions.nodes.some(node => node.id === centerKey)} onClick={focusCenterNode}>
-                Focus center in full graph
+                {tGX(language, "Focus center in full graph", "在全图中聚焦中心")}
               </button>
               <div style={{ marginTop: 6, fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--muted)", lineHeight: 1.45 }}>
-                Default view shows all approved tenant graph nodes. Selecting a node only changes focus contrast.
+                {tGX(language, "Default view shows all approved tenant graph nodes. Selecting a node only changes focus contrast.", "默认视图显示该租户所有已批准图节点；选中节点只改变聚焦对比度。")}
               </div>
             </div>
             <div style={{ display: "flex", gap: 6 }}>
               <div style={{ flex: 1 }}>
-                <div className="eyebrow" style={{ marginBottom: 4 }}>Depth</div>
+                <div className="eyebrow" style={{ marginBottom: 4 }}>{tGX(language, "Depth", "深度")}</div>
                 <input className="input" value={depth} onChange={e => setDepth(+e.target.value)} type="number" min={1} max={3} />
               </div>
               <div style={{ flex: 1 }}>
-                <div className="eyebrow" style={{ marginBottom: 4 }}>Limit</div>
+                <div className="eyebrow" style={{ marginBottom: 4 }}>{tGX(language, "Limit", "上限")}</div>
                 <input className="input" value={limit} onChange={e => setLimit(+e.target.value)} type="number" />
               </div>
             </div>
-            <button className="btn primary" disabled={!centerKey || graphQ.loading} onClick={loadAndFocusCenter}>Load full graph</button>
+            <button className="btn primary" disabled={!centerKey || graphQ.loading} onClick={loadAndFocusCenter}>{tGX(language, "Load full graph", "加载全图")}</button>
             {focusMessage && (
               <div style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: focusMessage.includes("not in") ? "var(--changes)" : "var(--muted)", lineHeight: 1.4 }}>
                 {focusMessage}
@@ -364,39 +400,39 @@ function GraphExplorer({ data, tenant }) {
           </div>
 
           <div style={{ padding: "var(--pad-3) var(--pad-4)", borderBottom: "1px solid var(--line)" }}>
-            <div className="eyebrow" style={{ marginBottom: 8 }}>Current scope</div>
+            <div className="eyebrow" style={{ marginBottom: 8 }}>{tGX(language, "Current scope", "当前范围")}</div>
             <dl className="kv">
-              <dt>Center</dt><dd>{centerLabel}</dd>
-              <dt>Nodes</dt><dd>{graphWithPositions.nodes.length}</dd>
-              <dt>Edges</dt><dd>{graphWithPositions.edges.length}</dd>
-              <dt>View</dt><dd>all approved nodes</dd>
-              <dt>Limit</dt><dd>{limit}</dd>
+              <dt>{tGX(language, "Center", "中心")}</dt><dd>{labelGX(centerLabel, language)}</dd>
+              <dt>{tGX(language, "Nodes", "节点")}</dt><dd>{graphWithPositions.nodes.length}</dd>
+              <dt>{tGX(language, "Edges", "边")}</dt><dd>{graphWithPositions.edges.length}</dd>
+              <dt>{tGX(language, "View", "视图")}</dt><dd>{tGX(language, "all approved nodes", "全部已批准节点")}</dd>
+              <dt>{tGX(language, "Limit", "上限")}</dt><dd>{limit}</dd>
             </dl>
             <button
               className="btn ghost"
               style={{ marginTop: 10, width: "100%" }}
               disabled={!selected}
               onClick={() => setHideUnrelated(v => !v)}>
-              {hideUnrelated ? "Show all graph nodes" : "Hide unrelated nodes"}
+              {hideUnrelated ? tGX(language, "Show all graph nodes", "显示所有图节点") : tGX(language, "Hide unrelated nodes", "隐藏无关节点")}
             </button>
           </div>
 
           <div style={{ padding: "var(--pad-3) var(--pad-4)", borderBottom: "1px solid var(--line)" }}>
-            <div className="eyebrow" style={{ marginBottom: 8 }}>Edge types</div>
+            <div className="eyebrow" style={{ marginBottom: 8 }}>{tGX(language, "Edge types", "边类型")}</div>
             <div className="chip-row">
-              {Object.keys(edgeCounts).length === 0 && <Chip count={0}>none</Chip>}
+              {Object.keys(edgeCounts).length === 0 && <Chip count={0}>{tGX(language, "none", "无")}</Chip>}
               {Object.entries(edgeCounts).map(([kind, count]) => <Chip key={kind} active count={count}>{kind}</Chip>)}
             </div>
           </div>
 
           <div style={{ flex: 1, overflow: "auto" }}>
             <div style={{ padding: "var(--pad-3) var(--pad-4)" }}>
-              <div className="eyebrow" style={{ marginBottom: 8 }}>Expand history</div>
+              <div className="eyebrow" style={{ marginBottom: 8 }}>{tGX(language, "Expand history", "展开历史")}</div>
               <div style={{ display: "flex", flexDirection: "column", gap: 6, fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--muted)" }}>
-                <div>current — all approved tenant graph · {graphWithPositions.nodes.length} nodes</div>
-                <div>tenant — {tenantId} · {tenant?.graph || "graph db unknown"}</div>
-                <div>focus — {selected ? selected.id : "none; full graph contrast"}</div>
-                <div>visibility — {hideUnrelated && selected ? "selected context only" : "all graph nodes"}</div>
+                <div>{tGX(language, "current", "当前")} — {tGX(language, "all approved tenant graph", "全部已批准租户图谱")} · {graphWithPositions.nodes.length} {tGX(language, "nodes", "节点")}</div>
+                <div>{tGX(language, "tenant", "租户")} — {tenantId} · {tenant?.graph || tGX(language, "graph db unknown", "未知图数据库")}</div>
+                <div>{tGX(language, "focus", "聚焦")} — {selected ? selected.id : tGX(language, "none; full graph contrast", "无；全图对比")}</div>
+                <div>{tGX(language, "visibility", "可见性")} — {hideUnrelated && selected ? tGX(language, "selected context only", "仅选中上下文") : tGX(language, "all graph nodes", "全部图节点")}</div>
               </div>
             </div>
           </div>
@@ -404,13 +440,13 @@ function GraphExplorer({ data, tenant }) {
 
           {leftTab === "proposed" && (
             <div style={{ flex: 1, minHeight: 0, overflow: "auto" }}>
-              <ProposedGraphPanel tenantId={tenantId} proposed={proposed} loading={proposedQ.loading} source={proposedQ.source} focusElementKey={focusElementKey} compact />
+              <ProposedGraphPanel tenantId={tenantId} proposed={proposed} loading={proposedQ.loading} source={proposedQ.source} focusElementKey={focusElementKey} compact language={language} />
             </div>
           )}
 
           {leftTab === "saved" && (
             <div style={{ flex: 1, padding: 24, fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--muted)" }}>
-              No saved graph views for tenant {tenantId}.
+              {tGX(language, "No saved graph views for tenant", "该租户暂无保存视图")} {tenantId}.
             </div>
           )}
         </div>
@@ -435,15 +471,16 @@ function GraphExplorer({ data, tenant }) {
               setHoverId={setHoverId}
               hideUnrelated={hideUnrelated}
               onNodePositionChange={updateNodePosition}
+              language={language}
             />
             )}
 
             <div className="graph-overlay-tl">
               <div className="row">
-                <div><span style={{ color: "var(--dim)" }}>NODES</span><span className="v">{graphWithPositions.nodes.length}</span></div>
-                <div><span style={{ color: "var(--dim)" }}>EDGES</span><span className="v">{graphWithPositions.edges.length}</span></div>
-                <div><span style={{ color: "var(--dim)" }}>FOCUS</span><span className="v">{selected ? "ON" : "ALL"}</span></div>
-                <div><span style={{ color: "var(--dim)" }}>VISIBLE</span><span className="v">{hideUnrelated && selected ? "LOCAL" : "ALL"}</span></div>
+                <div><span style={{ color: "var(--dim)" }}>{tGX(language, "NODES", "节点")}</span><span className="v">{graphWithPositions.nodes.length}</span></div>
+                <div><span style={{ color: "var(--dim)" }}>{tGX(language, "EDGES", "边")}</span><span className="v">{graphWithPositions.edges.length}</span></div>
+                <div><span style={{ color: "var(--dim)" }}>{tGX(language, "FOCUS", "聚焦")}</span><span className="v">{selected ? tGX(language, "ON", "开") : tGX(language, "ALL", "全部")}</span></div>
+                <div><span style={{ color: "var(--dim)" }}>{tGX(language, "VISIBLE", "可见")}</span><span className="v">{hideUnrelated && selected ? tGX(language, "LOCAL", "局部") : tGX(language, "ALL", "全部")}</span></div>
                 <div><span style={{ color: "var(--dim)" }}>SOURCE</span><span className="v" style={{ color: graphQ.source === "live" ? "var(--approved)" : graphQ.source === "live-stale" ? "var(--changes)" : "var(--rejected)" }}>{graphQ.source === "live" ? "LIVE" : graphQ.source === "live-stale" ? "STALE" : graphQ.source === "loading" ? "…" : "NONE"}</span></div>
               </div>
             </div>
@@ -460,19 +497,19 @@ function GraphExplorer({ data, tenant }) {
             </div>
 
             <div className="graph-overlay-bl">
-              <button className="icon-btn" title="Zoom in">+</button>
-              <button className="icon-btn" title="Zoom out">−</button>
-              <button className="icon-btn" title="Fit view">⌖</button>
-              <button className="icon-btn" title="Clear focus" disabled={!selected} onClick={() => { setSelected(null); setHideUnrelated(false); }}>◎</button>
+              <button className="icon-btn" title={tGX(language, "Zoom in", "放大")}>+</button>
+              <button className="icon-btn" title={tGX(language, "Zoom out", "缩小")}>−</button>
+              <button className="icon-btn" title={tGX(language, "Fit view", "适配视图")}>⌖</button>
+              <button className="icon-btn" title={tGX(language, "Clear focus", "清除聚焦")} disabled={!selected} onClick={() => { setSelected(null); setHideUnrelated(false); }}>◎</button>
               <button
                 className="icon-btn"
-                title={hideUnrelated ? "Show all nodes" : "Hide unrelated nodes"}
+                title={hideUnrelated ? tGX(language, "Show all nodes", "显示所有节点") : tGX(language, "Hide unrelated nodes", "隐藏无关节点")}
                 disabled={!selected}
                 onClick={() => setHideUnrelated(v => !v)}>
                 {hideUnrelated ? "◉" : "◌"}
               </button>
-              <button className="icon-btn" title="Expand">⊕</button>
-              <button className="icon-btn" title="Collapse">⊖</button>
+              <button className="icon-btn" title={tGX(language, "Expand", "展开")}>⊕</button>
+              <button className="icon-btn" title={tGX(language, "Collapse", "收起")}>⊖</button>
             </div>
 
             <div className="graph-overlay-br" style={{ textTransform: "none", letterSpacing: 0, padding: 8 }}>
@@ -495,27 +532,27 @@ function GraphExplorer({ data, tenant }) {
         <div className="col inspector">
           {!selected ? (
             <div style={{ padding: 24, fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--muted)" }}>
-              All approved tenant graph nodes are visible. Select a node to focus its local context; selected nodes can be dragged to rearrange the canvas.
+              {tGX(language, "All approved tenant graph nodes are visible. Select a node to focus its local context; selected nodes can be dragged to rearrange the canvas.", "当前显示该租户全部已批准图节点。选择节点可聚焦本地上下文；选中节点可拖拽重新布局。")}
             </div>
           ) : (
           <>
           <div className="section">
             <div className="section-head">
-              <span>Inspector</span>
+              <span>{tGX(language, "Inspector", "检查器")}</span>
               <span className="ct">{selected.type}</span>
             </div>
             <div className="section-body">
               <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
                 <div className="eyebrow accent">{selected.type}</div>
                 <div style={{ fontSize: 16, color: "var(--text)", fontWeight: 500 }}>{selected.id}</div>
-                <div style={{ color: "var(--muted)", fontFamily: "var(--font-mono)", fontSize: 11 }}>{selected.label}</div>
+                <div style={{ color: "var(--muted)", fontFamily: "var(--font-mono)", fontSize: 11 }}>{labelGX(selected.label, language)}</div>
               </div>
               <div style={{ marginTop: 14 }}>
                 <dl className="kv">
-                  <dt>Status</dt><dd>{selected._raw?.status || "approved"}</dd>
-                  <dt>Source row</dt><dd>{selected._raw?.source_table || "source"}#{selected._raw?.source_pk || selected.id.split(":").slice(1).join(":")}</dd>
-                  <dt>Edges in</dt><dd>{graphWithPositions.edges.filter(e => e.t === selected.id).length}</dd>
-                  <dt>Edges out</dt><dd>{graphWithPositions.edges.filter(e => e.s === selected.id).length}</dd>
+                  <dt>{tGX(language, "Status", "状态")}</dt><dd>{selected._raw?.status || "approved"}</dd>
+                  <dt>{tGX(language, "Source row", "来源行")}</dt><dd>{selected._raw?.source_table || "source"}#{selected._raw?.source_pk || selected.id.split(":").slice(1).join(":")}</dd>
+                  <dt>{tGX(language, "Edges in", "入边")}</dt><dd>{graphWithPositions.edges.filter(e => e.t === selected.id).length}</dd>
+                  <dt>{tGX(language, "Edges out", "出边")}</dt><dd>{graphWithPositions.edges.filter(e => e.s === selected.id).length}</dd>
                 </dl>
               </div>
               {selected.flag && (
@@ -527,7 +564,7 @@ function GraphExplorer({ data, tenant }) {
           </div>
 
           <div className="section">
-            <div className="section-head"><span>Connected edges</span><span className="ct">{graphWithPositions.edges.filter(e => e.s === selected.id || e.t === selected.id).length}</span></div>
+            <div className="section-head"><span>{tGX(language, "Connected edges", "相连边")}</span><span className="ct">{graphWithPositions.edges.filter(e => e.s === selected.id || e.t === selected.id).length}</span></div>
             <div className="section-body" style={{ padding: 0 }}>
               {graphWithPositions.edges.filter(e => e.s === selected.id || e.t === selected.id).map((e, i) => {
                 const other = e.s === selected.id ? e.t : e.s;
@@ -537,7 +574,7 @@ function GraphExplorer({ data, tenant }) {
                        onClick={() => setSelected(map[other])}>
                     <span style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--accent)", textTransform: "uppercase", letterSpacing: "0.08em" }}>{e.kind}</span>
                     <span style={{ color: "var(--dim)" }}>{dir}</span>
-                    <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-dim)" }}>{other}</span>
+                    <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-dim)" }}>{labelGX(other, language)}</span>
                   </div>
                 );
               })}
@@ -545,16 +582,16 @@ function GraphExplorer({ data, tenant }) {
           </div>
 
           <div className="section">
-            <div className="section-head"><span>Scoped reasoning</span><span className="ct">draft-only</span></div>
+            <div className="section-head"><span>{tGX(language, "Scoped reasoning", "范围推理")}</span><span className="ct">draft-only</span></div>
             <div className="section-body">
-              <div className="eyebrow" style={{ marginBottom: 4 }}>Question</div>
+              <div className="eyebrow" style={{ marginBottom: 4 }}>{tGX(language, "Question", "问题")}</div>
               <select className="select" style={{ marginBottom: 8 }}>
-                <option>Explain this node's role in the graph</option>
-                <option>Find workload / concentration risk</option>
-                <option>Explain why this edge exists</option>
-                <option>Find unusual neighbors in this scope</option>
+                <option>{tGX(language, "Explain this node's role in the graph", "解释该节点在图谱中的作用")}</option>
+                <option>{tGX(language, "Find workload / concentration risk", "发现工作负载 / 集中风险")}</option>
+                <option>{tGX(language, "Explain why this edge exists", "解释这条边为什么存在")}</option>
+                <option>{tGX(language, "Find unusual neighbors in this scope", "发现该范围内异常邻居")}</option>
               </select>
-              <button className="btn primary" style={{ width: "100%" }}>Open scoped reasoning</button>
+              <button className="btn primary" style={{ width: "100%" }}>{tGX(language, "Open scoped reasoning", "打开范围推理")}</button>
             </div>
           </div>
           </>
@@ -565,7 +602,7 @@ function GraphExplorer({ data, tenant }) {
   );
 }
 
-function ProposedGraphPanel({ tenantId, proposed, loading, source, focusElementKey }) {
+function ProposedGraphPanel({ tenantId, proposed, loading, source, focusElementKey, language }) {
   const [selectedElement, setSelectedElement] = useStateGX(null);
   const [kindFilter, setKindFilter] = useStateGX("all");
   const [selectedKeys, setSelectedKeys] = useStateGX([]);
@@ -633,11 +670,11 @@ function ProposedGraphPanel({ tenantId, proposed, loading, source, focusElementK
   async function reviewSelected(action) {
     const reason = reviewReason.trim();
     if (selectedKeys.length === 0) {
-      setReviewMessage({ kind: "error", text: "Select at least one proposed graph element." });
+      setReviewMessage({ kind: "error", text: tGX(language, "Select at least one proposed graph element.", "请至少选择一个候选图元素。") });
       return;
     }
     if ((action === "reject" || action === "needs-evidence") && !reason) {
-      setReviewMessage({ kind: "error", text: "Review reason is required for batch reject / needs evidence." });
+      setReviewMessage({ kind: "error", text: tGX(language, "Review reason is required for batch reject / needs evidence.", "批量拒绝或要求补证据时必须填写审核原因。") });
       return;
     }
     setReviewBusy(true);
@@ -659,8 +696,8 @@ function ProposedGraphPanel({ tenantId, proposed, loading, source, focusElementK
       setReviewMessage({
         kind: failed ? "error" : "ok",
         text: failed
-          ? `${ok} recorded, ${failed} failed · ${failedItems.map(item => item.element_key || item.error).slice(0, 2).join(", ")}`
-          : `${ok} graph proposal review decisions recorded · formal graph unchanged`,
+          ? tGX(language, `${ok} recorded, ${failed} failed · ${failedItems.map(item => item.element_key || item.error).slice(0, 2).join(", ")}`, `已记录 ${ok} 条，失败 ${failed} 条 · ${failedItems.map(item => item.element_key || item.error).slice(0, 2).join(", ")}`)
+          : tGX(language, `${ok} graph proposal review decisions recorded · formal graph unchanged`, `已记录 ${ok} 条图候选审核决定 · formal graph 未改变`),
       });
       window.dispatchEvent(new CustomEvent("aletheia:retry"));
     } catch (err) {
@@ -673,7 +710,7 @@ function ProposedGraphPanel({ tenantId, proposed, loading, source, focusElementK
     if (!selectedElement) return;
     const reason = reviewReason.trim();
     if ((action === "reject" || action === "needs-evidence") && !reason) {
-      setReviewMessage({ kind: "error", text: "Review reason is required for reject / needs evidence." });
+      setReviewMessage({ kind: "error", text: tGX(language, "Review reason is required for reject / needs evidence.", "拒绝或要求补证据时必须填写审核原因。") });
       return;
     }
     setReviewBusy(true);
@@ -687,7 +724,7 @@ function ProposedGraphPanel({ tenantId, proposed, loading, source, focusElementK
       setReviewReason("");
       setReviewMessage({
         kind: "ok",
-        text: `${action} recorded · canonical/formal graph unchanged`,
+        text: tGX(language, `${action} recorded · canonical/formal graph unchanged`, `已记录 ${action} · canonical/formal graph 未改变`),
       });
       window.dispatchEvent(new CustomEvent("aletheia:retry"));
     } catch (err) {
@@ -699,43 +736,43 @@ function ProposedGraphPanel({ tenantId, proposed, loading, source, focusElementK
   return (
     <div className="section">
       <div className="section-head">
-        <span>Proposed graph space</span>
-        <span className="ct">{loading ? "loading" : `${totalCount} pending`}</span>
+        <span>{tGX(language, "Proposed graph space", "候选图空间")}</span>
+        <span className="ct">{loading ? tGX(language, "loading", "加载中") : `${totalCount} ${tGX(language, "pending", "待处理")}`}</span>
       </div>
       <div className="section-body">
         <div className="chip-row" style={{ marginBottom: 10 }}>
-          <Chip active={kindFilter === "all"} onClick={() => selectKind("all")} count={totalCount}>all</Chip>
-          <Chip active={kindFilter === "node"} onClick={() => selectKind("node")} count={counts.node || 0}>nodes</Chip>
-          <Chip active={kindFilter === "edge"} onClick={() => selectKind("edge")} count={counts.edge || 0}>edges</Chip>
-          <Chip active={kindFilter === "finding"} onClick={() => selectKind("finding")} count={counts.finding || 0}>findings</Chip>
+          <Chip active={kindFilter === "all"} onClick={() => selectKind("all")} count={totalCount}>{tGX(language, "all", "全部")}</Chip>
+          <Chip active={kindFilter === "node"} onClick={() => selectKind("node")} count={counts.node || 0}>{tGX(language, "nodes", "节点")}</Chip>
+          <Chip active={kindFilter === "edge"} onClick={() => selectKind("edge")} count={counts.edge || 0}>{tGX(language, "edges", "边")}</Chip>
+          <Chip active={kindFilter === "finding"} onClick={() => selectKind("finding")} count={counts.finding || 0}>{tGX(language, "findings", "发现")}</Chip>
         </div>
         <div style={{ border: "1px solid var(--line-soft)", background: "var(--bg-2)", padding: 8, marginBottom: 10 }}>
           <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center", marginBottom: 8 }}>
-            <span className="eyebrow">Batch review</span>
-            <span className="ct">{selectedKeys.length} selected</span>
+            <span className="eyebrow">{tGX(language, "Batch review", "批量审核")}</span>
+            <span className="ct">{selectedKeys.length} {tGX(language, "selected", "已选择")}</span>
           </div>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-            <button className="btn xs" disabled={!filteredElements.length || reviewBusy} onClick={selectVisible}>Select visible</button>
-            <button className="btn xs" disabled={!selectedKeys.length || reviewBusy} onClick={clearSelection}>Clear</button>
-            <button className="btn xs approve" disabled={!selectedKeys.length || reviewBusy} onClick={() => reviewSelected("approve")}>Approve selected</button>
-            <button className="btn xs changes" disabled={!selectedKeys.length || reviewBusy} onClick={() => reviewSelected("needs-evidence")}>Needs evidence</button>
-            <button className="btn xs reject" disabled={!selectedKeys.length || reviewBusy} onClick={() => reviewSelected("reject")}>Reject</button>
-            <button className="btn xs ghost" disabled={!selectedKeys.length || reviewBusy} onClick={() => reviewSelected("comment")}>Comment</button>
+            <button className="btn xs" disabled={!filteredElements.length || reviewBusy} onClick={selectVisible}>{tGX(language, "Select visible", "选择当前可见")}</button>
+            <button className="btn xs" disabled={!selectedKeys.length || reviewBusy} onClick={clearSelection}>{tGX(language, "Clear", "清除")}</button>
+            <button className="btn xs approve" disabled={!selectedKeys.length || reviewBusy} onClick={() => reviewSelected("approve")}>{tGX(language, "Approve selected", "批准所选")}</button>
+            <button className="btn xs changes" disabled={!selectedKeys.length || reviewBusy} onClick={() => reviewSelected("needs-evidence")}>{tGX(language, "Needs evidence", "需要补证据")}</button>
+            <button className="btn xs reject" disabled={!selectedKeys.length || reviewBusy} onClick={() => reviewSelected("reject")}>{tGX(language, "Reject", "拒绝")}</button>
+            <button className="btn xs ghost" disabled={!selectedKeys.length || reviewBusy} onClick={() => reviewSelected("comment")}>{tGX(language, "Comment", "评论")}</button>
           </div>
           <div style={{ marginTop: 6, fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--muted)" }}>
-            Scope: selected proposed graph elements only · review decision only · formal graph write disabled.
-            {selectedInFilter.length > 0 ? ` Current filter selected: ${selectedInFilter.length}.` : ""}
+            {tGX(language, "Scope: selected proposed graph elements only · review decision only · formal graph write disabled.", "范围：仅所选候选图元素 · 只记录审核决定 · formal graph 写入禁用。")}
+            {selectedInFilter.length > 0 ? tGX(language, ` Current filter selected: ${selectedInFilter.length}.`, ` 当前过滤结果已选择：${selectedInFilter.length}。`) : ""}
           </div>
         </div>
         {latestRun ? (
           <dl className="kv" style={{ marginBottom: 12 }}>
-            <dt>Run</dt><dd>{latestRun.run_key}</dd>
-            <dt>Status</dt><dd>{latestRun.status} · canonical writes disabled</dd>
-            <dt>Skipped</dt><dd>{(latestRun.skipped_sources || []).length}</dd>
+            <dt>{tGX(language, "Run", "运行")}</dt><dd>{latestRun.run_key}</dd>
+            <dt>{tGX(language, "Status", "状态")}</dt><dd>{latestRun.status} · canonical writes disabled</dd>
+            <dt>{tGX(language, "Skipped", "跳过")}</dt><dd>{(latestRun.skipped_sources || []).length}</dd>
           </dl>
         ) : (
           <div style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--muted)", marginBottom: 12 }}>
-            No proposed graph elements for this tenant.
+            {tGX(language, "No proposed graph elements for this tenant.", "该租户暂无候选图元素。")}
           </div>
         )}
         {findings.map(item => {
@@ -743,20 +780,20 @@ function ProposedGraphPanel({ tenantId, proposed, loading, source, focusElementK
           return (
             <button key={item.element_key} type="button" onClick={() => { setSelectedElement(item); setReviewMessage(null); }}
                     style={{ border: selectedElement?.element_key === item.element_key ? "1px solid var(--accent)" : "1px solid var(--line)", padding: 10, marginBottom: 10, background: "var(--bg-2)", width: "100%", textAlign: "left", cursor: "pointer" }}>
-              <div className="eyebrow accent">deep graph finding · draft</div>
-              <div style={{ color: "var(--text)", fontWeight: 600, marginTop: 4 }}>{item.name}</div>
+              <div className="eyebrow accent">{tGX(language, "deep graph finding · draft", "深度图推理发现 · 草稿")}</div>
+              <div style={{ color: "var(--text)", fontWeight: 600, marginTop: 4 }}>{labelGX(item.name, language)}</div>
               <div style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--muted)", marginTop: 6 }}>
-                {profile.path_label || compactText(item.payload?.conclusion, 140)}
+                {labelGX(profile.path_label || compactText(item.payload?.conclusion, 140), language)}
               </div>
               <dl className="kv" style={{ marginTop: 8 }}>
-                <dt>Confidence</dt><dd>{Math.round((item.confidence || 0) * 100)}%</dd>
-                <dt>Evidence</dt><dd>{(item.evidence_refs || []).join(", ") || item.source_url || "—"}</dd>
+                <dt>{tGX(language, "Confidence", "置信度")}</dt><dd>{Math.round((item.confidence || 0) * 100)}%</dd>
+                <dt>{tGX(language, "Evidence", "证据")}</dt><dd>{(item.evidence_refs || []).join(", ") || item.source_url || "—"}</dd>
               </dl>
             </button>
           );
         })}
         <div style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--muted)", marginBottom: 8 }}>
-          Showing {kindFilter === "all" ? "all proposed graph elements" : `${kindFilter} proposals`} · click an item to review.
+          {tGX(language, "Showing", "显示")} {kindFilter === "all" ? tGX(language, "all proposed graph elements", "全部候选图元素") : `${kindFilter} ${tGX(language, "proposals", "候选")}`} · {tGX(language, "click an item to review.", "点击条目进行审核。")}
         </div>
         <div style={{ maxHeight: 220, overflow: "auto", display: "flex", flexDirection: "column", gap: 6 }}>
           {filteredElements.map(item => (
@@ -772,18 +809,18 @@ function ProposedGraphPanel({ tenantId, proposed, loading, source, focusElementK
                     onClick={e => e.stopPropagation()}
                     onChange={e => toggleSelection(item.element_key, e.target.checked)}
                   />
-                  {item.name}
+                  {labelGX(item.name, language)}
                 </span>
                 <span className="ct">{item.element_type}</span>
               </div>
               <div style={{ fontFamily: "var(--font-mono)", color: "var(--muted)", fontSize: 10 }}>
-                {item.status} · {item.source_url || "source unknown"}
+                {statusLabelGraphGX(item.status, language)} · {item.source_url || tGX(language, "source unknown", "来源未知")}
               </div>
             </div>
           ))}
           {filteredElements.length === 0 && (
             <div style={{ fontFamily: "var(--font-mono)", color: "var(--muted)", fontSize: 10, border: "1px solid var(--line-soft)", padding: 8 }}>
-              No {kindFilter} proposed graph elements.
+              {tGX(language, "No", "没有")} {kindFilter} {tGX(language, "proposed graph elements.", "候选图元素。")}
             </div>
           )}
         </div>
@@ -795,11 +832,12 @@ function ProposedGraphPanel({ tenantId, proposed, loading, source, focusElementK
             busy={reviewBusy}
             message={reviewMessage}
             onReview={reviewElement}
+            language={language}
           />
         )}
         {source === "error" && (
           <div style={{ marginTop: 8, fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--rejected)" }}>
-            Proposed graph API unavailable.
+            {tGX(language, "Proposed graph API unavailable.", "候选图 API 不可用。")}
           </div>
         )}
       </div>
@@ -807,7 +845,7 @@ function ProposedGraphPanel({ tenantId, proposed, loading, source, focusElementK
   );
 }
 
-function ProposedGraphDetail({ item, reason, setReason, busy, message, onReview }) {
+function ProposedGraphDetail({ item, reason, setReason, busy, message, onReview, language }) {
   const payload = item.payload || {};
   const profile = payload.deep_graph_profile || {};
   const reviewEvents = payload.review_events || [];
@@ -817,45 +855,45 @@ function ProposedGraphDetail({ item, reason, setReason, busy, message, onReview 
   const conclusion = payload.conclusion || payload.summary || payload.description || "";
   return (
     <div style={{ marginTop: 14, borderTop: "1px solid var(--line)", paddingTop: 12 }}>
-      <div className="eyebrow accent">Review selected {item.element_type}</div>
-      <div style={{ color: "var(--text)", fontWeight: 600, marginTop: 4 }}>{item.name}</div>
+      <div className="eyebrow accent">{tGX(language, "Review selected", "审核选中的")} {tGX(language, item.element_type, item.element_type === "node" ? "节点" : item.element_type === "edge" ? "边" : item.element_type === "finding" ? "发现" : item.element_type)}</div>
+      <div style={{ color: "var(--text)", fontWeight: 600, marginTop: 4 }}>{labelGX(item.name, language)}</div>
       <dl className="kv" style={{ marginTop: 10 }}>
-        <dt>Key</dt><dd>{item.element_key}</dd>
-        <dt>Status</dt><dd>{item.status}</dd>
-        <dt>Run</dt><dd>{item.run_key || "—"}</dd>
-        <dt>Confidence</dt><dd>{Math.round((item.confidence || 0) * 100)}%</dd>
-        <dt>Source</dt><dd>{item.source_url || "—"}</dd>
-        <dt>Evidence</dt><dd>{(item.evidence_refs || []).join(", ") || "—"}</dd>
-        <dt>Boundary</dt><dd>{boundary.writes_canonical === false || boundary.canonical_write === false ? "canonical disabled" : "canonical disabled"} · {boundary.writes_formal_graph === false || boundary.formal_graph_write === false ? "formal graph disabled" : "formal graph disabled"}</dd>
+        <dt>{tGX(language, "Key", "键")}</dt><dd>{item.element_key}</dd>
+        <dt>{tGX(language, "Status", "状态")}</dt><dd>{statusLabelGraphGX(item.status, language)}</dd>
+        <dt>{tGX(language, "Run", "运行")}</dt><dd>{item.run_key || "—"}</dd>
+        <dt>{tGX(language, "Confidence", "置信度")}</dt><dd>{Math.round((item.confidence || 0) * 100)}%</dd>
+        <dt>{tGX(language, "Source", "来源")}</dt><dd>{item.source_url || "—"}</dd>
+        <dt>{tGX(language, "Evidence", "证据")}</dt><dd>{(item.evidence_refs || []).join(", ") || "—"}</dd>
+        <dt>{tGX(language, "Boundary", "边界")}</dt><dd>{boundary.writes_canonical === false || boundary.canonical_write === false ? "canonical disabled" : "canonical disabled"} · {boundary.writes_formal_graph === false || boundary.formal_graph_write === false ? "formal graph disabled" : "formal graph disabled"}</dd>
       </dl>
       {(pathLabel || conclusion) && (
         <div style={{ marginTop: 10, padding: 10, border: "1px solid var(--line-soft)", background: "var(--bg-2)" }}>
-          {pathLabel && <div style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--accent)", marginBottom: 6 }}>{pathLabel}</div>}
-          {conclusion && <div style={{ fontSize: 12, color: "var(--text-dim)", lineHeight: 1.5 }}>{conclusion}</div>}
+          {pathLabel && <div style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--accent)", marginBottom: 6 }}>{labelGX(pathLabel, language)}</div>}
+          {conclusion && <div style={{ fontSize: 12, color: "var(--text-dim)", lineHeight: 1.5 }}>{labelGX(conclusion, language)}</div>}
         </div>
       )}
       {Array.isArray(path) && path.length > 0 && (
         <div style={{ marginTop: 10 }}>
-          <div className="eyebrow" style={{ marginBottom: 6 }}>Evidence path</div>
+          <div className="eyebrow" style={{ marginBottom: 6 }}>{tGX(language, "Evidence path", "证据路径")}</div>
           <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
             {path.map((step, index) => (
               <div key={index} style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--muted)", borderBottom: "1px solid var(--line-soft)", paddingBottom: 4 }}>
-                {index + 1}. {typeof step === "string" ? step : (step.label || step.name || step.key || JSON.stringify(step))}
+                {index + 1}. {labelGX(typeof step === "string" ? step : (step.label || step.name || step.key || JSON.stringify(step)), language)}
               </div>
             ))}
           </div>
         </div>
       )}
       <div style={{ marginTop: 12 }}>
-        <div className="eyebrow" style={{ marginBottom: 6 }}>Review note</div>
+        <div className="eyebrow" style={{ marginBottom: 6 }}>{tGX(language, "Review note", "审核说明")}</div>
         <textarea className="input" value={reason} onChange={e => setReason(e.target.value)}
-                  placeholder="Optional for approve; required for reject / needs evidence"
+                  placeholder={tGX(language, "Optional for approve; required for reject / needs evidence", "批准时可选；拒绝或要求补证据时必填")}
                   style={{ minHeight: 64, resize: "vertical" }} />
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, marginTop: 8 }}>
-          <button className="btn approve" disabled={busy || item.status === "approved"} onClick={() => onReview("approve")}>Approve</button>
-          <button className="btn changes" disabled={busy} onClick={() => onReview("needs-evidence")}>Needs evidence</button>
-          <button className="btn reject" disabled={busy} onClick={() => onReview("reject")}>Reject</button>
-          <button className="btn ghost" disabled={busy} onClick={() => onReview("comment")}>Comment</button>
+          <button className="btn approve" disabled={busy || item.status === "approved"} onClick={() => onReview("approve")}>{tGX(language, "Approve", "批准")}</button>
+          <button className="btn changes" disabled={busy} onClick={() => onReview("needs-evidence")}>{tGX(language, "Needs evidence", "需要补证据")}</button>
+          <button className="btn reject" disabled={busy} onClick={() => onReview("reject")}>{tGX(language, "Reject", "拒绝")}</button>
+          <button className="btn ghost" disabled={busy} onClick={() => onReview("comment")}>{tGX(language, "Comment", "评论")}</button>
         </div>
         {message && (
           <div style={{ marginTop: 8, fontFamily: "var(--font-mono)", fontSize: 10, color: message.kind === "error" ? "var(--rejected)" : "var(--approved)" }}>
@@ -865,7 +903,7 @@ function ProposedGraphDetail({ item, reason, setReason, busy, message, onReview 
       </div>
       {reviewEvents.length > 0 && (
         <div style={{ marginTop: 12 }}>
-          <div className="eyebrow" style={{ marginBottom: 6 }}>Review history</div>
+          <div className="eyebrow" style={{ marginBottom: 6 }}>{tGX(language, "Review history", "审核历史")}</div>
           {reviewEvents.slice().reverse().map((event, index) => (
             <div key={index} style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--muted)", borderTop: "1px solid var(--line-soft)", paddingTop: 5, marginTop: 5 }}>
               {event.decision} · {event.reviewer || "reviewer"} · {event.after_status || item.status}
@@ -878,7 +916,7 @@ function ProposedGraphDetail({ item, reason, setReason, busy, message, onReview 
   );
 }
 
-function BigGraph({ data, selected, onSelect, hoverId, setHoverId, hideUnrelated, onNodePositionChange }) {
+function BigGraph({ data, selected, onSelect, hoverId, setHoverId, hideUnrelated, onNodePositionChange, language }) {
   const svgRef = useRefGX(null);
   const [dragging, setDragging] = useStateGX(null);
   const map = Object.fromEntries(data.nodes.map(n => [n.id, n]));
@@ -957,7 +995,7 @@ function BigGraph({ data, selected, onSelect, hoverId, setHoverId, hideUnrelated
                     textAnchor="middle" fontSize="10" fontFamily="var(--font-mono)"
                     fill={e.flag ? "var(--rejected)" : "var(--accent)"}
                     style={{ textTransform: "uppercase", letterSpacing: "0.08em" }}>
-                {e.kind}
+                {labelGX(e.kind, language)}
               </text>
             )}
           </g>
@@ -996,14 +1034,14 @@ function BigGraph({ data, selected, onSelect, hoverId, setHoverId, hideUnrelated
                       fontSize="11" fontFamily="var(--font-mono)"
                       fill="var(--accent)"
                       style={{ pointerEvents: "none" }}>
-                  {n.id}
+                  {labelGX(n.id, language)}
                 </text>
                 <text x={n.x} y={n.y + n.r + 26}
                       textAnchor="middle"
                       fontSize="9.5" fontFamily="var(--font-mono)"
                       fill="var(--dim)"
                       style={{ pointerEvents: "none", letterSpacing: "0.04em" }}>
-                  {n.label}
+                  {labelGX(n.label, language)}
                 </text>
               </>
             )}

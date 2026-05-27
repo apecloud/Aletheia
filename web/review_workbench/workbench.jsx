@@ -1,6 +1,74 @@
 /* Aletheia — lightweight Workspace / Work Queue */
 const { useState: useStateWB, useMemo: useMemoWB, useEffect: useEffectWB } = React;
 
+function isZhWB(language) {
+  return typeof isZhUI === "function" ? isZhUI(language) : String(language || "").startsWith("zh");
+}
+
+function tWB(language, en, zh) {
+  return typeof tUI === "function" ? tUI(language, en, zh) : (isZhWB(language) ? zh : en);
+}
+
+function textWB(value, language) {
+  if (typeof displayLabelUI === "function") return displayLabelUI(value, language);
+  return typeof displayCountryCodesUI === "function" ? displayCountryCodesUI(value, language) : value;
+}
+
+function statusLabelWB(status, language) {
+  if (!isZhWB(language)) return status || "—";
+  const map = {
+    active: "待处理",
+    approved: "已批准",
+    blocked: "已阻塞",
+    candidate: "候选",
+    changes: "需修改",
+    completed: "已完成",
+    done: "已完成",
+    draft: "草稿",
+    failed: "失败",
+    needs_evidence: "需补证据",
+    proposed: "待审核",
+    rejected: "已拒绝",
+    running: "运行中",
+  };
+  return map[String(status || "").toLowerCase()] || status || "—";
+}
+
+function itemTypeLabelWB(type, language) {
+  if (!isZhWB(language)) return type || "Work item";
+  const map = {
+    "Ontology proposal": "本体候选",
+    "Graph node": "图节点",
+    "Graph edge": "图边",
+    "Graph proposal": "图候选",
+    "Candidate finding": "候选发现",
+  };
+  return map[type] || type || "工作项";
+}
+
+function nextActionLabelWB(text, language) {
+  if (!isZhWB(language)) return text || "—";
+  const map = {
+    "Resolve review feedback in Ontology": "在本体审核中处理反馈",
+    "Approve, reject, or request changes in Ontology": "在本体审核中批准、拒绝或要求修改",
+    "Review evidence gap or rejection reason in Graph": "在图谱审核中处理证据缺口或拒绝原因",
+    "Review proposed graph element": "审核候选图元素",
+    "Add evidence or mark as rejected in Reasoning": "在推理中补充证据或标记拒绝",
+    "Approve, reject, or request evidence in Reasoning": "在推理中批准、拒绝或要求补证据",
+  };
+  return map[text] || text || "—";
+}
+
+function reviewLinkLabelWB(label, language) {
+  if (!isZhWB(language)) return label;
+  const map = {
+    "Open in Ontology": "打开本体审核",
+    "Open in Graph": "打开图谱审核",
+    "Open in Reasoning": "打开推理审核",
+  };
+  return map[label] || label;
+}
+
 const FALLBACK_CASES = [
   {
     canonical_key: "case:employee-order-basis",
@@ -40,7 +108,7 @@ const FALLBACK_CASES = [
   },
 ];
 
-function Workbench({ data, tenant }) {
+function Workbench({ data, tenant, language }) {
   const tenantId = tenant ? tenant.id : "default";
   const tasksQ = useApiData("reasoningTasks", [tenantId], { fallback: FALLBACK_CASES });
   const agentRunsQ = useApiData("agentRunsConsole", [tenantId, { limit: 20 }], { fallback: { sessions: [], runs: [] } });
@@ -115,7 +183,7 @@ function Workbench({ data, tenant }) {
     const requiresReason = action !== "approve";
     const reason = reviewNote.trim();
     if (requiresReason && !reason) {
-      setReviewMessage({ tone: "changes", text: "Add a short review note before this action." });
+      setReviewMessage({ tone: "changes", text: tWB(language, "Add a short review note before this action.", "执行该操作前请填写简短审核说明。") });
       return;
     }
     const body = {
@@ -150,7 +218,7 @@ function Workbench({ data, tenant }) {
     };
     const apiAction = actionMap[selected.reviewKind]?.[action];
     if (!apiAction) {
-      setReviewMessage({ tone: "changes", text: "This work item does not support inline review yet." });
+      setReviewMessage({ tone: "changes", text: tWB(language, "This work item does not support inline review yet.", "该工作项暂不支持工作台内审核。") });
       return;
     }
     setReviewBusy(true);
@@ -166,7 +234,7 @@ function Workbench({ data, tenant }) {
         await AL_API.reviewFinding(selected.id, apiAction, body, tenantId);
       }
       setReviewNote("");
-      setReviewMessage({ tone: "approved", text: `Review action recorded: ${inlineActionLabel(action)}.` });
+      setReviewMessage({ tone: "approved", text: tWB(language, `Review action recorded: ${inlineActionLabel(action)}.`, `审核操作已记录：${inlineActionLabel(action, language)}。`) });
       window.dispatchEvent(new CustomEvent("aletheia:retry"));
     } catch (err) {
       setReviewMessage({ tone: "changes", text: err?.message || String(err) });
@@ -179,15 +247,15 @@ function Workbench({ data, tenant }) {
     <div className="canvas">
       <div className="subbar">
         <div className="tabs">
-          <div className={"tab" + (workspaceTab === "workqueue" ? " active" : "")} onClick={() => selectWorkspaceTab("workqueue")}>Work Queue <span className="ct">{counts.active}</span></div>
-          <div className={"tab" + (workspaceTab === "agents" ? " active" : "")} onClick={() => selectWorkspaceTab("agents")}>Agent <span className="ct">{agentRuns.length}</span></div>
+          <div className={"tab" + (workspaceTab === "workqueue" ? " active" : "")} onClick={() => selectWorkspaceTab("workqueue")}>{tWB(language, "Work Queue", "工作队列")} <span className="ct">{counts.active}</span></div>
+          <div className={"tab" + (workspaceTab === "agents" ? " active" : "")} onClick={() => selectWorkspaceTab("agents")}>{tWB(language, "Agent", "Agent")} <span className="ct">{agentRuns.length}</span></div>
         </div>
         <div className="spacer" />
-        {isMock && <span className="pill changes" style={{ marginRight: 8 }}><span className="dot" />Mock fallback</span>}
-        {isStale && <span className="pill changes" style={{ marginRight: 8 }}><span className="dot" />Stale · last fetch failed</span>}
-        {tasksQ.loading && tasksQ.data && <span className="pill"><span className="dot" />Refreshing…</span>}
-        <button className="tool" onClick={() => window.dispatchEvent(new CustomEvent("aletheia:retry"))}>⟲ Refresh</button>
-        <a className="tool primary" href={`/?screen=reasoning&tenant=${encodeURIComponent(tenantId)}`}>+ New Case</a>
+        {isMock && <span className="pill changes" style={{ marginRight: 8 }}><span className="dot" />{tWB(language, "Mock fallback", "模拟回退")}</span>}
+        {isStale && <span className="pill changes" style={{ marginRight: 8 }}><span className="dot" />{tWB(language, "Stale · last fetch failed", "数据陈旧 · 最近拉取失败")}</span>}
+        {tasksQ.loading && tasksQ.data && <span className="pill"><span className="dot" />{tWB(language, "Refreshing…", "刷新中…")}</span>}
+        <button className="tool" onClick={() => window.dispatchEvent(new CustomEvent("aletheia:retry"))}>⟲ {tWB(language, "Refresh", "刷新")}</button>
+        <a className="tool primary" href={`/?screen=reasoning&tenant=${encodeURIComponent(tenantId)}`}>+ {tWB(language, "New Case", "新问题")}</a>
       </div>
 
       {workspaceTab === "agents" ? (
@@ -196,31 +264,32 @@ function Workbench({ data, tenant }) {
           query={agentRunsQ}
           artifacts={artifactsQ.data || []}
           graphElements={graphProposedQ.data?.elements || []}
+          language={language}
         />
       ) : (
       <div className="wb">
         <div className="col">
           <div style={{ padding: "12px 14px", borderBottom: "1px solid var(--line)", background: "var(--bg-2)" }}>
-            <div className="eyebrow accent">Work Queue</div>
+            <div className="eyebrow accent">{tWB(language, "Work Queue", "工作队列")}</div>
             <div style={{ marginTop: 5, color: "var(--text-dim)", fontSize: 12, lineHeight: 1.45 }}>
-              Review objects waiting for a human decision: ontology proposals, proposed graph nodes or edges, and candidate findings.
+              {tWB(language, "Review objects waiting for a human decision: ontology proposals, proposed graph nodes or edges, and candidate findings.", "集中处理等待人工决策的对象：本体候选、候选图节点/边，以及候选发现。")}
             </div>
             <div style={{ position: "relative", marginTop: 10 }}>
               <input className="input" value={search} onChange={e => setSearch(e.target.value)}
-                     placeholder="search review object, type, run…"
+                     placeholder={tWB(language, "search review object, type, run…", "搜索审核对象、类型或运行…")}
                      style={{ paddingLeft: 28 }} />
               <span style={{ position: "absolute", left: 9, top: 7, color: "var(--dim)", fontFamily: "var(--font-mono)" }}>⌕</span>
             </div>
             <div className="tabs" style={{ marginTop: 10, height: 32, border: "1px solid var(--line)", display: "flex" }}>
-              <div className={"tab" + (statusView === "active" ? " active" : "")} onClick={() => setStatusView("active")}>Active <span className="ct">{counts.active}</span></div>
-              <div className={"tab" + (statusView === "blocked" ? " active" : "")} onClick={() => setStatusView("blocked")}>Blocked <span className="ct">{counts.blocked}</span></div>
-              <div className={"tab" + (statusView === "done" ? " active" : "")} onClick={() => setStatusView("done")}>Done <span className="ct">{counts.done}</span></div>
-              <div className={"tab" + (statusView === "all" ? " active" : "")} onClick={() => setStatusView("all")}>All <span className="ct">{counts.all}</span></div>
+              <div className={"tab" + (statusView === "active" ? " active" : "")} onClick={() => setStatusView("active")}>{tWB(language, "Active", "待处理")} <span className="ct">{counts.active}</span></div>
+              <div className={"tab" + (statusView === "blocked" ? " active" : "")} onClick={() => setStatusView("blocked")}>{tWB(language, "Blocked", "已阻塞")} <span className="ct">{counts.blocked}</span></div>
+              <div className={"tab" + (statusView === "done" ? " active" : "")} onClick={() => setStatusView("done")}>{tWB(language, "Done", "已完成")} <span className="ct">{counts.done}</span></div>
+              <div className={"tab" + (statusView === "all" ? " active" : "")} onClick={() => setStatusView("all")}>{tWB(language, "All", "全部")} <span className="ct">{counts.all}</span></div>
             </div>
             <div className="row" style={{ marginTop: 10 }}>
-              <div className="stat"><span className="label">Active</span><span className="val mono">{counts.active}</span></div>
-              <div className="stat"><span className="label">Blocked</span><span className="val mono">{counts.blocked}</span></div>
-              <div className="stat"><span className="label">Done</span><span className="val mono">{counts.done}</span></div>
+              <div className="stat"><span className="label">{tWB(language, "Active", "待处理")}</span><span className="val mono">{counts.active}</span></div>
+              <div className="stat"><span className="label">{tWB(language, "Blocked", "已阻塞")}</span><span className="val mono">{counts.blocked}</span></div>
+              <div className="stat"><span className="label">{tWB(language, "Done", "已完成")}</span><span className="val mono">{counts.done}</span></div>
             </div>
           </div>
 
@@ -232,7 +301,7 @@ function Workbench({ data, tenant }) {
             <div className="artifact-list">
               {filtered.length === 0 && (
                 <div style={{ padding: 24, fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--muted)", textAlign: "center" }}>
-                  No review objects match this view.
+                  {tWB(language, "No review objects match this view.", "当前视图没有匹配的审核对象。")}
                 </div>
               )}
               {filtered.map(c => (
@@ -242,18 +311,18 @@ function Workbench({ data, tenant }) {
                   <div className="ar-bar" />
                   <div className="ar-main">
                     <div className="ar-top">
-                      <span className="type">{c.itemType}</span>
+                      <span className="type">{itemTypeLabelWB(c.itemType, language)}</span>
                       <span>·</span>
                       <span className="key">{c.id}</span>
                     </div>
-                    <div className="ar-title">{c.title}</div>
+                    <div className="ar-title">{textWB(c.title, language)}</div>
                     <div className="ar-meta">
                       <span>{c.tenantId}</span>
-                      <span>{c.sourceRun}</span>
+                      <span>{textWB(c.sourceRun, language)}</span>
                       <span>{c.updatedLabel}</span>
                     </div>
                   </div>
-                  <div className="ar-right">{c.statusLabel}</div>
+                  <div className="ar-right">{statusLabelWB(c.statusLabel, language)}</div>
                 </div>
               ))}
             </div>
@@ -263,59 +332,59 @@ function Workbench({ data, tenant }) {
         <div className="col" style={{ display: "flex", flexDirection: "column" }}>
           {!selected ? (
             <div style={{ flex: 1, display: "grid", placeItems: "center", color: "var(--muted)", fontFamily: "var(--font-mono)", fontSize: 12 }}>
-              Select a work item from the queue.
+              {tWB(language, "Select a work item from the queue.", "从队列中选择一个工作项。")}
             </div>
           ) : (
             <>
               <div className="art-header">
                 <div className="crumb">
-                  <span className="type">{selected.itemType}</span>
+                  <span className="type">{itemTypeLabelWB(selected.itemType, language)}</span>
                   <span className="sep">/</span>
                   <span>{selected.id}</span>
                   <span className="sep">·</span>
                   <span>{selected.updatedLabel}</span>
                   <span style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
-                    <Pill kind={selected.tone}>{selected.statusLabel}</Pill>
-                    <Pill kind="accent">{selected.sourceRun}</Pill>
+                    <Pill kind={selected.tone}>{statusLabelWB(selected.statusLabel, language)}</Pill>
+                    <Pill kind="accent">{textWB(selected.sourceRun, language)}</Pill>
                   </span>
                 </div>
-                <h1>{selected.title}</h1>
-                <p className="desc">{selected.summary}</p>
+                <h1>{textWB(selected.title, language)}</h1>
+                <p className="desc">{textWB(selected.summary, language)}</p>
                 <div className="row">
                   <div className="stat">
-                    <span className="label">Tenant</span>
+                    <span className="label">{tWB(language, "Tenant", "租户")}</span>
                     <span className="val mono">{selected.tenantId}</span>
                   </div>
                   <div className="stat">
-                    <span className="label">Status</span>
-                    <span className="val" style={{ color: selected.statusGroup === "blocked" ? "var(--changes)" : "var(--approved)" }}>{selected.statusLabel}</span>
+                    <span className="label">{tWB(language, "Status", "状态")}</span>
+                    <span className="val" style={{ color: selected.statusGroup === "blocked" ? "var(--changes)" : "var(--approved)" }}>{statusLabelWB(selected.statusLabel, language)}</span>
                   </div>
                   <div className="stat lg">
-                    <span className="label">Next action</span>
-                    <span className="val">{selected.nextAction}</span>
+                    <span className="label">{tWB(language, "Next action", "下一步")}</span>
+                    <span className="val">{nextActionLabelWB(selected.nextAction, language)}</span>
                   </div>
                 </div>
               </div>
 
               <div style={{ flex: 1, overflow: "auto", padding: "var(--pad-4) var(--pad-5)" }}>
-                <Panel eyebrow="Work routing" title="What needs attention" count={selected.statusLabel}>
+                <Panel eyebrow={tWB(language, "Work routing", "工作流转")} title={tWB(language, "What needs attention", "需要处理什么")} count={statusLabelWB(selected.statusLabel, language)}>
                   <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-                    <CaseField label="Object type" value={selected.itemType} />
-                    <CaseField label="Source / run" value={selected.sourceRun} />
-                    <CaseField label="Confidence" value={selected.confidenceLabel} />
-                    <CaseField label="Next action" value={selected.nextAction} />
+                    <CaseField label={tWB(language, "Object type", "对象类型")} value={itemTypeLabelWB(selected.itemType, language)} />
+                    <CaseField label={tWB(language, "Source / run", "来源 / 运行")} value={textWB(selected.sourceRun, language)} />
+                    <CaseField label={tWB(language, "Confidence", "置信度")} value={selected.confidenceLabel} />
+                    <CaseField label={tWB(language, "Next action", "下一步")} value={nextActionLabelWB(selected.nextAction, language)} />
                   </div>
                 </Panel>
 
-                <Panel eyebrow="Inline review" title="Review this proposed draft" count={selected.reviewKindLabel || selected.itemType} style={{ marginTop: 16 }}>
-                  <InlineReviewDetails item={selected} />
+                <Panel eyebrow={tWB(language, "Inline review", "工作台内审核")} title={tWB(language, "Review this proposed draft", "审核这个候选草稿")} count={textWB(selected.reviewKindLabel || selected.itemType, language)} style={{ marginTop: 16 }}>
+                  <InlineReviewDetails item={selected} language={language} />
                   <div style={{ marginTop: 12 }}>
-                    <div className="eyebrow" style={{ marginBottom: 6 }}>Review note</div>
+                    <div className="eyebrow" style={{ marginBottom: 6 }}>{tWB(language, "Review note", "审核说明")}</div>
                     <textarea
                       className="input"
                       value={reviewNote}
                       onChange={e => setReviewNote(e.target.value)}
-                      placeholder="Optional for approve. Required for reject, needs evidence/changes, or comment."
+                      placeholder={tWB(language, "Optional for approve. Required for reject, needs evidence/changes, or comment.", "批准时可选；拒绝、要求补证据/修改或评论时必填。")}
                       style={{ minHeight: 72, resize: "vertical", lineHeight: 1.45 }}
                     />
                   </div>
@@ -325,23 +394,23 @@ function Workbench({ data, tenant }) {
                     </div>
                   )}
                   <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 12 }}>
-                    <button className="btn primary" disabled={reviewBusy} onClick={() => submitInlineReview("approve")}>Approve</button>
-                    <button className="btn ghost" disabled={reviewBusy} onClick={() => submitInlineReview("needs")}>{selected.reviewKind === "ontology" ? "Needs changes" : "Needs evidence"}</button>
-                    <button className="btn ghost" disabled={reviewBusy} onClick={() => submitInlineReview("reject")}>Reject</button>
-                    <button className="btn ghost" disabled={reviewBusy} onClick={() => submitInlineReview("comment")}>Comment</button>
+                    <button className="btn primary" disabled={reviewBusy} onClick={() => submitInlineReview("approve")}>{tWB(language, "Approve", "批准")}</button>
+                    <button className="btn ghost" disabled={reviewBusy} onClick={() => submitInlineReview("needs")}>{selected.reviewKind === "ontology" ? tWB(language, "Needs changes", "需要修改") : tWB(language, "Needs evidence", "需要补证据")}</button>
+                    <button className="btn ghost" disabled={reviewBusy} onClick={() => submitInlineReview("reject")}>{tWB(language, "Reject", "拒绝")}</button>
+                    <button className="btn ghost" disabled={reviewBusy} onClick={() => submitInlineReview("comment")}>{tWB(language, "Comment", "评论")}</button>
                   </div>
                   <div style={{ marginTop: 10, color: "var(--muted)", fontFamily: "var(--font-mono)", fontSize: 11, lineHeight: 1.5 }}>
-                    Inline review calls the owning review gate. It does not create a second workflow and does not bypass canonical ontology, formal graph, or finding evidence boundaries.
+                    {tWB(language, "Inline review calls the owning review gate. It does not create a second workflow and does not bypass canonical ontology, formal graph, or finding evidence boundaries.", "工作台内审核仍调用原有审核入口，不创建第二套流程，也不会绕过 canonical ontology、formal graph 或 finding 证据边界。")}
                   </div>
                 </Panel>
 
-                <Panel eyebrow="Boundary" title="Where to continue" style={{ marginTop: 16 }}>
+                <Panel eyebrow={tWB(language, "Boundary", "边界")} title={tWB(language, "Where to continue", "去哪里继续")} style={{ marginTop: 16 }}>
                   <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                    <a className="btn primary" href={selected.reviewHref}>{selected.reviewLabel}</a>
-                    {selected.runHref && <a className="btn ghost" href={selected.runHref}>Open agent run</a>}
+                    <a className="btn primary" href={selected.reviewHref}>{reviewLinkLabelWB(selected.reviewLabel, language)}</a>
+                    {selected.runHref && <a className="btn ghost" href={selected.runHref}>{tWB(language, "Open agent run", "打开 Agent 运行")}</a>}
                   </div>
                   <div style={{ marginTop: 12, color: "var(--muted)", fontFamily: "var(--font-mono)", fontSize: 11, lineHeight: 1.5 }}>
-                    Workspace routes the decision. Approval, rejection, and evidence review still happen in the owning review surface.
+                    {tWB(language, "Workspace routes the decision. Approval, rejection, and evidence review still happen in the owning review surface.", "Workspace 只负责汇总入口；批准、拒绝和证据审核仍由所属审核面处理。")}
                   </div>
                 </Panel>
               </div>
@@ -351,36 +420,36 @@ function Workbench({ data, tenant }) {
 
         <div className="col inspector">
           <div className="section">
-            <div className="section-head"><span>Queue summary</span><span className="ct">{reviewItems.length}</span></div>
+            <div className="section-head"><span>{tWB(language, "Queue summary", "队列汇总")}</span><span className="ct">{reviewItems.length}</span></div>
             <div className="section-body">
-              <div className="hbar"><span className="lbl">active</span><span className="track"><i style={{ width: pct(counts.active, counts.all) }} /></span><span className="num">{counts.active}</span></div>
-              <div className="hbar"><span className="lbl">blocked</span><span className="track"><i style={{ width: pct(counts.blocked, counts.all) }} /></span><span className="num">{counts.blocked}</span></div>
-              <div className="hbar"><span className="lbl">done</span><span className="track"><i style={{ width: pct(counts.done, counts.all) }} /></span><span className="num">{counts.done}</span></div>
+              <div className="hbar"><span className="lbl">{tWB(language, "active", "待处理")}</span><span className="track"><i style={{ width: pct(counts.active, counts.all) }} /></span><span className="num">{counts.active}</span></div>
+              <div className="hbar"><span className="lbl">{tWB(language, "blocked", "已阻塞")}</span><span className="track"><i style={{ width: pct(counts.blocked, counts.all) }} /></span><span className="num">{counts.blocked}</span></div>
+              <div className="hbar"><span className="lbl">{tWB(language, "done", "已完成")}</span><span className="track"><i style={{ width: pct(counts.done, counts.all) }} /></span><span className="num">{counts.done}</span></div>
             </div>
           </div>
 
           <div className="section">
-            <div className="section-head"><span>Selected work item</span></div>
+            <div className="section-head"><span>{tWB(language, "Selected work item", "选中的工作项")}</span></div>
             <div className="section-body" style={{ display: "flex", flexDirection: "column", gap: 8 }}>
               {selected ? (
                 <>
-                  <CaseField label="Work item key" value={selected.id} />
-                  <CaseField label="Status" value={selected.statusLabel} />
-                  <CaseField label="Source" value={selected.sourceRun} />
-                  <CaseField label="Boundary" value={selected.boundary} />
+                  <CaseField label={tWB(language, "Work item key", "工作项键")} value={selected.id} />
+                  <CaseField label={tWB(language, "Status", "状态")} value={statusLabelWB(selected.statusLabel, language)} />
+                  <CaseField label={tWB(language, "Source", "来源")} value={textWB(selected.sourceRun, language)} />
+                  <CaseField label={tWB(language, "Boundary", "边界")} value={textWB(selected.boundary, language)} />
                 </>
               ) : (
-                <div style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--muted)" }}>No work item selected.</div>
+                <div style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--muted)" }}>{tWB(language, "No work item selected.", "未选择工作项。")}</div>
               )}
             </div>
           </div>
 
           <div className="section">
-            <div className="section-head"><span>Quick links</span></div>
+            <div className="section-head"><span>{tWB(language, "Quick links", "快捷入口")}</span></div>
             <div className="section-body" style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-              <a className="btn ghost" style={{ justifyContent: "flex-start" }} href={`/?screen=reasoning&tenant=${encodeURIComponent(tenantId)}`}>Open reasoning queue</a>
-              <a className="btn ghost" style={{ justifyContent: "flex-start" }} href={`/?screen=ontology&tenant=${encodeURIComponent(tenantId)}`}>Open ontology catalog</a>
-              <a className="btn ghost" style={{ justifyContent: "flex-start" }} href={`/?screen=graph&tenant=${encodeURIComponent(tenantId)}&graph_tab=proposed`}>Open proposed graph</a>
+              <a className="btn ghost" style={{ justifyContent: "flex-start" }} href={`/?screen=reasoning&tenant=${encodeURIComponent(tenantId)}`}>{tWB(language, "Open reasoning queue", "打开推理队列")}</a>
+              <a className="btn ghost" style={{ justifyContent: "flex-start" }} href={`/?screen=ontology&tenant=${encodeURIComponent(tenantId)}`}>{tWB(language, "Open ontology catalog", "打开本体目录")}</a>
+              <a className="btn ghost" style={{ justifyContent: "flex-start" }} href={`/?screen=graph&tenant=${encodeURIComponent(tenantId)}&graph_tab=proposed`}>{tWB(language, "Open proposed graph", "打开候选图谱")}</a>
             </div>
           </div>
         </div>
@@ -390,7 +459,7 @@ function Workbench({ data, tenant }) {
   );
 }
 
-function AgentRunsWorkspace({ tenantId, query, artifacts = [], graphElements = [] }) {
+function AgentRunsWorkspace({ tenantId, query, artifacts = [], graphElements = [], language }) {
   const data = query.data || { sessions: [], runs: [] };
   const runs = data.runs || [];
   const sessions = data.sessions || [];
@@ -554,7 +623,7 @@ function AgentRunsWorkspace({ tenantId, query, artifacts = [], graphElements = [
         budget: Number(agentParams.budget) || 3,
         stop_condition: agentParams.stopCondition,
       });
-      setMessage({ kind: "ok", text: "Auto enriching settings saved." });
+      setMessage({ kind: "ok", text: tWB(language, "Auto enriching settings saved.", "自动信息增益设置已保存。") });
       window.dispatchEvent(new CustomEvent("aletheia:retry"));
     } catch (err) {
       setMessage({ kind: "error", text: err.message || String(err) });
@@ -567,24 +636,24 @@ function AgentRunsWorkspace({ tenantId, query, artifacts = [], graphElements = [
     <div className="wb agent-workspace">
       <div className="col">
         <div style={{ padding: "12px 14px", borderBottom: "1px solid var(--line)", background: "var(--bg-2)" }}>
-          <div className="eyebrow accent">Agent</div>
+          <div className="eyebrow accent">{tWB(language, "Agent", "Agent")}</div>
           <div style={{ marginTop: 5, color: "var(--text-dim)", fontSize: 12, lineHeight: 1.45 }}>
-            Manage automatic reasoning and enrichment agents. Review stays in the owning surfaces.
+            {tWB(language, "Manage automatic reasoning and enrichment agents. Review stays in the owning surfaces.", "管理自动推理和信息增益 Agent；审核仍由各自所属页面和 gate 处理。")}
           </div>
           <div className="tabs" style={{ marginTop: 10, height: 32, border: "1px solid var(--line)", display: "flex" }}>
-            <div className={"tab" + (agentTab === "enrichment" ? " active" : "")} onClick={() => selectAgentTab("enrichment")}>Auto enriching <span className="ct">{(kindCounts.web_enrichment_crawl || 0) + (kindCounts.iterative_graph_enrichment || 0)}</span></div>
-            <div className={"tab" + (agentTab === "autopilot" ? " active" : "")} onClick={() => selectAgentTab("autopilot")}>Autopilot reasoning <span className="ct">{kindCounts.autopilot_deep_reasoning || 0}</span></div>
+            <div className={"tab" + (agentTab === "enrichment" ? " active" : "")} onClick={() => selectAgentTab("enrichment")}>{tWB(language, "Auto enriching", "自动信息增益")} <span className="ct">{(kindCounts.web_enrichment_crawl || 0) + (kindCounts.iterative_graph_enrichment || 0)}</span></div>
+            <div className={"tab" + (agentTab === "autopilot" ? " active" : "")} onClick={() => selectAgentTab("autopilot")}>{tWB(language, "Autopilot reasoning", "自动推理")} <span className="ct">{kindCounts.autopilot_deep_reasoning || 0}</span></div>
           </div>
           <div className="row" style={{ marginTop: 10 }}>
-            <div className="stat"><span className="label">Runs</span><span className="val mono">{runs.length}</span></div>
-            <div className="stat"><span className="label">Pending review</span><span className="val mono">{pending}</span></div>
-            <div className="stat"><span className="label">Failed</span><span className="val mono">{failed}</span></div>
+            <div className="stat"><span className="label">{tWB(language, "Runs", "运行")}</span><span className="val mono">{runs.length}</span></div>
+            <div className="stat"><span className="label">{tWB(language, "Pending review", "待审核")}</span><span className="val mono">{pending}</span></div>
+            <div className="stat"><span className="label">{tWB(language, "Failed", "失败")}</span><span className="val mono">{failed}</span></div>
           </div>
         </div>
         <div style={{ flex: 1, overflow: "auto" }}>
-          <ApiStatus q={query} what="agent runs" />
+          <ApiStatus q={query} what={tWB(language, "agent runs", "Agent 运行")} />
           <div style={{ padding: "10px 14px 4px", fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--accent)", textTransform: "uppercase", letterSpacing: "0.08em" }}>
-            Agent run history
+            {tWB(language, "Agent run history", "Agent 运行历史")}
           </div>
           <div className="artifact-list">
             {filteredRuns.map(run => (
@@ -594,15 +663,15 @@ function AgentRunsWorkspace({ tenantId, query, artifacts = [], graphElements = [
                 <div className="ar-bar" />
                 <div className="ar-main">
                   <div className="ar-top">
-                    <span className="type">{agentKindLabelWB(run.kind)}</span>
+                    <span className="type">{agentKindLabelWB(run.kind, language)}</span>
                     <span>·</span>
-                    <span className="key">{run.status || "unknown"}</span>
+                    <span className="key">{statusLabelWB(run.status || "unknown", language)}</span>
                   </div>
-                  <div className="ar-title">{agentObjectiveWB(run)}</div>
+                  <div className="ar-title">{textWB(agentObjectiveWB(run), language)}</div>
                   <div className="ar-meta">
-                    <span>{run.started_at ? String(run.started_at).slice(0, 16) : "no start time"}</span>
-                    <span>{runOutputCountWB(run)} outputs</span>
-                    <span>{runSkippedCountWB(run)} skipped</span>
+                    <span>{run.started_at ? String(run.started_at).slice(0, 16) : tWB(language, "no start time", "无开始时间")}</span>
+                    <span>{runOutputCountWB(run)} {tWB(language, "outputs", "输出")}</span>
+                    <span>{runSkippedCountWB(run)} {tWB(language, "skipped", "跳过")}</span>
                   </div>
                 </div>
                 <div className="ar-right">{runOutputCountWB(run)}</div>
@@ -610,7 +679,7 @@ function AgentRunsWorkspace({ tenantId, query, artifacts = [], graphElements = [
             ))}
             {filteredRuns.length === 0 && (
               <div style={{ padding: 24, fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--muted)", textAlign: "center" }}>
-                No {agentTab === "autopilot" ? "Autopilot reasoning" : "Auto enriching"} runs for tenant {tenantId}.
+                {tWB(language, "No", "没有")}{agentTab === "autopilot" ? tWB(language, " Autopilot reasoning", "自动推理") : tWB(language, " Auto enriching", "自动信息增益")}{tWB(language, " runs for tenant ", "运行，租户 ")}{tenantId}.
               </div>
             )}
           </div>
@@ -620,84 +689,84 @@ function AgentRunsWorkspace({ tenantId, query, artifacts = [], graphElements = [
       <div className="col" style={{ display: "flex", flexDirection: "column" }}>
         <div className="art-header">
           <div className="crumb">
-            <span className="type">Agent</span>
+            <span className="type">{tWB(language, "Agent", "Agent")}</span>
             <span className="sep">/</span>
-            <span>{agentTab === "autopilot" ? "Autopilot reasoning" : "Auto enriching"}</span>
+            <span>{agentTab === "autopilot" ? tWB(language, "Autopilot reasoning", "自动推理") : tWB(language, "Auto enriching", "自动信息增益")}</span>
             <span style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
-              <Pill kind={agentTab === "autopilot" ? "accent" : (session?.status === "running" ? "approved" : "proposed")}>{agentTab === "autopilot" ? "run on demand" : (session?.status || "no session")}</Pill>
-              <Pill kind="accent">{filteredRuns.length} runs</Pill>
+              <Pill kind={agentTab === "autopilot" ? "accent" : (session?.status === "running" ? "approved" : "proposed")}>{agentTab === "autopilot" ? tWB(language, "run on demand", "按需运行") : statusLabelWB(session?.status || "no session", language)}</Pill>
+              <Pill kind="accent">{filteredRuns.length} {tWB(language, "runs", "次运行")}</Pill>
             </span>
           </div>
-          <h1>{agentTab === "autopilot" ? "Autopilot reasoning agent" : "Auto enriching agent"}</h1>
+          <h1>{agentTab === "autopilot" ? tWB(language, "Autopilot reasoning agent", "自动推理 Agent") : tWB(language, "Auto enriching agent", "自动信息增益 Agent")}</h1>
           <p className="desc">{agentTab === "autopilot"
-            ? "Run bounded deep reasoning over the current tenant graph and send candidate findings to review."
-            : "Keep the graph enrichment loop visible and bounded while generated objects route to review."}</p>
+            ? tWB(language, "Run bounded deep reasoning over the current tenant graph and send candidate findings to review.", "在当前租户图谱上执行有边界的深度推理，并把候选 findings 送入审核。")
+            : tWB(language, "Keep the graph enrichment loop visible and bounded while generated objects route to review.", "持续展示并约束图谱信息增益循环，生成对象进入审核流程。")}</p>
           <div className="row">
             <div className="stat">
-              <span className="label">Scope</span>
+              <span className="label">{tWB(language, "Scope", "范围")}</span>
               <span className="val mono">{compactTextWB(agentParams.scope, 42)}</span>
             </div>
             <div className="stat">
-              <span className="label">Budget</span>
+              <span className="label">{tWB(language, "Budget", "预算")}</span>
               <span className="val mono">{agentParams.budget}</span>
             </div>
             <div className="stat lg">
-              <span className="label">Next action</span>
-              <span className="val">{pending ? "Review generated proposals" : "Run once or inspect latest run"}</span>
+              <span className="label">{tWB(language, "Next action", "下一步")}</span>
+              <span className="val">{pending ? tWB(language, "Review generated proposals", "审核生成的候选对象") : tWB(language, "Run once or inspect latest run", "运行一次或查看最近运行")}</span>
             </div>
           </div>
         </div>
 
         <div style={{ flex: 1, overflow: "auto", padding: "var(--pad-4) var(--pad-5)" }}>
-          <Panel eyebrow="Parameters" title="Agent settings">
+          <Panel eyebrow={tWB(language, "Parameters", "参数")} title={tWB(language, "Agent settings", "Agent 设置")}>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 120px", gap: 10 }}>
               <label>
-                <div className="eyebrow" style={{ marginBottom: 4 }}>Scope</div>
+                <div className="eyebrow" style={{ marginBottom: 4 }}>{tWB(language, "Scope", "范围")}</div>
                 <input className="input" value={agentParams.scope} onChange={e => updateAgentParam("scope", e.target.value)} />
               </label>
               <label>
-                <div className="eyebrow" style={{ marginBottom: 4 }}>Budget</div>
+                <div className="eyebrow" style={{ marginBottom: 4 }}>{tWB(language, "Budget", "预算")}</div>
                 <input className="input" value={agentParams.budget} onChange={e => updateAgentParam("budget", e.target.value)} />
               </label>
               <label>
-                <div className="eyebrow" style={{ marginBottom: 4 }}>Allowlist / safety</div>
+                <div className="eyebrow" style={{ marginBottom: 4 }}>{tWB(language, "Allowlist / safety", "允许域名 / 安全")}</div>
                 <input className="input" value={agentParams.allowlist} onChange={e => updateAgentParam("allowlist", e.target.value)} />
               </label>
               <label>
-                <div className="eyebrow" style={{ marginBottom: 4 }}>Cadence</div>
+                <div className="eyebrow" style={{ marginBottom: 4 }}>{tWB(language, "Cadence", "频率")}</div>
                 <select className="select" value={agentParams.cadence} onChange={e => updateAgentParam("cadence", e.target.value)}>
-                  <option value="manual">Manual</option>
-                  <option value="hourly">Hourly</option>
-                  <option value="daily">Daily</option>
-                  <option value="custom">Custom interval</option>
+                  <option value="manual">{tWB(language, "Manual", "手动")}</option>
+                  <option value="hourly">{tWB(language, "Hourly", "每小时")}</option>
+                  <option value="daily">{tWB(language, "Daily", "每天")}</option>
+                  <option value="custom">{tWB(language, "Custom interval", "自定义间隔")}</option>
                 </select>
               </label>
               <label>
-                <div className="eyebrow" style={{ marginBottom: 4 }}>Custom minutes</div>
+                <div className="eyebrow" style={{ marginBottom: 4 }}>{tWB(language, "Custom minutes", "自定义分钟数")}</div>
                 <input className="input" value={agentParams.customInterval} onChange={e => updateAgentParam("customInterval", e.target.value)} />
               </label>
               <label>
-                <div className="eyebrow" style={{ marginBottom: 4 }}>Stop condition</div>
+                <div className="eyebrow" style={{ marginBottom: 4 }}>{tWB(language, "Stop condition", "停止条件")}</div>
                 <input className="input" value={agentParams.stopCondition} onChange={e => updateAgentParam("stopCondition", e.target.value)} />
               </label>
             </div>
             <div style={{ marginTop: 10, fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--muted)" }}>
-              {agentParams.safety} · next run {session?.config?.next_run_at || "manual"}
+              {agentParams.safety} · {tWB(language, "next run", "下次运行")} {session?.config?.next_run_at || tWB(language, "manual", "手动")}
             </div>
           </Panel>
 
-          <Panel eyebrow="Controls" title="Run and pause from Workspace" style={{ marginTop: 16 }}>
+          <Panel eyebrow={tWB(language, "Controls", "控制")} title={tWB(language, "Run and pause from Workspace", "在 Workspace 中运行和暂停")} style={{ marginTop: 16 }}>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              <button className="btn primary" disabled={busy || (agentTab !== "autopilot" && !session)} onClick={runOnce}>Run once</button>
+              <button className="btn primary" disabled={busy || (agentTab !== "autopilot" && !session)} onClick={runOnce}>{tWB(language, "Run once", "运行一次")}</button>
               {agentTab !== "autopilot" && (
-                <button className="btn" disabled={busy || !session} onClick={saveAgentSettings}>Save settings</button>
+                <button className="btn" disabled={busy || !session} onClick={saveAgentSettings}>{tWB(language, "Save settings", "保存设置")}</button>
               )}
               <button className="btn ghost" disabled={busy || (agentTab !== "autopilot" && !session)} onClick={toggleSession}>
-                {agentTab === "autopilot" ? "Pause / Resume" : (["running", "active", "idle"].includes(String(session?.status || "").toLowerCase()) ? "Pause" : "Resume")}
+                {agentTab === "autopilot" ? tWB(language, "Pause / Resume", "暂停 / 恢复") : (["running", "active", "idle"].includes(String(session?.status || "").toLowerCase()) ? tWB(language, "Pause", "暂停") : tWB(language, "Resume", "恢复"))}
               </button>
-              <a className="btn" href={`/?screen=graph&tenant=${encodeURIComponent(tenantId)}&graph_tab=proposed`}>Open results</a>
-              <a className="btn ghost" href={`/?screen=workbench&tenant=${encodeURIComponent(tenantId)}&workspace_tab=agents&agent_tab=${encodeURIComponent(agentTab)}`}>Full run log</a>
-              <a className="btn ghost" href={`/?screen=reasoning&tenant=${encodeURIComponent(tenantId)}`}>Open reasoning</a>
+              <a className="btn" href={`/?screen=graph&tenant=${encodeURIComponent(tenantId)}&graph_tab=proposed`}>{tWB(language, "Open results", "打开结果")}</a>
+              <a className="btn ghost" href={`/?screen=workbench&tenant=${encodeURIComponent(tenantId)}&workspace_tab=agents&agent_tab=${encodeURIComponent(agentTab)}`}>{tWB(language, "Full run log", "完整运行日志")}</a>
+              <a className="btn ghost" href={`/?screen=reasoning&tenant=${encodeURIComponent(tenantId)}`}>{tWB(language, "Open reasoning", "打开推理")}</a>
             </div>
             {message && (
               <div style={{ marginTop: 10, fontFamily: "var(--font-mono)", fontSize: 10, color: message.kind === "error" ? "var(--rejected)" : "var(--approved)" }}>
@@ -706,18 +775,18 @@ function AgentRunsWorkspace({ tenantId, query, artifacts = [], graphElements = [
             )}
           </Panel>
 
-          <AgentOutputsPanel groups={outputGroups} agentTab={agentTab} />
+          <AgentOutputsPanel groups={outputGroups} agentTab={agentTab} language={language} />
 
           {agentTab !== "autopilot" && session?.config?.latest_events?.length > 0 && (
-            <Panel eyebrow="Agent chain" title="Latest enrichment events" style={{ marginTop: 16 }}>
+            <Panel eyebrow={tWB(language, "Agent chain", "Agent 链路")} title={tWB(language, "Latest enrichment events", "最近信息增益事件")} style={{ marginTop: 16 }}>
               <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                 {session.config.latest_events.slice(-6).reverse().map((event, index) => (
                   <div key={`${event.type}-${index}`} style={{ border: "1px solid var(--line-soft)", background: "var(--bg-2)", padding: "8px 10px" }}>
                     <div style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--accent)" }}>
-                      {event.type} · {event.created_at ? String(event.created_at).slice(0, 19) : "no time"}
+                      {event.type} · {event.created_at ? String(event.created_at).slice(0, 19) : tWB(language, "no time", "无时间")}
                     </div>
                     <div style={{ marginTop: 4, fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--muted)" }}>
-                      {compactTextWB(event.autopilot_session_key || event.run_key || event.reason || "event recorded", 130)}
+                      {compactTextWB(event.autopilot_session_key || event.run_key || event.reason || tWB(language, "event recorded", "事件已记录"), 130)}
                     </div>
                   </div>
                 ))}
@@ -726,7 +795,7 @@ function AgentRunsWorkspace({ tenantId, query, artifacts = [], graphElements = [
           )}
 
           {agentTab !== "autopilot" && session?.frontier?.length > 0 && (
-            <Panel eyebrow="Frontier priority" title="Next enrichment seeds" count={`${session.frontier.length} queued`} style={{ marginTop: 16 }}>
+            <Panel eyebrow={tWB(language, "Frontier priority", "Frontier 优先级")} title={tWB(language, "Next enrichment seeds", "下一批信息增益种子")} count={`${session.frontier.length} ${tWB(language, "queued", "排队中")}`} style={{ marginTop: 16 }}>
               <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                 {session.frontier.slice(0, 8).map((item, index) => (
                   <div key={`${item.key || item.target_key || index}`} style={{ border: "1px solid var(--line-soft)", background: "var(--bg-2)", padding: "8px 10px" }}>
@@ -735,7 +804,7 @@ function AgentRunsWorkspace({ tenantId, query, artifacts = [], graphElements = [
                       <span className="chip">{item.source_kind || item.source || "frontier"}</span>
                     </div>
                     <div style={{ marginTop: 4, fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--muted)" }}>
-                      priority {item.priority ?? "—"} · {compactTextWB(item.reason || item.path || item.key, 140)}
+                      {tWB(language, "priority", "优先级")} {item.priority ?? "—"} · {compactTextWB(textWB(item.reason || item.path || item.key, language), 140)}
                     </div>
                   </div>
                 ))}
@@ -743,23 +812,23 @@ function AgentRunsWorkspace({ tenantId, query, artifacts = [], graphElements = [
             </Panel>
           )}
 
-          <Panel eyebrow="Agent run log" title={selected ? agentObjectiveWB(selected) : "No run selected"} count={selected?.status || "—"} style={{ marginTop: 16 }}>
+          <Panel eyebrow={tWB(language, "Agent run log", "Agent 运行日志")} title={selected ? textWB(agentObjectiveWB(selected), language) : tWB(language, "No run selected", "未选择运行")} count={statusLabelWB(selected?.status || "—", language)} style={{ marginTop: 16 }}>
             {selected ? (
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-                <CaseField label="Kind" value={agentKindLabelWB(selected.kind)} />
-                <CaseField label="Status" value={selected.status || selected.statusLabel} />
-                <CaseField label="Started" value={selected.started_at ? String(selected.started_at).slice(0, 19) : "—"} />
-                <CaseField label="Outputs" value={`${runOutputCountWB(selected)} generated · ${runSkippedCountWB(selected)} skipped`} />
-                <CaseField label="Run key" value={compactTextWB(selected.run_key, 72)} />
-                <CaseField label="Trace rows" value={(selected.trace || []).length} />
+                <CaseField label={tWB(language, "Kind", "类型")} value={agentKindLabelWB(selected.kind, language)} />
+                <CaseField label={tWB(language, "Status", "状态")} value={statusLabelWB(selected.status || selected.statusLabel, language)} />
+                <CaseField label={tWB(language, "Started", "开始时间")} value={selected.started_at ? String(selected.started_at).slice(0, 19) : "—"} />
+                <CaseField label={tWB(language, "Outputs", "输出")} value={`${runOutputCountWB(selected)} ${tWB(language, "generated", "生成")} · ${runSkippedCountWB(selected)} ${tWB(language, "skipped", "跳过")}`} />
+                <CaseField label={tWB(language, "Run key", "运行键")} value={compactTextWB(selected.run_key, 72)} />
+                <CaseField label={tWB(language, "Trace rows", "Trace 行")} value={(selected.trace || []).length} />
               </div>
             ) : (
-              <div style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--muted)" }}>Select a run from the list.</div>
+              <div style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--muted)" }}>{tWB(language, "Select a run from the list.", "从列表中选择一次运行。")}</div>
             )}
           </Panel>
 
           {selected && (
-            <Panel eyebrow="Agent run log" title="Timeline and trace" style={{ marginTop: 16 }}>
+            <Panel eyebrow={tWB(language, "Agent run log", "Agent 运行日志")} title={tWB(language, "Timeline and trace", "时间线与 trace")} style={{ marginTop: 16 }}>
               <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                 {(selected.trace || []).slice(0, 5).map((step, index) => (
                   <div key={index} style={{ border: "1px solid var(--line-soft)", background: "var(--bg-2)", padding: "8px 10px" }}>
@@ -767,25 +836,25 @@ function AgentRunsWorkspace({ tenantId, query, artifacts = [], graphElements = [
                       {compactTextWB(step.query || step.title || step.hypothesis_key || `step ${index + 1}`, 120)}
                     </div>
                     <div style={{ marginTop: 4, fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--muted)" }}>
-                      results {step.result_count ?? "—"} · extracted {(step.extracted_candidates || []).length || (step.reasoning_task_keys || []).length || 0}
+                      {tWB(language, "results", "结果")} {step.result_count ?? "—"} · {tWB(language, "extracted", "抽取")} {(step.extracted_candidates || []).length || (step.reasoning_task_keys || []).length || 0}
                     </div>
                     {(step.query_terms || step.graph_context_used || step.path_context_used) && (
                       <div style={{ marginTop: 6, display: "grid", gap: 4, fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--muted)" }}>
                         {step.query_terms && (
-                          <div>query terms · {compactTextWB(flatQueryTermsWB(step.query_terms), 150)}</div>
+                          <div>{tWB(language, "query terms", "查询词")} · {compactTextWB(flatQueryTermsWB(step.query_terms), 150)}</div>
                         )}
                         {step.graph_context_used && (
-                          <div>graph context · {compactTextWB(graphContextLabelWB(step.graph_context_used), 150)}</div>
+                          <div>{tWB(language, "graph context", "图谱上下文")} · {compactTextWB(textWB(graphContextLabelWB(step.graph_context_used), language), 150)}</div>
                         )}
                         {step.path_context_used && (
-                          <div>path context · {compactTextWB(pathContextLabelWB(step.path_context_used), 150)}</div>
+                          <div>{tWB(language, "path context", "路径上下文")} · {compactTextWB(textWB(pathContextLabelWB(step.path_context_used), language), 150)}</div>
                         )}
                       </div>
                     )}
                   </div>
                 ))}
                 {!(selected.trace || []).length && (
-                  <div style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--muted)" }}>No trace rows recorded.</div>
+                  <div style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--muted)" }}>{tWB(language, "No trace rows recorded.", "未记录 trace 行。")}</div>
                 )}
               </div>
             </Panel>
@@ -795,7 +864,7 @@ function AgentRunsWorkspace({ tenantId, query, artifacts = [], graphElements = [
 
       <div className="col inspector">
         <div className="section">
-          <div className="section-head"><span>Run summary</span><span className="ct">{runs.length}</span></div>
+          <div className="section-head"><span>{tWB(language, "Run summary", "运行汇总")}</span><span className="ct">{runs.length}</span></div>
           <div className="section-body">
             <div className="hbar"><span className="lbl">web</span><span className="track"><i style={{ width: pct(kindCounts.web_enrichment_crawl || 0, runs.length) }} /></span><span className="num">{kindCounts.web_enrichment_crawl || 0}</span></div>
             <div className="hbar"><span className="lbl">graph</span><span className="track"><i style={{ width: pct(kindCounts.iterative_graph_enrichment || 0, runs.length) }} /></span><span className="num">{kindCounts.iterative_graph_enrichment || 0}</span></div>
@@ -803,20 +872,20 @@ function AgentRunsWorkspace({ tenantId, query, artifacts = [], graphElements = [
           </div>
         </div>
         <div className="section">
-          <div className="section-head"><span>Write boundary</span></div>
+          <div className="section-head"><span>{tWB(language, "Write boundary", "写入边界")}</span></div>
           <div className="section-body" style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            <CaseField label="Ontology candidates" value="review required" />
-            <CaseField label="Graph facts" value="proposed graph space" />
-            <CaseField label="Findings" value="candidate / reviewed only" />
-            <CaseField label="Canonical writes" value="disabled" />
+            <CaseField label={tWB(language, "Ontology candidates", "本体候选")} value={tWB(language, "review required", "需要审核")} />
+            <CaseField label={tWB(language, "Graph facts", "图事实")} value={tWB(language, "proposed graph space", "候选图空间")} />
+            <CaseField label={tWB(language, "Findings", "发现")} value={tWB(language, "candidate / reviewed only", "仅候选 / 已审核")} />
+            <CaseField label={tWB(language, "Canonical writes", "正式写入")} value={tWB(language, "disabled", "禁用")} />
           </div>
         </div>
         <div className="section">
-          <div className="section-head"><span>Quick links</span></div>
+          <div className="section-head"><span>{tWB(language, "Quick links", "快捷入口")}</span></div>
           <div className="section-body" style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-            <a className="btn ghost" style={{ justifyContent: "flex-start" }} href={`/?screen=graph&tenant=${encodeURIComponent(tenantId)}&graph_tab=proposed`}>Review pending graph proposals</a>
-            <a className="btn ghost" style={{ justifyContent: "flex-start" }} href={`/?screen=ontology&tenant=${encodeURIComponent(tenantId)}`}>Review ontology candidates</a>
-            <a className="btn ghost" style={{ justifyContent: "flex-start" }} href={`/?screen=reasoning&tenant=${encodeURIComponent(tenantId)}`}>Review candidate findings</a>
+            <a className="btn ghost" style={{ justifyContent: "flex-start" }} href={`/?screen=graph&tenant=${encodeURIComponent(tenantId)}&graph_tab=proposed`}>{tWB(language, "Review pending graph proposals", "审核待处理图候选")}</a>
+            <a className="btn ghost" style={{ justifyContent: "flex-start" }} href={`/?screen=ontology&tenant=${encodeURIComponent(tenantId)}`}>{tWB(language, "Review ontology candidates", "审核本体候选")}</a>
+            <a className="btn ghost" style={{ justifyContent: "flex-start" }} href={`/?screen=reasoning&tenant=${encodeURIComponent(tenantId)}`}>{tWB(language, "Review candidate findings", "审核候选 findings")}</a>
           </div>
         </div>
       </div>
@@ -940,7 +1009,7 @@ function buildWorkspaceReviewItems({ tenantId, artifacts, graphElements, agentRu
     });
 }
 
-function InlineReviewDetails({ item }) {
+function InlineReviewDetails({ item, language }) {
   const raw = item?.raw || {};
   const payload = raw.payload || {};
   const sourceUrl = raw.source_url || payload.source?.url || payload.source_url || "";
@@ -950,26 +1019,26 @@ function InlineReviewDetails({ item }) {
   return (
     <div style={{ display: "grid", gap: 10 }}>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-        <CaseField label="Review gate" value={item.reviewKindLabel || item.reviewKind || "—"} />
-        <CaseField label="Current status" value={item.statusLabel} />
-        <CaseField label="Confidence" value={item.confidenceLabel} />
-        <CaseField label="Source run" value={item.sourceRun} />
+        <CaseField label={tWB(language, "Review gate", "审核入口")} value={item.reviewKindLabel || item.reviewKind || "—"} />
+        <CaseField label={tWB(language, "Current status", "当前状态")} value={statusLabelWB(item.statusLabel, language)} />
+        <CaseField label={tWB(language, "Confidence", "置信度")} value={item.confidenceLabel} />
+        <CaseField label={tWB(language, "Source run", "来源运行")} value={item.sourceRun} />
       </div>
-      {path && <CaseField label="Path / relation" value={path} />}
-      {sourceUrl && <CaseField label="Source URL" value={sourceUrl} />}
+      {path && <CaseField label={tWB(language, "Path / relation", "路径 / 关系")} value={textWB(path, language)} />}
+      {sourceUrl && <CaseField label={tWB(language, "Source URL", "来源 URL")} value={sourceUrl} />}
       {evidenceRefs.length > 0 && (
         <div style={{ border: "1px solid var(--line-soft)", background: "var(--bg-2)", padding: "10px 12px" }}>
-          <div className="eyebrow" style={{ marginBottom: 6 }}>Evidence refs</div>
+          <div className="eyebrow" style={{ marginBottom: 6 }}>{tWB(language, "Evidence refs", "证据引用")}</div>
           <div style={{ display: "grid", gap: 4 }}>
             {evidenceRefs.slice(0, 5).map((ref, idx) => (
               <div key={`${ref}-${idx}`} style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text)", overflowWrap: "anywhere" }}>{ref}</div>
             ))}
-            {evidenceRefs.length > 5 && <div style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--muted)" }}>+{evidenceRefs.length - 5} more</div>}
+            {evidenceRefs.length > 5 && <div style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--muted)" }}>+{evidenceRefs.length - 5} {tWB(language, "more", "条更多")}</div>}
           </div>
         </div>
       )}
       <div style={{ border: "1px solid var(--line-soft)", background: "var(--bg-2)", padding: "10px 12px" }}>
-        <div className="eyebrow" style={{ marginBottom: 6 }}>Write boundary</div>
+        <div className="eyebrow" style={{ marginBottom: 6 }}>{tWB(language, "Write boundary", "写入边界")}</div>
         <div style={{ display: "grid", gap: 4, fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text)" }}>
           {boundary.map(line => <div key={line}>{line}</div>)}
         </div>
@@ -995,9 +1064,9 @@ function workspaceEvidenceRefs(item) {
 function workspacePathLabel(item) {
   const raw = item?.raw || {};
   const payload = raw.payload || {};
-  const source = payload.source_label || payload.source || payload.country || "";
-  const relation = payload.relation || payload.edge_type || payload.path_relation || "";
-  const target = payload.target_label || payload.target || payload.chokepoint || "";
+  const source = pathPartWB(payload.source_label || payload.source || payload.country || "");
+  const relation = pathPartWB(payload.relation || payload.edge_type || payload.path_relation || "");
+  const target = pathPartWB(payload.target_label || payload.target || payload.chokepoint || "");
   if (source || relation || target) {
     return [source, relation, target].filter(Boolean).join(" -> ");
   }
@@ -1005,6 +1074,13 @@ function workspacePathLabel(item) {
   if (pathLabel) return Array.isArray(pathLabel) ? pathLabel.join(" -> ") : String(pathLabel);
   if (payload.metrics && payload.metrics.length) return `metrics: ${payload.metrics.join(", ")}`;
   return "";
+}
+
+function pathPartWB(value) {
+  if (value == null) return "";
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") return String(value);
+  if (Array.isArray(value)) return value.map(pathPartWB).filter(Boolean).join(" -> ");
+  return value.label || value.name || value.key || value.id || value.url || "";
 }
 
 function workspaceBoundaryFacts(item) {
@@ -1029,12 +1105,12 @@ function workspaceBoundaryFacts(item) {
   ];
 }
 
-function inlineActionLabel(action) {
+function inlineActionLabel(action, language) {
   const labels = {
-    approve: "approve",
-    reject: "reject",
-    needs: "needs evidence / changes",
-    comment: "comment",
+    approve: tWB(language, "approve", "批准"),
+    reject: tWB(language, "reject", "拒绝"),
+    needs: tWB(language, "needs evidence / changes", "需要补证据 / 修改"),
+    comment: tWB(language, "comment", "评论"),
   };
   return labels[action] || action;
 }
@@ -1133,32 +1209,32 @@ function agentOutputDetailScore(item) {
   return evidenceRefs.length * 8 + evidenceChain.length * 8 + path.length * 6 + Math.min(30, Math.floor(text.length / 40));
 }
 
-function AgentOutputsPanel({ groups, agentTab }) {
+function AgentOutputsPanel({ groups, agentTab, language }) {
   return (
-    <Panel eyebrow="Agent outputs" title={agentTab === "autopilot" ? "Findings ranked by confidence and detail" : "Enrichment proposals by type"} style={{ marginTop: 16 }}>
+    <Panel eyebrow={tWB(language, "Agent outputs", "Agent 输出")} title={agentTab === "autopilot" ? tWB(language, "Findings ranked by confidence and detail", "按置信度和详情排序的 findings") : tWB(language, "Enrichment proposals by type", "按类型分组的信息增益候选")} style={{ marginTop: 16 }}>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 12 }}>
         {(groups || []).map(group => (
           <div key={group.key} style={{ border: "1px solid var(--line-soft)", background: "var(--bg-2)", padding: "10px 12px" }}>
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <div className="eyebrow accent" style={{ flex: 1 }}>{group.title}</div>
+              <div className="eyebrow accent" style={{ flex: 1 }}>{agentOutputGroupTitleWB(group.title, language)}</div>
               <span className="ct">{group.items.length}</span>
             </div>
-            <div style={{ marginTop: 4, color: "var(--muted)", fontSize: 11, lineHeight: 1.4 }}>{group.description}</div>
+            <div style={{ marginTop: 4, color: "var(--muted)", fontSize: 11, lineHeight: 1.4 }}>{agentOutputGroupDescriptionWB(group.description, language)}</div>
             <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 8 }}>
               {group.items.slice(0, 6).map(item => (
                 <a key={item.element_key || item.canonical_key || item.id || item.name}
                    href={group.href(item)}
                    style={{ display: "block", border: "1px solid var(--line-soft)", padding: "8px 9px", background: "var(--bg-1)", textDecoration: "none" }}>
-                  <div style={{ color: "var(--text)", fontSize: 12, fontWeight: 600 }}>{compactTextWB(agentOutputTitle(item), 74)}</div>
+          <div style={{ color: "var(--text)", fontSize: 12, fontWeight: 600 }}>{compactTextWB(textWB(agentOutputTitle(item), language), 74)}</div>
                   <div style={{ marginTop: 5, fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--muted)", display: "flex", gap: 8, flexWrap: "wrap" }}>
-                    <span>conf {agentOutputConfidence(item).toFixed(2)}</span>
-                    <span>detail {agentOutputDetailScore(item)}</span>
-                    <span>{item.status || item.rawStatus || "draft"}</span>
+                    <span>{tWB(language, "conf", "置信度")} {agentOutputConfidence(item).toFixed(2)}</span>
+                    <span>{tWB(language, "detail", "详情")} {agentOutputDetailScore(item)}</span>
+                    <span>{statusLabelWB(item.status || item.rawStatus || "draft", language)}</span>
                   </div>
                 </a>
               ))}
               {group.items.length === 0 && (
-                <div style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--muted)" }}>No outputs in this category.</div>
+                <div style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--muted)" }}>{tWB(language, "No outputs in this category.", "该类别暂无输出。")}</div>
               )}
             </div>
           </div>
@@ -1166,6 +1242,30 @@ function AgentOutputsPanel({ groups, agentTab }) {
       </div>
     </Panel>
   );
+}
+
+function agentOutputGroupTitleWB(title, language) {
+  if (!isZhWB(language)) return title;
+  const map = {
+    "Proposed findings": "候选 findings",
+    "Findings": "已审核 findings",
+    "Proposed ontologies": "候选本体",
+    "Proposed nodes": "候选节点",
+    "Proposed edges": "候选边",
+  };
+  return map[title] || title;
+}
+
+function agentOutputGroupDescriptionWB(description, language) {
+  if (!isZhWB(language)) return description;
+  const map = {
+    "Candidate findings generated by reasoning runs, sorted by confidence and detail.": "自动推理生成的候选 findings，按置信度和详情排序。",
+    "Reviewed or graph-level findings surfaced for comparison.": "用于对比的已审核或图谱级 findings。",
+    "Ontology candidates and web enrichment proposals that still require ontology review.": "仍需本体审核的本体候选和网页信息增益候选。",
+    "Graph node proposals generated by enrichment runs.": "信息增益运行生成的候选图节点。",
+    "Graph edge proposals generated by enrichment runs.": "信息增益运行生成的候选图边。",
+  };
+  return map[description] || description;
 }
 
 function agentOutputTitle(item) {
@@ -1263,13 +1363,13 @@ function CaseField({ label, value }) {
   );
 }
 
-function agentKindLabelWB(kind) {
+function agentKindLabelWB(kind, language) {
   const labels = {
-    web_enrichment_crawl: "Crawl",
-    iterative_graph_enrichment: "Graph enrich",
-    autopilot_deep_reasoning: "Reasoning",
+    web_enrichment_crawl: tWB(language, "Crawl", "爬取"),
+    iterative_graph_enrichment: tWB(language, "Graph enrich", "图谱信息增益"),
+    autopilot_deep_reasoning: tWB(language, "Reasoning", "推理"),
   };
-  return labels[kind] || kind || "Agent";
+  return labels[kind] || kind || tWB(language, "Agent", "Agent");
 }
 
 function agentObjectiveWB(run) {

@@ -164,7 +164,7 @@ const RESULT_TITLE_ZH_RX = {
   "The imported profile did not show enough value lift to promote this into a candidate finding before stronger evidence exists.": "导入画像尚未显示足够价值提升，因此在更强证据出现前不提升为候选发现。",
   "Rank country/chokepoint pairs by value share and dependent trade value to find countries exposed to one chokepoint.": "按价值占比和依赖贸易额排序国家/咽喉点组合，识别暴露于单一咽喉点的国家。",
   "Combine hazard likelihood/severity with systemic risk results so the finding explains risk propagation, not just trade volume.": "把风险可能性/严重度与系统性风险结果结合，使发现能解释风险传播，而不只是贸易量。",
-  "Use the chokepoint hazard row and downstream country risk rows to prioritize analyst review when upstream events increase.": "使用咽喉点风险行和下游国家风险行，在上游事件增强时确定分析师复核优先级。",
+  "Use the chokepoint hazard row and downstream country risk rows to prioritize analyst review when upstream events increase.": "使用咽喉点风险行和下游国家风险行，在上游事件升级时确定分析师复核优先级。",
   "A volume-only ranking does not explain hazard, dependency, country exposure, and action linkage.": "仅按交易量排名无法解释风险因子、依赖关系、国家暴露和行动关联。",
   "No rationale recorded.": "未记录依据。",
 };
@@ -191,7 +191,7 @@ const RESULT_TEXT_ZH_RX = [
   [/This phase uses structural 2022 dependency data and does not include live event updates\./,
     "当前阶段使用 2022 年结构性依赖数据，尚未包含实时事件更新。"],
   [/The playbook uses structural chokepoint risk data; ACLED\/GDELT live events are a planned enrichment, not yet imported\./,
-    "该 playbook 使用结构化咽喉点风险数据；ACLED/GDELT 实时事件是计划中的增强数据，尚未导入。"],
+    "该 playbook 使用结构化咽喉点风险数据；ACLED/GDELT 实时事件是计划中的信息增益数据，尚未导入。"],
   [/Draft candidate from Autopilot playbook; requires human review before formal finding approval\./,
     "来自 Autopilot playbook 的候选发现；正式批准前需要人工复核。"],
   [/Uses a derived match flag only; raw verification values are not surfaced\./,
@@ -225,9 +225,26 @@ function resultTextRX(value, language) {
   if (!isZhRX(language)) return text;
   if (RESULT_TITLE_ZH_RX[text]) return RESULT_TITLE_ZH_RX[text];
   for (const [pattern, replacement] of RESULT_TEXT_ZH_RX) {
-    if (pattern.test(text)) return text.replace(pattern, replacement);
+    if (pattern.test(text)) return expandCountryCodesRX(text.replace(pattern, replacement), language);
   }
-  return text;
+  return expandCountryCodesRX(text, language);
+}
+
+function expandCountryCodesRX(text, language) {
+  if (!isZhRX(language) || text == null) return text;
+  if (typeof displayCountryCodesUI === "function") return displayCountryCodesUI(text, language);
+  const names = {
+    ARE: "United Arab Emirates",
+    CHN: "China",
+    GMB: "Gambia",
+    IND: "India",
+    IRN: "Iran",
+    JPN: "Japan",
+    KOR: "South Korea",
+    SAU: "Saudi Arabia",
+    USA: "United States",
+  };
+  return String(text).replace(/\b(ARE|CHN|GMB|IND|IRN|JPN|KOR|SAU|USA)\b/g, code => names[code] ? `${names[code]} (${code})` : code);
 }
 
 function resultListRX(values, language) {
@@ -358,7 +375,7 @@ function displayActionTextRX(value, language) {
     "Separate reversals, merchant retries, and high-confidence multi-swipe clusters.": "区分冲正、商户重试和高置信多次刷卡簇。",
     "Open a country/chokepoint dependency review and compare alternate maritime routes.": "创建国家/咽喉点依赖复核，并比较替代海运路线。",
     "Rank chokepoint review by hazard-adjusted trade-at-risk, not volume alone.": "按风险调整后的贸易风险排序咽喉点复核优先级，而不是仅按吞吐量排序。",
-    "Create a Bab el-Mandeb review case for the top exposed countries and attach live event enrichment when available.": "为最高暴露国家创建 Bab el-Mandeb 复核事项，并在可用时附加实时事件增强证据。",
+    "Create a Bab el-Mandeb review case for the top exposed countries and attach live event enrichment when available.": "为最高暴露国家创建 Bab el-Mandeb 复核事项，并在可用时附加实时事件信息增益证据。",
     "Use this draft as a reviewer prompt; do not treat it as an approved finding until it passes the review gate.": "将该草稿作为审核提示使用；在通过审核关口前，不要把它当作已批准发现。",
   };
   return map[text] || resultTextRX(text, language);

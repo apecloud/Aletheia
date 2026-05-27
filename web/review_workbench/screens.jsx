@@ -2,8 +2,20 @@
 
 const { useState: useStateXS, useMemo: useMemoXS, useEffect: useEffectXS } = React;
 
+function isZhXS(language) {
+  return typeof isZhUI === "function" ? isZhUI(language) : String(language || "").startsWith("zh");
+}
+
+function tXS(language, en, zh) {
+  return typeof tUI === "function" ? tUI(language, en, zh) : (isZhXS(language) ? zh : en);
+}
+
+function textXS(value, language) {
+  return typeof displayCountryCodesUI === "function" ? displayCountryCodesUI(value, language) : value;
+}
+
 /* ---------------- ONTOLOGY ---------------- */
-function Ontology({ data, tenant }) {
+function Ontology({ data, tenant, language }) {
   const [active, setActive] = useStateXS("ObjectType");
   const [selectedId, setSelectedId] = useStateXS(null);
   const [search, setSearch] = useStateXS("");
@@ -97,7 +109,7 @@ function Ontology({ data, tenant }) {
     if (!canonicalKey) return;
     const reason = reviewReason.trim();
     if ((action === "approve" || action === "reject") && !reason) {
-      setReviewMsg({ kind: "err", msg: "Decision rationale is required for approve / reject." });
+      setReviewMsg({ kind: "err", msg: tXS(language, "Decision rationale is required for approve / reject.", "批准或拒绝时必须填写决策理由。") });
       return;
     }
     try {
@@ -108,7 +120,7 @@ function Ontology({ data, tenant }) {
         tenantId,
       );
       setReviewReason("");
-      setReviewMsg({ kind: "ok", msg: `Ontology artifact ${action} recorded.` });
+      setReviewMsg({ kind: "ok", msg: tXS(language, `Ontology artifact ${action} recorded.`, `本体 artifact 的 ${action} 已记录。`) });
       setDetailMode("review");
       if (action === "approve") setStatusView("all");
       window.dispatchEvent(new CustomEvent("aletheia:retry"));
@@ -121,46 +133,46 @@ function Ontology({ data, tenant }) {
     <div className="canvas">
       <div className="subbar">
         <div className="tabs">
-          <div className={"tab" + (active === "ObjectType" ? " active" : "")} onClick={() => setActive("ObjectType")}>Object Types <span className="ct">{grouped.ObjectType.length}</span></div>
-          <div className={"tab" + (active === "LinkType" ? " active" : "")} onClick={() => setActive("LinkType")}>Link Types <span className="ct">{grouped.LinkType.length}</span></div>
-          <div className={"tab" + (active === "Property" ? " active" : "")} onClick={() => setActive("Property")}>Properties <span className="ct">{grouped.Property.length}</span></div>
-          {grouped.Action.length > 0 && <div className={"tab" + (active === "Action" ? " active" : "")} onClick={() => setActive("Action")}>Actions <span className="ct">{grouped.Action.length}</span></div>}
+          <div className={"tab" + (active === "ObjectType" ? " active" : "")} onClick={() => setActive("ObjectType")}>{tXS(language, "Object Types", "对象类型")} <span className="ct">{grouped.ObjectType.length}</span></div>
+          <div className={"tab" + (active === "LinkType" ? " active" : "")} onClick={() => setActive("LinkType")}>{tXS(language, "Link Types", "关系类型")} <span className="ct">{grouped.LinkType.length}</span></div>
+          <div className={"tab" + (active === "Property" ? " active" : "")} onClick={() => setActive("Property")}>{tXS(language, "Properties", "属性")} <span className="ct">{grouped.Property.length}</span></div>
+          {grouped.Action.length > 0 && <div className={"tab" + (active === "Action" ? " active" : "")} onClick={() => setActive("Action")}>{tXS(language, "Actions", "动作")} <span className="ct">{grouped.Action.length}</span></div>}
         </div>
         <div className="spacer" />
-        {isMock  && <span className="pill changes" style={{ marginRight: 8 }}><span className="dot" />Mock fallback</span>}
-        {isStale && <span className="pill changes" style={{ marginRight: 8 }}><span className="dot" />Stale · last fetch failed</span>}
-        {listQ.loading && listQ.data && <span className="pill"><span className="dot" />Refreshing…</span>}
-        <button className="tool" onClick={() => window.dispatchEvent(new CustomEvent("aletheia:retry"))}>⟲ Refresh</button>
-        <button className="tool">⤓ Export schema</button>
+        {isMock  && <span className="pill changes" style={{ marginRight: 8 }}><span className="dot" />{tXS(language, "Mock fallback", "模拟回退")}</span>}
+        {isStale && <span className="pill changes" style={{ marginRight: 8 }}><span className="dot" />{tXS(language, "Stale · last fetch failed", "数据陈旧 · 最近拉取失败")}</span>}
+        {listQ.loading && listQ.data && <span className="pill"><span className="dot" />{tXS(language, "Refreshing…", "刷新中…")}</span>}
+        <button className="tool" onClick={() => window.dispatchEvent(new CustomEvent("aletheia:retry"))}>⟲ {tXS(language, "Refresh", "刷新")}</button>
+        <button className="tool">⤓ {tXS(language, "Export schema", "导出 schema")}</button>
       </div>
 
       <div className="ontology-cols" style={{ flex: 1, minHeight: 0 }}>
         {/* catalog */}
         <div style={{ display: "flex", flexDirection: "column", minHeight: 0 }}>
           <div style={{ padding: "var(--pad-3) var(--pad-4)", borderBottom: "1px solid var(--line)", background: "var(--bg-2)" }}>
-            <div className="eyebrow accent">Ontology Catalog · {active}s</div>
+            <div className="eyebrow accent">{tXS(language, "Ontology Catalog", "本体目录")} · {active}</div>
             <input className="input" value={search} onChange={e => setSearch(e.target.value)}
-                   placeholder="filter by name, key, source…" style={{ marginTop: 8 }} />
+                   placeholder={tXS(language, "filter by name, key, source…", "按名称、键、来源过滤…")} style={{ marginTop: 8 }} />
             <div className="chip-row" style={{ marginTop: 10 }}>
-              <Chip active={statusView === "approved"} onClick={() => setStatusView("approved")} count={stats.approved}>Canonical</Chip>
-              <Chip active={statusView === "proposed"} onClick={() => setStatusView("proposed")} count={stats.proposed}>Proposed</Chip>
-              <Chip active={statusView === "changes"} onClick={() => setStatusView("changes")} count={stats.changes}>Changes</Chip>
-              <Chip active={statusView === "rejected"} onClick={() => setStatusView("rejected")} count={stats.rejected}>Rejected</Chip>
-              <Chip active={statusView === "all"} onClick={() => setStatusView("all")} count={stats.total}>All</Chip>
+              <Chip active={statusView === "approved"} onClick={() => setStatusView("approved")} count={stats.approved}>{tXS(language, "Canonical", "正式")}</Chip>
+              <Chip active={statusView === "proposed"} onClick={() => setStatusView("proposed")} count={stats.proposed}>{tXS(language, "Proposed", "候选")}</Chip>
+              <Chip active={statusView === "changes"} onClick={() => setStatusView("changes")} count={stats.changes}>{tXS(language, "Changes", "需修改")}</Chip>
+              <Chip active={statusView === "rejected"} onClick={() => setStatusView("rejected")} count={stats.rejected}>{tXS(language, "Rejected", "已拒绝")}</Chip>
+              <Chip active={statusView === "all"} onClick={() => setStatusView("all")} count={stats.total}>{tXS(language, "All", "全部")}</Chip>
             </div>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, marginTop: 10 }}>
-              <MiniMetric label="Total" value={stats.total} />
-              <MiniMetric label="Canonical" value={stats.approved} tone="approved" />
-              <MiniMetric label="Review" value={stats.proposed + stats.changes} tone="changes" />
-              <MiniMetric label="Rejected" value={stats.rejected} tone="rejected" />
+              <MiniMetric label={tXS(language, "Total", "总数")} value={stats.total} />
+              <MiniMetric label={tXS(language, "Canonical", "正式")} value={stats.approved} tone="approved" />
+              <MiniMetric label={tXS(language, "Review", "待审核")} value={stats.proposed + stats.changes} tone="changes" />
+              <MiniMetric label={tXS(language, "Rejected", "已拒绝")} value={stats.rejected} tone="rejected" />
             </div>
           </div>
           <div style={{ flex: 1, overflow: "auto" }}>
-            <ApiStatus q={listQ} what="ontology artifacts" />
+            <ApiStatus q={listQ} what={tXS(language, "ontology artifacts", "本体 artifacts")} />
             <div className="artifact-list">
               {filtered.length === 0 && (
                 <div style={{ padding: 24, fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--muted)", textAlign: "center" }}>
-                  No ontology artifacts match this filter.
+                  {tXS(language, "No ontology artifacts match this filter.", "没有匹配该过滤条件的本体 artifact。")}
                 </div>
               )}
               {filtered.map(a => {
@@ -176,11 +188,11 @@ function Ontology({ data, tenant }) {
                       <span>·</span>
                       <span className="key">{aid}</span>
                     </div>
-                    <div className="ar-title">{a.title}</div>
+                    <div className="ar-title">{textXS(a.title, language)}</div>
                     <div className="ar-meta">
                       <span>v{a.version}</span>
                       <span>{a.agent}</span>
-                      <span>conf {Math.round((a.confidence || 0) * 100)}%</span>
+                      <span>{tXS(language, "conf", "置信度")} {Math.round((a.confidence || 0) * 100)}%</span>
                     </div>
                   </div>
                   <div className="ar-right">{a.status}</div>
@@ -195,7 +207,7 @@ function Ontology({ data, tenant }) {
         <div style={{ display: "flex", flexDirection: "column", minHeight: 0 }}>
           {!selected ? (
             <div style={{ flex: 1, display: "grid", placeItems: "center", color: "var(--muted)", fontFamily: "var(--font-mono)", fontSize: 12 }}>
-              Select an ontology object to inspect schema, source, review, and usage.
+              {tXS(language, "Select an ontology object to inspect schema, source, review, and usage.", "选择一个本体对象以查看 schema、来源、审核和使用情况。")}
             </div>
           ) : (
             <>
@@ -208,28 +220,28 @@ function Ontology({ data, tenant }) {
                   <span>v{selected.version}</span>
                   <span style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
                     <Pill kind={selected.status}>{selected.status}</Pill>
-                    <Pill kind="accent">conf {Math.round((selected.confidence || 0) * 100)}%</Pill>
+                    <Pill kind="accent">{tXS(language, "conf", "置信度")} {Math.round((selected.confidence || 0) * 100)}%</Pill>
                   </span>
                 </div>
-                <h1>{selected.title}</h1>
-                <p className="desc">{selected.desc || "No description recorded."}</p>
+                <h1>{textXS(selected.title, language)}</h1>
+                <p className="desc">{textXS(selected.desc, language) || tXS(language, "No description recorded.", "暂无描述。")}</p>
                 <div className="row">
                   <div className="stat">
-                    <span className="label">Source agent</span>
+                    <span className="label">{tXS(language, "Source agent", "来源 Agent")}</span>
                     <span className="val mono">{selected.agent || "unknown"}</span>
                   </div>
                   <div className="stat">
-                    <span className="label">Source evidence</span>
+                    <span className="label">{tXS(language, "Source evidence", "来源证据")}</span>
                     <span className="val mono">{sourceRefs.length + evidence.length}</span>
                   </div>
                   <div className="stat">
-                    <span className="label">Review events</span>
+                    <span className="label">{tXS(language, "Review events", "审核事件")}</span>
                     <span className="val mono">{audit.length}</span>
                   </div>
                   <div className="stat">
-                    <span className="label">Canonical graph use</span>
+                    <span className="label">{tXS(language, "Canonical graph use", "正式图使用")}</span>
                     <span className="val" style={{ color: selected.status === "approved" ? "var(--approved)" : "var(--changes)" }}>
-                      {selected.status === "approved" ? "eligible" : "blocked"}
+                      {selected.status === "approved" ? tXS(language, "eligible", "可用") : tXS(language, "blocked", "阻塞")}
                     </span>
                   </div>
                 </div>
@@ -239,57 +251,58 @@ function Ontology({ data, tenant }) {
                   setReason={setReviewReason}
                   msg={reviewMsg}
                   onAction={reviewArtifact}
+                  language={language}
                 />
               </div>
 
               <div className="subbar" style={{ background: "var(--bg-1)" }}>
                 <div className="tabs">
-                  <div className={"tab" + (detailMode === "source" ? " active" : "")} onClick={() => setDetailMode("source")}>Source &amp; Schema <span className="ct">{sourceRefs.length + evidence.length}</span></div>
-                  <div className={"tab" + (detailMode === "review" ? " active" : "")} onClick={() => setDetailMode("review")}>Review history <span className="ct">{audit.length}</span></div>
-                  <div className={"tab" + (detailMode === "governance" ? " active" : "")} onClick={() => setDetailMode("governance")}>Governance &amp; Impact</div>
+                  <div className={"tab" + (detailMode === "source" ? " active" : "")} onClick={() => setDetailMode("source")}>{tXS(language, "Source & Schema", "来源与 Schema")} <span className="ct">{sourceRefs.length + evidence.length}</span></div>
+                  <div className={"tab" + (detailMode === "review" ? " active" : "")} onClick={() => setDetailMode("review")}>{tXS(language, "Review history", "审核历史")} <span className="ct">{audit.length}</span></div>
+                  <div className={"tab" + (detailMode === "governance" ? " active" : "")} onClick={() => setDetailMode("governance")}>{tXS(language, "Governance & Impact", "治理与影响")}</div>
                 </div>
                 <div className="spacer" />
-                <a className="tool" href={ontologyHref(canonicalKey)}>Permalink</a>
+                <a className="tool" href={ontologyHref(canonicalKey)}>{tXS(language, "Permalink", "固定链接")}</a>
               </div>
 
               <div style={{ flex: 1, overflow: "auto", padding: "var(--pad-4) var(--pad-5)" }}>
                 {detailMode === "source" && (
                   <>
-                    <Panel eyebrow="Canonical schema" title="Definition payload" count={`v${selected.version}`} style={{ marginBottom: 16 }}>
+                    <Panel eyebrow={tXS(language, "Canonical schema", "正式 schema")} title={tXS(language, "Definition payload", "定义 payload")} count={`v${selected.version}`} style={{ marginBottom: 16 }}>
                       <JsonView data={selected.payload || {}} />
                     </Panel>
-                    <Panel eyebrow="Source schema" title="Field properties and mapping" count={selected.sourceSchema?.schema_source || "schema"} style={{ marginBottom: 16 }}>
+                    <Panel eyebrow={tXS(language, "Source schema", "来源 schema")} title={tXS(language, "Field properties and mapping", "字段属性与映射")} count={selected.sourceSchema?.schema_source || "schema"} style={{ marginBottom: 16 }}>
                       <FieldPropertiesTable schema={selected.sourceSchema || {}} />
                       <JsonView data={selected.sourceSchema || {}} />
                     </Panel>
-                    <Panel eyebrow="Raw source" title="Source refs and evidence" count={`${sourceRefs.length + evidence.length} refs`} nopad style={{ marginBottom: 16 }}>
+                    <Panel eyebrow={tXS(language, "Raw source", "原始来源")} title={tXS(language, "Source refs and evidence", "来源引用与证据")} count={`${sourceRefs.length + evidence.length} refs`} nopad style={{ marginBottom: 16 }}>
                       <SourceList sourceRefs={sourceRefs} evidence={evidence} />
                     </Panel>
                     {(selected.webEnrichment || []).length > 0 && (
-                      <Panel eyebrow="Web enrichment" title="External evidence proposals" count={`${selected.webEnrichment.length} drafts`} nopad style={{ marginBottom: 16 }}>
+                      <Panel eyebrow={tXS(language, "Web enrichment", "网页信息增益")} title={tXS(language, "External evidence proposals", "外部证据候选")} count={`${selected.webEnrichment.length} ${tXS(language, "drafts", "草稿")}`} nopad style={{ marginBottom: 16 }}>
                         <WebEnrichmentList proposals={selected.webEnrichment || []} />
                       </Panel>
                     )}
-                    <Panel eyebrow="Schema map" title="Tenant ontology structure">
+                    <Panel eyebrow={tXS(language, "Schema map", "Schema 图")} title={tXS(language, "Tenant ontology structure", "租户本体结构")}>
                       <SchemaDiagram artifacts={artifacts} selectedKey={canonicalKey} onSelect={setSelectedId} />
                     </Panel>
                   </>
                 )}
 
                 {detailMode === "review" && (
-                  <Panel eyebrow="Review history" title="Decisions and rationale" count={`${audit.length} events`} nopad>
+                  <Panel eyebrow={tXS(language, "Review history", "审核历史")} title={tXS(language, "Decisions and rationale", "决策与理由")} count={`${audit.length} ${tXS(language, "events", "事件")}`} nopad>
                     <ReviewTimeline audit={audit} selected={selected} />
                   </Panel>
                 )}
 
                 {detailMode === "governance" && (
-                  <Panel eyebrow="Lifecycle & usage" title="Canonical readiness and downstream usage" count={(selected.usedBy || []).length || (canonicalKey ? "basis" : null)}>
+                  <Panel eyebrow={tXS(language, "Lifecycle & usage", "生命周期与使用")} title={tXS(language, "Canonical readiness and downstream usage", "正式化准备度与下游使用")} count={(selected.usedBy || []).length || (canonicalKey ? "basis" : null)}>
                     <div style={{ display: "grid", gap: 12 }}>
                       <GovernanceSummary selected={selected} tenant={tenant} tenantId={tenantId} />
                       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                        <a className="btn" href={reasoningHref(canonicalKey)}>Open reasoning cases using this basis</a>
+                        <a className="btn" href={reasoningHref(canonicalKey)}>{tXS(language, "Open reasoning cases using this basis", "打开使用该基础的推理 case")}</a>
                         {canonicalKey && canonicalKey.startsWith("object:") && (
-                          <a className="btn ghost" href={`/?screen=graph&tenant=${encodeURIComponent(tenantId)}&artifact=${encodeURIComponent(canonicalKey)}`}>Open graph context</a>
+                          <a className="btn ghost" href={`/?screen=graph&tenant=${encodeURIComponent(tenantId)}&artifact=${encodeURIComponent(canonicalKey)}`}>{tXS(language, "Open graph context", "打开图谱上下文")}</a>
                         )}
                       </div>
                       {(selected.usedBy || []).length > 0 && (
@@ -310,10 +323,10 @@ function Ontology({ data, tenant }) {
                         </div>
                       )}
                       <dl className="kv">
-                        <dt>Canonical key</dt><dd>{canonicalKey}</dd>
-                        <dt>Last decision</dt><dd>{audit[0]?.act || audit[0]?.decision || "none"}</dd>
-                        <dt>Blocking issue</dt><dd>{selected.status === "approved" ? "none" : "approval required before canonical graph use"}</dd>
-                        <dt>Canonical write boundary</dt><dd>Only approved ontology artifacts can change canonical graph schema.</dd>
+                        <dt>{tXS(language, "Canonical key", "正式键")}</dt><dd>{canonicalKey}</dd>
+                        <dt>{tXS(language, "Last decision", "最近决策")}</dt><dd>{audit[0]?.act || audit[0]?.decision || tXS(language, "none", "无")}</dd>
+                        <dt>{tXS(language, "Blocking issue", "阻塞问题")}</dt><dd>{selected.status === "approved" ? tXS(language, "none", "无") : tXS(language, "approval required before canonical graph use", "用于正式图谱前需要先批准")}</dd>
+                        <dt>{tXS(language, "Canonical write boundary", "正式写入边界")}</dt><dd>{tXS(language, "Only approved ontology artifacts can change canonical graph schema.", "只有已批准的本体 artifact 能改变正式图谱 schema。")}</dd>
                       </dl>
                     </div>
                   </Panel>
@@ -326,28 +339,28 @@ function Ontology({ data, tenant }) {
         {/* catalog health summary */}
         <div style={{ display: "flex", flexDirection: "column", minHeight: 0 }}>
           <div style={{ padding: "var(--pad-3) var(--pad-4)", borderBottom: "1px solid var(--line)", background: "var(--bg-2)" }}>
-            <div className="eyebrow accent">Catalog health</div>
-            <div style={{ marginTop: 4, fontSize: 13, color: "var(--text)" }}>Canonical state and boundary checks</div>
+            <div className="eyebrow accent">{tXS(language, "Catalog health", "目录健康度")}</div>
+            <div style={{ marginTop: 4, fontSize: 13, color: "var(--text)" }}>{tXS(language, "Canonical state and boundary checks", "正式状态和边界检查")}</div>
           </div>
           <div style={{ padding: "var(--pad-3) var(--pad-4)", overflow: "auto" }}>
-            <div className="eyebrow" style={{ marginBottom: 8 }}>Status distribution</div>
-            <div className="hbar"><span className="lbl">approved</span><span className="track"><i style={{ width: pct(catalogStats.approved, catalogStats.total) + "%" }} /></span><span className="num">{catalogStats.approved}</span></div>
-            <div className="hbar"><span className="lbl">proposed</span><span className="track"><i style={{ width: pct(catalogStats.proposed, catalogStats.total) + "%" }} /></span><span className="num">{catalogStats.proposed}</span></div>
-            <div className="hbar"><span className="lbl">needs changes</span><span className="track"><i style={{ width: pct(catalogStats.changes, catalogStats.total) + "%" }} /></span><span className="num">{catalogStats.changes}</span></div>
-            <div className="hbar"><span className="lbl">rejected</span><span className="track"><i style={{ width: pct(catalogStats.rejected, catalogStats.total) + "%" }} /></span><span className="num">{catalogStats.rejected}</span></div>
+            <div className="eyebrow" style={{ marginBottom: 8 }}>{tXS(language, "Status distribution", "状态分布")}</div>
+            <div className="hbar"><span className="lbl">{tXS(language, "approved", "已批准")}</span><span className="track"><i style={{ width: pct(catalogStats.approved, catalogStats.total) + "%" }} /></span><span className="num">{catalogStats.approved}</span></div>
+            <div className="hbar"><span className="lbl">{tXS(language, "proposed", "候选")}</span><span className="track"><i style={{ width: pct(catalogStats.proposed, catalogStats.total) + "%" }} /></span><span className="num">{catalogStats.proposed}</span></div>
+            <div className="hbar"><span className="lbl">{tXS(language, "needs changes", "需修改")}</span><span className="track"><i style={{ width: pct(catalogStats.changes, catalogStats.total) + "%" }} /></span><span className="num">{catalogStats.changes}</span></div>
+            <div className="hbar"><span className="lbl">{tXS(language, "rejected", "已拒绝")}</span><span className="track"><i style={{ width: pct(catalogStats.rejected, catalogStats.total) + "%" }} /></span><span className="num">{catalogStats.rejected}</span></div>
 
-            <div className="eyebrow" style={{ marginBottom: 8, marginTop: 18 }}>Selected readiness</div>
+            <div className="eyebrow" style={{ marginBottom: 8, marginTop: 18 }}>{tXS(language, "Selected readiness", "所选对象准备度")}</div>
             {selected ? (
               <GovernanceSummary selected={selected} tenant={tenant} tenantId={tenantId} compact />
             ) : (
-              <div style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--muted)" }}>No artifact selected.</div>
+              <div style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--muted)" }}>{tXS(language, "No artifact selected.", "未选择 artifact。")}</div>
             )}
 
-            <div className="eyebrow" style={{ marginBottom: 8, marginTop: 18 }}>Boundary checks</div>
+            <div className="eyebrow" style={{ marginBottom: 8, marginTop: 18 }}>{tXS(language, "Boundary checks", "边界检查")}</div>
             <div style={{ display: "flex", flexDirection: "column", gap: 6, fontFamily: "var(--font-mono)", fontSize: 11 }}>
-              <div style={{ display: "flex", gap: 8, color: "var(--approved)" }}><span>●</span><span>Ontology owns source/schema/review/canonical state</span></div>
-              <div style={{ display: "flex", gap: 8, color: "var(--changes)" }}><span>●</span><span>Reasoning may cite this page as basis only</span></div>
-              <div style={{ display: "flex", gap: 8, color: "var(--muted)" }}><span>●</span><span>Workspace remains a lightweight Work Queue</span></div>
+              <div style={{ display: "flex", gap: 8, color: "var(--approved)" }}><span>●</span><span>{tXS(language, "Ontology owns source/schema/review/canonical state", "本体页面负责来源、schema、审核和正式状态")}</span></div>
+              <div style={{ display: "flex", gap: 8, color: "var(--changes)" }}><span>●</span><span>{tXS(language, "Reasoning may cite this page as basis only", "推理只能把该页作为依据引用")}</span></div>
+              <div style={{ display: "flex", gap: 8, color: "var(--muted)" }}><span>●</span><span>{tXS(language, "Workspace remains a lightweight Work Queue", "Workspace 保持为轻量工作队列")}</span></div>
             </div>
           </div>
         </div>
@@ -374,7 +387,7 @@ function MiniMetric({ label, value, tone }) {
   );
 }
 
-function OntologyReviewControls({ selected, reason, setReason, msg, onAction }) {
+function OntologyReviewControls({ selected, reason, setReason, msg, onAction, language }) {
   if (!selected) return null;
   const status = (selected.status || "").toLowerCase();
   const isCanonical = status === "approved";
@@ -390,13 +403,13 @@ function OntologyReviewControls({ selected, reason, setReason, msg, onAction }) 
     }}>
       <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
         <div>
-          <div className="eyebrow" style={{ marginBottom: 4 }}>Ontology review gate</div>
+          <div className="eyebrow" style={{ marginBottom: 4 }}>{tXS(language, "Ontology review gate", "本体审核入口")}</div>
           <div style={{ fontSize: 12, color: "var(--muted)", lineHeight: 1.45 }}>
             {canDecide
-              ? "Review proposed ontology artifacts here before they become eligible for canonical graph use."
+              ? tXS(language, "Review proposed ontology artifacts here before they become eligible for canonical graph use.", "在这里审核候选本体 artifact；批准后才可进入正式图谱使用。")
               : isCanonical
-              ? "This artifact is canonical. Record a comment here if the review rationale needs more context."
-              : "This artifact is not in an active review state. Record a comment here; reopen decisions should happen through a new proposal."}
+              ? tXS(language, "This artifact is canonical. Record a comment here if the review rationale needs more context.", "该 artifact 已是正式状态；如需补充审核上下文，可在此评论。")
+              : tXS(language, "This artifact is not in an active review state. Record a comment here; reopen decisions should happen through a new proposal.", "该 artifact 当前不在活跃审核状态；可在此评论，重新打开需通过新候选。")}
           </div>
         </div>
         <span style={{ marginLeft: "auto" }}><Pill kind={selected.status}>{selected.status}</Pill></span>
@@ -405,13 +418,13 @@ function OntologyReviewControls({ selected, reason, setReason, msg, onAction }) 
         className="reason-input"
         value={reason}
         onChange={e => setReason(e.target.value)}
-        placeholder="Decision rationale (required for approve / reject)..."
+        placeholder={tXS(language, "Decision rationale (required for approve / reject)...", "决策理由（批准 / 拒绝时必填）...")}
       />
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-        <button className="btn approve" onClick={() => onAction("approve")} disabled={!canDecide}>Approve artifact</button>
-        <button className="btn changes" onClick={() => onAction("needs-changes")} disabled={!canDecide}>Needs changes</button>
-        <button className="btn reject" onClick={() => onAction("reject")} disabled={!canDecide}>Reject</button>
-        <button className="btn ghost" onClick={() => onAction("comment")}>Comment</button>
+        <button className="btn approve" onClick={() => onAction("approve")} disabled={!canDecide}>{tXS(language, "Approve artifact", "批准 artifact")}</button>
+        <button className="btn changes" onClick={() => onAction("needs-changes")} disabled={!canDecide}>{tXS(language, "Needs changes", "需要修改")}</button>
+        <button className="btn reject" onClick={() => onAction("reject")} disabled={!canDecide}>{tXS(language, "Reject", "拒绝")}</button>
+        <button className="btn ghost" onClick={() => onAction("comment")}>{tXS(language, "Comment", "评论")}</button>
         {msg && (
           <span style={{
             marginLeft: "auto",

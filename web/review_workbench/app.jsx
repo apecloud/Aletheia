@@ -117,13 +117,13 @@ function App() {
               onConn={() => setConnOpen(true)} />
       <MockBanner onClick={() => setConnOpen(true)} />
       <div className="body">
-        <Rail screen={screen} onNav={setScreen} />
-        {screen === "workbench" && <ErrorBoundary><Workbench data={data} tenant={tenant} /></ErrorBoundary>}
+        <Rail screen={screen} onNav={setScreen} language={language} />
+        {screen === "workbench" && <ErrorBoundary><Workbench data={data} tenant={tenant} language={language} /></ErrorBoundary>}
         {screen === "reasoning" && <ErrorBoundary><Reasoning tenant={tenant} language={language} /></ErrorBoundary>}
-        {screen === "ontology"  && <ErrorBoundary><Ontology data={data} tenant={tenant} /></ErrorBoundary>}
-        {screen === "graph"     && <ErrorBoundary><GraphExplorer data={data} tenant={tenant} /></ErrorBoundary>}
-        {screen === "quality"   && <ErrorBoundary><Quality data={data} tenant={tenant} /></ErrorBoundary>}
-        {screen === "runtime"   && <ErrorBoundary><Runtime data={data} tenant={tenant} /></ErrorBoundary>}
+        {screen === "ontology"  && <ErrorBoundary><Ontology data={data} tenant={tenant} language={language} /></ErrorBoundary>}
+        {screen === "graph"     && <ErrorBoundary><GraphExplorer data={data} tenant={tenant} language={language} /></ErrorBoundary>}
+        {screen === "quality"   && <ErrorBoundary><Quality data={data} tenant={tenant} language={language} /></ErrorBoundary>}
+        {screen === "runtime"   && <ErrorBoundary><Runtime data={data} tenant={tenant} language={language} /></ErrorBoundary>}
       </div>
       <StatusBar tenant={tenant} language={language} />
 
