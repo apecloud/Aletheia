@@ -11,6 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.append(str(ROOT / "agents"))
 
 from agents.iterative_graph_enrichment_agent import (  # noqa: E402
+    GRAPH_EXTRACTION_PROMPT_VERSION,
     GraphDeepResearchBenchmark,
     IterativeGraphEnrichmentAgent,
 )
@@ -90,6 +91,49 @@ class IterativeGraphEnrichmentTest(unittest.TestCase):
             self.assertEqual(result["run"]["skipped_sources"][0]["reason"], "blocked_domain_not_allowlisted")
             self.assertEqual(before_fp["ontology_artifacts"], after_fp["ontology_artifacts"])
             self.assertEqual(before_count, 1)
+
+    def test_crawled_evidence_extracts_typed_graph_semantics(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_url, _ = self._seed_db(tmpdir)
+            agent = IterativeGraphEnrichmentAgent(
+                db_url,
+                tenant="maritime-risk",
+                search_results_json=self._fixture(tmpdir),
+                allowed_domains=["zenodo.org"],
+                max_iterations=1,
+                max_frontier=1,
+                max_results_per_query=1,
+            )
+
+            result = agent.run("extract ontology node edge property description from maritime evidence")
+            proposed = result["proposed_graph"]
+            nodes = [item for item in proposed if item["element_type"] == "node"]
+            edges = [item for item in proposed if item["element_type"] == "edge"]
+            trade_edges = [item for item in edges if item["payload"].get("relation") == "trade_dependency"]
+
+            self.assertTrue(nodes)
+            self.assertTrue(trade_edges)
+            for node in nodes:
+                payload = node["payload"]
+                self.assertEqual(payload["extraction"]["prompt_version"], GRAPH_EXTRACTION_PROMPT_VERSION)
+                self.assertTrue(payload.get("description"))
+                self.assertTrue(payload.get("properties"))
+                self.assertTrue(payload.get("evidence_quote"))
+                self.assertTrue(payload.get("ontology_candidate", {}).get("review_required"))
+            for edge in trade_edges:
+                payload = edge["payload"]
+                self.assertEqual(payload["source_type"], "Country")
+                self.assertEqual(payload["target_type"], "Chokepoint")
+                self.assertTrue(payload.get("description"))
+                self.assertTrue(payload.get("properties", {}).get("fact_node_hint"))
+                self.assertIn("trade_at_risk_v", payload.get("metrics", []))
+                self.assertTrue(payload.get("relation_ontology_candidate", {}).get("review_required"))
+            trace = result["run"]["expansion_trace"][0]
+            self.assertEqual(trace["extraction_prompt_version"], GRAPH_EXTRACTION_PROMPT_VERSION)
+            self.assertIn("ontology_candidates", trace["extraction_contract"]["outputs"])
+            self.assertTrue(trace["last_extraction_profile"]["quality"]["has_properties"])
+            self.assertTrue(trace["last_extraction_profile"]["quality"]["has_descriptions"])
+            self.assertTrue(trace["last_extraction_profile"]["ontology_candidates"])
 
     def test_benchmark_reads_baseline_as_comparison_only(self):
         with tempfile.TemporaryDirectory() as tmpdir:

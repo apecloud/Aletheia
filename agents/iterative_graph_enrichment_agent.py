@@ -46,11 +46,27 @@ METRIC_TERMS = {
 
 RELATION_TERMS = {
     "depends_on": ["depends on", "trade dependency", "maritime chokepoint"],
+    "trade_dependency": ["depends on", "trade dependency", "maritime chokepoint", "trade route exposure"],
     "raises_risk_for": ["risk propagation", "hazard", "maritime disruption"],
     "dependency_chokepoint": ["chokepoint dependency", "trade route"],
     "risk_country": ["country exposure", "risk exposure"],
     "risk_chokepoint": ["chokepoint risk", "maritime risk"],
 }
+
+GRAPH_EXTRACTION_PROMPT_VERSION = "graph_entity_relation_v2"
+
+GRAPH_EXTRACTION_PROMPT = """Extract graph-ready facts from crawled evidence.
+Return strict JSON with:
+1. ontology_candidates: object/relation/property proposals with label, description, domain, range, and review_required=true.
+2. nodes: typed real-world entities only, with label, type, stable id hint, properties, description, confidence, and evidence_quote.
+3. edges: typed binary relations only, with source_label, relation, target_label, properties, description, confidence, and evidence_quote.
+4. findings: candidate analytical findings only when the evidence supports a complete path.
+Rules:
+- Use only facts explicitly supported by the source text.
+- Prefer domain relations such as trade_dependency over generic related_to/depends_on.
+- Keep metrics, confidence, source_url, and provenance as properties, not hidden text.
+- Reify a fact node only when the relation needs its own identity for metrics/provenance; otherwise keep the main graph as source --relation--> target.
+- Do not write canonical ontology or formal graph. Output remains draft/proposed until review."""
 
 
 def _json_load(value: str | None, default: Any) -> Any:
@@ -112,6 +128,210 @@ def _extract_terms(text: str) -> dict[str, list[str]]:
         "chokepoints": list(dict.fromkeys(chokepoint_terms)),
         "countries": list(dict.fromkeys(country_terms)),
         "metrics": list(dict.fromkeys(metric_terms)),
+    }
+
+
+def _evidence_excerpt(text: str, terms: list[str], limit: int = 280) -> str:
+    normalized = _clean_text(text, 1200)
+    if not normalized:
+        return ""
+    lowered = normalized.lower()
+    positions = [lowered.find(term.lower()) for term in terms if term and lowered.find(term.lower()) >= 0]
+    if not positions:
+        return normalized[:limit].rstrip()
+    start = max(min(positions) - 80, 0)
+    end = min(max(positions) + 200, len(normalized))
+    return normalized[start:end].strip()[:limit].rstrip()
+
+
+def _entity_key(entity_type: str, label: str) -> str:
+    if entity_type == "Country":
+        iso3 = label.upper()
+        return f"Country:{iso3}"
+    return f"{entity_type}:{label}"
+
+
+def _entity_description(entity_type: str, label: str, source_title: str) -> str:
+    if entity_type == "Country":
+        return f"Country or economy mentioned as exposed to maritime chokepoint trade disruption: {label}."
+    if entity_type == "Chokepoint":
+        return f"Maritime chokepoint or canal mentioned as a trade disruption concentration point: {label}."
+    if entity_type == "Hazard":
+        return f"Risk driver or disruption condition mentioned in source evidence: {label}."
+    return f"{entity_type} extracted from {source_title or 'crawled evidence'}: {label}."
+
+
+def _ontology_candidate(artifact_type: str, label: str, description: str, **extra: Any) -> dict[str, Any]:
+    candidate = {
+        "artifact_type": artifact_type,
+        "label": label,
+        "description": description,
+        "review_required": True,
+        "source": "graph_extraction",
+    }
+    candidate.update({key: value for key, value in extra.items() if value not in (None, "", [])})
+    return candidate
+
+
+def _extract_graph_semantics(frontier_item: dict[str, Any], result, summary: str) -> dict[str, Any]:
+    source_text = _clean_text(" ".join([result.title or "", result.snippet or "", summary or ""]), 1600)
+    terms = _extract_terms(source_text)
+    source_ref = result.url
+    source_title = result.title or source_ref
+    ontology_candidates: list[dict[str, Any]] = []
+    nodes: list[dict[str, Any]] = []
+    edges: list[dict[str, Any]] = []
+
+    def add_node(entity_type: str, label: str, confidence: float) -> None:
+        label = str(label).strip()
+        if not label:
+            return
+        if any(node["type"] == entity_type and node["label"] == label for node in nodes):
+            return
+        evidence_quote = _evidence_excerpt(source_text, [label, COUNTRY_ALIASES.get(label, "")])
+        description = _entity_description(entity_type, label, source_title)
+        properties = {
+            "canonical_id_hint": _entity_key(entity_type, label),
+            "source_title": source_title,
+            "source_url": source_ref,
+            "extracted_from_frontier": frontier_item.get("key"),
+        }
+        if entity_type == "Country":
+            properties["iso3"] = label.upper()
+            properties["name"] = COUNTRY_ALIASES.get(label.upper(), label)
+        if entity_type == "Chokepoint":
+            properties["domain"] = "maritime chokepoint"
+        if entity_type == "Hazard":
+            properties["hazard_category"] = "maritime disruption risk"
+        nodes.append(
+            {
+                "type": entity_type,
+                "label": label,
+                "description": description,
+                "properties": properties,
+                "evidence_quote": evidence_quote,
+                "confidence": confidence,
+            }
+        )
+        ontology_candidates.append(
+            _ontology_candidate(
+                "object",
+                entity_type,
+                f"{entity_type} entities extracted from crawled maritime risk evidence.",
+                properties=["label", "description", "source_url", "confidence"],
+            )
+        )
+
+    for hazard in terms["hazards"][:2]:
+        add_node("Hazard", hazard, 0.68)
+    for chokepoint in terms["chokepoints"][:2]:
+        add_node("Chokepoint", chokepoint, 0.74)
+    for country in terms["countries"][:4]:
+        add_node("Country", country, 0.72)
+
+    if terms["chokepoints"] and terms["countries"]:
+        relation = "trade_dependency"
+        ontology_candidates.append(
+            _ontology_candidate(
+                "link",
+                relation,
+                "A country has trade exposure or dependency through a maritime chokepoint.",
+                domain="Country",
+                range="Chokepoint",
+                edge_properties=["metrics", "source_url", "confidence", "evidence_quote"],
+            )
+        )
+        for country in terms["countries"][:4]:
+            for chokepoint in terms["chokepoints"][:1]:
+                metric_terms = terms["metrics"][:5]
+                evidence_quote = _evidence_excerpt(source_text, [country, COUNTRY_ALIASES.get(country, ""), chokepoint] + metric_terms)
+                edges.append(
+                    {
+                        "source_type": "Country",
+                        "source_label": country,
+                        "relation": relation,
+                        "target_type": "Chokepoint",
+                        "target_label": chokepoint,
+                        "description": f"{country} has a maritime trade dependency through {chokepoint}.",
+                        "properties": {
+                            "metrics": metric_terms,
+                            "source_url": source_ref,
+                            "source_title": source_title,
+                            "evidence_quote": evidence_quote,
+                            "extracted_from_frontier": frontier_item.get("key"),
+                            "fact_node_hint": f"TradeDependency:{country}::{chokepoint}",
+                        },
+                        "evidence_quote": evidence_quote,
+                        "confidence": 0.76 if metric_terms else 0.7,
+                    }
+                )
+
+    if terms["hazards"] and terms["chokepoints"]:
+        relation = "raises_risk_for"
+        ontology_candidates.append(
+            _ontology_candidate(
+                "link",
+                relation,
+                "A hazard or disruption driver raises risk for a maritime chokepoint.",
+                domain="Hazard",
+                range="Chokepoint",
+                edge_properties=["source_url", "confidence", "evidence_quote"],
+            )
+        )
+        hazard = terms["hazards"][0]
+        chokepoint = terms["chokepoints"][0]
+        evidence_quote = _evidence_excerpt(source_text, [hazard, chokepoint])
+        edges.append(
+            {
+                "source_type": "Hazard",
+                "source_label": hazard,
+                "relation": relation,
+                "target_type": "Chokepoint",
+                "target_label": chokepoint,
+                "description": f"{hazard} is stated as a risk driver for {chokepoint}.",
+                "properties": {
+                    "source_url": source_ref,
+                    "source_title": source_title,
+                    "evidence_quote": evidence_quote,
+                    "extracted_from_frontier": frontier_item.get("key"),
+                },
+                "evidence_quote": evidence_quote,
+                "confidence": 0.7,
+            }
+        )
+
+    # Dedupe ontology candidate labels while keeping the richer first version.
+    deduped_candidates = []
+    seen_candidates = set()
+    for candidate in ontology_candidates:
+        key = (candidate.get("artifact_type"), candidate.get("label"))
+        if key in seen_candidates:
+            continue
+        seen_candidates.add(key)
+        deduped_candidates.append(candidate)
+
+    return {
+        "prompt_version": GRAPH_EXTRACTION_PROMPT_VERSION,
+        "prompt_contract": GRAPH_EXTRACTION_PROMPT,
+        "source": {"url": source_ref, "title": source_title},
+        "terms": terms,
+        "ontology_candidates": deduped_candidates,
+        "nodes": nodes,
+        "edges": edges,
+        "quality": {
+            "node_count": len(nodes),
+            "edge_count": len(edges),
+            "has_properties": all(bool(item.get("properties")) for item in [*nodes, *edges]),
+            "has_descriptions": all(bool(item.get("description")) for item in [*nodes, *edges]),
+            "has_evidence_quotes": all(bool(item.get("evidence_quote")) for item in [*nodes, *edges]),
+            "extraction_steps": [
+                "identify ontology candidate types and relation schemas",
+                "extract typed nodes with descriptions and properties",
+                "extract typed binary edges with relation semantics and edge properties",
+                "attach evidence quote, source_url, confidence, and review boundary",
+                "leave ontology/formal graph writes disabled until review",
+            ],
+        },
     }
 
 
@@ -349,83 +569,82 @@ class IterativeGraphEnrichmentAgent:
         return _graph_context_query_plan(item, objective, self.tenant)
 
     def _candidate_elements(self, frontier_item: dict[str, Any], result, summary: str, iteration: int) -> list[dict[str, Any]]:
-        terms = _extract_terms(" ".join([result.title, result.snippet, summary]))
+        extraction = _extract_graph_semantics(frontier_item, result, summary)
+        terms = extraction["terms"]
         elements: list[dict[str, Any]] = []
         source_ref = result.url
-        for hazard in terms["hazards"][:2]:
+        for node in extraction["nodes"]:
             elements.append(
                 {
                     "element_type": "node",
-                    "name": hazard,
-                    "payload": {"ontology_type": "Hazard", "label": hazard, "discovered_from": frontier_item.get("key")},
-                    "evidence_refs": [source_ref],
-                    "source_url": source_ref,
-                    "confidence": 0.66,
-                    "iteration": iteration,
-                }
-            )
-        for chokepoint in terms["chokepoints"][:2]:
-            elements.append(
-                {
-                    "element_type": "node",
-                    "name": chokepoint,
-                    "payload": {"ontology_type": "Chokepoint", "label": chokepoint, "discovered_from": frontier_item.get("key")},
-                    "evidence_refs": [source_ref],
-                    "source_url": source_ref,
-                    "confidence": 0.72,
-                    "iteration": iteration,
-                }
-            )
-        for country in terms["countries"][:3]:
-            elements.append(
-                {
-                    "element_type": "node",
-                    "name": country,
-                    "payload": {"ontology_type": "Country", "iso3": country, "discovered_from": frontier_item.get("key")},
-                    "evidence_refs": [source_ref],
-                    "source_url": source_ref,
-                    "confidence": 0.7,
-                    "iteration": iteration,
-                }
-            )
-        if terms["hazards"] and terms["chokepoints"]:
-            elements.append(
-                {
-                    "element_type": "edge",
-                    "name": f"{terms['hazards'][0]} -> {terms['chokepoints'][0]}",
+                    "name": node["label"],
                     "payload": {
-                        "source_type": "Hazard",
-                        "target_type": "Chokepoint",
-                        "relation": "raises_risk_for",
-                        "source_label": terms["hazards"][0],
-                        "target_label": terms["chokepoints"][0],
+                        "ontology_type": node["type"],
+                        "label": node["label"],
+                        "description": node["description"],
+                        "properties": node["properties"],
+                        "evidence_quote": node["evidence_quote"],
+                        "ontology_candidate": next(
+                            (
+                                candidate
+                                for candidate in extraction["ontology_candidates"]
+                                if candidate.get("artifact_type") == "object" and candidate.get("label") == node["type"]
+                            ),
+                            None,
+                        ),
+                        "extraction": {
+                            "prompt_version": extraction["prompt_version"],
+                            "steps": extraction["quality"]["extraction_steps"],
+                            "review_boundary": "proposed_graph_space",
+                            "canonical_ontology_write": False,
+                            "formal_graph_write": False,
+                        },
+                        "discovered_from": frontier_item.get("key"),
                     },
                     "evidence_refs": [source_ref],
                     "source_url": source_ref,
-                    "confidence": 0.68,
+                    "confidence": node["confidence"],
                     "iteration": iteration,
                 }
             )
-        if terms["chokepoints"] and terms["countries"]:
-            for country in terms["countries"][:3]:
-                elements.append(
-                    {
-                        "element_type": "edge",
-                        "name": f"{country} depends on {terms['chokepoints'][0]}",
-                        "payload": {
-                            "source_type": "Country",
-                            "target_type": "Chokepoint",
-                            "relation": "depends_on",
-                            "source_label": country,
-                            "target_label": terms["chokepoints"][0],
-                            "metrics": terms["metrics"],
+        for edge in extraction["edges"]:
+            relation_ontology = next(
+                (
+                    candidate
+                    for candidate in extraction["ontology_candidates"]
+                    if candidate.get("artifact_type") == "link" and candidate.get("label") == edge["relation"]
+                ),
+                None,
+            )
+            elements.append(
+                {
+                    "element_type": "edge",
+                    "name": f"{edge['source_label']} {edge['relation'].replace('_', ' ')} {edge['target_label']}",
+                    "payload": {
+                        "source_type": edge["source_type"],
+                        "target_type": edge["target_type"],
+                        "relation": edge["relation"],
+                        "source_label": edge["source_label"],
+                        "target_label": edge["target_label"],
+                        "description": edge["description"],
+                        "properties": edge["properties"],
+                        "metrics": edge["properties"].get("metrics") or [],
+                        "evidence_quote": edge["evidence_quote"],
+                        "relation_ontology_candidate": relation_ontology,
+                        "extraction": {
+                            "prompt_version": extraction["prompt_version"],
+                            "steps": extraction["quality"]["extraction_steps"],
+                            "review_boundary": "proposed_graph_space",
+                            "canonical_ontology_write": False,
+                            "formal_graph_write": False,
                         },
-                        "evidence_refs": [source_ref],
-                        "source_url": source_ref,
-                        "confidence": 0.7,
-                        "iteration": iteration,
-                    }
-                )
+                    },
+                    "evidence_refs": [source_ref],
+                    "source_url": source_ref,
+                    "confidence": edge["confidence"],
+                    "iteration": iteration,
+                }
+            )
         if terms["hazards"] and terms["chokepoints"] and terms["countries"] and terms["metrics"]:
             evidence_chain = [
                 {"kind": "hazard", "metric": terms["hazards"][0], "value": terms["hazards"][0], "source_ref": source_ref},
@@ -444,6 +663,14 @@ class IterativeGraphEnrichmentAgent:
                         "conclusion": summary,
                         "evidence_chain": evidence_chain,
                         "deep_graph_profile": deep_graph_profile(evidence_chain),
+                        "extraction": {
+                            "prompt_version": extraction["prompt_version"],
+                            "ontology_candidates": extraction["ontology_candidates"],
+                            "quality": extraction["quality"],
+                            "review_boundary": "candidate_finding_review",
+                            "canonical_ontology_write": False,
+                            "formal_graph_write": False,
+                        },
                         "recommended_action": "Run analyst review on exposed country/chokepoint path",
                         "writes_canonical": False,
                     },
@@ -537,6 +764,7 @@ class IterativeGraphEnrichmentAgent:
                             pruned_count += 1
                             continue
                         summary = _clean_text(result.snippet or result.title, 700)
+                        extraction_profile = _extract_graph_semantics(item, result, summary)
                         candidates = self._candidate_elements(item, result, summary, iteration)
                         if not candidates:
                             pruned.append({"url": result.url, "reason": "no_graph_candidate_extracted"})
@@ -569,6 +797,18 @@ class IterativeGraphEnrichmentAgent:
                             "excluded_terms": query_plan["excluded_terms"],
                             "result_count": len(results),
                             "extracted_candidates": extracted_keys,
+                            "extraction_prompt_version": GRAPH_EXTRACTION_PROMPT_VERSION,
+                            "extraction_contract": {
+                                "outputs": ["ontology_candidates", "nodes", "edges", "properties", "descriptions", "findings"],
+                                "rules": [
+                                    "typed entities only",
+                                    "typed binary relations with properties",
+                                    "evidence quote and source URL required",
+                                    "candidate ontology remains review-gated",
+                                    "formal graph writes disabled",
+                                ],
+                            },
+                            "last_extraction_profile": extraction_profile if extracted_keys else None,
                             "pruned": pruned,
                         }
                     )
