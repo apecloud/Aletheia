@@ -251,6 +251,46 @@ function resultListRX(values, language) {
   return (values || []).map(v => resultTextRX(v, language));
 }
 
+function questionTextRX(value, language) {
+  const text = value == null ? "" : String(value);
+  if (!isZhRX(language)) return text;
+  const replacements = [
+    [/^Select a chokepoint, country, dependency, or risk result to analyze propagation risk\.$/, "选择咽喉点、国家、依赖关系或风险结果来分析传播风险。"],
+    [/^Select a transaction, account, card, or merchant to analyze fraud risk\.$/, "选择交易、账户、卡或商户来分析欺诈风险。"],
+    [/^Select a center node to ask a scoped question\.$/, "选择中心节点来提出范围问题。"],
+    [/^Which countries are most exposed to (.+)\?$/, "哪些国家最暴露于 $1？"],
+    [/^Which chokepoint dependencies create the highest risk for (.+)\?$/, "$1 的哪些咽喉点依赖带来最高风险？"],
+    [/^Explain the risk path for (.+)$/, "解释 $1 的风险路径"],
+    [/^What evidence supports this maritime risk signal for (.+)\?$/, "哪些证据支持 $1 的海运风险信号？"],
+    [/^Find maritime chokepoint risk findings for (.+)$/, "发现 $1 的海运咽喉点风险发现"],
+    [/^Show the hazard -> chokepoint -> country -> risk metric path for (.+)$/, "展示 $1 的 风险因子 -> 咽喉点 -> 国家 -> 风险指标 路径"],
+    [/^Which dependent countries or chokepoints should be prioritized from (.+)\?$/, "基于 $1，应优先复核哪些依赖国家或咽喉点？"],
+    [/^What action should be created from (.+)'s maritime risk evidence\?$/, "应基于 $1 的海运风险证据创建什么行动？"],
+    [/^What evidence supports the risk propagation path for (.+)\?$/, "哪些证据支持 $1 的风险传播路径？"],
+    [/^Which downstream countries or trade metrics are affected by (.+)\?$/, "$1 影响哪些下游国家或贸易指标？"],
+    [/^Which (.+) produce the strongest multi-hop risk chain\?$/, "哪些 $1 产生最强多跳风险链？"],
+    [/^Explain fraud risk signals for (.+)$/, "解释 $1 的欺诈风险信号"],
+    [/^Summarize fraud exposure and suspicious activity for (.+)$/, "总结 $1 的欺诈暴露和可疑活动"],
+    [/^Review verification, channel, and merchant risk signals for (.+)$/, "复核 $1 的验证、渠道和商户风险信号"],
+    [/^Which fraud patterns are concentrated around (.+)\?$/, "$1 周围集中出现哪些欺诈模式？"],
+    [/^Find high-value fraud risk patterns for (.+)$/, "发现 $1 的高价值欺诈风险模式"],
+    [/^What evidence supports this fraud-risk interpretation for (.+)\?$/, "哪些证据支持 $1 的欺诈风险解释？"],
+    [/^Which merchant\/channel\/POS signals explain risk for (.+)\?$/, "哪些商户/渠道/POS 信号解释 $1 的风险？"],
+    [/^What follow-up action should an analyst take for (.+)\?$/, "分析师应对 $1 采取什么后续行动？"],
+    [/^What evidence supports the risk profile for (.+)\?$/, "哪些证据支持 $1 的风险画像？"],
+    [/^Which transaction patterns around (.+) need review\?$/, "$1 周边哪些交易模式需要复核？"],
+    [/^What action should be created from (.+)'s risk signals\?$/, "应基于 $1 的风险信号创建什么行动？"],
+    [/^Which (.+) should Autopilot investigate next\?$/, "Autopilot 接下来应调查哪些 $1？"],
+    [/^Give a summary of (.+)$/, "总结 $1"],
+    [/^Which (.+)s have the highest activity\?$/, "哪些 $1 活跃度最高？"],
+    [/^(.+) — (.+)$/, "$1 — $2"],
+  ];
+  for (const [pattern, replacement] of replacements) {
+    if (pattern.test(text)) return expandCountryCodesRX(text.replace(pattern, replacement), language);
+  }
+  return expandCountryCodesRX(text, language);
+}
+
 function evidenceKindLabelRX(kind, language) {
   const labels = {
     aggregate: "聚合指标",
@@ -274,6 +314,41 @@ function evidenceKindLabelRX(kind, language) {
   };
   if (!isZhRX(language)) return kind || "evidence";
   return labels[kind] || kind || "证据";
+}
+
+function statusTextRX(status, language) {
+  const text = status == null ? "" : String(status);
+  if (!isZhRX(language)) return text || "—";
+  const map = {
+    active: "进行中",
+    approved: "已批准",
+    blocked: "已阻塞",
+    closed: "已关闭",
+    completed: "已完成",
+    draft: "草稿",
+    failed: "失败",
+    needs_more_evidence: "需更多证据",
+    pending: "等待中",
+    proposed: "待审核",
+    pruned: "已剪枝",
+    rejected: "已拒绝",
+    running: "运行中",
+    stale: "已过期",
+    superseded: "已替代",
+  };
+  return map[text.toLowerCase()] || text || "—";
+}
+
+function evidenceFilterLabelRX(key, language) {
+  const labels = {
+    all: ["All", "全部"],
+    fact: ["Fact", "事实"],
+    hypothesis: ["Hypothesis", "假设"],
+    conflict: ["Conflict", "冲突"],
+    missing: ["Missing", "缺失"],
+  };
+  const pair = labels[key] || [key, key];
+  return tRX(language, pair[0], pair[1]);
 }
 
 function structuredTitleRX(finding, language) {
@@ -700,7 +775,7 @@ function Reasoning({ tenant, language }) {
         const firstType = typeNamesLocal[0] || "";
         if (!firstType) {
           setCenterNode("");
-          setQuestion(tenantEmptyQuestionRX(tid));
+          setQuestion(questionTextRX(tenantEmptyQuestionRX(tid), language));
           setScopeBootstrapKey(bootstrapKey);
           return;
         }
@@ -711,17 +786,20 @@ function Reasoning({ tenant, language }) {
         const nextNode = first ? first.id : "";
         const nextLabel = first ? (first.label || first.id) : firstType;
         setCenterNode(nextNode);
-        setQuestion(defaultQuestionForTenantRX(tid, firstType, nextLabel, nextNode));
+        setQuestion(questionTextRX(defaultQuestionForTenantRX(tid, firstType, nextLabel, nextNode), language));
         setScopeBootstrapKey(bootstrapKey);
       } catch (_) {
         if (!alive) return;
         setScopeTypes([]);
         setCenterNode("");
-        setQuestion(tenantEmptyQuestionRX(tenant ? tenant.id : "default"));
+        setQuestion(questionTextRX(tenantEmptyQuestionRX(tenant ? tenant.id : "default"), language));
       }
     })();
     return () => { alive = false; };
-  }, [tenant ? tenant.id : "default"]);
+  }, [tenant ? tenant.id : "default", language]);
+  useEffectRX(() => {
+    if (isZhRX(language)) setQuestion(q => questionTextRX(q, language));
+  }, [language]);
   useEffectRX(() => {
     if (activeTab !== "autopilot") return;
     if (!autopilotSessions.length) { setAutopilotSelectedKey(null); return; }
@@ -1251,7 +1329,7 @@ function Reasoning({ tenant, language }) {
       const key = res?.session?.session_key;
       if (key) setAutopilotSelectedKey(key);
       setActiveTab("autopilot");
-      setActionMsg({ kind: "ok", msg: "Maritime-risk playbook completed · " + (key || "") });
+      setActionMsg({ kind: "ok", msg: tRX(language, "Maritime-risk playbook completed · ", "Maritime-risk playbook 已完成 · ") + (key || "") });
       window.dispatchEvent(new CustomEvent("aletheia:retry"));
     } catch (err) {
       setActionMsg({ kind: "err", msg: err.message || String(err) });
@@ -1261,13 +1339,13 @@ function Reasoning({ tenant, language }) {
   }
 
   async function deleteTask(taskKey) {
-    if (!confirm("Delete this task? This cannot be undone.")) return;
+    if (!confirm(tRX(language, "Delete this task? This cannot be undone.", "删除这个任务？此操作无法撤销。"))) return;
     try {
       try { await window.AL_API.closeTask(taskKey, tenant.id); } catch (_) {}
       await window.AL_API.deleteTask(taskKey, tenant.id);
       setLocalTasks(prev => prev.filter(t => t.canonical_key !== taskKey));
       if (selectedKey === taskKey) setSelectedKey(null);
-      setActionMsg({ kind: "ok", msg: "Task deleted." });
+      setActionMsg({ kind: "ok", msg: tRX(language, "Task deleted.", "任务已删除。") });
       window.dispatchEvent(new CustomEvent("aletheia:retry"));
     } catch (e) {
       setActionMsg({ kind: "err", msg: e.message || String(e) });
@@ -1280,35 +1358,35 @@ function Reasoning({ tenant, language }) {
     <div className="canvas">
       <div className="subbar">
         <div className="tabs">
-          <div className={"tab" + (activeTab === "mine"    ? " active" : "")} onClick={() => setActiveTab("mine")}>My Questions <span className="ct">{counts.mine}</span></div>
-          <div className={"tab" + (activeTab === "all"     ? " active" : "")} onClick={() => setActiveTab("all")}>Reasoning Process <span className="ct">{counts.all}</span></div>
-          <div className={"tab" + (activeTab === "graph"   ? " active" : "")} onClick={() => setActiveTab("graph")}>From Graph <span className="ct">{counts.graph}</span></div>
+          <div className={"tab" + (activeTab === "mine"    ? " active" : "")} onClick={() => setActiveTab("mine")}>{tRX(language, "My Questions", "我的问题")} <span className="ct">{counts.mine}</span></div>
+          <div className={"tab" + (activeTab === "all"     ? " active" : "")} onClick={() => setActiveTab("all")}>{tRX(language, "Reasoning Process", "推理流程")} <span className="ct">{counts.all}</span></div>
+          <div className={"tab" + (activeTab === "graph"   ? " active" : "")} onClick={() => setActiveTab("graph")}>{tRX(language, "From Graph", "来自图谱")} <span className="ct">{counts.graph}</span></div>
           <div className={"tab" + (activeTab === "autopilot" ? " active" : "")} onClick={() => setActiveTab("autopilot")}>Autopilot <span className="ct">{counts.autopilot}</span></div>
         </div>
         <div className="spacer" />
-        <button className="tool" onClick={() => setCleanupModal(true)}>Clean up</button>
-        {isMock  && <span className="pill changes" style={{ marginRight: 8 }}><span className="dot" />Mock fallback</span>}
-        {isStale && <span className="pill changes" style={{ marginRight: 8 }}><span className="dot" />Stale · last fetch failed</span>}
-        {tasksQ.loading && tasksQ.data && <span className="pill"><span className="dot" />Refreshing…</span>}
-        <button className="tool" onClick={() => window.dispatchEvent(new CustomEvent("aletheia:retry"))}>⟲ Refresh</button>
+        <button className="tool" onClick={() => setCleanupModal(true)}>{tRX(language, "Clean up", "清理")}</button>
+        {isMock  && <span className="pill changes" style={{ marginRight: 8 }}><span className="dot" />{tRX(language, "Mock fallback", "模拟回退")}</span>}
+        {isStale && <span className="pill changes" style={{ marginRight: 8 }}><span className="dot" />{tRX(language, "Stale · last fetch failed", "数据陈旧 · 最近拉取失败")}</span>}
+        {tasksQ.loading && tasksQ.data && <span className="pill"><span className="dot" />{tRX(language, "Refreshing…", "刷新中…")}</span>}
+        <button className="tool" onClick={() => window.dispatchEvent(new CustomEvent("aletheia:retry"))}>⟲ {tRX(language, "Refresh", "刷新")}</button>
         {activeTab !== "autopilot" && shouldRerun && (
           <button className="tool" onClick={runTask} disabled={running || !task}
-                  title="Create a new task with the same question and scope, and run it.">
-            {running ? "Rerunning…" : "↻ Rerun (new task)"}
+                  title={tRX(language, "Create a new task with the same question and scope, and run it.", "创建同问题和范围的新任务并运行。")}>
+            {running ? tRX(language, "Rerunning…", "重新运行中…") : "↻ " + tRX(language, "Rerun (new task)", "重新运行（新任务）")}
           </button>
         )}
         {activeTab !== "autopilot" && !shouldRerun && !finding && !runDone && (
-          <button className="tool" onClick={runTask} disabled={running || !task}>{running ? "Running…" : "▶ Run reasoning"}</button>
+          <button className="tool" onClick={runTask} disabled={running || !task}>{running ? tRX(language, "Running…", "运行中…") : "▶ " + tRX(language, "Run reasoning", "运行推理")}</button>
         )}
         {activeTab !== "autopilot" && task && !shouldRerun && (
           <button className="tool" onClick={stopAndClose}
                   style={{ color: "var(--rejected)" }}
-                  title="Stop the current run (if any) and close this task.">
-            ■ Stop &amp; close
+                  title={tRX(language, "Stop the current run (if any) and close this task.", "停止当前运行（如有）并关闭任务。")}>
+            ■ {tRX(language, "Stop & close", "停止并关闭")}
           </button>
         )}
         <button className="tool primary" onClick={() => activeTab === "autopilot" ? startAutopilot() : setAskMode(true)}>
-          {activeTab === "autopilot" ? "▶ Start Autopilot" : "+ Ask question"}
+          {activeTab === "autopilot" ? "▶ " + tRX(language, "Start Autopilot", "启动 Autopilot") : "+ " + tRX(language, "Ask question", "提问")}
         </button>
       </div>
 
@@ -1316,23 +1394,23 @@ function Reasoning({ tenant, language }) {
         {/* ============ LEFT — task list ============ */}
         <div className="col">
           <div style={{ padding: "var(--pad-3) var(--pad-4)", borderBottom: "1px solid var(--line)", background: "var(--bg-2)" }}>
-            <div className="eyebrow accent">Question → Answer → Evidence</div>
+            <div className="eyebrow accent">{tRX(language, "Question → Answer → Evidence", "问题 → 答案 → 证据")}</div>
             <div style={{ marginTop: 4, fontSize: 13, color: "var(--text)" }}>
-              {activeTab === "autopilot" ? "Autopilot sessions" : "Reasoning tasks"}
+              {activeTab === "autopilot" ? tRX(language, "Autopilot sessions", "Autopilot 会话") : tRX(language, "Reasoning tasks", "推理任务")}
             </div>
             <button className="btn primary" style={{ width: "100%", marginTop: 10 }}
                     onClick={() => activeTab === "autopilot" ? startAutopilot() : setAskMode(true)}>
-              {activeTab === "autopilot" ? "▶ Start Autopilot" : "+ Ask a new question"}
+              {activeTab === "autopilot" ? "▶ " + tRX(language, "Start Autopilot", "启动 Autopilot") : "+ " + tRX(language, "Ask a new question", "新建问题")}
             </button>
           </div>
           <div style={{ flex: 1, overflow: "auto" }}>
-            {activeTab === "autopilot" ? <ApiStatus q={autopilotSessionsQ} what="autopilot sessions" /> : <ApiStatus q={tasksQ} what="reasoning tasks" />}
+            {activeTab === "autopilot" ? <ApiStatus q={autopilotSessionsQ} what={tRX(language, "autopilot sessions", "Autopilot 会话")} /> : <ApiStatus q={tasksQ} what={tRX(language, "reasoning tasks", "推理任务")} />}
             <div className="artifact-list">
               {activeTab === "autopilot" ? (
                 <React.Fragment>
                   {(autopilotSessionsQ.source === "live" || autopilotSessionsQ.source === "mock") && autopilotSessions.length === 0 && (
                     <div style={{ padding: 24, fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--muted)", textAlign: "center", lineHeight: 1.6 }}>
-                      No Autopilot sessions yet. Start one to queue hypotheses and collect draft candidate findings.
+                      {tRX(language, "No Autopilot sessions yet. Start one to queue hypotheses and collect draft candidate findings.", "暂无 Autopilot 会话。启动后会排队假设并收集候选发现草稿。")}
                     </div>
                   )}
                   {autopilotSessions.map(s => (
@@ -1342,17 +1420,17 @@ function Reasoning({ tenant, language }) {
                       <div className="ar-bar" />
                       <div className="ar-main">
                         <div className="ar-top">
-                          <span className="type">AUTOPILOT</span>
+                          <span className="type">Autopilot</span>
                           <span>·</span>
                           <span className="key" style={{ color: "var(--text)" }}>{s.objective}</span>
                         </div>
                         <div className="ar-meta">
-                          <span>{s.scope?.table || s.scope?.tenant || "tenant scope"}</span>
+                          <span>{s.scope?.table || s.scope?.tenant || tRX(language, "tenant scope", "租户范围")}</span>
                           <span>{fmtTime(s.updated_at || s.created_at)}</span>
                         </div>
                       </div>
                       <div className="ar-right">
-                        <Pill kind="proposed">{s.status || "draft"}</Pill>
+                        <Pill kind="proposed">{statusTextRX(s.status || "draft", language)}</Pill>
                       </div>
                     </div>
                   ))}
@@ -1361,9 +1439,9 @@ function Reasoning({ tenant, language }) {
                 <React.Fragment>
               {(tasksQ.source === "live" || tasksQ.source === "mock") && tasks.length === 0 && (
                 <div style={{ padding: 24, fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--muted)", textAlign: "center", lineHeight: 1.6 }}>
-                  {activeTab === "mine"    ? "No questions of yours yet. Click \u201c+ Ask a new question\u201d above to start." :
-                   activeTab === "graph"   ? "No graph-derived reasoning tasks here." :
-                                             "No active reasoning tasks. Click \u201c+ Ask a new question\u201d above."}
+                  {activeTab === "mine"    ? tRX(language, "No questions of yours yet. Click “+ Ask a new question” above to start.", "你还没有问题。点击上方“+ 新建问题”开始。") :
+                   activeTab === "graph"   ? tRX(language, "No graph-derived reasoning tasks here.", "这里暂无来自图谱的推理任务。") :
+                                             tRX(language, "No active reasoning tasks. Click “+ Ask a new question” above.", "暂无活跃推理任务。点击上方“+ 新建问题”。")}
                 </div>
               )}
               {tasks.map(t => {
@@ -1375,18 +1453,18 @@ function Reasoning({ tenant, language }) {
                   <div className="ar-bar" />
                   <div className="ar-main">
                     <div className="ar-top">
-                      <span className="type">TASK</span>
+                      <span className="type">{tRX(language, "TASK", "任务")}</span>
                       <span>·</span>
                       <span className="key" style={{ color: "var(--text)" }}>{t.question || t.name || t.canonical_key}</span>
                       {ts.isRunning && !ts.isStale && (
                         <span style={{ marginLeft: "auto", color: "var(--accent)", display: "inline-flex", alignItems: "center", gap: 4 }}>
                           <span style={{ width: 6, height: 6, background: "var(--accent)", display: "inline-block", animation: "pulse 1s ease-in-out infinite" }} />
-                          running
+                          {tRX(language, "running", "运行中")}
                         </span>
                       )}
                       {ts.isStale && (
-                        <span style={{ marginLeft: "auto", color: "var(--rejected)" }} title={"Active but no update for " + ts.ageLbl + " — likely orphaned"}>
-                          ⚠ stale {ts.ageLbl}
+                        <span style={{ marginLeft: "auto", color: "var(--rejected)" }} title={tRX(language, "Active but no update for ", "任务仍活跃但已 ") + ts.ageLbl + tRX(language, " — likely orphaned", " 未更新，可能已孤立")}>
+                          ⚠ {tRX(language, "stale", "陈旧")} {ts.ageLbl}
                         </span>
                       )}
                     </div>
@@ -1397,10 +1475,10 @@ function Reasoning({ tenant, language }) {
                     </div>
                   </div>
                   <div className="ar-right" style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 4 }}>
-                    <Pill kind={statusToPill[t.status] || "proposed"}>{t.status}</Pill>
+                    <Pill kind={statusToPill[t.status] || "proposed"}>{statusTextRX(t.status, language)}</Pill>
                     <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
                       {ts.isRunning && !ts.isStale && (
-                        <button className="btn xs ghost" title="Stop task"
+                        <button className="btn xs ghost" title={tRX(language, "Stop task", "停止任务")}
                                 onClick={e => { e.stopPropagation(); setSelectedKey(t.canonical_key); stopAndClose(); }}
                                 style={{ padding: "4px 7px", fontSize: 12, color: "var(--rejected)", border: "1px solid oklch(0.66 0.18 25 / 0.3)", lineHeight: 1, borderRadius: 4 }}>
                           ■
@@ -1408,12 +1486,12 @@ function Reasoning({ tenant, language }) {
                       )}
                       {!ts.isRunning && (
                         <React.Fragment>
-                          <button className="btn xs ghost" title="Rerun (new task)"
+                          <button className="btn xs ghost" title={tRX(language, "Rerun (new task)", "重新运行（新任务）")}
                                   onClick={e => { e.stopPropagation(); setSelectedKey(t.canonical_key); setTimeout(runTask, 50); }}
                                   style={{ padding: "4px 7px", color: "var(--accent)", border: "1px solid var(--line)", lineHeight: 1, borderRadius: 4 }}>
                             <span style={{ display: "inline-flex", width: 16, height: 16 }} dangerouslySetInnerHTML={{ __html: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 8a5.5 5.5 0 0 1 9.3-4"/><path d="M13.5 8a5.5 5.5 0 0 1-9.3 4"/><path d="M11.8 1.5V4h-2.5"/><path d="M4.2 14.5V12h2.5"/></svg>' }} />
                           </button>
-                          <button className="btn xs ghost" title="Delete task"
+                          <button className="btn xs ghost" title={tRX(language, "Delete task", "删除任务")}
                                   onClick={e => { e.stopPropagation(); deleteTask(t.canonical_key); }}
                                   style={{ padding: "4px 7px", color: "var(--muted)", border: "1px solid var(--line)", lineHeight: 1, borderRadius: 4 }}>
                             <span style={{ display: "inline-flex", width: 16, height: 16 }} dangerouslySetInnerHTML={{ __html: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M3 4h10M5.5 4V3a1 1 0 0 1 1-1h3a1 1 0 0 1 1 1v1M4.5 4l.7 9.1a1 1 0 0 0 1 .9h3.6a1 1 0 0 0 1-.9L11.5 4"/></svg>' }} />
@@ -1483,34 +1561,35 @@ function Reasoning({ tenant, language }) {
               onDismissMsg={() => setActionMsg(null)}
               onCancel={() => setAskMode(false)}
               onSubmit={submitQuestion}
+              language={language}
             />
           ) : !task ? (
             <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 14, color: "var(--muted)", fontFamily: "var(--font-mono)", fontSize: 12 }}>
               <div style={{ fontSize: 13, color: "var(--text-dim)" }}>
-                {activeTab === "mine"    ? "You haven't asked any questions yet." :
-                 activeTab === "graph"   ? "No graph-derived reasoning tasks in this scope." :
-                                           "Select a reasoning task from the left, or ask a new question."}
+                {activeTab === "mine"    ? tRX(language, "You haven't asked any questions yet.", "你还没有提出问题。") :
+                 activeTab === "graph"   ? tRX(language, "No graph-derived reasoning tasks in this scope.", "此范围内暂无来自图谱的推理任务。") :
+                                           tRX(language, "Select a reasoning task from the left, or ask a new question.", "从左侧选择推理任务，或新建问题。")}
               </div>
-              <button className="btn primary" onClick={() => setAskMode(true)}>+ Ask a new question</button>
+              <button className="btn primary" onClick={() => setAskMode(true)}>+ {tRX(language, "Ask a new question", "新建问题")}</button>
             </div>
           ) : (
             <>
               <div className="art-header">
                 <div className="crumb">
-                  <span className="type">Reasoning Task</span>
+                  <span className="type">{tRX(language, "Reasoning Task", "推理任务")}</span>
                   <span className="sep">/</span>
                   <span>{task.canonical_key}</span>
-                  {task.center_node && <><span className="sep">·</span><span>scope {task.center_node} · d{task.depth || 1} · n{task.limit || 200}</span></>}
+                  {task.center_node && <><span className="sep">·</span><span>{tRX(language, "scope", "范围")} {task.center_node} · d{task.depth || 1} · n{task.limit || 200}</span></>}
                   <span style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center" }}>
                     {isLoadingDetail && (
                       <span className="pill" style={{ fontSize: 9 }}>
-                        <span className="dot" style={{ background: "var(--accent)" }} />Loading detail…
+                        <span className="dot" style={{ background: "var(--accent)" }} />{tRX(language, "Loading detail…", "加载详情…")}
                       </span>
                     )}
                     {showRunning && (
                       <span className="pill changes" style={{ fontSize: 9 }}>
                         <span className="dot" style={{ animation: "pulse 1s ease-in-out infinite" }} />
-                        {isTaskRunning ? "Polling · " + pollTick : "Running…"}
+                        {isTaskRunning ? tRX(language, "Polling · ", "轮询 · ") + pollTick : tRX(language, "Running…", "运行中…")}
                       </span>
                     )}
                   </span>
@@ -1521,37 +1600,37 @@ function Reasoning({ tenant, language }) {
                 )}
                 <div className="row">
                   <div className="stat">
-                    <span className="label">Center</span>
+                    <span className="label">{tRX(language, "Center", "中心")}</span>
                     <span className="val mono">{task.center_node || "—"}</span>
                   </div>
                   <div className="stat">
-                    <span className="label">Depth / limit</span>
+                    <span className="label">{tRX(language, "Depth / limit", "深度 / 上限")}</span>
                     <span className="val mono">{task.depth || 1} · {task.limit || 200}</span>
                   </div>
                   <div className="stat">
-                    <span className="label">Source</span>
+                    <span className="label">{tRX(language, "Source", "来源")}</span>
                     <span className="val mono">{task.source || "manual"}</span>
                   </div>
                   <div className="stat">
-                    <span className="label">Evidence</span>
-                    <span className="val mono">{evidence.length} items</span>
+                    <span className="label">{tRX(language, "Evidence", "证据")}</span>
+                    <span className="val mono">{evidence.length} {tRX(language, "items", "项")}</span>
                   </div>
                   <div className="stat">
-                    <span className="label">Canonical write</span>
-                    <span className="val" style={{ color: "var(--changes)" }}>blocked · draft only</span>
+                    <span className="label">{tRX(language, "Canonical write", "正式写入")}</span>
+                    <span className="val" style={{ color: "var(--changes)" }}>{tRX(language, "blocked · draft only", "已阻断 · 仅草稿")}</span>
                   </div>
                   {task.id != null && (
                     <div className="stat">
-                      <span className="label">Run ID</span>
+                      <span className="label">{tRX(language, "Run ID", "运行 ID")}</span>
                       <span className="val mono">{task.id}</span>
                     </div>
                   )}
                   <div className="stat">
-                    <span className="label">Created</span>
+                    <span className="label">{tRX(language, "Created", "创建时间")}</span>
                     <span className="val mono">{fmtTime(task.created_at)}</span>
                   </div>
                   <div className="stat">
-                    <span className="label">Completed</span>
+                    <span className="label">{tRX(language, "Completed", "完成时间")}</span>
                     <span className="val mono">{isTerminal ? fmtTime(task.updated_at) : "—"}</span>
                   </div>
                 </div>
@@ -1559,12 +1638,12 @@ function Reasoning({ tenant, language }) {
 
               <div style={{ flex: 1, overflow: "auto", padding: "var(--pad-4) var(--pad-5)" }}>
                 {/* Conclusion */}
-                <Panel eyebrow="Current answer" title="Conclusion"
-                       count={showRunning ? (isTaskRunning ? `polling · ${pollTick}` : "running…") : isStaleActive ? "stale" : finding ? (finding.status || "draft") : "no answer"}
+                <Panel eyebrow={tRX(language, "Current answer", "当前答案")} title={tRX(language, "Conclusion", "结论")}
+                       count={showRunning ? (isTaskRunning ? `${tRX(language, "polling", "轮询")} · ${pollTick}` : tRX(language, "running…", "运行中…")) : isStaleActive ? tRX(language, "stale", "已陈旧") : finding ? statusTextRX(finding.status || "draft", language) : tRX(language, "no answer", "暂无答案")}
                        actions={shouldRerun ? (
                          <button className="btn xs" onClick={runTask} disabled={running}
-                                 title="Create a new task with same question/scope">
-                           {running ? "Rerunning…" : "↻ Rerun (new task)"}
+                                 title={tRX(language, "Create a new task with same question/scope", "创建同问题/范围的新任务")}>
+                           {running ? tRX(language, "Rerunning…", "重新运行中…") : "↻ " + tRX(language, "Rerun (new task)", "重新运行（新任务）")}
                          </button>
                        ) : null}
                        style={{ marginBottom: 16 }}>
@@ -1581,43 +1660,43 @@ function Reasoning({ tenant, language }) {
                         lineHeight: 1.6,
                       }}>
                         <div style={{ textTransform: "uppercase", letterSpacing: "0.08em", fontSize: 10, marginBottom: 6, color: "var(--rejected)" }}>
-                          ⚠ Likely orphaned
+                          ⚠ {tRX(language, "Likely orphaned", "可能已孤立")}
                         </div>
                         <div style={{ color: "var(--text-dim)", textTransform: "none", letterSpacing: 0 }}>
-                          Status is <span style={{ color: "var(--rejected)" }}>{task.status}</span> but the task hasn't been updated for <span style={{ color: "var(--text)" }}>{selectedState.ageLbl}</span>. The worker probably crashed or the service was restarted before it could mark this task complete. The backend status is not being actively maintained.
+                          {tRX(language, "Status is", "状态为")} <span style={{ color: "var(--rejected)" }}>{statusTextRX(task.status, language)}</span>{tRX(language, " but the task hasn't been updated for ", "，但任务已 ")}<span style={{ color: "var(--text)" }}>{selectedState.ageLbl}</span>{tRX(language, ". The worker probably crashed or the service was restarted before it could mark this task complete. The backend status is not being actively maintained.", " 未更新。可能是 worker 崩溃或服务重启，后端状态未继续维护。")}
                         </div>
                       </div>
                       <div style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--muted)", lineHeight: 1.7 }}>
-                        <div style={{ color: "var(--accent)", fontSize: 10, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 6 }}>What to do</div>
-                        <div>·  Click <span style={{ color: "var(--text)" }}>↻ Rerun reasoning</span> below to start a fresh run.</div>
-                        <div>·  Or check the backend worker log for the original failure.</div>
-                        <div>·  Status will only change if you rerun, or someone manually clears it on the server.</div>
+                        <div style={{ color: "var(--accent)", fontSize: 10, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 6 }}>{tRX(language, "What to do", "处理建议")}</div>
+                        <div>·  {tRX(language, "Click", "点击")} <span style={{ color: "var(--text)" }}>↻ {tRX(language, "Rerun reasoning", "重新运行推理")}</span> {tRX(language, "below to start a fresh run.", "启动一次新的运行。")}</div>
+                        <div>·  {tRX(language, "Or check the backend worker log for the original failure.", "也可以检查后端 worker 日志确认原始失败。")}</div>
+                        <div>·  {tRX(language, "Status will only change if you rerun, or someone manually clears it on the server.", "只有重新运行或人工清理服务端状态后，状态才会变化。")}</div>
                       </div>
                       <div style={{ display: "flex", gap: 8 }}>
-                        <button className="btn primary" onClick={runTask} disabled={running}>↻ Rerun reasoning</button>
-                        <button className="btn ghost" onClick={() => window.dispatchEvent(new CustomEvent("aletheia:retry"))}>Refresh once</button>
+                        <button className="btn primary" onClick={runTask} disabled={running}>↻ {tRX(language, "Rerun reasoning", "重新运行推理")}</button>
+                        <button className="btn ghost" onClick={() => window.dispatchEvent(new CustomEvent("aletheia:retry"))}>{tRX(language, "Refresh once", "刷新一次")}</button>
                       </div>
                     </div>
                   ) : showRunning ? (
                     <div style={{ display: "flex", flexDirection: "column", gap: 14, padding: "16px 0" }}>
                       <div style={{ display: "flex", alignItems: "center", gap: 10, color: "var(--accent)", fontFamily: "var(--font-mono)", fontSize: 12, textTransform: "uppercase", letterSpacing: "0.08em" }}>
                         <span style={{ width: 8, height: 8, background: "var(--accent)", display: "inline-block", animation: "pulse 1s ease-in-out infinite" }} />
-                        Reasoning in progress
+                        {tRX(language, "Reasoning in progress", "推理进行中")}
                         <span style={{ marginLeft: "auto", color: "var(--muted)", fontSize: 10 }}>
-                          {liveTrace.length} event{liveTrace.length === 1 ? "" : "s"} · {liveTrace.length > 0 ? "SSE" : "starting…"}
+                          {liveTrace.length} {tRX(language, "events", "事件")} · {liveTrace.length > 0 ? "SSE" : tRX(language, "starting…", "启动中…")}
                         </span>
                       </div>
                       <div style={{ color: "var(--muted)", fontSize: 12, lineHeight: 1.55 }}>
-                        Running scoped reasoning over <span style={{ color: "var(--text)" }}>{task.center_node}</span> (depth {task.depth || 1}, limit {task.limit || 200}).
+                        {tRX(language, "Running scoped reasoning over", "正在针对")} <span style={{ color: "var(--text)" }}>{task.center_node}</span> {tRX(language, "(depth", "执行范围推理（深度")} {task.depth || 1}, {tRX(language, "limit", "上限")} {task.limit || 200}).
                       </div>
                       <TraceLog events={liveTrace} />
                       <div style={{ display: "flex", gap: 8 }}>
-                        <button className="btn ghost" onClick={() => window.dispatchEvent(new CustomEvent("aletheia:retry"))}>↻ Refresh now</button>
+                        <button className="btn ghost" onClick={() => window.dispatchEvent(new CustomEvent("aletheia:retry"))}>↻ {tRX(language, "Refresh now", "立即刷新")}</button>
                         {streamRef.current && (
                           <button className="btn ghost" onClick={() => {
                             try { streamRef.current.close(); } catch {}
                             setRunning(false);
-                          }}>✕ Stop stream</button>
+                          }}>✕ {tRX(language, "Stop stream", "停止流")}</button>
                         )}
                       </div>
                     </div>
@@ -1632,10 +1711,10 @@ function Reasoning({ tenant, language }) {
                           marginBottom: 4,
                         }}>
                           <span style={{ width: 6, height: 6, background: "var(--accent)", display: "inline-block", animation: "pulse 1s ease-in-out infinite" }} />
-                          <span style={{ color: "var(--accent)", textTransform: "uppercase", letterSpacing: "0.08em", fontSize: 10 }}>Running on backend</span>
-                          <span style={{ color: "var(--muted)" }}>· polling · {pollTick}</span>
+                          <span style={{ color: "var(--accent)", textTransform: "uppercase", letterSpacing: "0.08em", fontSize: 10 }}>{tRX(language, "Running on backend", "后端运行中")}</span>
+                          <span style={{ color: "var(--muted)" }}>· {tRX(language, "polling", "轮询")} · {pollTick}</span>
                           <span style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
-                            <button className="btn xs" onClick={() => window.dispatchEvent(new CustomEvent("aletheia:retry"))}>↻ Refresh</button>
+                            <button className="btn xs" onClick={() => window.dispatchEvent(new CustomEvent("aletheia:retry"))}>↻ {tRX(language, "Refresh", "刷新")}</button>
                           </span>
                         </div>
                       )}
@@ -1656,7 +1735,7 @@ function Reasoning({ tenant, language }) {
                         </div>
                       )}
                       <div style={{ paddingTop: 12, borderTop: "1px solid var(--line)", display: "flex", gap: 8, alignItems: "center" }}>
-                        <div className="eyebrow" style={{ color: "var(--changes)" }}>Canonical boundary</div>
+                        <div className="eyebrow" style={{ color: "var(--changes)" }}>{tRX(language, "Canonical boundary", "正式边界")}</div>
                         <div style={{ fontSize: 11, color: "var(--muted)" }}>
                           {tRX(language,
                             "Approving this finding cites it in the approved-finding layer; it does NOT modify canonical ontology or graph.",
@@ -1666,10 +1745,10 @@ function Reasoning({ tenant, language }) {
                       {shouldRerun && (
                         <div style={{ paddingTop: 12, borderTop: "1px solid var(--line)", display: "flex", gap: 8, alignItems: "center" }}>
                           <button className="btn primary" onClick={runTask} disabled={running}
-                                  title="Create a new task with the same question and scope, and run it.">
-                            {running ? "Rerunning…" : "↻ Rerun (new task)"}
+                                  title={tRX(language, "Create a new task with the same question and scope, and run it.", "创建同问题和范围的新任务并运行。")}>
+                            {running ? tRX(language, "Rerunning…", "重新运行中…") : "↻ " + tRX(language, "Rerun (new task)", "重新运行（新任务）")}
                           </button>
-                          {isClosed && <span style={{ fontSize: 11, color: "var(--muted)" }}>Task is closed — rerun creates a fresh task.</span>}
+                          {isClosed && <span style={{ fontSize: 11, color: "var(--muted)" }}>{tRX(language, "Task is closed — rerun creates a fresh task.", "任务已关闭，重新运行会创建新任务。")}</span>}
                         </div>
                       )}
                       {liveTrace.length > 0 && (
@@ -1688,22 +1767,22 @@ function Reasoning({ tenant, language }) {
                           fontFamily: "var(--font-mono)", fontSize: 11,
                         }}>
                           <span style={{ width: 6, height: 6, background: "var(--accent)", display: "inline-block", animation: "pulse 1s ease-in-out infinite" }} />
-                          <span style={{ color: "var(--accent)", textTransform: "uppercase", letterSpacing: "0.08em", fontSize: 10 }}>Running on backend</span>
-                          <span style={{ color: "var(--muted)" }}>· waiting for result · polling · {pollTick}</span>
-                          <button className="btn xs" style={{ marginLeft: "auto" }} onClick={() => window.dispatchEvent(new CustomEvent("aletheia:retry"))}>↻ Refresh</button>
+                          <span style={{ color: "var(--accent)", textTransform: "uppercase", letterSpacing: "0.08em", fontSize: 10 }}>{tRX(language, "Running on backend", "后端运行中")}</span>
+                          <span style={{ color: "var(--muted)" }}>· {tRX(language, "waiting for result", "等待结果")} · {tRX(language, "polling", "轮询")} · {pollTick}</span>
+                          <button className="btn xs" style={{ marginLeft: "auto" }} onClick={() => window.dispatchEvent(new CustomEvent("aletheia:retry"))}>↻ {tRX(language, "Refresh", "刷新")}</button>
                         </div>
                       )}
                       <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                      <span style={{ color: "var(--dim)", fontFamily: "var(--font-mono)", fontSize: 12 }}>{backendRunning ? "No conclusion yet — task is still running." : "No conclusion yet."}</span>
+                      <span style={{ color: "var(--dim)", fontFamily: "var(--font-mono)", fontSize: 12 }}>{backendRunning ? tRX(language, "No conclusion yet — task is still running.", "暂无结论，任务仍在运行。") : tRX(language, "No conclusion yet.", "暂无结论。")}</span>
                       {shouldRerun && (
                         <button className="btn primary" onClick={runTask} disabled={running}
-                                title="Create a new task with the same question and scope, and run it.">
-                          {running ? "Rerunning…" : "↻ Rerun (new task)"}
+                                title={tRX(language, "Create a new task with the same question and scope, and run it.", "创建同问题和范围的新任务并运行。")}>
+                          {running ? tRX(language, "Rerunning…", "重新运行中…") : "↻ " + tRX(language, "Rerun (new task)", "重新运行（新任务）")}
                         </button>
                       )}
                       {!shouldRerun && !runDone && !backendRunning && !running && (
                         <button className="btn primary" onClick={runTask}>
-                          ▶ Run reasoning
+                          ▶ {tRX(language, "Run reasoning", "运行推理")}
                         </button>
                       )}
                       </div>
@@ -1717,20 +1796,20 @@ function Reasoning({ tenant, language }) {
                 </Panel>
 
                 {/* Evidence chain */}
-                <Panel eyebrow="Provenance" title="Evidence chain" count={`${evidence.length} items`} nopad
+                <Panel eyebrow={tRX(language, "Provenance", "来源")} title={tRX(language, "Evidence chain", "证据链")} count={`${evidence.length} ${tRX(language, "items", "项")}`} nopad
                        actions={
                          <div className="chip-row">
                            {["all", "fact", "hypothesis", "conflict", "missing"].map(k => (
                              <Chip key={k} active={evidenceFilter === k} onClick={() => setEvidenceFilter(k)}
                                    count={k === "all" ? evidence.length : evidence.filter(e => (e.kind || "fact") === k).length}>
-                               {k.charAt(0).toUpperCase() + k.slice(1)}
+                               {evidenceFilterLabelRX(k, language)}
                              </Chip>
                            ))}
                          </div>
                        }>
                   {evidence.length === 0 ? (
                     <div style={{ padding: 24, fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--muted)" }}>
-                      No evidence yet. Run the reasoning to populate.
+                      {tRX(language, "No evidence yet. Run the reasoning to populate.", "暂无证据。运行推理后会生成证据链。")}
                     </div>
                   ) : (
                     <div className="evidence-list">
@@ -1746,22 +1825,22 @@ function Reasoning({ tenant, language }) {
                         return (
                           <div key={i} className={"evidence-item " + ev.kind}>
                             <div className="v-bar" />
-                            <div className="kind">{ontologyKey ? "ontology basis" : ev.kind}</div>
+                            <div className="kind">{ontologyKey ? tRX(language, "ontology basis", "本体依据") : evidenceKindLabelRX(ev.kind, language)}</div>
                             <div className="body-x">
                               <div className="title">{resultTextRX(ev.title, language)}</div>
                               <div className="src">
                                 {ontologyKey
-                                  ? `${ontologyKey} · compact basis only`
+                                  ? `${ontologyKey} · ${tRX(language, "compact basis only", "仅紧凑依据")}`
                                   : ev.src}
                               </div>
                             </div>
                             <div className="conf-side">
                               {ontologyKey ? (
                                 <a className="btn xs" href={`/?screen=ontology&tenant=${encodeURIComponent(tenant ? tenant.id : "default")}&artifact=${encodeURIComponent(ontologyKey)}`}
-                                 title="Open full ontology governance details in Ontology.">
-                                  View in Ontology
+                                 title={tRX(language, "Open full ontology governance details in Ontology.", "在 Ontology 中打开完整本体治理详情。")}>
+                                  {tRX(language, "View in Ontology", "在 Ontology 中查看")}
                                 </a>
-                              ) : ev.conf != null ? <><span style={{ color: "var(--text)" }}>{Math.round(ev.conf * 100)}%</span><span style={{ color: "var(--dim)", fontSize: 9, marginTop: 2 }}>confidence</span></> : <span className="faint">—</span>}
+                              ) : ev.conf != null ? <><span style={{ color: "var(--text)" }}>{Math.round(ev.conf * 100)}%</span><span style={{ color: "var(--dim)", fontSize: 9, marginTop: 2 }}>{tRX(language, "confidence", "置信度")}</span></> : <span className="faint">—</span>}
                             </div>
                           </div>
                         );
@@ -1783,15 +1862,15 @@ function Reasoning({ tenant, language }) {
                 )}
                 <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
                   <input className="reason-input" value={reviewReason} onChange={e => setReviewReason(e.target.value)}
-                         placeholder="Decision rationale (required for approve / reject / lifecycle changes)…" />
+                         placeholder={tRX(language, "Decision rationale (required for reject / lifecycle changes; optional for approve)…", "决策说明（拒绝/生命周期变更必填；批准可选）…")} />
                   <div style={{ display: "flex", gap: 6 }}>
-                    <button className="btn approve" onClick={() => reviewFinding("approve")} disabled={!finding}>✓ Approve finding</button>
-                    <button className="btn changes" onClick={() => reviewFinding("needs-evidence")} disabled={!finding}>↻ Needs evidence</button>
-                    <button className="btn reject"  onClick={() => reviewFinding("reject")} disabled={!finding}>✕ Reject</button>
-                    <button className="btn ghost"   onClick={() => reviewFinding("reaffirm")} disabled={!finding}>Reaffirm</button>
-                    <button className="btn ghost"   onClick={() => reviewFinding("mark-stale")} disabled={!finding}>Mark stale</button>
-                    <button className="btn ghost"   onClick={() => reviewFinding("supersede")} disabled={!finding}>Supersede</button>
-                    <button className="btn ghost"   onClick={() => reviewFinding("comment")} disabled={!finding}>Comment</button>
+                    <button className="btn approve" onClick={() => reviewFinding("approve")} disabled={!finding}>✓ {tRX(language, "Approve finding", "批准发现")}</button>
+                    <button className="btn changes" onClick={() => reviewFinding("needs-evidence")} disabled={!finding}>↻ {tRX(language, "Needs evidence", "需补证据")}</button>
+                    <button className="btn reject"  onClick={() => reviewFinding("reject")} disabled={!finding}>✕ {tRX(language, "Reject", "拒绝")}</button>
+                    <button className="btn ghost"   onClick={() => reviewFinding("reaffirm")} disabled={!finding}>{tRX(language, "Reaffirm", "再次确认")}</button>
+                    <button className="btn ghost"   onClick={() => reviewFinding("mark-stale")} disabled={!finding}>{tRX(language, "Mark stale", "标记陈旧")}</button>
+                    <button className="btn ghost"   onClick={() => reviewFinding("supersede")} disabled={!finding}>{tRX(language, "Supersede", "标记替代")}</button>
+                    <button className="btn ghost"   onClick={() => reviewFinding("comment")} disabled={!finding}>{tRX(language, "Comment", "评论")}</button>
                   </div>
                 </div>
               </div>
@@ -1817,50 +1896,51 @@ function Reasoning({ tenant, language }) {
               onRunPlaybook={(tenant && tenant.id) === "maritime-risk" ? runMaritimeRiskPlaybook : runCreditcardfraudPlaybook}
               playbookRunning={autopilotPlaybookRunning}
               detail={autopilotDetail}
+              language={language}
             />
           ) : (
           <React.Fragment>
           <div className="section">
-            <div className="section-head"><span>Ask with scope</span></div>
+            <div className="section-head"><span>{tRX(language, "Ask with scope", "按范围提问")}</span></div>
             <div className="section-body">
               <form onSubmit={submitQuestion} style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                 <div>
-                  <div className="eyebrow" style={{ marginBottom: 4 }}>Question</div>
+                  <div className="eyebrow" style={{ marginBottom: 4 }}>{tRX(language, "Question", "问题")}</div>
                   <textarea className="textarea" rows={3} value={question} onChange={onQuestionChangeWithExtract}
-                            placeholder={(tenant && tenant.id) === "creditcardfraud" ? "Which transaction has elevated fraud risk?" : "Why is Employee #4 workload unusual?"} />
+                            placeholder={(tenant && tenant.id) === "creditcardfraud" ? tRX(language, "Which transaction has elevated fraud risk?", "哪笔交易存在更高欺诈风险？") : tRX(language, "Why is Employee #4 workload unusual?", "为什么 Employee #4 的工作量异常？")} />
                 </div>
-                <EntityPicker tenant={tenant} centerNode={centerNode} setCenterNode={setCenterNode} question={question} setQuestion={setQuestion} compact />
+                <EntityPicker tenant={tenant} centerNode={centerNode} setCenterNode={setCenterNode} question={question} setQuestion={setQuestion} compact language={language} />
                 <div style={{ display: "flex", gap: 6 }}>
                   <div style={{ flex: 1 }}>
-                    <div className="eyebrow" style={{ marginBottom: 4 }}>Depth</div>
+                    <div className="eyebrow" style={{ marginBottom: 4 }}>{tRX(language, "Depth", "深度")}</div>
                     <input className="input" type="number" min={1} max={3} value={depth} onChange={e => setDepth(+e.target.value)} />
                   </div>
                   <div style={{ flex: 1 }}>
-                    <div className="eyebrow" style={{ marginBottom: 4 }}>Limit</div>
+                    <div className="eyebrow" style={{ marginBottom: 4 }}>{tRX(language, "Limit", "上限")}</div>
                     <input className="input" type="number" value={limit} onChange={e => setLimit(+e.target.value)} />
                   </div>
                 </div>
-                <button className="btn primary" type="submit" disabled={submitting}>{submitting ? "Creating…" : "↗ Create scoped question"}</button>
+                <button className="btn primary" type="submit" disabled={submitting}>{submitting ? tRX(language, "Creating…", "创建中…") : "↗ " + tRX(language, "Create scoped question", "创建范围问题")}</button>
               </form>
             </div>
           </div>
 
           <div className="section">
-            <div className="section-head"><span>Follow-up in scope</span></div>
+            <div className="section-head"><span>{tRX(language, "Follow-up in scope", "范围内追问")}</span></div>
             <div className="section-body">
               <textarea className="textarea" rows={3} value={followup} onChange={e => setFollowup(e.target.value)}
-                        placeholder="What evidence would change this conclusion?" style={{ marginBottom: 8 }} />
+                        placeholder={tRX(language, "What evidence would change this conclusion?", "什么证据会改变这个结论？")} style={{ marginBottom: 8 }} />
               <button className="btn" style={{ width: "100%" }} onClick={() => {
                 if (!followup.trim()) return;
                 const q = followup;
                 setQuestion(q);
                 setFollowup("");
                 submitQuestion({ preventDefault: () => {} }, q);
-              }} disabled={!followup.trim() || !task}>Create follow-up</button>
+              }} disabled={!followup.trim() || !task}>{tRX(language, "Create follow-up", "创建追问")}</button>
             </div>
           </div>
 
-          <OntologyBasisPanel task={task} tenant={tenant} />
+          <OntologyBasisPanel task={task} tenant={tenant} language={language} />
 
           <ApprovedFindingRegistry
             findings={approvedFindingsRegistry}
@@ -1874,20 +1954,20 @@ function Reasoning({ tenant, language }) {
           />
 
           <div className="section">
-            <div className="section-head"><span>Write boundary</span></div>
+            <div className="section-head"><span>{tRX(language, "Write boundary", "写入边界")}</span></div>
             <div className="section-body">
               <div style={{ fontSize: 11, color: "var(--muted)", lineHeight: 1.55 }}>
-                Reasoning agents can only write <span style={{ color: "var(--changes)" }}>draft</span> findings and action proposals. Structural facts (links, properties, classifications) require a separate canonical write proposal and a stronger approval gate.
+                {tRX(language, "Reasoning agents can only write", "推理 agent 只能写入")} <span style={{ color: "var(--changes)" }}>{tRX(language, "draft", "草稿")}</span> {tRX(language, "findings and action proposals. Structural facts (links, properties, classifications) require a separate canonical write proposal and a stronger approval gate.", "发现和行动建议。结构性事实（链接、属性、分类）需要单独的正式写入提案和更强的审批关口。")}
               </div>
             </div>
           </div>
 
           <div className="section">
-            <div className="section-head"><span>Quick actions</span></div>
+            <div className="section-head"><span>{tRX(language, "Quick actions", "快捷操作")}</span></div>
             <div className="section-body" style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-              <button className="btn ghost" style={{ justifyContent: "flex-start" }}>↗ Open graph context</button>
-              <button className="btn ghost" style={{ justifyContent: "flex-start" }}>≡ Compare with prior run</button>
-              <button className="btn ghost" style={{ justifyContent: "flex-start" }}>⤓ Export evidence pack</button>
+              <button className="btn ghost" style={{ justifyContent: "flex-start" }}>↗ {tRX(language, "Open graph context", "打开图谱上下文")}</button>
+              <button className="btn ghost" style={{ justifyContent: "flex-start" }}>≡ {tRX(language, "Compare with prior run", "与上次运行对比")}</button>
+              <button className="btn ghost" style={{ justifyContent: "flex-start" }}>⤓ {tRX(language, "Export evidence pack", "导出证据包")}</button>
             </div>
           </div>
           </React.Fragment>
@@ -1931,10 +2011,10 @@ function AutopilotWorkspace({
     <React.Fragment>
       <div className="art-header">
         <div className="crumb">
-          <span className="type">Reasoning Autopilot</span>
+          <span className="type">{tRX(language, "Reasoning Autopilot", "推理 Autopilot")}</span>
           <span className="sep">/</span>
-          <span>{session ? session.session_key : selectedKey || "new session"}</span>
-          {detailQ.loading && <span className="pill" style={{ marginLeft: "auto" }}><span className="dot" />Loading detail…</span>}
+          <span>{session ? session.session_key : selectedKey || tRX(language, "new session", "新会话")}</span>
+          {detailQ.loading && <span className="pill" style={{ marginLeft: "auto" }}><span className="dot" />{tRX(language, "Loading detail…", "加载详情…")}</span>}
         </div>
         <h1>{session ? resultTextRX(session.objective, language) : tRX(language, "Autopilot Discovery", "Autopilot 自动发现")}</h1>
         <p className="desc">
@@ -1944,25 +2024,25 @@ function AutopilotWorkspace({
         </p>
         <div className="row">
           <div className="stat">
-            <span className="label">Hypotheses</span>
+            <span className="label">{tRX(language, "Hypotheses", "假设")}</span>
             <span className="val mono">{hypotheses.length}</span>
           </div>
           <div className="stat">
-            <span className="label">Candidate findings</span>
+            <span className="label">{tRX(language, "Candidate findings", "候选发现")}</span>
             <span className="val mono">{candidates.length}</span>
           </div>
           <div className="stat">
-            <span className="label">Write scope</span>
+            <span className="label">{tRX(language, "Write scope", "写入范围")}</span>
             <span className="val" style={{ color: "var(--changes)" }}>{safety.write_scope || "draft_only"}</span>
           </div>
           <div className="stat">
-            <span className="label">Canonical writes</span>
+            <span className="label">{tRX(language, "Canonical writes", "正式写入")}</span>
             <span className="val" style={{ color: "var(--rejected)" }}>{safety.canonical_writes || "disabled"}</span>
           </div>
           <div className="stat">
-            <span className="label">Sensitive fields</span>
+            <span className="label">{tRX(language, "Sensitive fields", "敏感字段")}</span>
             <span className="val" style={{ color: safety.allow_sensitive_fields ? "var(--rejected)" : "var(--approved)" }}>
-              {safety.allow_sensitive_fields ? "allowed" : "blocked"}
+              {safety.allow_sensitive_fields ? tRX(language, "allowed", "允许") : tRX(language, "blocked", "已阻断")}
             </span>
           </div>
         </div>
@@ -1986,15 +2066,15 @@ function AutopilotWorkspace({
             <Panel eyebrow={tRX(language, "Run trace", "运行轨迹")} title={tRX(language, "Autopilot execution trace", "Autopilot 执行轨迹")} count={`${trace.length} ${tRX(language, "events", "事件")}`} style={{ marginBottom: 16 }}>
               {trace.length === 0 ? (
                 <div style={{ color: "var(--muted)", fontFamily: "var(--font-mono)", fontSize: 11 }}>
-                  No trace events yet. The playbook will append hypotheses and candidate findings through the Autopilot API.
+                  {tRX(language, "No trace events yet. The playbook will append hypotheses and candidate findings through the Autopilot API.", "暂无轨迹事件。Playbook 会通过 Autopilot API 追加假设和候选发现。")}
                 </div>
               ) : (
                 <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                   {trace.map((event, idx) => (
                     <div key={idx} style={{ display: "grid", gridTemplateColumns: "120px 1fr auto", gap: 10, padding: "9px 10px", border: "1px solid var(--line)", background: "var(--bg-1)", alignItems: "center" }}>
-                      <span className="eyebrow" style={{ color: event.tone || "var(--accent)" }}>{event.kind}</span>
+                      <span className="eyebrow" style={{ color: event.tone || "var(--accent)" }}>{statusTextRX(event.kind, language)}</span>
                       <span style={{ fontSize: 12, color: "var(--text-dim)", lineHeight: 1.45 }}>{resultTextRX(event.title, language)}</span>
-                      <span className="mono" style={{ fontSize: 10, color: "var(--muted)" }}>{event.status}</span>
+                      <span className="mono" style={{ fontSize: 10, color: "var(--muted)" }}>{statusTextRX(event.status, language)}</span>
                     </div>
                   ))}
                 </div>
@@ -2006,7 +2086,7 @@ function AutopilotWorkspace({
                 <MetricMini label={tRX(language, "Complete chains", "完整链路")} value={deepGraphCandidates.length} />
                 <MetricMini label={tRX(language, "Incomplete chains", "不完整链路")} value={incompleteGraphCandidates.length} />
                 <MetricMini label={tRX(language, "Max hops", "最大跳数")} value={Math.max(0, ...candidates.map(c => c.deep_graph_profile?.hop_count || 0))} />
-                <MetricMini label={tRX(language, "Required path", "要求路径")} value="5 steps" />
+                <MetricMini label={tRX(language, "Required path", "要求路径")} value={tRX(language, "5 steps", "5 步")} />
               </div>
               {deepGraphCandidates.length === 0 ? (
                 <div style={{ color: "var(--muted)", fontFamily: "var(--font-mono)", fontSize: 11 }}>
@@ -2024,14 +2104,14 @@ function AutopilotWorkspace({
             <Panel eyebrow={tRX(language, "Hypothesis queue", "假设队列")} title={tRX(language, "Queued reasoning hypotheses", "排队中的推理假设")} count={`${hypotheses.length} ${tRX(language, "items", "项")}`} style={{ marginBottom: 16 }}>
               {hypotheses.length === 0 ? (
                 <div style={{ color: "var(--muted)", fontFamily: "var(--font-mono)", fontSize: 11 }}>
-                  No hypotheses yet. Run a tenant playbook to populate this queue with draft candidate findings.
+                  {tRX(language, "No hypotheses yet. Run a tenant playbook to populate this queue with draft candidate findings.", "暂无假设。运行租户 playbook 后会用候选发现草稿填充该队列。")}
                 </div>
               ) : (
                 <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                   {hypotheses.map(h => (
                     <div key={h.hypothesis_key} style={{ border: "1px solid var(--line)", background: "var(--bg-1)", padding: 12 }}>
                       <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 6 }}>
-                        <Pill kind={h.status === "pruned" ? "rejected" : h.status === "completed" ? "approved" : "changes"}>{h.status}</Pill>
+                        <Pill kind={h.status === "pruned" ? "rejected" : h.status === "completed" ? "approved" : "changes"}>{statusTextRX(h.status, language)}</Pill>
                         <strong style={{ color: "var(--text)", fontSize: 13 }}>{resultTextRX(h.title, language)}</strong>
                         <span className="mono" style={{ marginLeft: "auto", color: "var(--muted)", fontSize: 10 }}>p{h.priority}</span>
                       </div>
@@ -2041,7 +2121,7 @@ function AutopilotWorkspace({
                       )}
                       {h.evidence_plan?.length > 0 && (
                         <div className="mono" style={{ marginTop: 8, color: "var(--muted)", fontSize: 10 }}>
-                          Evidence plan: {h.evidence_plan.map(p => p.metric || p.kind || p.source_ref).filter(Boolean).join(" · ")}
+                          {tRX(language, "Evidence plan", "证据计划")}: {h.evidence_plan.map(p => p.metric || p.kind || p.source_ref).filter(Boolean).join(" · ")}
                         </div>
                       )}
                     </div>
@@ -2051,7 +2131,7 @@ function AutopilotWorkspace({
             </Panel>
 
             {(tenant?.id === "creditcardfraud" || tenant?.id === "maritime-risk") && (
-              <Panel eyebrow="Playbook" title={tenant?.id === "maritime-risk" ? tRX(language, "Maritime-risk graph reasoning playbook", "Maritime-risk 图推理 Playbook") : tRX(language, "Creditcardfraud discovery playbook", "信用卡欺诈发现 Playbook")} count="draft-only" style={{ marginBottom: 16 }}>
+              <Panel eyebrow="Playbook" title={tenant?.id === "maritime-risk" ? tRX(language, "Maritime-risk graph reasoning playbook", "Maritime-risk 图推理 Playbook") : tRX(language, "Creditcardfraud discovery playbook", "信用卡欺诈发现 Playbook")} count={tRX(language, "draft-only", "仅草稿")} style={{ marginBottom: 16 }}>
                 <div style={{ display: "flex", gap: 10, alignItems: "center", color: "var(--muted)", fontSize: 12, lineHeight: 1.5 }}>
                   <span>{tenant?.id === "maritime-risk"
                     ? tRX(language, "Run the fixed maritime playbook to populate chokepoint dependency, hazard-adjusted risk, and country-priority graph findings, plus a pruned non-graph ranking hypothesis.", "运行固定 maritime playbook，生成咽喉点依赖、风险因子调整、国家优先级等图推理发现，并保留一条已剪枝的非图排名假设。")
@@ -2066,7 +2146,7 @@ function AutopilotWorkspace({
             <Panel eyebrow={tRX(language, "Finding Inbox", "发现收件箱")} title={tRX(language, "Draft candidate findings", "候选发现草稿")} count={`${candidates.length} ${tRX(language, "candidates", "候选")}`} style={{ marginBottom: 16 }}>
               {candidates.length === 0 ? (
                 <div style={{ color: "var(--muted)", fontFamily: "var(--font-mono)", fontSize: 11 }}>
-                  No candidate findings yet. Autopilot UI is wired; the discovery playbook will fill this inbox with draft candidates.
+                  {tRX(language, "No candidate findings yet. Autopilot UI is wired; the discovery playbook will fill this inbox with draft candidates.", "暂无候选发现。Autopilot UI 已接通，发现 playbook 会把候选草稿写入这里。")}
                 </div>
               ) : (
                 <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
@@ -2077,8 +2157,8 @@ function AutopilotWorkspace({
                     return (
                     <div key={c.canonical_key} style={{ border: "1px solid var(--line)", background: "var(--bg-1)", padding: 14 }}>
                       <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 8 }}>
-                        <Pill kind={c.status === "rejected" ? "rejected" : c.status === "needs_more_evidence" ? "changes" : "proposed"}>{c.status}</Pill>
-                        <strong style={{ color: "var(--text)", fontSize: 14 }}>{displayCandidateTitleRX(c, language)}</strong>
+                        <Pill kind={c.status === "rejected" ? "rejected" : c.status === "needs_more_evidence" ? "changes" : "proposed"}>{statusTextRX(c.status, language)}</Pill>
+                <strong style={{ color: "var(--text)", fontSize: 14 }}>{displayCandidateTitleRX(c, language)}</strong>
                       </div>
                       <div style={{ color: "var(--text-dim)", fontSize: 13, lineHeight: 1.55 }}>{displayCandidateConclusionRX(c, language)}</div>
                       {c.deep_graph_profile && (
@@ -2093,7 +2173,7 @@ function AutopilotWorkspace({
                       <div style={{ marginTop: 12, borderTop: "1px solid var(--line)", paddingTop: 10 }}>
                         <div className="eyebrow" style={{ marginBottom: 6 }}>{tRX(language, "Evidence chain", "证据链")}</div>
                         {(c.evidence_chain || []).length === 0 ? (
-                          <div style={{ color: "var(--rejected)", fontSize: 11 }}>Missing evidence chain; should not pass final validation.</div>
+                          <div style={{ color: "var(--rejected)", fontSize: 11 }}>{tRX(language, "Missing evidence chain; should not pass final validation.", "缺少证据链；不应通过最终验证。")}</div>
                         ) : (
                           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                             {(c.evidence_chain || []).map((e, i) => (
@@ -2121,13 +2201,13 @@ function AutopilotWorkspace({
                             fontSize: 11,
                             lineHeight: 1.45,
                           }}>
-                            Review note required before rejecting or requesting more evidence.
+                            {tRX(language, "Review note required before rejecting or requesting more evidence.", "拒绝或要求更多证据前必须填写审核说明。")}
                           </div>
                         )}
                         <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
                           {isReviewed ? (
                             <span style={{ color: c.status === "approved" ? "var(--approved)" : c.status === "rejected" ? "var(--rejected)" : "var(--changes)", fontSize: 11 }}>
-                              {tRX(language, "Review recorded", "复核已记录")} · {c.status === "approved" ? tRX(language, "approved finding created", "已创建批准发现") : c.status}
+                              {tRX(language, "Review recorded", "复核已记录")} · {c.status === "approved" ? tRX(language, "approved finding created", "已创建批准发现") : statusTextRX(c.status, language)}
                             </span>
                           ) : (
                             <>
@@ -2144,7 +2224,7 @@ function AutopilotWorkspace({
                           <div style={{ marginTop: 8 }}>
                             <textarea className="textarea" rows={2} value={reviewReason}
                                       onChange={e => { setReviewReason(e.target.value); setReviewMissingKey(""); }}
-                                      placeholder="Optional note for approval; required for reject or needs-more-evidence." />
+                                      placeholder={tRX(language, "Optional note for approval; required for reject or needs-more-evidence.", "批准时备注可选；拒绝或要求更多证据时必填。")} />
                           </div>
                         )}
                       </div>
@@ -2154,13 +2234,13 @@ function AutopilotWorkspace({
               )}
             </Panel>
 
-            <Panel eyebrow="Review gate" title="Candidate review note" count="human approval required">
+            <Panel eyebrow={tRX(language, "Review gate", "审核关口")} title={tRX(language, "Candidate review note", "候选审核说明")} count={tRX(language, "human approval required", "需要人工批准")}>
               <textarea className="textarea" rows={3} value={reviewReason}
                         onChange={e => { setReviewReason(e.target.value); setReviewMissingKey(""); }}
                         onFocus={() => setReviewTargetKey(reviewTargetKey || (candidates[0] && candidates[0].canonical_key) || "")}
-                        placeholder="Reason required for approve / reject / needs more evidence." />
+                        placeholder={tRX(language, "Reason required for reject / needs more evidence; optional for approve.", "拒绝/要求更多证据时必须填写原因；批准时可选。")} />
               <div style={{ marginTop: 8, color: "var(--muted)", fontSize: 11, lineHeight: 1.5 }}>
-                Candidate approval creates a reviewed Finding Registry entry. It can be reused as prior_finding context and can draft next actions/proposals, but does not write canonical ontology or graph.
+                {tRX(language, "Candidate approval creates a reviewed Finding Registry entry. It can be reused as prior_finding context and can draft next actions/proposals, but does not write canonical ontology or graph.", "候选批准后会创建已审核的 Finding Registry 条目。它可以作为 prior_finding 上下文复用，也可以草拟后续行动/提案，但不会写入正式本体或图谱。")}
               </div>
             </Panel>
           </React.Fragment>
@@ -2233,38 +2313,38 @@ function graphStepLabelRX(step, language) {
   return tRX(language, pair[0], pair[1]);
 }
 
-function AutopilotStartPanel({ tenant, objective, setObjective, maxHypotheses, setMaxHypotheses, maxRuns, setMaxRuns, maxToolCalls, setMaxToolCalls, starting, onStart, onRunPlaybook, playbookRunning, detail }) {
+function AutopilotStartPanel({ tenant, objective, setObjective, maxHypotheses, setMaxHypotheses, maxRuns, setMaxRuns, maxToolCalls, setMaxToolCalls, starting, onStart, onRunPlaybook, playbookRunning, detail, language }) {
   const safety = detail?.session?.safety_profile || {};
   const budget = detail?.session?.budget || {};
   return (
     <React.Fragment>
       <div className="section">
-        <div className="section-head"><span>Start Autopilot</span></div>
+        <div className="section-head"><span>{tRX(language, "Start Autopilot", "启动 Autopilot")}</span></div>
         <div className="section-body">
           <form onSubmit={onStart} style={{ display: "flex", flexDirection: "column", gap: 10 }}>
             <div>
-              <div className="eyebrow" style={{ marginBottom: 4 }}>Objective</div>
+              <div className="eyebrow" style={{ marginBottom: 4 }}>{tRX(language, "Objective", "目标")}</div>
               <textarea className="textarea" rows={3} value={objective} onChange={e => setObjective(e.target.value)}
-                        placeholder="Find high-value candidate findings…" />
+                        placeholder={tRX(language, "Find high-value candidate findings…", "发现高价值候选发现…")} />
             </div>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 6 }}>
               <div>
-                <div className="eyebrow" style={{ marginBottom: 4 }}>Hypotheses</div>
+                <div className="eyebrow" style={{ marginBottom: 4 }}>{tRX(language, "Hypotheses", "假设")}</div>
                 <input className="input" type="number" min={1} max={25} value={maxHypotheses} onChange={e => setMaxHypotheses(+e.target.value)} />
               </div>
               <div>
-                <div className="eyebrow" style={{ marginBottom: 4 }}>Runs</div>
+                <div className="eyebrow" style={{ marginBottom: 4 }}>{tRX(language, "Runs", "运行")}</div>
                 <input className="input" type="number" min={1} max={20} value={maxRuns} onChange={e => setMaxRuns(+e.target.value)} />
               </div>
               <div>
-                <div className="eyebrow" style={{ marginBottom: 4 }}>Tool calls</div>
+                <div className="eyebrow" style={{ marginBottom: 4 }}>{tRX(language, "Tool calls", "工具调用")}</div>
                 <input className="input" type="number" min={1} max={80} value={maxToolCalls} onChange={e => setMaxToolCalls(+e.target.value)} />
               </div>
             </div>
-            <button className="btn primary" type="submit" disabled={starting}>{starting ? "Starting…" : "▶ Start Autopilot"}</button>
+            <button className="btn primary" type="submit" disabled={starting}>{starting ? tRX(language, "Starting…", "启动中…") : "▶ " + tRX(language, "Start Autopilot", "启动 Autopilot")}</button>
             {(tenant?.id === "creditcardfraud" || tenant?.id === "maritime-risk") && (
               <button className="btn" type="button" onClick={onRunPlaybook} disabled={playbookRunning}>
-                {playbookRunning ? "Running playbook…" : tenant?.id === "maritime-risk" ? "Run maritime-risk playbook" : "Run creditcardfraud playbook"}
+                {playbookRunning ? tRX(language, "Running playbook…", "Playbook 运行中…") : tenant?.id === "maritime-risk" ? tRX(language, "Run maritime-risk playbook", "运行 maritime-risk playbook") : tRX(language, "Run creditcardfraud playbook", "运行 creditcardfraud playbook")}
               </button>
             )}
           </form>
@@ -2272,24 +2352,24 @@ function AutopilotStartPanel({ tenant, objective, setObjective, maxHypotheses, s
       </div>
 
       <div className="section">
-        <div className="section-head"><span>Safety profile</span></div>
+        <div className="section-head"><span>{tRX(language, "Safety profile", "安全配置")}</span></div>
         <div className="section-body" style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          <BoundaryLine label="Tenant" value={tenant ? tenant.id : "default"} />
-          <BoundaryLine label="Safe views only" value={String(safety.safe_views_only !== false)} tone="var(--approved)" />
-          <BoundaryLine label="Sensitive fields" value={safety.allow_sensitive_fields ? "allowed" : "blocked"} tone={safety.allow_sensitive_fields ? "var(--rejected)" : "var(--approved)"} />
-          <BoundaryLine label="Canonical writes" value={safety.canonical_writes || "disabled"} tone="var(--rejected)" />
-          <BoundaryLine label="Auto approve" value={String(!!safety.auto_approve_findings)} tone={safety.auto_approve_findings ? "var(--rejected)" : "var(--approved)"} />
-          <BoundaryLine label="Blocked field group" value={(safety.blocked_fields || []).length ? (safety.blocked_fields || []).join(", ") : "none"} />
+          <BoundaryLine label={tRX(language, "Tenant", "租户")} value={tenant ? tenant.id : "default"} />
+          <BoundaryLine label={tRX(language, "Safe views only", "仅安全视图")} value={String(safety.safe_views_only !== false)} tone="var(--approved)" />
+          <BoundaryLine label={tRX(language, "Sensitive fields", "敏感字段")} value={safety.allow_sensitive_fields ? tRX(language, "allowed", "允许") : tRX(language, "blocked", "已阻断")} tone={safety.allow_sensitive_fields ? "var(--rejected)" : "var(--approved)"} />
+          <BoundaryLine label={tRX(language, "Canonical writes", "正式写入")} value={safety.canonical_writes || "disabled"} tone="var(--rejected)" />
+          <BoundaryLine label={tRX(language, "Auto approve", "自动批准")} value={String(!!safety.auto_approve_findings)} tone={safety.auto_approve_findings ? "var(--rejected)" : "var(--approved)"} />
+          <BoundaryLine label={tRX(language, "Blocked field group", "阻断字段组")} value={(safety.blocked_fields || []).length ? (safety.blocked_fields || []).join(", ") : tRX(language, "none", "无")} />
         </div>
       </div>
 
       <div className="section">
-        <div className="section-head"><span>Budget</span></div>
+        <div className="section-head"><span>{tRX(language, "Budget", "预算")}</span></div>
         <div className="section-body" style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          <BoundaryLine label="Max hypotheses" value={budget.max_hypotheses || maxHypotheses} />
-          <BoundaryLine label="Max reasoning tasks" value={budget.max_reasoning_tasks || maxRuns} />
-          <BoundaryLine label="Max tool calls" value={budget.max_tool_calls || maxToolCalls} />
-          <BoundaryLine label="Sample strategy" value={budget.sample_strategy || "deterministic_full_table_aggregates"} />
+          <BoundaryLine label={tRX(language, "Max hypotheses", "最大假设数")} value={budget.max_hypotheses || maxHypotheses} />
+          <BoundaryLine label={tRX(language, "Max reasoning tasks", "最大推理任务数")} value={budget.max_reasoning_tasks || maxRuns} />
+          <BoundaryLine label={tRX(language, "Max tool calls", "最大工具调用数")} value={budget.max_tool_calls || maxToolCalls} />
+          <BoundaryLine label={tRX(language, "Sample strategy", "采样策略")} value={budget.sample_strategy || "deterministic_full_table_aggregates"} />
         </div>
       </div>
     </React.Fragment>
@@ -2531,7 +2611,7 @@ function ontologyBasisLabel(key) {
   return labels[key] || key;
 }
 
-function OntologyBasisPanel({ task, tenant }) {
+function OntologyBasisPanel({ task, tenant, language }) {
   if (!task) return null;
   const scope = task.scope || {};
   const keys = new Set();
@@ -2546,20 +2626,20 @@ function OntologyBasisPanel({ task, tenant }) {
   const tenantId = tenant ? tenant.id : "default";
   return (
     <div className="section">
-      <div className="section-head"><span>Ontology basis</span><span className="ct">{list.length}</span></div>
+      <div className="section-head"><span>{tRX(language, "Ontology basis", "本体依据")}</span><span className="ct">{list.length}</span></div>
       <div className="section-body" style={{ display: "flex", flexDirection: "column", gap: 6 }}>
         {list.map(key => (
           <a key={key}
              className="btn ghost"
              href={`/?screen=ontology&tenant=${encodeURIComponent(tenantId)}&artifact=${encodeURIComponent(key)}`}
              style={{ justifyContent: "space-between", gap: 10 }}
-             title="Open full ontology governance details in Ontology.">
+             title={tRX(language, "Open full ontology governance details in Ontology.", "在 Ontology 中打开完整本体治理详情。")}>
             <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{ontologyBasisLabel(key)}</span>
-            <span style={{ color: "var(--accent)", flexShrink: 0 }}>View in Ontology</span>
+            <span style={{ color: "var(--accent)", flexShrink: 0 }}>{tRX(language, "View in Ontology", "在 Ontology 中查看")}</span>
           </a>
         ))}
         <div style={{ fontSize: 11, color: "var(--muted)", lineHeight: 1.55 }}>
-          Compact basis only. Detailed source mapping, approval audit, canonical state, and graph eligibility live in Ontology.
+          {tRX(language, "Compact basis only. Detailed source mapping, approval audit, canonical state, and graph eligibility live in Ontology.", "这里只显示紧凑依据。详细源映射、审批审计、正式状态和图谱资格在 Ontology 中查看。")}
         </div>
       </div>
     </div>
@@ -2585,7 +2665,7 @@ function ApprovedFindingRegistry({ findings, query, tenant, filters, setFilters,
         priority: "medium",
         reviewer: "M. Aoki",
       }, tenantId);
-      setActionMsg && setActionMsg({ kind: "ok", msg: "Workspace action created." });
+      setActionMsg && setActionMsg({ kind: "ok", msg: tRX(language, "Workspace action created.", "Workspace 行动已创建。") });
       window.dispatchEvent(new CustomEvent("aletheia:retry"));
     } catch (err) {
       setActionMsg && setActionMsg({ kind: "err", msg: err.message || String(err) });
@@ -2599,7 +2679,7 @@ function ApprovedFindingRegistry({ findings, query, tenant, filters, setFilters,
         reviewer: "M. Aoki",
         reason: `Registry action ${action}`,
       }, tenantId);
-      setActionMsg && setActionMsg({ kind: "ok", msg: `Action ${action} recorded.` });
+      setActionMsg && setActionMsg({ kind: "ok", msg: tRX(language, "Action recorded.", "行动已记录。") });
       window.dispatchEvent(new CustomEvent("aletheia:retry"));
     } catch (err) {
       setActionMsg && setActionMsg({ kind: "err", msg: err.message || String(err) });
@@ -2607,7 +2687,7 @@ function ApprovedFindingRegistry({ findings, query, tenant, filters, setFilters,
   }
   async function batch(action) {
     if (!selectedKeys.length) {
-      setActionMsg && setActionMsg({ kind: "err", msg: "Select findings for batch revalidation." });
+      setActionMsg && setActionMsg({ kind: "err", msg: tRX(language, "Select findings for batch revalidation.", "请选择要批量复验的发现。") });
       return;
     }
     try {
@@ -2620,7 +2700,7 @@ function ApprovedFindingRegistry({ findings, query, tenant, filters, setFilters,
         reason: `Batch ${action} from Approved Finding Registry`,
       });
       setSelected({});
-      setActionMsg && setActionMsg({ kind: "ok", msg: `Batch ${action} recorded for ${selectedKeys.length} findings.` });
+      setActionMsg && setActionMsg({ kind: "ok", msg: tRX(language, "Batch review recorded for ", "已批量记录 ") + selectedKeys.length + tRX(language, " findings.", " 个发现。") });
       window.dispatchEvent(new CustomEvent("aletheia:retry"));
     } catch (err) {
       setActionMsg && setActionMsg({ kind: "err", msg: err.message || String(err) });
@@ -2630,48 +2710,48 @@ function ApprovedFindingRegistry({ findings, query, tenant, filters, setFilters,
     <div className="section">
       <div className="section-head"><span>{tRX(language, "Approved Finding Registry", "已批准发现库")}</span><span className="ct">{list.length}</span></div>
       <div className="section-body" style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-        <ApiStatus q={query} what="approved findings" />
+        <ApiStatus q={query} what={tRX(language, "approved findings", "已批准发现")} />
         <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 6 }}>
           <select className="input" value={filters.status || ""} onChange={e => updateFilter("status", e.target.value)}>
-            <option value="">Any status</option>
-            <option value="approved">Approved</option>
-            <option value="stale">Stale</option>
-            <option value="superseded">Superseded</option>
-            <option value="rejected">Rejected</option>
-            <option value="needs_more_evidence">Needs evidence</option>
+            <option value="">{tRX(language, "Any status", "任意状态")}</option>
+            <option value="approved">{tRX(language, "Approved", "已批准")}</option>
+            <option value="stale">{tRX(language, "Stale", "已陈旧")}</option>
+            <option value="superseded">{tRX(language, "Superseded", "已替代")}</option>
+            <option value="rejected">{tRX(language, "Rejected", "已拒绝")}</option>
+            <option value="needs_more_evidence">{tRX(language, "Needs evidence", "需补证据")}</option>
           </select>
           <select className="input" value={filters.context || ""} onChange={e => updateFilter("context", e.target.value)}>
-            <option value="">Audit/history</option>
-            <option value="active">Active context</option>
+            <option value="">{tRX(language, "Audit/history", "审计/历史")}</option>
+            <option value="active">{tRX(language, "Active context", "活跃上下文")}</option>
           </select>
           <select className="input" value={filters.finding_type || ""} onChange={e => updateFilter("finding_type", e.target.value)}>
-            <option value="">Any type</option>
-            <option value="risk_pattern">Risk pattern</option>
-            <option value="operational_anomaly">Operational anomaly</option>
-            <option value="quality_issue">Quality issue</option>
-            <option value="ontology_conflict">Ontology conflict</option>
-            <option value="investigation_prompt">Investigation prompt</option>
+            <option value="">{tRX(language, "Any type", "任意类型")}</option>
+            <option value="risk_pattern">{tRX(language, "Risk pattern", "风险模式")}</option>
+            <option value="operational_anomaly">{tRX(language, "Operational anomaly", "运营异常")}</option>
+            <option value="quality_issue">{tRX(language, "Quality issue", "质量问题")}</option>
+            <option value="ontology_conflict">{tRX(language, "Ontology conflict", "本体冲突")}</option>
+            <option value="investigation_prompt">{tRX(language, "Investigation prompt", "调研提示")}</option>
           </select>
           <select className="input" value={filters.action_state || ""} onChange={e => updateFilter("action_state", e.target.value)}>
-            <option value="">Any action</option>
-            <option value="no_action">No action</option>
-            <option value="open_action">Open action</option>
-            <option value="overdue_action">Overdue action</option>
-            <option value="closed_action">Closed action</option>
+            <option value="">{tRX(language, "Any action", "任意行动")}</option>
+            <option value="no_action">{tRX(language, "No action", "无行动")}</option>
+            <option value="open_action">{tRX(language, "Open action", "开放行动")}</option>
+            <option value="overdue_action">{tRX(language, "Overdue action", "逾期行动")}</option>
+            <option value="closed_action">{tRX(language, "Closed action", "已关闭行动")}</option>
           </select>
           <select className="input" value={filters.freshness || ""} onChange={e => updateFilter("freshness", e.target.value)}>
-            <option value="">Any freshness</option>
-            <option value="reaffirmed_recently">Reaffirmed</option>
-            <option value="due_for_revalidation">Due for review</option>
-            <option value="stale">Stale</option>
-            <option value="superseded">Superseded</option>
+            <option value="">{tRX(language, "Any freshness", "任意新鲜度")}</option>
+            <option value="reaffirmed_recently">{tRX(language, "Reaffirmed", "已再次确认")}</option>
+            <option value="due_for_revalidation">{tRX(language, "Due for review", "待复验")}</option>
+            <option value="stale">{tRX(language, "Stale", "已陈旧")}</option>
+            <option value="superseded">{tRX(language, "Superseded", "已替代")}</option>
           </select>
           <select className="input" value={filters.sort || ""} onChange={e => updateFilter("sort", e.target.value)}>
-            <option value="newest_reviewed">Newest reviewed</option>
-            <option value="value_desc">Value score</option>
-            <option value="oldest_unrevalidated">Oldest unrevalidated</option>
-            <option value="action_due_asc">Action due date</option>
-            <option value="confidence_desc">Confidence</option>
+            <option value="newest_reviewed">{tRX(language, "Newest reviewed", "最新复核")}</option>
+            <option value="value_desc">{tRX(language, "Value score", "价值分")}</option>
+            <option value="oldest_unrevalidated">{tRX(language, "Oldest unrevalidated", "最久未复验")}</option>
+            <option value="action_due_asc">{tRX(language, "Action due date", "行动截止时间")}</option>
+            <option value="confidence_desc">{tRX(language, "Confidence", "置信度")}</option>
           </select>
         </div>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
@@ -2679,9 +2759,9 @@ function ApprovedFindingRegistry({ findings, query, tenant, filters, setFilters,
           <input className="input" type="datetime-local" value={dueAt} onChange={e => setDueAt(e.target.value)} />
         </div>
         <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-          <button className="btn xs approve" onClick={() => batch("reaffirm")} disabled={!selectedKeys.length}>Reaffirm selected</button>
-          <button className="btn xs changes" onClick={() => batch("mark_stale")} disabled={!selectedKeys.length}>Mark stale</button>
-          <button className="btn xs" onClick={() => batch("assign_owner")} disabled={!selectedKeys.length}>Assign owner</button>
+          <button className="btn xs approve" onClick={() => batch("reaffirm")} disabled={!selectedKeys.length}>{tRX(language, "Reaffirm selected", "再次确认选中项")}</button>
+          <button className="btn xs changes" onClick={() => batch("mark_stale")} disabled={!selectedKeys.length}>{tRX(language, "Mark stale", "标记陈旧")}</button>
+          <button className="btn xs" onClick={() => batch("assign_owner")} disabled={!selectedKeys.length}>{tRX(language, "Assign owner", "分配负责人")}</button>
         </div>
         {list.length === 0 ? (
           <div style={{ fontSize: 11, color: "var(--muted)", lineHeight: 1.55 }}>
@@ -2703,43 +2783,43 @@ function ApprovedFindingRegistry({ findings, query, tenant, filters, setFilters,
               <a href={`/?screen=reasoning&tenant=${encodeURIComponent(tenantId)}&task=${encodeURIComponent(f.task_key || (f.task && f.task.canonical_key) || "")}`}
                  style={{ color: "var(--text)", textDecoration: "none", flex: 1 }}>
                 <span style={{ fontSize: 10, color: f.reasoning_use ? "var(--approved)" : "var(--muted)", fontFamily: "var(--font-mono)" }}>
-                  {highlighted ? "newly added · " : ""}{f.reasoning_use ? "active prior insight · reviewed_inference" : "audit only"} · {f.source_label || "Reasoning"} · {f.finding_type || "finding"}
+                  {highlighted ? tRX(language, "newly added · ", "新加入 · ") : ""}{f.reasoning_use ? tRX(language, "active prior insight · reviewed_inference", "活跃历史洞察 · reviewed_inference") : tRX(language, "audit only", "仅审计")} · {f.source_label || "Reasoning"} · {f.finding_type || "finding"}
                 </span>
                 <strong style={{ display: "block", fontSize: 12, marginTop: 3 }}>{displayFindingTitleRX(f, language)}</strong>
                 <span style={{ display: "block", fontSize: 11, color: "var(--muted)", lineHeight: 1.4, marginTop: 3 }}>
                   {displayFindingConclusionRX(f, language).slice(0, 140)}
                 </span>
               </a>
-              <Pill kind={f.status === "approved" ? "approved" : f.status === "stale" ? "changes" : f.status === "rejected" ? "rejected" : "proposed"}>{f.status}</Pill>
+              <Pill kind={f.status === "approved" ? "approved" : f.status === "stale" ? "changes" : f.status === "rejected" ? "rejected" : "proposed"}>{statusTextRX(f.status, language)}</Pill>
             </div>
             <div className="mono" style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 8, color: "var(--muted)", fontSize: 10 }}>
-              <span>conf {pctRX(f.confidence, 0)}</span>
-              <span>value {pctRX(f.value_score, 0)}</span>
-              <span>evidence {f.evidence_count || 0}</span>
-              <span>freshness {f.freshness || "-"}</span>
-              <span>action {f.action_summary?.state || "no_action"}</span>
+              <span>{tRX(language, "conf", "置信度")} {pctRX(f.confidence, 0)}</span>
+              <span>{tRX(language, "value", "价值")} {pctRX(f.value_score, 0)}</span>
+              <span>{tRX(language, "evidence", "证据")} {f.evidence_count || 0}</span>
+              <span>{tRX(language, "freshness", "新鲜度")} {f.freshness || "-"}</span>
+              <span>{tRX(language, "action", "行动")} {f.action_summary?.state || "no_action"}</span>
             </div>
             {f.action_summary?.primary ? (
               <div style={{ marginTop: 8, borderTop: "1px solid var(--line)", paddingTop: 8, display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
                 <span style={{ fontSize: 11, color: "var(--text-dim)" }}>
-                  {f.action_summary.primary.owner || "unowned"} · due {f.action_summary.primary.due_at || "-"} · {f.action_summary.primary.status}
+                  {f.action_summary.primary.owner || tRX(language, "unowned", "未分配")} · {tRX(language, "due", "截止")} {f.action_summary.primary.due_at || "-"} · {statusTextRX(f.action_summary.primary.status, language)}
                 </span>
                 <select className="input" value={result} onChange={e => setResult(e.target.value)} style={{ width: 150 }}>
-                  <option value="confirmed_risk">confirmed risk</option>
-                  <option value="false_positive">false positive</option>
-                  <option value="evidence_added">evidence added</option>
-                  <option value="proposal_created">proposal created</option>
-                  <option value="no_action_needed">no action needed</option>
-                  <option value="rerun_scheduled">rerun scheduled</option>
+                  <option value="confirmed_risk">{tRX(language, "confirmed risk", "确认风险")}</option>
+                  <option value="false_positive">{tRX(language, "false positive", "误报")}</option>
+                  <option value="evidence_added">{tRX(language, "evidence added", "已补证据")}</option>
+                  <option value="proposal_created">{tRX(language, "proposal created", "已创建提案")}</option>
+                  <option value="no_action_needed">{tRX(language, "no action needed", "无需行动")}</option>
+                  <option value="rerun_scheduled">{tRX(language, "rerun scheduled", "已安排重跑")}</option>
                 </select>
-                <button className="btn xs" onClick={() => transitionAction(f.action_summary.primary.action_key, "start")}>Start</button>
-                <button className="btn xs changes" onClick={() => transitionAction(f.action_summary.primary.action_key, "block")}>Block</button>
-                <button className="btn xs approve" onClick={() => transitionAction(f.action_summary.primary.action_key, "close")}>Close</button>
-                <button className="btn xs" onClick={() => transitionAction(f.action_summary.primary.action_key, "reopen")}>Reopen</button>
+                <button className="btn xs" onClick={() => transitionAction(f.action_summary.primary.action_key, "start")}>{tRX(language, "Start", "开始")}</button>
+                <button className="btn xs changes" onClick={() => transitionAction(f.action_summary.primary.action_key, "block")}>{tRX(language, "Block", "阻塞")}</button>
+                <button className="btn xs approve" onClick={() => transitionAction(f.action_summary.primary.action_key, "close")}>{tRX(language, "Close", "关闭")}</button>
+                <button className="btn xs" onClick={() => transitionAction(f.action_summary.primary.action_key, "reopen")}>{tRX(language, "Reopen", "重开")}</button>
               </div>
             ) : (
               <div style={{ marginTop: 8 }}>
-                <button className="btn xs" onClick={() => createAction(f)}>Create action</button>
+                <button className="btn xs" onClick={() => createAction(f)}>{tRX(language, "Create action", "创建行动")}</button>
               </div>
             )}
           </div>
@@ -2977,7 +3057,7 @@ Object.assign(window, { TraceLog, TraceEventBody });
 /* ---------------- AskHero ----------------
    The centered ask form shown when askMode is true, or as
    empty state. Question-first, scope-second. */
-function AskHero({ tenant, question, setQuestion, centerNode, setCenterNode, depth, setDepth, limit, setLimit, isMock, submitting, actionMsg, onDismissMsg, onCancel, onSubmit }) {
+function AskHero({ tenant, question, setQuestion, centerNode, setCenterNode, depth, setDepth, limit, setLimit, isMock, submitting, actionMsg, onDismissMsg, onCancel, onSubmit, language }) {
   const tenantId = tenant ? tenant.id : "default";
   const isFraudTenant = tenantId === "creditcardfraud";
 
@@ -3096,7 +3176,7 @@ function AskHero({ tenant, question, setQuestion, centerNode, setCenterNode, dep
     let prev = prevLabelRef.current;
     const q = questionRef.current.trim();
     if (!q || q === tenantEmptyQuestionRX(tenantId)) {
-      setQuestion(defaultQuestionForTenantRX(tenantId, pickedType, newLabel, ent.id));
+      setQuestion(questionTextRX(defaultQuestionForTenantRX(tenantId, pickedType, newLabel, ent.id), language));
     } else if (prev && prev.length > 1 && q.includes(prev)) {
       setQuestion(q.split(prev).join(newLabel));
     } else {
@@ -3150,7 +3230,7 @@ function AskHero({ tenant, question, setQuestion, centerNode, setCenterNode, dep
     <div style={{ flex: 1, overflow: "auto", padding: "var(--pad-5) var(--pad-6)", position: "relative" }}>
       {/* close button — top right of the canvas */}
       <button onClick={onCancel} type="button"
-              title="Close (Esc)"
+              title={tRX(language, "Close (Esc)", "关闭（Esc）")}
               style={{
                 position: "absolute",
                 top: 20, right: 24,
@@ -3172,7 +3252,7 @@ function AskHero({ tenant, question, setQuestion, centerNode, setCenterNode, dep
       </button>
       <div style={{ maxWidth: 760, margin: "0 auto" }}>
         <div style={{ display: "flex", alignItems: "baseline", gap: 14, marginBottom: 8 }}>
-          <div className="eyebrow accent">New reasoning task</div>
+          <div className="eyebrow accent">{tRX(language, "New reasoning task", "新推理任务")}</div>
           <button onClick={onCancel} type="button"
                   style={{
                     fontFamily: "var(--font-mono)",
@@ -3187,23 +3267,23 @@ function AskHero({ tenant, question, setQuestion, centerNode, setCenterNode, dep
                     textDecoration: "underline",
                     textUnderlineOffset: 3,
                   }}>
-            ← back to task list
+            ← {tRX(language, "back to task list", "返回任务列表")}
           </button>
         </div>
         <h1 style={{ fontSize: 28, fontWeight: 600, margin: "0 0 8px 0", lineHeight: 1.15 }}>
-          {isFraudTenant ? "Ask a fraud-scoped question." : "Ask a scoped question."}
+          {isFraudTenant ? tRX(language, "Ask a fraud-scoped question.", "提出欺诈范围问题。") : tRX(language, "Ask a scoped question.", "提出范围问题。")}
         </h1>
         <p style={{ color: "var(--muted)", fontSize: 14, lineHeight: 1.55, margin: "0 0 24px 0", maxWidth: "60ch" }}>
-          The agent reasons only over the approved graph and live source objects for this tenant. A scoped question pins a center node, depth, and limit — and produces a <span style={{ color: "var(--changes)" }}>draft</span> finding that you can review.
+          {tRX(language, "The agent reasons only over the approved graph and live source objects for this tenant. A scoped question pins a center node, depth, and limit — and produces a", "Agent 只基于该租户的已批准图谱和 live source 对象推理。范围问题会固定中心节点、深度和上限，并生成可审核的")} <span style={{ color: "var(--changes)" }}>{tRX(language, "draft", "草稿")}</span> {tRX(language, "finding that you can review.", "发现。")}
         </p>
 
         <form onSubmit={onSubmit}>
           <div style={{ border: "1px solid var(--line-strong)", background: "var(--bg-2)" }}>
             <div style={{ padding: "var(--pad-4) var(--pad-4)" }}>
-              <div className="eyebrow" style={{ marginBottom: 6 }}>Question</div>
+              <div className="eyebrow" style={{ marginBottom: 6 }}>{tRX(language, "Question", "问题")}</div>
               <textarea autoFocus value={question} onChange={onQuestionChange}
                         rows={3}
-                        placeholder={isFraudTenant ? "e.g. Which transactions have elevated fraud risk?" : "e.g. Why is Employee #4 workload unusual?"}
+                        placeholder={isFraudTenant ? tRX(language, "e.g. Which transactions have elevated fraud risk?", "例如：哪些交易存在更高欺诈风险？") : tRX(language, "e.g. Why is Employee #4 workload unusual?", "例如：为什么 Employee #4 的工作量异常？")}
                         style={{
                           width: "100%",
                           background: "var(--bg-1)",
@@ -3219,7 +3299,7 @@ function AskHero({ tenant, question, setQuestion, centerNode, setCenterNode, dep
             </div>
             <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr", borderTop: "1px solid var(--line)" }}>
               <div style={{ padding: "var(--pad-3) var(--pad-4)", borderRight: "1px solid var(--line)" }}>
-                <div className="eyebrow" style={{ marginBottom: 4 }}>Center node</div>
+                <div className="eyebrow" style={{ marginBottom: 4 }}>{tRX(language, "Center node", "中心节点")}</div>
                 <div style={{ display: "flex", gap: 6 }} ref={dropdownRef}>
                   <select className="input" value={pickedType} onChange={onTypeChange}
                           style={{ width: 110, flexShrink: 0, cursor: "pointer" }}>
@@ -3230,7 +3310,7 @@ function AskHero({ tenant, question, setQuestion, centerNode, setCenterNode, dep
                            value={entityQuery}
                            onChange={onEntityQueryChange}
                            onFocus={() => setShowDropdown(true)}
-                           placeholder={entitiesLoading ? "Loading…" : entityTypes.length ? (entities.length ? entities[0].label || entities[0].id : "Search…") : "No tenant objects"} />
+                           placeholder={entitiesLoading ? tRX(language, "Loading…", "加载中…") : entityTypes.length ? (entities.length ? entities[0].label || entities[0].id : tRX(language, "Search…", "搜索…")) : tRX(language, "No tenant objects", "无租户对象")} />
                     {showDropdown && entities.length > 0 && (
                       <div style={{
                         position: "absolute", top: "100%", left: 0, right: 0, zIndex: 20,
@@ -3267,12 +3347,12 @@ function AskHero({ tenant, question, setQuestion, centerNode, setCenterNode, dep
                 )}
               </div>
               <div style={{ padding: "var(--pad-3) var(--pad-4)", borderRight: "1px solid var(--line)" }}>
-                <div className="eyebrow" style={{ marginBottom: 4 }}>Depth</div>
+                <div className="eyebrow" style={{ marginBottom: 4 }}>{tRX(language, "Depth", "深度")}</div>
                 <input className="input" type="number" min={1} max={3}
                        value={depth} onChange={e => setDepth(+e.target.value)} />
               </div>
               <div style={{ padding: "var(--pad-3) var(--pad-4)" }}>
-                <div className="eyebrow" style={{ marginBottom: 4 }}>Limit</div>
+                <div className="eyebrow" style={{ marginBottom: 4 }}>{tRX(language, "Limit", "上限")}</div>
                 <input className="input" type="number" value={limit} onChange={e => setLimit(+e.target.value)} />
               </div>
             </div>
@@ -3284,13 +3364,13 @@ function AskHero({ tenant, question, setQuestion, centerNode, setCenterNode, dep
               alignItems: "center",
               gap: 10,
             }}>
-              <span className="eyebrow" style={{ color: "var(--muted)" }}>Scope</span>
+              <span className="eyebrow" style={{ color: "var(--muted)" }}>{tRX(language, "Scope", "范围")}</span>
               <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-dim)" }}>
-                approved-only · tenant-scoped · agent writes <span style={{ color: "var(--changes)" }}>draft</span> only
+                {tRX(language, "approved-only · tenant-scoped · agent writes", "仅已批准 · 租户范围 · agent 仅写")} <span style={{ color: "var(--changes)" }}>{tRX(language, "draft", "草稿")}</span>
               </span>
               {isMock && (
                 <span className="pill changes" style={{ marginLeft: "auto" }}>
-                  <span className="dot" />Mock — will save locally
+                  <span className="dot" />{tRX(language, "Mock — will save locally", "模拟模式 — 将本地保存")}
                 </span>
               )}
             </div>
@@ -3298,9 +3378,9 @@ function AskHero({ tenant, question, setQuestion, centerNode, setCenterNode, dep
 
           <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
             <button type="submit" className="btn primary" style={{ padding: "10px 18px", fontSize: 12 }} disabled={!question.trim() || submitting}>
-              {submitting ? "Creating…" : "↗ Create scoped question"}
+              {submitting ? tRX(language, "Creating…", "创建中…") : "↗ " + tRX(language, "Create scoped question", "创建范围问题")}
             </button>
-            <button type="button" className="btn ghost" onClick={onCancel}>Cancel</button>
+            <button type="button" className="btn ghost" onClick={onCancel}>{tRX(language, "Cancel", "取消")}</button>
           </div>
           {actionMsg && (
             <div style={{
@@ -3318,7 +3398,7 @@ function AskHero({ tenant, question, setQuestion, centerNode, setCenterNode, dep
         </form>
 
         <div style={{ marginTop: 32 }}>
-          <div className="eyebrow" style={{ marginBottom: 10 }}>Suggested questions</div>
+          <div className="eyebrow" style={{ marginBottom: 10 }}>{tRX(language, "Suggested questions", "建议问题")}</div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
             {suggestions.map((s, i) => {
               const active = centerNode === s.node;
@@ -3327,7 +3407,7 @@ function AskHero({ tenant, question, setQuestion, centerNode, setCenterNode, dep
                       type="button"
                       disabled={!s.node}
                       onClick={() => {
-                        setQuestion(s.q);
+                        setQuestion(questionTextRX(s.q, language));
                         if (s.node) {
                           setCenterNode(s.node);
                           const [t] = s.node.split(":");
@@ -3352,10 +3432,10 @@ function AskHero({ tenant, question, setQuestion, centerNode, setCenterNode, dep
                       }}
                       onMouseEnter={e => { e.currentTarget.style.borderColor = "var(--accent-line)"; e.currentTarget.style.color = "var(--text)"; }}
                       onMouseLeave={e => { if (!active) { e.currentTarget.style.borderColor = "var(--line)"; e.currentTarget.style.color = "var(--text-dim)"; } }}>
-                <div>{s.q}</div>
+                <div>{questionTextRX(s.q, language)}</div>
                 {s.node && (
                 <div style={{ marginTop: 4, fontFamily: "var(--font-mono)", fontSize: 10, color: active ? "var(--accent)" : "var(--dim)", textTransform: "uppercase", letterSpacing: "0.08em" }}>
-                  center · {s.node}
+                  {tRX(language, "center", "中心")} · {s.node}
                 </div>
                 )}
               </button>);
@@ -3364,12 +3444,12 @@ function AskHero({ tenant, question, setQuestion, centerNode, setCenterNode, dep
         </div>
 
         <div style={{ marginTop: 32, padding: "14px 16px", border: "1px solid var(--line)", background: "var(--bg-2)" }}>
-          <div className="eyebrow" style={{ marginBottom: 6 }}>How this works</div>
+          <div className="eyebrow" style={{ marginBottom: 6 }}>{tRX(language, "How this works", "工作方式")}</div>
           <ol style={{ margin: 0, paddingLeft: 18, color: "var(--muted)", fontSize: 12, lineHeight: 1.7 }}>
-            <li>Create a scoped question — pinned to a center node, depth, and limit on the approved graph.</li>
-            <li>Run reasoning. The agent produces a <span style={{ color: "var(--changes)" }}>draft</span> conclusion with an evidence chain.</li>
-            <li>Review the evidence and approve, request changes, or reject the finding.</li>
-            <li>Approval cites the finding in the approved-finding layer — it does <strong style={{ color: "var(--text)" }}>not</strong> modify the canonical ontology or graph.</li>
+            <li>{tRX(language, "Create a scoped question — pinned to a center node, depth, and limit on the approved graph.", "创建范围问题：固定已批准图谱中的中心节点、深度和上限。")}</li>
+            <li>{tRX(language, "Run reasoning. The agent produces a", "运行推理。Agent 会生成带证据链的")} <span style={{ color: "var(--changes)" }}>{tRX(language, "draft", "草稿")}</span> {tRX(language, "conclusion with an evidence chain.", "结论。")}</li>
+            <li>{tRX(language, "Review the evidence and approve, request changes, or reject the finding.", "复核证据后批准、要求修改或拒绝发现。")}</li>
+            <li>{tRX(language, "Approval cites the finding in the approved-finding layer — it does", "批准只会把发现引用到已批准发现层，")} <strong style={{ color: "var(--text)" }}>{tRX(language, "not", "不会")}</strong> {tRX(language, "modify the canonical ontology or graph.", "修改正式本体或图谱。")}</li>
           </ol>
         </div>
       </div>
@@ -3379,7 +3459,7 @@ function AskHero({ tenant, question, setQuestion, centerNode, setCenterNode, dep
 
 /* ---------------- EntityPicker ----------------
    Reusable entity type + search picker. Used in both AskHero and sidebar "Ask with scope". */
-function EntityPicker({ tenant, centerNode, setCenterNode, question, setQuestion, compact }) {
+function EntityPicker({ tenant, centerNode, setCenterNode, question, setQuestion, compact, language }) {
   const tenantId = tenant ? tenant.id : "default";
 
   const [entityTypes, setEntityTypes] = React.useState([]);
@@ -3465,7 +3545,7 @@ function EntityPicker({ tenant, centerNode, setCenterNode, question, setQuestion
       const prev = prevLabelRef.current;
       const q = questionRef.current.trim();
       if (!q || q === tenantEmptyQuestionRX(tenantId)) {
-        setQuestion(defaultQuestionForTenantRX(tenantId, pickedType, newLabel, ent.id));
+        setQuestion(questionTextRX(defaultQuestionForTenantRX(tenantId, pickedType, newLabel, ent.id), language));
       } else if (prev && prev.length > 1 && q.includes(prev)) {
         setQuestion(q.split(prev).join(newLabel));
       } else {
@@ -3508,7 +3588,7 @@ function EntityPicker({ tenant, centerNode, setCenterNode, question, setQuestion
 
   return (
     <div>
-      <div className="eyebrow" style={{ marginBottom: 4 }}>Center node</div>
+      <div className="eyebrow" style={{ marginBottom: 4 }}>{tRX(language, "Center node", "中心节点")}</div>
       <div style={{ display: "flex", gap: 6 }} ref={dropdownRef}>
         <select className="input" value={pickedType} onChange={onTypeChange}
                 style={{ width: compact ? 90 : 110, flexShrink: 0, cursor: "pointer" }}>
@@ -3519,7 +3599,7 @@ function EntityPicker({ tenant, centerNode, setCenterNode, question, setQuestion
                  value={entityQuery}
                  onChange={onEntityQueryChange}
                  onFocus={() => setShowDropdown(true)}
-                 placeholder={entitiesLoading ? "Loading…" : entityTypes.length ? (entities.length ? entities[0].label || entities[0].id : "Search…") : "No tenant objects"} />
+                 placeholder={entitiesLoading ? tRX(language, "Loading…", "加载中…") : entityTypes.length ? (entities.length ? entities[0].label || entities[0].id : tRX(language, "Search…", "搜索…")) : tRX(language, "No tenant objects", "无租户对象")} />
           {showDropdown && entities.length > 0 && (
             <div style={{
               position: "absolute", top: "100%", left: 0, right: 0, zIndex: 20,
@@ -3569,8 +3649,8 @@ function EntityPicker({ tenant, centerNode, setCenterNode, question, setQuestion
             {items.map((s, i) => (
               <button key={i} type="button" className="btn xs ghost"
                       style={{ fontSize: 10, padding: "3px 8px", color: "var(--accent)", border: "1px solid var(--line)", borderRadius: 3, textAlign: "left" }}
-                      onClick={() => setQuestion(s)}>
-                {s}
+                      onClick={() => setQuestion(questionTextRX(s, language))}>
+                {questionTextRX(s, language)}
               </button>
             ))}
           </div>

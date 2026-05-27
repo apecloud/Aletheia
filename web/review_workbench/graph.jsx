@@ -103,6 +103,12 @@ function resolveCenterInputGX(input, centerType, candidates) {
   const raw = String(input || "").trim();
   if (!raw) return "";
   const normalized = normalizeCenterInputGX(raw);
+  const matches = (candidates || []).map(c => {
+    const id = String(c.id || "");
+    const shortId = id.split(":").slice(1).join(":");
+    const label = String(c.label || c.name || shortId || id);
+    return { ...c, id, shortId, label };
+  });
   const countryAliases = {
     china: "CHN",
     "people's republic of china": "CHN",
@@ -132,13 +138,10 @@ function resolveCenterInputGX(input, centerType, candidates) {
   const directCountry = String(centerType || "").toLowerCase() === "country"
     ? (countryAliases[normalized] || (/^[a-z]{3}$/i.test(raw) ? raw.toUpperCase() : ""))
     : "";
-  if (directCountry) return directCountry;
-  const matches = (candidates || []).map(c => {
-    const id = String(c.id || "");
-    const shortId = id.split(":").slice(1).join(":");
-    const label = String(c.label || c.name || shortId || id);
-    return { ...c, id, shortId, label };
-  });
+  if (directCountry) {
+    const countryMatch = matches.find(c => c.shortId === directCountry || c.id === `${centerType}:${directCountry}`);
+    return countryMatch ? countryMatch.shortId : "";
+  }
   const exact = matches.find(c =>
     normalizeCenterInputGX(c.shortId) === normalized ||
     normalizeCenterInputGX(c.id) === normalized ||
@@ -149,7 +152,7 @@ function resolveCenterInputGX(input, centerType, candidates) {
     normalizeCenterInputGX(c.label).includes(normalized) ||
     normalizeCenterInputGX(c.shortId).includes(normalized)
   );
-  return fuzzy ? fuzzy.shortId : raw;
+  return fuzzy ? fuzzy.shortId : "";
 }
 
 function GraphExplorer({ data, tenant, language }) {
@@ -198,10 +201,13 @@ function GraphExplorer({ data, tenant, language }) {
   const applyCenterInput = () => {
     if (!centerType || !centerSearch.trim()) return;
     const resolved = resolveCenterInputGX(centerSearch, centerType, candidates);
-    setCenterNodeId(resolved);
-    setFocusMessage(resolved
-      ? tGX(language, "Center resolved inside current tenant. Load full graph to focus it.", "已在当前租户内解析中心节点；点击加载全图后聚焦。")
-      : tGX(language, "No matching center node in this tenant.", "当前租户没有匹配的中心节点。"));
+    if (resolved) {
+      setCenterNodeId(resolved);
+      setFocusMessage(tGX(language, "Center resolved inside current tenant. Load full graph to focus it.", "已在当前租户内解析中心节点；点击加载全图后聚焦。"));
+    } else {
+      setCenterNodeId("");
+      setFocusMessage(tGX(language, "No matching center node for this type in the current tenant.", "当前租户的当前类型下没有匹配的中心节点。"));
+    }
   };
 
   useEffectGX(() => {
@@ -248,7 +254,7 @@ function GraphExplorer({ data, tenant, language }) {
       setCenterNodeId(requestedCenterNodeId);
       return;
     }
-    if (!centerNodeId) {
+    if (!centerNodeId && !centerSearch.trim()) {
       const first = candidates[0];
       setCenterNodeId(String(first.id || "").split(":").slice(1).join(":"));
     } else if (!match) {
