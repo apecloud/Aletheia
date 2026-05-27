@@ -1361,7 +1361,7 @@ function Reasoning({ tenant, language }) {
           <div className={"tab" + (activeTab === "mine"    ? " active" : "")} onClick={() => setActiveTab("mine")}>{tRX(language, "My Questions", "我的问题")} <span className="ct">{counts.mine}</span></div>
           <div className={"tab" + (activeTab === "all"     ? " active" : "")} onClick={() => setActiveTab("all")}>{tRX(language, "Reasoning Process", "推理流程")} <span className="ct">{counts.all}</span></div>
           <div className={"tab" + (activeTab === "graph"   ? " active" : "")} onClick={() => setActiveTab("graph")}>{tRX(language, "From Graph", "来自图谱")} <span className="ct">{counts.graph}</span></div>
-          <div className={"tab" + (activeTab === "autopilot" ? " active" : "")} onClick={() => setActiveTab("autopilot")}>Autopilot <span className="ct">{counts.autopilot}</span></div>
+          <div className={"tab" + (activeTab === "autopilot" ? " active" : "")} onClick={() => setActiveTab("autopilot")}>{tRX(language, "Autopilot", "自动推理")} <span className="ct">{counts.autopilot}</span></div>
         </div>
         <div className="spacer" />
         <button className="tool" onClick={() => setCleanupModal(true)}>{tRX(language, "Clean up", "清理")}</button>

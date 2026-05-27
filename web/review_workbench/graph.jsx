@@ -107,7 +107,13 @@ function resolveCenterInputGX(input, centerType, candidates) {
     const id = String(c.id || "");
     const shortId = id.split(":").slice(1).join(":");
     const label = String(c.label || c.name || shortId || id);
-    return { ...c, id, shortId, label };
+    const localizedNames = c.localized_names && typeof c.localized_names === "object" ? Object.values(c.localized_names) : [];
+    const aliases = Array.isArray(c.aliases) ? c.aliases : [];
+    const keyProps = c.key_properties && typeof c.key_properties === "object" ? Object.values(c.key_properties) : [];
+    const searchTerms = [id, shortId, label, c.name, c.title, ...aliases, ...localizedNames, ...keyProps]
+      .filter(v => v != null && v !== "")
+      .map(v => normalizeCenterInputGX(v));
+    return { ...c, id, shortId, label, searchTerms };
   });
   const countryAliases = {
     china: "CHN",
@@ -135,22 +141,25 @@ function resolveCenterInputGX(input, centerType, candidates) {
     singapore: "SGP",
     "新加坡": "SGP",
   };
+  const displayedCountryCode = raw.match(/\(([A-Za-z]{3})\)\s*$/);
   const directCountry = String(centerType || "").toLowerCase() === "country"
-    ? (countryAliases[normalized] || (/^[a-z]{3}$/i.test(raw) ? raw.toUpperCase() : ""))
+    ? (countryAliases[normalized] || (displayedCountryCode ? displayedCountryCode[1].toUpperCase() : /^[a-z]{3}$/i.test(raw) ? raw.toUpperCase() : ""))
     : "";
   if (directCountry) {
-    const countryMatch = matches.find(c => c.shortId === directCountry || c.id === `${centerType}:${directCountry}`);
+    const code = normalizeCenterInputGX(directCountry);
+    const countryMatch = matches.find(c =>
+      normalizeCenterInputGX(c.shortId) === code ||
+      normalizeCenterInputGX(c.id) === normalizeCenterInputGX(`${centerType}:${directCountry}`) ||
+      (c.searchTerms || []).some(term => term === normalized || term === code || term.includes(`(${code})`))
+    );
     return countryMatch ? countryMatch.shortId : "";
   }
   const exact = matches.find(c =>
-    normalizeCenterInputGX(c.shortId) === normalized ||
-    normalizeCenterInputGX(c.id) === normalized ||
-    normalizeCenterInputGX(c.label) === normalized
+    (c.searchTerms || []).some(term => term === normalized)
   );
   if (exact) return exact.shortId;
   const fuzzy = matches.find(c =>
-    normalizeCenterInputGX(c.label).includes(normalized) ||
-    normalizeCenterInputGX(c.shortId).includes(normalized)
+    (c.searchTerms || []).some(term => term.includes(normalized))
   );
   return fuzzy ? fuzzy.shortId : "";
 }
@@ -189,6 +198,14 @@ function GraphExplorer({ data, tenant, language }) {
     { enabled: typesLoaded && !!activeType, fallback: [] }
   );
   const candidates = Array.isArray(candidatesQ.data) ? candidatesQ.data : [];
+  const allCandidatesQ = useApiData(
+    "instanceSearch",
+    [tenantId, centerType, "", 300, { includeDraft: true }],
+    { enabled: typesLoaded && !!activeType, fallback: [] }
+  );
+  const allCandidates = Array.isArray(allCandidatesQ.data) ? allCandidatesQ.data : [];
+  const centerCandidateUniverse = allCandidates.length ? allCandidates : candidates;
+  const visibleCandidates = candidates.length || centerSearch.trim() ? candidates : allCandidates;
   const proposedQ = useApiData("graphProposedElements", [tenantId, { limit: 100 }], {
     fallback: { runs: [], elements: [] },
   });
@@ -200,7 +217,7 @@ function GraphExplorer({ data, tenant, language }) {
   };
   const applyCenterInput = () => {
     if (!centerType || !centerSearch.trim()) return;
-    const resolved = resolveCenterInputGX(centerSearch, centerType, candidates);
+    const resolved = resolveCenterInputGX(centerSearch, centerType, centerCandidateUniverse);
     if (resolved) {
       setCenterNodeId(resolved);
       setFocusMessage(tGX(language, "Center resolved inside current tenant. Load full graph to focus it.", "已在当前租户内解析中心节点；点击加载全图后聚焦。"));
@@ -238,13 +255,13 @@ function GraphExplorer({ data, tenant, language }) {
   }, [tenantId, typesQ.source, JSON.stringify(centerTypeNames)]);
 
   useEffectGX(() => {
-    if (!centerType || candidatesQ.source === "loading") return;
-    if (candidates.length === 0) {
+    if (!centerType || candidatesQ.source === "loading" || allCandidatesQ.source === "loading") return;
+    if (centerCandidateUniverse.length === 0) {
       if (centerNodeId) setCenterNodeId("");
       return;
     }
     const expectedId = `${centerType}:${centerNodeId}`;
-    const match = centerNodeId && candidates.some(c => c.id === expectedId || String(c.id || "").endsWith(`:${centerNodeId}`));
+    const match = centerNodeId && centerCandidateUniverse.some(c => c.id === expectedId || String(c.id || "").endsWith(`:${centerNodeId}`));
     if (
       !centerNodeId &&
       requestedCenterType === centerType &&
@@ -255,12 +272,20 @@ function GraphExplorer({ data, tenant, language }) {
       return;
     }
     if (!centerNodeId && !centerSearch.trim()) {
-      const first = candidates[0];
+      const first = centerCandidateUniverse[0];
       setCenterNodeId(String(first.id || "").split(":").slice(1).join(":"));
+    } else if (!match && centerSearch.trim()) {
+      const resolved = resolveCenterInputGX(centerSearch, centerType, centerCandidateUniverse);
+      if (resolved) {
+        setCenterNodeId(resolved);
+        setFocusMessage(tGX(language, "Center resolved inside current tenant. Load full graph to focus it.", "已在当前租户内解析中心节点；点击加载全图后聚焦。"));
+        return;
+      }
+      setFocusMessage(`${expectedId} is outside the visible center list; Load full graph will still include it if it exists.`);
     } else if (!match) {
       setFocusMessage(`${expectedId} is outside the visible center list; Load full graph will still include it if it exists.`);
     }
-  }, [tenantId, centerType, centerSearch, candidatesQ.source, JSON.stringify(candidates.map(c => c.id))]);
+  }, [tenantId, centerType, centerSearch, candidatesQ.source, allCandidatesQ.source, JSON.stringify(centerCandidateUniverse.map(c => c.id))]);
 
   useEffectGX(() => {
     try {
@@ -288,12 +313,14 @@ function GraphExplorer({ data, tenant, language }) {
   const graph = useMemoGX(() => normalizeGraph(graphQ.data, { nodes: [], edges: [] }, language), [graphQ.data, language]);
 
   const [selected, setSelected] = useStateGX(null);
+  const [trailNodeIds, setTrailNodeIds] = useStateGX([]);
   const [nodePositions, setNodePositions] = useStateGX({});
   const [hideUnrelated, setHideUnrelated] = useStateGX(false);
   const [pendingCenterFocus, setPendingCenterFocus] = useStateGX("");
   const [focusMessage, setFocusMessage] = useStateGX("");
   useEffectGX(() => {
     setSelected(null);
+    setTrailNodeIds([]);
     setHoverId(null);
     setPendingCenterFocus("");
     setFocusMessage("");
@@ -310,15 +337,49 @@ function GraphExplorer({ data, tenant, language }) {
   useEffectGX(() => {
     if (!graphWithPositions.nodes.length) {
       if (selected) setSelected(null);
+      if (trailNodeIds.length) setTrailNodeIds([]);
       return;
     }
     setSelected(prev => graphWithPositions.nodes.find(n => prev && n.id === prev.id) || null);
+    const nodeIds = new Set(graphWithPositions.nodes.map(n => n.id));
+    setTrailNodeIds(prev => {
+      const next = prev.filter(id => nodeIds.has(id));
+      return next.length === prev.length ? prev : next;
+    });
   }, [graphWithPositions]);
   useEffectGX(() => {
     if (!selected && hideUnrelated) setHideUnrelated(false);
   }, [selected, hideUnrelated]);
 
   const map = Object.fromEntries(graphWithPositions.nodes.map(n => [n.id, n]));
+  const selectGraphNode = (node, options = {}) => {
+    if (!node) return;
+    setSelected(node);
+    setTrailNodeIds(prev => {
+      const current = options.reset ? [] : prev;
+      if (!node.id || current.includes(node.id)) return current;
+      return [...current, node.id];
+    });
+  };
+  const clearGraphTrail = () => {
+    setTrailNodeIds([]);
+    setSelected(null);
+    setHideUnrelated(false);
+  };
+  const stepBackGraphTrail = () => {
+    if (!trailNodeIds.length) return;
+    const next = trailNodeIds.slice(0, -1);
+    setTrailNodeIds(next);
+    const nextSelected = next.length ? map[next[next.length - 1]] : null;
+    setSelected(nextSelected || null);
+    if (!next.length) setHideUnrelated(false);
+  };
+  const toggleTrailFocus = () => {
+    if (!selected) return;
+    setTrailNodeIds(prev => selected.id && !prev.includes(selected.id) ? [...prev, selected.id] : prev);
+    setHideUnrelated(v => !v);
+  };
+  const trailNodes = trailNodeIds.map(id => map[id]).filter(Boolean);
   const palette = ["var(--accent)", "var(--changes)", "var(--proposed)", "var(--approved)", "var(--dim)"];
   const graphTypes = Array.from(new Set(graphWithPositions.nodes.map(n => n.type).filter(Boolean)));
   const typeColors = Object.fromEntries(graphTypes.map((t, i) => [t, palette[i % palette.length]]));
@@ -333,7 +394,7 @@ function GraphExplorer({ data, tenant, language }) {
     if (!centerKey) return false;
     const match = graphWithPositions.nodes.find(node => node.id === centerKey);
     if (match) {
-      setSelected(match);
+      selectGraphNode(match, { reset: true });
       setFocusMessage(`Focused ${centerKey}`);
       return true;
     }
@@ -346,6 +407,8 @@ function GraphExplorer({ data, tenant, language }) {
       return;
     }
     setPendingCenterFocus(centerKey);
+    setTrailNodeIds([]);
+    setHideUnrelated(false);
     setFocusMessage(`Loading full graph for ${centerKey}…`);
     window.dispatchEvent(new CustomEvent("aletheia:retry"));
   };
@@ -353,7 +416,7 @@ function GraphExplorer({ data, tenant, language }) {
     if (!pendingCenterFocus || graphQ.loading) return;
     const match = graphWithPositions.nodes.find(node => node.id === pendingCenterFocus);
     if (match) {
-      setSelected(match);
+      selectGraphNode(match, { reset: true });
       setFocusMessage(`Focused ${pendingCenterFocus}`);
       setPendingCenterFocus("");
     } else if (graphQ.source !== "loading") {
@@ -422,13 +485,13 @@ function GraphExplorer({ data, tenant, language }) {
             <div>
               <div className="eyebrow" style={{ marginBottom: 4 }}>{tGX(language, "Center", "中心")}</div>
               <div style={{ display: "flex", gap: 6 }}>
-                <select className="select" style={{ width: 110 }} value={centerType} onChange={e => { setCenterType(e.target.value); setCenterNodeId(""); setCenterSearch(""); setSelected(null); setFocusMessage(""); }}>
+                <select className="select" style={{ width: 110 }} value={centerType} onChange={e => { setCenterType(e.target.value); setCenterNodeId(""); setCenterSearch(""); clearGraphTrail(); setFocusMessage(""); }}>
                   {centerTypes.length === 0 && <option value="">{tGX(language, "No tenant types", "无租户类型")}</option>}
                   {centerTypes.map(t => <option key={t.type} value={t.type}>{t.label || t.type}{t.approved ? "" : " · draft"}</option>)}
                 </select>
-                <select className="select" value={centerNodeId} onChange={e => { setCenterNodeId(e.target.value); setCenterSearch(e.target.value); }} disabled={!centerType || candidates.length === 0}>
-                  {candidates.length === 0 && <option value="">{tGX(language, "No center nodes", "无中心节点")}</option>}
-                  {candidates.map(c => {
+                <select className="select" value={centerNodeId} onChange={e => { setCenterNodeId(e.target.value); setCenterSearch(e.target.value); }} disabled={!centerType || visibleCandidates.length === 0}>
+                  {visibleCandidates.length === 0 && <option value="">{tGX(language, "No center nodes", "无中心节点")}</option>}
+                  {visibleCandidates.map(c => {
                     const id = String(c.id || "").split(":").slice(1).join(":");
                     return <option key={c.id} value={id}>{centerType === "Country" ? countryLabelGX(c.label || c.id, language) : labelGX(c.label || c.id, language)}</option>;
                   })}
@@ -447,7 +510,7 @@ function GraphExplorer({ data, tenant, language }) {
                 {tGX(language, "Use typed center", "使用输入的中心节点")}
               </button>
               <div style={{ marginTop: 6, fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--muted)" }}>
-                {activeType ? `${activeType.table} · ${activeType.ontology_artifact} · ${activeType.artifact_status || "unknown"} · ${candidates.length} ${tGX(language, "candidates", "候选")}` : tGX(language, "No tenant graph center types for this tenant.", "该租户没有可用的图谱中心类型。")}
+                {activeType ? `${activeType.table} · ${activeType.ontology_artifact} · ${activeType.artifact_status || "unknown"} · ${centerCandidateUniverse.length} ${tGX(language, "candidates", "候选")}` : tGX(language, "No tenant graph center types for this tenant.", "该租户没有可用的图谱中心类型。")}
               </div>
               <button className="btn ghost" style={{ marginTop: 8, width: "100%" }} disabled={!centerKey || !graphWithPositions.nodes.some(node => node.id === centerKey)} onClick={focusCenterNode}>
                 {tGX(language, "Focus center in full graph", "在全图中聚焦中心")}
@@ -481,15 +544,31 @@ function GraphExplorer({ data, tenant, language }) {
               <dt>{tGX(language, "Nodes", "节点")}</dt><dd>{graphWithPositions.nodes.length}</dd>
               <dt>{tGX(language, "Edges", "边")}</dt><dd>{graphWithPositions.edges.length}</dd>
               <dt>{tGX(language, "View", "视图")}</dt><dd>{tGX(language, "all approved nodes", "全部已批准节点")}</dd>
+              <dt>{tGX(language, "Trail", "路径")}</dt><dd>{trailNodes.length}</dd>
               <dt>{tGX(language, "Limit", "上限")}</dt><dd>{limit}</dd>
             </dl>
+            {trailNodes.length > 0 && (
+              <div style={{ marginTop: 8, padding: 8, border: "1px solid var(--line-soft)", background: "var(--bg-2)", fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--muted)", lineHeight: 1.45 }}>
+                <div className="eyebrow accent" style={{ marginBottom: 4 }}>{tGX(language, "Trail focus", "路径聚焦")}</div>
+                {trailNodes.slice(-6).map((node, index) => (
+                  <div key={node.id} style={{ color: node.id === selected?.id ? "var(--accent)" : "var(--text-dim)" }}>
+                    {index > 0 ? "→ " : ""}{labelGX(node.id, language)}
+                  </div>
+                ))}
+                {trailNodes.length > 6 && <div>… {trailNodes.length - 6} {tGX(language, "earlier nodes", "个更早节点")}</div>}
+              </div>
+            )}
             <button
               className="btn ghost"
               style={{ marginTop: 10, width: "100%" }}
               disabled={!selected}
-              onClick={() => setHideUnrelated(v => !v)}>
-              {hideUnrelated ? tGX(language, "Show all graph nodes", "显示所有图节点") : tGX(language, "Hide unrelated nodes", "隐藏无关节点")}
+              onClick={toggleTrailFocus}>
+              {hideUnrelated ? tGX(language, "Show all graph nodes", "显示所有图节点") : tGX(language, "Hide unrelated to trail", "隐藏路径外节点")}
             </button>
+            <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
+              <button className="btn ghost" style={{ flex: 1 }} disabled={trailNodes.length < 2} onClick={stepBackGraphTrail}>{tGX(language, "Back", "回退一步")}</button>
+              <button className="btn ghost" style={{ flex: 1 }} disabled={!trailNodes.length} onClick={clearGraphTrail}>{tGX(language, "Clear trail", "清空路径")}</button>
+            </div>
           </div>
 
           <div style={{ padding: "var(--pad-3) var(--pad-4)", borderBottom: "1px solid var(--line)" }}>
@@ -507,7 +586,8 @@ function GraphExplorer({ data, tenant, language }) {
                 <div>{tGX(language, "current", "当前")} — {tGX(language, "all approved tenant graph", "全部已批准租户图谱")} · {graphWithPositions.nodes.length} {tGX(language, "nodes", "节点")}</div>
                 <div>{tGX(language, "tenant", "租户")} — {tenantId} · {tenant?.graph || tGX(language, "graph db unknown", "未知图数据库")}</div>
                 <div>{tGX(language, "focus", "聚焦")} — {selected ? selected.id : tGX(language, "none; full graph contrast", "无；全图对比")}</div>
-                <div>{tGX(language, "visibility", "可见性")} — {hideUnrelated && selected ? tGX(language, "selected context only", "仅选中上下文") : tGX(language, "all graph nodes", "全部图节点")}</div>
+                <div>{tGX(language, "trail", "路径")} — {trailNodes.length ? trailNodes.map(n => n.id).join(" → ") : tGX(language, "none", "无")}</div>
+                <div>{tGX(language, "visibility", "可见性")} — {hideUnrelated && selected ? tGX(language, "trail plus next-hop neighbors", "路径和下一跳邻居") : tGX(language, "all graph nodes", "全部图节点")}</div>
               </div>
             </div>
           </div>
@@ -541,10 +621,11 @@ function GraphExplorer({ data, tenant, language }) {
             <BigGraph
               data={graphWithPositions}
               selected={selected}
-              onSelect={setSelected}
+              onSelect={selectGraphNode}
               hoverId={hoverId}
               setHoverId={setHoverId}
               hideUnrelated={hideUnrelated}
+              trailNodeIds={trailNodeIds}
               onNodePositionChange={updateNodePosition}
               language={language}
             />
@@ -555,7 +636,8 @@ function GraphExplorer({ data, tenant, language }) {
                 <div><span style={{ color: "var(--dim)" }}>{tGX(language, "NODES", "节点")}</span><span className="v">{graphWithPositions.nodes.length}</span></div>
                 <div><span style={{ color: "var(--dim)" }}>{tGX(language, "EDGES", "边")}</span><span className="v">{graphWithPositions.edges.length}</span></div>
                 <div><span style={{ color: "var(--dim)" }}>{tGX(language, "FOCUS", "聚焦")}</span><span className="v">{selected ? tGX(language, "ON", "开") : tGX(language, "ALL", "全部")}</span></div>
-                <div><span style={{ color: "var(--dim)" }}>{tGX(language, "VISIBLE", "可见")}</span><span className="v">{hideUnrelated && selected ? tGX(language, "LOCAL", "局部") : tGX(language, "ALL", "全部")}</span></div>
+                <div><span style={{ color: "var(--dim)" }}>{tGX(language, "TRAIL", "路径")}</span><span className="v">{trailNodes.length}</span></div>
+                <div><span style={{ color: "var(--dim)" }}>{tGX(language, "VISIBLE", "可见")}</span><span className="v">{hideUnrelated && selected ? tGX(language, "TRAIL", "路径") : tGX(language, "ALL", "全部")}</span></div>
                 <div><span style={{ color: "var(--dim)" }}>SOURCE</span><span className="v" style={{ color: graphQ.source === "live" ? "var(--approved)" : graphQ.source === "live-stale" ? "var(--changes)" : "var(--rejected)" }}>{graphQ.source === "live" ? "LIVE" : graphQ.source === "live-stale" ? "STALE" : graphQ.source === "loading" ? "…" : "NONE"}</span></div>
               </div>
             </div>
@@ -575,12 +657,13 @@ function GraphExplorer({ data, tenant, language }) {
               <button className="icon-btn" title={tGX(language, "Zoom in", "放大")}>+</button>
               <button className="icon-btn" title={tGX(language, "Zoom out", "缩小")}>−</button>
               <button className="icon-btn" title={tGX(language, "Fit view", "适配视图")}>⌖</button>
-              <button className="icon-btn" title={tGX(language, "Clear focus", "清除聚焦")} disabled={!selected} onClick={() => { setSelected(null); setHideUnrelated(false); }}>◎</button>
+              <button className="icon-btn" title={tGX(language, "Clear trail", "清空路径")} disabled={!selected && !trailNodes.length} onClick={clearGraphTrail}>◎</button>
+              <button className="icon-btn" title={tGX(language, "Back one trail step", "路径回退一步")} disabled={trailNodes.length < 2} onClick={stepBackGraphTrail}>↶</button>
               <button
                 className="icon-btn"
-                title={hideUnrelated ? tGX(language, "Show all nodes", "显示所有节点") : tGX(language, "Hide unrelated nodes", "隐藏无关节点")}
+                title={hideUnrelated ? tGX(language, "Show all nodes", "显示所有节点") : tGX(language, "Hide unrelated to trail", "隐藏路径外节点")}
                 disabled={!selected}
-                onClick={() => setHideUnrelated(v => !v)}>
+                onClick={toggleTrailFocus}>
                 {hideUnrelated ? "◉" : "◌"}
               </button>
               <button className="icon-btn" title={tGX(language, "Expand", "展开")}>⊕</button>
@@ -646,7 +729,7 @@ function GraphExplorer({ data, tenant, language }) {
                 const dir = e.s === selected.id ? "→" : "←";
                 return (
                   <div key={i} style={{ padding: "8px 14px", borderBottom: "1px solid var(--line-soft)", display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}
-                       onClick={() => setSelected(map[other])}>
+                       onClick={() => selectGraphNode(map[other])}>
                     <span style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--accent)", textTransform: "uppercase", letterSpacing: "0.08em" }}>{e.kind}</span>
                     <span style={{ color: "var(--dim)" }}>{dir}</span>
                     <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-dim)" }}>{labelGX(other, language)}</span>
@@ -991,7 +1074,7 @@ function ProposedGraphDetail({ item, reason, setReason, busy, message, onReview,
   );
 }
 
-function BigGraph({ data, selected, onSelect, hoverId, setHoverId, hideUnrelated, onNodePositionChange, language }) {
+function BigGraph({ data, selected, onSelect, hoverId, setHoverId, hideUnrelated, trailNodeIds = [], onNodePositionChange, language }) {
   const svgRef = useRefGX(null);
   const [dragging, setDragging] = useStateGX(null);
   const map = Object.fromEntries(data.nodes.map(n => [n.id, n]));
@@ -999,17 +1082,27 @@ function BigGraph({ data, selected, onSelect, hoverId, setHoverId, hideUnrelated
   const graphTypes = Array.from(new Set(data.nodes.map(n => n.type).filter(Boolean)));
   const typeColors = Object.fromEntries(graphTypes.map((t, i) => [t, palette[i % palette.length]]));
   const sel = selected ? selected.id : null;
-  const focusActive = !!sel;
-  const neighborIds = new Set();
+  const trailIds = new Set(trailNodeIds || []);
+  if (sel) trailIds.add(sel);
+  const focusActive = !!sel || trailIds.size > 0;
+  const activeNeighborIds = new Set();
   data.edges.forEach(e => {
-    if (e.s === sel) neighborIds.add(e.t);
-    if (e.t === sel) neighborIds.add(e.s);
+    if (!sel) return;
+    if (e.s === sel) activeNeighborIds.add(e.t);
+    if (e.t === sel) activeNeighborIds.add(e.s);
   });
   const visibleNodeIds = new Set();
   if (focusActive && hideUnrelated) {
-    visibleNodeIds.add(sel);
-    neighborIds.forEach(id => visibleNodeIds.add(id));
+    trailIds.forEach(id => visibleNodeIds.add(id));
+    activeNeighborIds.forEach(id => visibleNodeIds.add(id));
   }
+  const trailEdgeKeys = new Set();
+  data.edges.forEach(e => {
+    if (trailIds.has(e.s) && trailIds.has(e.t)) {
+      trailEdgeKeys.add(`${e.s}→${e.t}`);
+      trailEdgeKeys.add(`${e.t}→${e.s}`);
+    }
+  });
 
   const eventPoint = (event) => {
     const svg = svgRef.current;
@@ -1056,16 +1149,18 @@ function BigGraph({ data, selected, onSelect, hoverId, setHoverId, hideUnrelated
         const s = map[e.s], t = map[e.t];
         if (!s || !t) return null;
         const involved = e.s === sel || e.t === sel;
-        if (focusActive && hideUnrelated && !involved) return null;
-        const dimmed = focusActive && !involved;
+        const inTrail = trailEdgeKeys.has(`${e.s}→${e.t}`);
+        if (focusActive && hideUnrelated && (!visibleNodeIds.has(e.s) || !visibleNodeIds.has(e.t))) return null;
+        const dimmed = focusActive && !involved && !inTrail && !(activeNeighborIds.has(e.s) || activeNeighborIds.has(e.t));
+        const emphasized = involved || inTrail;
         return (
           <g key={i} opacity={dimmed ? 0.16 : 1}>
             <line x1={s.x} y1={s.y} x2={t.x} y2={t.y}
-                  stroke={e.flag ? "oklch(0.66 0.18 25 / 0.7)" : (involved ? "var(--accent)" : e.muted ? "var(--faint)" : "var(--line-strong)")}
-                  strokeWidth={involved ? 1.8 : 1}
-                  strokeDasharray={e.muted ? "4 3" : ""}
-                  markerEnd={involved ? "url(#arrow-accent)" : "url(#arrow)"} />
-            {involved && (
+                  stroke={e.flag ? "oklch(0.66 0.18 25 / 0.7)" : (emphasized ? "var(--accent)" : e.muted ? "var(--faint)" : "var(--line-strong)")}
+                  strokeWidth={emphasized ? 1.8 : 1}
+                  strokeDasharray={inTrail && !involved ? "2 2" : e.muted ? "4 3" : ""}
+                  markerEnd={emphasized ? "url(#arrow-accent)" : "url(#arrow)"} />
+            {emphasized && (
               <text x={(s.x + t.x) / 2} y={(s.y + t.y) / 2 - 6}
                     textAnchor="middle" fontSize="10" fontFamily="var(--font-mono)"
                     fill={e.flag ? "var(--rejected)" : "var(--accent)"}
@@ -1080,12 +1175,13 @@ function BigGraph({ data, selected, onSelect, hoverId, setHoverId, hideUnrelated
       {/* nodes */}
       {data.nodes.map((n, i) => {
         const isSel = n.id === sel;
-        const isNeighbor = neighborIds.has(n.id);
+        const isTrail = trailIds.has(n.id);
+        const isNeighbor = activeNeighborIds.has(n.id);
         if (focusActive && hideUnrelated && !visibleNodeIds.has(n.id)) return null;
         const isHover = n.id === hoverId;
-        const dimmed = focusActive && !isSel && !isNeighbor;
-        const showLabel = isSel;
-        const stroke = n.flag ? "var(--rejected)" : (isSel ? "var(--accent)" : isNeighbor ? "var(--accent-dim)" : (n.muted ? "var(--faint)" : typeColors[n.type] || "var(--text-dim)"));
+        const dimmed = focusActive && !isSel && !isTrail && !isNeighbor;
+        const showLabel = isSel || isTrail || isHover;
+        const stroke = n.flag ? "var(--rejected)" : (isSel ? "var(--accent)" : isTrail ? "var(--approved)" : isNeighbor ? "var(--accent-dim)" : (n.muted ? "var(--faint)" : typeColors[n.type] || "var(--text-dim)"));
         return (
           <g key={i} onPointerDown={(event) => startDrag(event, n)}
                  onPointerMove={moveDrag}
@@ -1095,12 +1191,12 @@ function BigGraph({ data, selected, onSelect, hoverId, setHoverId, hideUnrelated
                  onMouseLeave={() => setHoverId(null)}
                  opacity={dimmed ? 0.24 : 1}
                  style={{ cursor: dragging?.id === n.id ? "grabbing" : "grab", transition: "opacity 120ms ease" }}>
-            {(isSel || isHover) && (
-              <circle cx={n.x} cy={n.y} r={n.r + 10} fill="var(--accent-bg)" stroke="var(--accent-line)" strokeWidth="1" />
+            {(isSel || isHover || isTrail) && (
+              <circle cx={n.x} cy={n.y} r={n.r + 10} fill={isTrail && !isSel ? "oklch(0.72 0.10 150 / 0.10)" : "var(--accent-bg)"} stroke={isTrail && !isSel ? "oklch(0.72 0.10 150 / 0.35)" : "var(--accent-line)"} strokeWidth="1" />
             )}
             <circle cx={n.x} cy={n.y} r={n.r}
                     fill={isSel ? "var(--accent)" : "var(--bg-2)"}
-                    stroke={stroke} strokeWidth={isSel ? 2 : 1.4} />
+                    stroke={stroke} strokeWidth={isSel ? 2 : isTrail ? 1.8 : 1.4} />
             {isSel && <circle cx={n.x} cy={n.y} r={n.r - 7} fill="var(--bg-1)" />}
             {showLabel && (
               <>
