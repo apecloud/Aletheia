@@ -1,0 +1,38 @@
+{
+  "task": 284,
+  "title": "Graph Relation Semantics",
+  "status": "implemented",
+  "files_changed": [
+    "web/review_workbench/graph.jsx"
+  ],
+  "semantic_layers": {
+    "base_fact_relation": "trade dependency",
+    "base_fact_projection": "Country:* --trade dependency--> Chokepoint:*",
+    "reified_fact_node_preserved": "TradeDependency:*",
+    "reified_fact_canvas_behavior": "hidden when projected, traceable from edge detail",
+    "fact_detail_fields": ["fact_node", "source_table", "source_pk", "ontology_artifact", "status"],
+    "reasoning_relation": "risk propagation"
+  },
+  "localization": {
+    "trade dependency": "贸易依赖",
+    "risk propagation": "风险传播"
+  },
+  "boundaries": {
+    "frontend_only": true,
+    "raw_graph_api_changed": false,
+    "formal_graph_write": false,
+    "canonical_ontology_write": false,
+    "proposed_graph_write": false,
+    "review_gate_changed": false
+  },
+  "validation": [
+    {
+      "command": "npx esbuild web/review_workbench/graph.jsx --bundle --outfile=/tmp/aletheia-graph-task284.js --format=iife --log-level=warning",
+      "result": "passed"
+    },
+    {
+      "command": "git diff --check",
+      "result": "passed"
+    }
+  ]
+}

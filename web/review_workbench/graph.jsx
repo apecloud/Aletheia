@@ -18,6 +18,9 @@ function edgeKindLabelGX(value, language) {
   if (String(value || "") === "risk propagation") {
     return tGX(language, "risk propagation", "风险传播");
   }
+  if (String(value || "") === "trade dependency") {
+    return tGX(language, "trade dependency", "贸易依赖");
+  }
   return labelGX(value, language);
 }
 
@@ -45,6 +48,37 @@ function statusLabelGraphGX(status, language) {
 
 function rawEdgeKindGX(edge) {
   return edge?.link_key || edge?.kind || edge?.ontology_link || edge?.label || "";
+}
+
+function tradeDependencyAggregatesGX(rawEdges) {
+  const byFact = new Map();
+  (rawEdges || []).forEach(edge => {
+    const kind = rawEdgeKindGX(edge);
+    if (kind !== "dependency_country" && kind !== "dependency_chokepoint") return;
+    const source = edge.source || edge.s;
+    const target = edge.target || edge.t;
+    if (!String(source || "").startsWith("TradeDependency:") || !target) return;
+    const rec = byFact.get(source) || { fact: source, country: "", chokepoint: "", rawEdges: [] };
+    if (kind === "dependency_country" && String(target).startsWith("Country:")) rec.country = target;
+    if (kind === "dependency_chokepoint" && String(target).startsWith("Chokepoint:")) rec.chokepoint = target;
+    rec.rawEdges.push(edge);
+    byFact.set(source, rec);
+  });
+
+  return Array.from(byFact.values())
+    .filter(rec => rec.country && rec.chokepoint)
+    .map(rec => ({
+      id: `${rec.country}->${rec.chokepoint}:trade_dependency:${rec.fact}`,
+      source: rec.country,
+      target: rec.chokepoint,
+      link_key: "trade_dependency",
+      label: "trade dependency",
+      aggregate: true,
+      aggregate_kind: "trade_dependency",
+      fact_node: rec.fact,
+      raw_edges: rec.rawEdges,
+      status: "approved",
+    }));
 }
 
 function riskProjectionLayerGX(nodeId) {
@@ -153,9 +187,16 @@ function layoutRadial(nodes, edges, opts = {}) {
 // normalize /api/graph/context response into the prototype's graph shape
 function normalizeGraph(raw, fallback, language) {
   if (!raw || !raw.nodes) return fallback;
+  const rawNodes = raw.nodes || [];
+  const rawNodeById = Object.fromEntries(rawNodes.map(n => [n.id, n]));
   const rawEdges = raw.edges || [];
+  const tradeDependencyEdges = tradeDependencyAggregatesGX(rawEdges).map(edge => ({
+    ...edge,
+    fact_node_raw: rawNodeById[edge.fact_node] || null,
+  }));
+  const projectedFactNodes = new Set(tradeDependencyEdges.map(edge => edge.fact_node).filter(Boolean));
   const aggregateEdges = riskPropagationAggregatesGX(rawEdges);
-  const nodes = raw.nodes.map(n => ({
+  const nodes = rawNodes.filter(n => !projectedFactNodes.has(n.id)).map(n => ({
     id: n.id, type: n.type,
     label: n.type === "Country"
       ? countryLabelGX(n.label || n.id, language)
@@ -170,16 +211,21 @@ function normalizeGraph(raw, fallback, language) {
     .filter(e => {
       const kind = rawEdgeKindGX(e);
       const source = e.source || e.s;
+      if ((kind === "dependency_country" || kind === "dependency_chokepoint") && String(source || "").startsWith("TradeDependency:")) return false;
       return !(kind === "risk_country" || kind === "risk_chokepoint") || !riskProjectionLayerGX(source);
     })
+    .concat(tradeDependencyEdges)
     .concat(aggregateEdges)
     .map(e => ({
     s: e.source || e.s,
     t: e.target || e.t,
-    kind: e.aggregate ? "risk propagation" : (e.label || e.kind || e.ontology_link || ""),
+    kind: e.aggregate_kind === "trade_dependency" ? "trade dependency" : (e.aggregate ? "risk propagation" : (e.label || e.kind || e.ontology_link || "")),
     flag: e.flag || e.conflict || false,
     muted: e.muted,
     aggregate: !!e.aggregate,
+    aggregateKind: e.aggregate_kind || "",
+    factNode: e.fact_node || "",
+    factNodeRaw: e.fact_node_raw || null,
     layers: e.layers || [],
     _raw: e,
   }));
@@ -861,6 +907,23 @@ function GraphExplorer({ data, tenant, language }) {
                             <div>{isZhGX(language) ? layer.zh : layer.summary}</div>
                           </div>
                         ))}
+                      </div>
+                    )}
+                    {e.aggregateKind === "trade_dependency" && e.factNode && (
+                      <div style={{ border: "1px solid var(--line-soft)", background: "var(--bg-2)", padding: 8, display: "flex", flexDirection: "column", gap: 5 }}>
+                        <div className="eyebrow accent">{tGX(language, "Trade dependency fact", "贸易依赖事实")}</div>
+                        <div style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--text-dim)", lineHeight: 1.4 }}>
+                          <span style={{ color: "var(--text)" }}>{labelGX(e.factNode, language)}</span>
+                          <div>{tGX(language, "Base fact preserved for metrics, source row, provenance, and confidence.", "基础事实仍保留，用于承载指标、来源行、溯源和置信度。")}</div>
+                        </div>
+                        {e.factNodeRaw && (
+                          <dl className="kv" style={{ marginTop: 2 }}>
+                            <dt>{tGX(language, "Source", "来源")}</dt><dd>{e.factNodeRaw.source_table || "source"}</dd>
+                            <dt>{tGX(language, "Source row", "来源行")}</dt><dd>{e.factNodeRaw.source_pk || e.factNode}</dd>
+                            <dt>{tGX(language, "Ontology", "本体")}</dt><dd>{e.factNodeRaw.ontology_artifact || "object:trade_dependency"}</dd>
+                            <dt>{tGX(language, "Status", "状态")}</dt><dd>{statusLabelGraphGX(e.factNodeRaw.status || "approved", language)}</dd>
+                          </dl>
+                        )}
                       </div>
                     )}
                   </div>
