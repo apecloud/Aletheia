@@ -1,0 +1,34 @@
+{
+  "task": 280,
+  "title": "Graph Inspector Connected Edges Scroll",
+  "status": "implemented",
+  "files_changed": [
+    "web/review_workbench/graph.jsx"
+  ],
+  "behavior": {
+    "connected_edges_scroll": true,
+    "max_rendered_edges": 1000,
+    "count_mode": "shown/total when truncated",
+    "truncation_notice": {
+      "en": "Showing first 1000 connected edges.",
+      "zh": "当前展示前 1000 条相连边。"
+    }
+  },
+  "boundaries": {
+    "frontend_only": true,
+    "backend_graph_api_changed": false,
+    "formal_graph_write": false,
+    "canonical_ontology_write": false,
+    "review_gate_changed": false
+  },
+  "validation": [
+    {
+      "command": "npx esbuild web/review_workbench/graph.jsx --bundle --outfile=/tmp/aletheia-graph-task280.js --format=iife --log-level=warning",
+      "result": "passed"
+    },
+    {
+      "command": "git diff --check",
+      "result": "passed"
+    }
+  ]
+}

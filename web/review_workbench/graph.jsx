@@ -452,6 +452,10 @@ function GraphExplorer({ data, tenant, language }) {
   }, [selected, hideUnrelated]);
 
   const map = Object.fromEntries(graphWithPositions.nodes.map(n => [n.id, n]));
+  const connectedEdgesAll = selected
+    ? graphWithPositions.edges.filter(e => e.s === selected.id || e.t === selected.id)
+    : [];
+  const connectedEdgesVisible = connectedEdgesAll.slice(0, 1000);
   const selectGraphNode = (node, options = {}) => {
     if (!node) return;
     setSelected(node);
@@ -809,8 +813,8 @@ function GraphExplorer({ data, tenant, language }) {
                 <dl className="kv">
                   <dt>{tGX(language, "Status", "状态")}</dt><dd>{selected._raw?.status || "approved"}</dd>
                   <dt>{tGX(language, "Source row", "来源行")}</dt><dd>{selected._raw?.source_table || "source"}#{selected._raw?.source_pk || selected.id.split(":").slice(1).join(":")}</dd>
-                  <dt>{tGX(language, "Edges in", "入边")}</dt><dd>{graphWithPositions.edges.filter(e => e.t === selected.id).length}</dd>
-                  <dt>{tGX(language, "Edges out", "出边")}</dt><dd>{graphWithPositions.edges.filter(e => e.s === selected.id).length}</dd>
+                  <dt>{tGX(language, "Edges in", "入边")}</dt><dd>{connectedEdgesAll.filter(e => e.t === selected.id).length}</dd>
+                  <dt>{tGX(language, "Edges out", "出边")}</dt><dd>{connectedEdgesAll.filter(e => e.s === selected.id).length}</dd>
                 </dl>
               </div>
               {selected.flag && (
@@ -822,9 +826,21 @@ function GraphExplorer({ data, tenant, language }) {
           </div>
 
           <div className="section">
-            <div className="section-head"><span>{tGX(language, "Connected edges", "相连边")}</span><span className="ct">{graphWithPositions.edges.filter(e => e.s === selected.id || e.t === selected.id).length}</span></div>
-            <div className="section-body" style={{ padding: 0 }}>
-              {graphWithPositions.edges.filter(e => e.s === selected.id || e.t === selected.id).map((e, i) => {
+            <div className="section-head">
+              <span>{tGX(language, "Connected edges", "相连边")}</span>
+              <span className="ct">
+                {connectedEdgesVisible.length < connectedEdgesAll.length
+                  ? `${connectedEdgesVisible.length}/${connectedEdgesAll.length}`
+                  : connectedEdgesAll.length}
+              </span>
+            </div>
+            {connectedEdgesAll.length > 1000 && (
+              <div style={{ padding: "6px 14px", borderBottom: "1px solid var(--line-soft)", fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--muted)" }}>
+                {tGX(language, "Showing first 1000 connected edges.", "当前展示前 1000 条相连边。")}
+              </div>
+            )}
+            <div className="section-body" style={{ padding: 0, maxHeight: "min(620px, 58vh)", overflowY: "auto", overscrollBehavior: "contain" }}>
+              {connectedEdgesVisible.map((e, i) => {
                 const other = e.s === selected.id ? e.t : e.s;
                 const dir = e.s === selected.id ? "→" : "←";
                 return (
