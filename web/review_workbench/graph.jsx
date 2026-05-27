@@ -587,7 +587,7 @@ function GraphExplorer({ data, tenant, language }) {
                 <div>{tGX(language, "tenant", "租户")} — {tenantId} · {tenant?.graph || tGX(language, "graph db unknown", "未知图数据库")}</div>
                 <div>{tGX(language, "focus", "聚焦")} — {selected ? selected.id : tGX(language, "none; full graph contrast", "无；全图对比")}</div>
                 <div>{tGX(language, "trail", "路径")} — {trailNodes.length ? trailNodes.map(n => n.id).join(" → ") : tGX(language, "none", "无")}</div>
-                <div>{tGX(language, "visibility", "可见性")} — {hideUnrelated && selected ? tGX(language, "trail plus next-hop neighbors", "路径和下一跳邻居") : tGX(language, "all graph nodes", "全部图节点")}</div>
+                <div>{tGX(language, "visibility", "可见性")} — {hideUnrelated && selected ? tGX(language, "visited trail plus one-hop neighbors", "已访问路径和一跳邻居") : tGX(language, "all graph nodes", "全部图节点")}</div>
               </div>
             </div>
           </div>
@@ -1086,15 +1086,26 @@ function BigGraph({ data, selected, onSelect, hoverId, setHoverId, hideUnrelated
   if (sel) trailIds.add(sel);
   const focusActive = !!sel || trailIds.size > 0;
   const activeNeighborIds = new Set();
+  const trailNeighborIds = new Set();
+  const trailContextEdgeKeys = new Set();
   data.edges.forEach(e => {
-    if (!sel) return;
-    if (e.s === sel) activeNeighborIds.add(e.t);
-    if (e.t === sel) activeNeighborIds.add(e.s);
+    if (sel) {
+      if (e.s === sel) activeNeighborIds.add(e.t);
+      if (e.t === sel) activeNeighborIds.add(e.s);
+    }
+    if (trailIds.has(e.s)) {
+      trailNeighborIds.add(e.t);
+      trailContextEdgeKeys.add(`${e.s}→${e.t}`);
+    }
+    if (trailIds.has(e.t)) {
+      trailNeighborIds.add(e.s);
+      trailContextEdgeKeys.add(`${e.s}→${e.t}`);
+    }
   });
   const visibleNodeIds = new Set();
   if (focusActive && hideUnrelated) {
     trailIds.forEach(id => visibleNodeIds.add(id));
-    activeNeighborIds.forEach(id => visibleNodeIds.add(id));
+    trailNeighborIds.forEach(id => visibleNodeIds.add(id));
   }
   const trailEdgeKeys = new Set();
   data.edges.forEach(e => {
@@ -1150,20 +1161,23 @@ function BigGraph({ data, selected, onSelect, hoverId, setHoverId, hideUnrelated
         if (!s || !t) return null;
         const involved = e.s === sel || e.t === sel;
         const inTrail = trailEdgeKeys.has(`${e.s}→${e.t}`);
+        const inTrailContext = trailContextEdgeKeys.has(`${e.s}→${e.t}`);
+        if (focusActive && hideUnrelated && !inTrailContext) return null;
         if (focusActive && hideUnrelated && (!visibleNodeIds.has(e.s) || !visibleNodeIds.has(e.t))) return null;
-        const dimmed = focusActive && !involved && !inTrail && !(activeNeighborIds.has(e.s) || activeNeighborIds.has(e.t));
+        const dimmed = focusActive && !involved && !inTrail && !inTrailContext && !(activeNeighborIds.has(e.s) || activeNeighborIds.has(e.t));
         const emphasized = involved || inTrail;
+        const showEdgeLabel = emphasized || (hideUnrelated && inTrailContext);
         return (
-          <g key={i} opacity={dimmed ? 0.16 : 1}>
+          <g key={i} opacity={dimmed ? 0.16 : (hideUnrelated && inTrailContext && !emphasized ? 0.78 : 1)}>
             <line x1={s.x} y1={s.y} x2={t.x} y2={t.y}
-                  stroke={e.flag ? "oklch(0.66 0.18 25 / 0.7)" : (emphasized ? "var(--accent)" : e.muted ? "var(--faint)" : "var(--line-strong)")}
-                  strokeWidth={emphasized ? 1.8 : 1}
+                  stroke={e.flag ? "oklch(0.66 0.18 25 / 0.7)" : (emphasized ? "var(--accent)" : inTrailContext ? "var(--approved)" : e.muted ? "var(--faint)" : "var(--line-strong)")}
+                  strokeWidth={emphasized ? 1.8 : inTrailContext ? 1.35 : 1}
                   strokeDasharray={inTrail && !involved ? "2 2" : e.muted ? "4 3" : ""}
                   markerEnd={emphasized ? "url(#arrow-accent)" : "url(#arrow)"} />
-            {emphasized && (
+            {showEdgeLabel && (
               <text x={(s.x + t.x) / 2} y={(s.y + t.y) / 2 - 6}
                     textAnchor="middle" fontSize="10" fontFamily="var(--font-mono)"
-                    fill={e.flag ? "var(--rejected)" : "var(--accent)"}
+                    fill={e.flag ? "var(--rejected)" : (emphasized ? "var(--accent)" : "var(--approved)")}
                     style={{ textTransform: "uppercase", letterSpacing: "0.08em" }}>
                 {labelGX(e.kind, language)}
               </text>
@@ -1176,12 +1190,13 @@ function BigGraph({ data, selected, onSelect, hoverId, setHoverId, hideUnrelated
       {data.nodes.map((n, i) => {
         const isSel = n.id === sel;
         const isTrail = trailIds.has(n.id);
-        const isNeighbor = activeNeighborIds.has(n.id);
+        const isActiveNeighbor = activeNeighborIds.has(n.id);
+        const isTrailNeighbor = trailNeighborIds.has(n.id);
         if (focusActive && hideUnrelated && !visibleNodeIds.has(n.id)) return null;
         const isHover = n.id === hoverId;
-        const dimmed = focusActive && !isSel && !isTrail && !isNeighbor;
-        const showLabel = isSel || isTrail || isHover;
-        const stroke = n.flag ? "var(--rejected)" : (isSel ? "var(--accent)" : isTrail ? "var(--approved)" : isNeighbor ? "var(--accent-dim)" : (n.muted ? "var(--faint)" : typeColors[n.type] || "var(--text-dim)"));
+        const dimmed = focusActive && !isSel && !isTrail && !isActiveNeighbor && !isTrailNeighbor;
+        const showLabel = isSel || isTrail || isHover || (hideUnrelated && isTrailNeighbor);
+        const stroke = n.flag ? "var(--rejected)" : (isSel ? "var(--accent)" : isTrail ? "var(--approved)" : isActiveNeighbor ? "var(--accent-dim)" : isTrailNeighbor ? "var(--approved)" : (n.muted ? "var(--faint)" : typeColors[n.type] || "var(--text-dim)"));
         return (
           <g key={i} onPointerDown={(event) => startDrag(event, n)}
                  onPointerMove={moveDrag}
