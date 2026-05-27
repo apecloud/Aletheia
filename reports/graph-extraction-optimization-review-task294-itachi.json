@@ -1,0 +1,42 @@
+{
+  "task": 294,
+  "verdict": "PASS",
+  "reviewed_commit": "bd9c013",
+  "evidence_file": "/tmp/task294-structured-extraction-review.json",
+  "isolated_smoke": {
+    "database": "temporary sqlite",
+    "nodes": 6,
+    "edges": 4,
+    "trade_dependency_edges": 3,
+    "findings": 1,
+    "skipped_sources": 1
+  },
+  "quality_checks": {
+    "typed_nodes": true,
+    "typed_edges": true,
+    "properties": true,
+    "descriptions": true,
+    "evidence_quotes": true,
+    "source_urls": true,
+    "confidence": true,
+    "ontology_candidates_review_required": true,
+    "trade_dependency_relation": true,
+    "trade_dependency_fact_node_hint": true,
+    "deep_graph_finding_path_complete": true
+  },
+  "boundaries": {
+    "canonical_ontology_writes": "disabled",
+    "formal_graph_writes": "disabled",
+    "ontology_artifact_count_before": 1,
+    "ontology_artifact_count_after": 1,
+    "live_maritime_database_mutated": false
+  },
+  "validation": [
+    ".venv/bin/python -m unittest tests/test_iterative_graph_enrichment.py",
+    ".venv/bin/python -m unittest tests/test_continuous_enrichment_frontier.py tests/test_ontology_eval.py",
+    ".venv/bin/python -m py_compile agents/iterative_graph_enrichment_agent.py review_workbench.py",
+    "node --check web/review_workbench/api.js",
+    "git diff --check"
+  ],
+  "non_blocking_note": "The extractor is still deterministic and bounded. Standalone property ontology artifacts can be added later if property-level governance becomes a requirement."
+}
