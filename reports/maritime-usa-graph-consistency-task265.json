@@ -1,0 +1,36 @@
+{
+  "task": 265,
+  "status": "implemented",
+  "tenant": "maritime-risk",
+  "issue": "Country:USA was visible as a forced center node but had no graph edges, while findings referenced USA impact paths.",
+  "root_cause": "The approved full-graph response sampled nodes before forcing the requested center. Edge emission requires both endpoints to be present, so USA-related dependency and risk nodes were absent and edges were dropped.",
+  "fix": [
+    "Load center-related maritime dependency rows for requested Country centers.",
+    "Load center-related systemic risk rows for requested Country centers.",
+    "Load matching chokepoint risk indicator rows for those canals.",
+    "Force related TradeDependency, SystemicRiskResult, RiskFinding, MitigationAction, Chokepoint, Hazard, and RiskIndicator nodes into the response before edge construction.",
+    "Emit center-related dependency/risk edges after global edge construction."
+  ],
+  "smoke": {
+    "usa": {
+      "url": "/api/graph/context?tenant=maritime-risk&type=Country&id=USA&depth=1&limit=200&view=all",
+      "center": "Country:USA",
+      "nodes": 299,
+      "edges": 446,
+      "country_edges": 97
+    },
+    "chn_regression": {
+      "url": "/api/graph/context?tenant=maritime-risk&type=Country&id=CHN&depth=1&limit=200&view=all",
+      "center": "Country:CHN",
+      "nodes": 299,
+      "edges": 446,
+      "country_edges": 97
+    }
+  },
+  "write_boundary": {
+    "candidate_finding_promoted": false,
+    "proposed_graph_written": false,
+    "canonical_ontology_written": false,
+    "formal_graph_written": false
+  }
+}

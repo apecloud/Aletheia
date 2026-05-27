@@ -1658,6 +1658,103 @@ class InstanceRepository:
                             if node["id"] == center["id"]:
                                 nodes[idx] = {**node, "center": True}
                                 break
+
+        def remember_maritime_chokepoint(canal):
+            if not canal:
+                return
+            remember_node({
+                "id": f"Chokepoint:{canal}",
+                "tenant_id": tenant.tenant_id,
+                "namespace": tenant.namespace,
+                "graph_database": tenant.graph_database,
+                "type": "Chokepoint",
+                "label": str(canal),
+                "source_table": "maritime_chokepoint_risk_indicators",
+                "source_pk": f"canal={canal}",
+                "ontology_artifact": "object:chokepoint",
+                "status": "approved",
+            })
+
+        def remember_entity_node(type_name, row):
+            node = self._entity_node(tenant, type_name, dict(row))
+            if node:
+                remember_node(node)
+
+        center_maritime_dep_rows = []
+        center_maritime_result_rows = []
+        center_maritime_risk_rows = []
+        if tenant.tenant_id == "maritime-risk" and center and object_type and instance_id:
+            center_type_key = self._cfg_key(object_type)
+            related_limit = max(8, min(48, limit))
+            with self.source_engine_for(tenant).connect() as conn:
+                dep_rows = []
+                result_rows = []
+                risk_rows = []
+                if center_type_key == "country":
+                    dep_rows = conn.execute(
+                        text(
+                            "SELECT * FROM maritime_chokepoint_country_dependencies "
+                            "WHERE iso3 = :iso3 ORDER BY v_canal DESC LIMIT :lim"
+                        ),
+                        {"iso3": instance_id, "lim": related_limit},
+                    ).mappings().all()
+                    result_rows = conn.execute(
+                        text(
+                            "SELECT * FROM maritime_chokepoint_systemic_risk_results "
+                            "WHERE iso3 = :iso3 ORDER BY trade_at_risk_v DESC LIMIT :lim"
+                        ),
+                        {"iso3": instance_id, "lim": related_limit},
+                    ).mappings().all()
+                elif center_type_key == "chokepoint":
+                    dep_rows = conn.execute(
+                        text(
+                            "SELECT * FROM maritime_chokepoint_country_dependencies "
+                            "WHERE canal = :canal ORDER BY v_canal DESC LIMIT :lim"
+                        ),
+                        {"canal": instance_id, "lim": related_limit},
+                    ).mappings().all()
+                    result_rows = conn.execute(
+                        text(
+                            "SELECT * FROM maritime_chokepoint_systemic_risk_results "
+                            "WHERE canal = :canal ORDER BY trade_at_risk_v DESC LIMIT :lim"
+                        ),
+                        {"canal": instance_id, "lim": related_limit},
+                    ).mappings().all()
+                    risk_rows = conn.execute(
+                        text(
+                            "SELECT * FROM maritime_chokepoint_risk_indicators "
+                            "WHERE canal = :canal OR risk_indicator_id = :risk_id "
+                            "ORDER BY risk_indicator_id LIMIT :lim"
+                        ),
+                        {"canal": instance_id, "risk_id": instance_id, "lim": related_limit},
+                    ).mappings().all()
+
+                canals = sorted({str(row["canal"]) for row in [*dep_rows, *result_rows] if row.get("canal")})
+                if center_type_key == "country":
+                    for canal in canals[:related_limit]:
+                        risk_rows.extend(conn.execute(
+                            text(
+                                "SELECT * FROM maritime_chokepoint_risk_indicators "
+                                "WHERE canal = :canal ORDER BY risk_indicator_id LIMIT 1"
+                            ),
+                            {"canal": canal},
+                        ).mappings().all())
+
+            for row in dep_rows:
+                remember_entity_node("TradeDependency", row)
+                remember_maritime_chokepoint(row.get("canal"))
+            for row in result_rows:
+                remember_entity_node("SystemicRiskResult", row)
+                remember_entity_node("RiskFinding", row)
+                remember_entity_node("MitigationAction", row)
+                remember_maritime_chokepoint(row.get("canal"))
+            for row in risk_rows:
+                remember_entity_node("Hazard", row)
+                remember_entity_node("RiskIndicator", row)
+                remember_maritime_chokepoint(row.get("canal"))
+            center_maritime_dep_rows = [dict(row) for row in dep_rows]
+            center_maritime_result_rows = [dict(row) for row in result_rows]
+            center_maritime_risk_rows = [dict(row) for row in risk_rows]
         node_ids = {node["id"] for node in nodes}
         edges = []
         seen_edges = set()
@@ -1718,7 +1815,7 @@ class InstanceRepository:
                 dep_rows = conn.execute(text("SELECT dependency_id, iso3, canal FROM maritime_chokepoint_country_dependencies LIMIT :lim"), {"lim": limit}).mappings().all()
                 result_rows = conn.execute(text("SELECT risk_result_id, iso3, canal FROM maritime_chokepoint_systemic_risk_results LIMIT :lim"), {"lim": limit}).mappings().all()
             for row in risk_rows:
-                chokepoint = f"Chokepoint:{row['risk_indicator_id']}"
+                chokepoint = f"Chokepoint:{row['canal']}"
                 add_edge(f"Hazard:{row['risk_indicator_id']}", chokepoint, "hazard_at_chokepoint", "hazard at")
                 add_edge(f"RiskIndicator:{row['risk_indicator_id']}", chokepoint, "risk_indicator_for_chokepoint", "risk indicator")
             for row in dep_rows:
@@ -1726,6 +1823,19 @@ class InstanceRepository:
                 add_edge(dep, f"Country:{row['iso3']}", "dependency_country", "country")
                 add_edge(dep, f"Chokepoint:{row['canal']}", "dependency_chokepoint", "chokepoint")
             for row in result_rows:
+                for source_type in ("SystemicRiskResult", "RiskFinding", "MitigationAction"):
+                    source = f"{source_type}:{row['risk_result_id']}"
+                    add_edge(source, f"Country:{row['iso3']}", "risk_country", "country")
+                    add_edge(source, f"Chokepoint:{row['canal']}", "risk_chokepoint", "chokepoint")
+            for row in center_maritime_risk_rows:
+                chokepoint = f"Chokepoint:{row['canal']}"
+                add_edge(f"Hazard:{row['risk_indicator_id']}", chokepoint, "hazard_at_chokepoint", "hazard at")
+                add_edge(f"RiskIndicator:{row['risk_indicator_id']}", chokepoint, "risk_indicator_for_chokepoint", "risk indicator")
+            for row in center_maritime_dep_rows:
+                dep = f"TradeDependency:{row['dependency_id']}"
+                add_edge(dep, f"Country:{row['iso3']}", "dependency_country", "country")
+                add_edge(dep, f"Chokepoint:{row['canal']}", "dependency_chokepoint", "chokepoint")
+            for row in center_maritime_result_rows:
                 for source_type in ("SystemicRiskResult", "RiskFinding", "MitigationAction"):
                     source = f"{source_type}:{row['risk_result_id']}"
                     add_edge(source, f"Country:{row['iso3']}", "risk_country", "country")
