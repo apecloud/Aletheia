@@ -316,7 +316,6 @@ function GraphExplorer({ data, tenant, language }) {
   }, []);
   const tenantId = tenant ? tenant.id : "default";
   const requestedGraphTab = initialParams.get("graph_tab") || "approved";
-  const agentRunsRequested = requestedGraphTab === "runs";
   const normalizeGraphTab = (tab) => ["approved", "proposed", "saved"].includes(tab) ? tab : (tab === "runs" ? "proposed" : "approved");
   const graphView = "all";
   const requestedTenantId = initialParams.get("tenant") || "";
@@ -328,7 +327,6 @@ function GraphExplorer({ data, tenant, language }) {
   const [limit, setLimit] = useStateGX(Math.max(1, Number(initialParams.get("limit") || 200)));
   const [hoverId, setHoverId] = useStateGX(null);
   const [leftTab, setLeftTab] = useStateGX(normalizeGraphTab(requestedGraphTab));
-  const [showAgentRunsMoved, setShowAgentRunsMoved] = useStateGX(agentRunsRequested);
   const [focusElementKey, setFocusElementKey] = useStateGX(initialParams.get("proposed_key") || "");
   const [initialScopeApplied, setInitialScopeApplied] = useStateGX(false);
   const [centerSearch, setCenterSearch] = useStateGX(initialParams.get("id") || "");
@@ -358,7 +356,6 @@ function GraphExplorer({ data, tenant, language }) {
   const proposed = proposedQ.data || { runs: [], elements: [] };
   const proposedTotalCount = proposed?.total_count ?? (proposed.elements || []).length;
   const selectGraphTab = (tab) => {
-    setShowAgentRunsMoved(false);
     setLeftTab(normalizeGraphTab(tab));
   };
   const applyCenterInput = () => {
@@ -617,17 +614,6 @@ function GraphExplorer({ data, tenant, language }) {
                 {tGX(language, "Saved views", "保存视图")} <span className="ct">0</span>
               </button>
             </div>
-            {showAgentRunsMoved && (
-              <div style={{ marginTop: 10, border: "1px solid var(--accent-line)", background: "var(--accent-bg)", padding: 10 }}>
-                <div className="eyebrow accent">{tGX(language, "Automatic runs moved", "自动运行已迁移")}</div>
-                <div style={{ marginTop: 5, fontSize: 12, color: "var(--text-dim)", lineHeight: 1.45 }}>
-                  {tGX(language, "Crawl, enrichment, and reasoning runs are managed from Workspace.", "爬取、信息增益和推理运行已统一由 Workspace 管理。")}
-                </div>
-                <a className="btn ghost" style={{ marginTop: 8 }} href={`/?screen=workbench&tenant=${encodeURIComponent(tenantId)}&workspace_tab=agents`}>
-                  {tGX(language, "Open Workspace agents", "打开 Workspace Agent")}
-                </a>
-              </div>
-            )}
           </div>
 
           {leftTab === "approved" && <>
