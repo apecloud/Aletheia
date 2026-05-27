@@ -95,6 +95,63 @@ function compactText(value, limit = 96) {
   return text.length > limit ? text.slice(0, limit - 1) + "…" : text;
 }
 
+function normalizeCenterInputGX(value) {
+  return String(value || "").trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+function resolveCenterInputGX(input, centerType, candidates) {
+  const raw = String(input || "").trim();
+  if (!raw) return "";
+  const normalized = normalizeCenterInputGX(raw);
+  const countryAliases = {
+    china: "CHN",
+    "people's republic of china": "CHN",
+    prc: "CHN",
+    "中国": "CHN",
+    "中华人民共和国": "CHN",
+    india: "IND",
+    "印度": "IND",
+    "united states": "USA",
+    usa: "USA",
+    "u.s.": "USA",
+    "美国": "USA",
+    japan: "JPN",
+    "日本": "JPN",
+    "south korea": "KOR",
+    korea: "KOR",
+    "韩国": "KOR",
+    gambia: "GMB",
+    "冈比亚": "GMB",
+    iran: "IRN",
+    "伊朗": "IRN",
+    russia: "RUS",
+    "俄罗斯": "RUS",
+    singapore: "SGP",
+    "新加坡": "SGP",
+  };
+  const directCountry = String(centerType || "").toLowerCase() === "country"
+    ? (countryAliases[normalized] || (/^[a-z]{3}$/i.test(raw) ? raw.toUpperCase() : ""))
+    : "";
+  if (directCountry) return directCountry;
+  const matches = (candidates || []).map(c => {
+    const id = String(c.id || "");
+    const shortId = id.split(":").slice(1).join(":");
+    const label = String(c.label || c.name || shortId || id);
+    return { ...c, id, shortId, label };
+  });
+  const exact = matches.find(c =>
+    normalizeCenterInputGX(c.shortId) === normalized ||
+    normalizeCenterInputGX(c.id) === normalized ||
+    normalizeCenterInputGX(c.label) === normalized
+  );
+  if (exact) return exact.shortId;
+  const fuzzy = matches.find(c =>
+    normalizeCenterInputGX(c.label).includes(normalized) ||
+    normalizeCenterInputGX(c.shortId).includes(normalized)
+  );
+  return fuzzy ? fuzzy.shortId : raw;
+}
+
 function GraphExplorer({ data, tenant, language }) {
   const initialParams = useMemoGX(() => {
     try { return new URLSearchParams(location.search); } catch { return new URLSearchParams(); }
@@ -137,6 +194,14 @@ function GraphExplorer({ data, tenant, language }) {
   const selectGraphTab = (tab) => {
     setShowAgentRunsMoved(false);
     setLeftTab(normalizeGraphTab(tab));
+  };
+  const applyCenterInput = () => {
+    if (!centerType || !centerSearch.trim()) return;
+    const resolved = resolveCenterInputGX(centerSearch, centerType, candidates);
+    setCenterNodeId(resolved);
+    setFocusMessage(resolved
+      ? tGX(language, "Center resolved inside current tenant. Load full graph to focus it.", "已在当前租户内解析中心节点；点击加载全图后聚焦。")
+      : tGX(language, "No matching center node in this tenant.", "当前租户没有匹配的中心节点。"));
   };
 
   useEffectGX(() => {
@@ -366,11 +431,15 @@ function GraphExplorer({ data, tenant, language }) {
               <input
                 className="input"
                 value={centerSearch}
-                onChange={e => { setCenterSearch(e.target.value); setCenterNodeId(e.target.value.trim()); setFocusMessage(""); }}
+                onChange={e => { setCenterSearch(e.target.value); setFocusMessage(""); }}
+                onKeyDown={e => { if (e.key === "Enter") applyCenterInput(); }}
                 placeholder={centerType === "Country" ? tGX(language, "Search or type country, e.g. China or CHN", "搜索或输入国家，例如 China 或 CHN") : tGX(language, "Search or type center id", "搜索或输入中心 ID")}
                 disabled={!centerType}
                 style={{ marginTop: 6 }}
               />
+              <button className="btn ghost" style={{ marginTop: 6, width: "100%" }} disabled={!centerType || !centerSearch.trim()} onClick={applyCenterInput}>
+                {tGX(language, "Use typed center", "使用输入的中心节点")}
+              </button>
               <div style={{ marginTop: 6, fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--muted)" }}>
                 {activeType ? `${activeType.table} · ${activeType.ontology_artifact} · ${activeType.artifact_status || "unknown"} · ${candidates.length} ${tGX(language, "candidates", "候选")}` : tGX(language, "No tenant graph center types for this tenant.", "该租户没有可用的图谱中心类型。")}
               </div>
