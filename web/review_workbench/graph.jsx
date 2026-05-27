@@ -14,6 +14,13 @@ function labelGX(value, language) {
   return typeof displayLabelUI === "function" ? displayLabelUI(value, language) : value;
 }
 
+function edgeKindLabelGX(value, language) {
+  if (String(value || "") === "risk propagation") {
+    return tGX(language, "risk propagation", "风险传播");
+  }
+  return labelGX(value, language);
+}
+
 function countryLabelGX(value, language) {
   return typeof countryNameUI === "function" ? countryNameUI(value, language) : value;
 }
@@ -34,6 +41,88 @@ function statusLabelGraphGX(status, language) {
     running: "运行中",
   };
   return map[String(status || "").toLowerCase()] || status || "—";
+}
+
+function rawEdgeKindGX(edge) {
+  return edge?.link_key || edge?.kind || edge?.ontology_link || edge?.label || "";
+}
+
+function riskProjectionLayerGX(nodeId) {
+  const prefix = String(nodeId || "").split(":", 1)[0];
+  if (prefix === "SystemicRiskResult") {
+    return {
+      key: "systemic_result",
+      title: "SystemicRiskResult",
+      summary: "Model result: quantified systemic exposure and trade-at-risk.",
+      zh: "模型结果：量化系统性暴露和贸易风险。",
+    };
+  }
+  if (prefix === "RiskFinding") {
+    return {
+      key: "risk_finding",
+      title: "RiskFinding",
+      summary: "Reviewable insight: whether this path should become a finding.",
+      zh: "可审核洞察：这条路径是否应形成发现。",
+    };
+  }
+  if (prefix === "MitigationAction") {
+    return {
+      key: "mitigation_action",
+      title: "MitigationAction",
+      summary: "Action layer: who should review or mitigate this exposure.",
+      zh: "行动层：谁需要复核或缓解该暴露。",
+    };
+  }
+  return null;
+}
+
+function riskPropagationAggregatesGX(rawEdges) {
+  const bySource = new Map();
+  (rawEdges || []).forEach(edge => {
+    const kind = rawEdgeKindGX(edge);
+    if (kind !== "risk_country" && kind !== "risk_chokepoint") return;
+    const source = edge.source || edge.s;
+    const target = edge.target || edge.t;
+    const layer = riskProjectionLayerGX(source);
+    if (!source || !target || !layer) return;
+    const rec = bySource.get(source) || { source, layer, country: "", chokepoint: "", rawEdges: [] };
+    if (kind === "risk_country" && String(target).startsWith("Country:")) rec.country = target;
+    if (kind === "risk_chokepoint" && String(target).startsWith("Chokepoint:")) rec.chokepoint = target;
+    rec.rawEdges.push(edge);
+    bySource.set(source, rec);
+  });
+
+  const byPair = new Map();
+  bySource.forEach(rec => {
+    if (!rec.country || !rec.chokepoint) return;
+    const key = `${rec.country}->${rec.chokepoint}:risk_propagation`;
+    const aggregate = byPair.get(key) || {
+      id: key,
+      source: rec.country,
+      target: rec.chokepoint,
+      link_key: "risk_propagation",
+      label: "risk propagation",
+      aggregate: true,
+      layers: [],
+      raw_edges: [],
+      status: "approved",
+    };
+    aggregate.layers.push({
+      ...rec.layer,
+      source: rec.source,
+      source_row: rec.source,
+    });
+    aggregate.raw_edges.push(...rec.rawEdges);
+    byPair.set(key, aggregate);
+  });
+
+  return Array.from(byPair.values()).map(edge => ({
+    ...edge,
+    layers: edge.layers.sort((a, b) => {
+      const order = { systemic_result: 1, risk_finding: 2, mitigation_action: 3 };
+      return (order[a.key] || 99) - (order[b.key] || 99);
+    }),
+  }));
 }
 
 // radial layout for nodes that don't already have x/y
@@ -64,6 +153,8 @@ function layoutRadial(nodes, edges, opts = {}) {
 // normalize /api/graph/context response into the prototype's graph shape
 function normalizeGraph(raw, fallback, language) {
   if (!raw || !raw.nodes) return fallback;
+  const rawEdges = raw.edges || [];
+  const aggregateEdges = riskPropagationAggregatesGX(rawEdges);
   const nodes = raw.nodes.map(n => ({
     id: n.id, type: n.type,
     label: n.type === "Country"
@@ -75,12 +166,21 @@ function normalizeGraph(raw, fallback, language) {
     _raw: n,
   }));
   const needsLayout = nodes.some(n => n.x == null || n.y == null);
-  const edges = (raw.edges || []).map(e => ({
+  const edges = rawEdges
+    .filter(e => {
+      const kind = rawEdgeKindGX(e);
+      const source = e.source || e.s;
+      return !(kind === "risk_country" || kind === "risk_chokepoint") || !riskProjectionLayerGX(source);
+    })
+    .concat(aggregateEdges)
+    .map(e => ({
     s: e.source || e.s,
     t: e.target || e.t,
-    kind: e.label || e.kind || e.ontology_link || "",
+    kind: e.aggregate ? "risk propagation" : (e.label || e.kind || e.ontology_link || ""),
     flag: e.flag || e.conflict || false,
     muted: e.muted,
+    aggregate: !!e.aggregate,
+    layers: e.layers || [],
     _raw: e,
   }));
   return {
@@ -728,11 +828,25 @@ function GraphExplorer({ data, tenant, language }) {
                 const other = e.s === selected.id ? e.t : e.s;
                 const dir = e.s === selected.id ? "→" : "←";
                 return (
-                  <div key={i} style={{ padding: "8px 14px", borderBottom: "1px solid var(--line-soft)", display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}
-                       onClick={() => selectGraphNode(map[other])}>
-                    <span style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--accent)", textTransform: "uppercase", letterSpacing: "0.08em" }}>{e.kind}</span>
-                    <span style={{ color: "var(--dim)" }}>{dir}</span>
-                    <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-dim)" }}>{labelGX(other, language)}</span>
+                  <div key={i} style={{ padding: "8px 14px", borderBottom: "1px solid var(--line-soft)", display: "flex", flexDirection: "column", gap: 6 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}
+                         onClick={() => selectGraphNode(map[other])}>
+                      <span style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--accent)", textTransform: "uppercase", letterSpacing: "0.08em" }}>{edgeKindLabelGX(e.kind, language)}</span>
+                      <span style={{ color: "var(--dim)" }}>{dir}</span>
+                      <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-dim)" }}>{labelGX(other, language)}</span>
+                    </div>
+                    {e.aggregate && e.layers?.length > 0 && (
+                      <div style={{ border: "1px solid var(--line-soft)", background: "var(--bg-2)", padding: 8, display: "flex", flexDirection: "column", gap: 5 }}>
+                        <div className="eyebrow accent">{tGX(language, "Risk propagation detail", "风险传播详情")}</div>
+                        {e.layers.map(layer => (
+                          <div key={`${e.s}-${e.t}-${layer.key}`} style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--text-dim)", lineHeight: 1.4 }}>
+                            <span style={{ color: "var(--text)" }}>{layer.title}</span>
+                            <span style={{ color: "var(--dim)" }}> · {labelGX(layer.source, language)}</span>
+                            <div>{isZhGX(language) ? layer.zh : layer.summary}</div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 );
               })}
@@ -1179,7 +1293,7 @@ function BigGraph({ data, selected, onSelect, hoverId, setHoverId, hideUnrelated
                     textAnchor="middle" fontSize="10" fontFamily="var(--font-mono)"
                     fill={e.flag ? "var(--rejected)" : (emphasized ? "var(--accent)" : "var(--approved)")}
                     style={{ textTransform: "uppercase", letterSpacing: "0.08em" }}>
-                {labelGX(e.kind, language)}
+                {edgeKindLabelGX(e.kind, language)}
               </text>
             )}
           </g>
