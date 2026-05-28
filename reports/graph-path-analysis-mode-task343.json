@@ -1,0 +1,45 @@
+{
+  "task": 343,
+  "title": "Graph Path Analysis Mode",
+  "scope": "Graph Explorer rendering and interaction only",
+  "canvas_candidate_edge_limit": 20,
+  "implemented": [
+    "explicit trail node state",
+    "explicit trail edge state",
+    "selected edge highlight",
+    "top candidate edge limit on canvas",
+    "aggregate badge for hidden selected-node edges",
+    "right inspector edge search",
+    "right inspector edge sort",
+    "edge-list-to-path-focus selection",
+    "show nearby candidates toggle",
+    "back one step",
+    "clear trail",
+    "show all graph nodes"
+  ],
+  "data_boundary": {
+    "graph_data_changed": false,
+    "ontology_changed": false,
+    "reasoning_changed": false,
+    "formal_graph_write": false,
+    "projection_source_required": "unchanged"
+  },
+  "api_smoke": {
+    "url": "http://127.0.0.1:8772/api/graph/context?tenant=maritime-risk&type=Country&id=CHN&view=all&limit=300",
+    "projection_source": "SchemaGraphModelingAgent",
+    "nodes": 222,
+    "edges": 900,
+    "connected_country_chn": 5,
+    "high_degree_example": {
+      "node": "MaritimeChokepoint:Bab el-Mandeb Strait",
+      "connected_edges": 198
+    }
+  },
+  "validation": [
+    "npx --yes esbuild web/app/graph.jsx --bundle --outfile=/tmp/aletheia-graph-task343.js --format=iife --global-name=AletheiaGraph --log-level=warning",
+    "node --check web/app/api.js",
+    ".venv/bin/python -m py_compile server/workbench_server.py reasoning_engine.py review_workbench.py",
+    ".venv/bin/python -m unittest tests/test_reasoning_deep_graph.py tests/test_schema_graph_modeling_agent.py tests/test_ontology_eval.py tests/test_iterative_graph_enrichment.py",
+    "git diff --check"
+  ]
+}

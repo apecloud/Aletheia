@@ -50,6 +50,46 @@ function rawEdgeKindGX(edge) {
   return edge?.link_key || edge?.kind || edge?.ontology_link || edge?.label || "";
 }
 
+function graphEdgeKeyGX(edge) {
+  const raw = edge?._raw || edge || {};
+  return String(
+    raw.id ||
+    raw.edge_key ||
+    raw.key ||
+    edge?._key ||
+    edge?.id ||
+    `${edge?.s || raw.source || raw.s}->${edge?.t || raw.target || raw.t}:${edge?.kind || rawEdgeKindGX(raw)}:${edge?.factNode || raw.fact_node || raw.source_pk || ""}`
+  );
+}
+
+function graphEdgeSearchTextGX(edge, nodeMap = {}) {
+  const s = edge?.s || edge?._raw?.source || "";
+  const t = edge?.t || edge?._raw?.target || "";
+  return [
+    s,
+    t,
+    nodeMap[s]?.label,
+    nodeMap[t]?.label,
+    edge?.kind,
+    edge?.factNode,
+    edge?._raw?.label,
+    edge?._raw?.source_table,
+    edge?._raw?.source_pk,
+  ].filter(Boolean).join(" ").toLowerCase();
+}
+
+function graphEdgeRankGX(edge, selectedId = "") {
+  let score = 0;
+  if (edge?.aggregateKind === "trade_dependency") score += 90;
+  if (edge?.kind === "trade dependency") score += 80;
+  if (edge?.kind === "risk propagation") score += 70;
+  if (edge?.aggregate) score += 20;
+  if (edge?.s === selectedId) score += 4;
+  if (edge?.t === selectedId) score += 2;
+  if (edge?.muted) score -= 10;
+  return score;
+}
+
 function tradeDependencyAggregatesGX(rawEdges) {
   const byFact = new Map();
   (rawEdges || []).forEach(edge => {
@@ -216,7 +256,8 @@ function normalizeGraph(raw, fallback, language) {
     })
     .concat(tradeDependencyEdges)
     .concat(aggregateEdges)
-    .map(e => ({
+    .map((e, edgeIndex) => ({
+    _key: e.id || e.edge_key || e.key || `${e.source || e.s}->${e.target || e.t}:${e.aggregate_kind || e.link_key || e.label || e.kind || e.ontology_link || ""}:${e.fact_node || e.source_pk || edgeIndex}`,
     s: e.source || e.s,
     t: e.target || e.t,
     kind: e.aggregate_kind === "trade_dependency" ? "trade dependency" : (e.aggregate ? "risk propagation" : (e.label || e.kind || e.ontology_link || "")),
@@ -457,6 +498,11 @@ function GraphExplorer({ data, tenant, language }) {
 
   const [selected, setSelected] = useStateGX(null);
   const [trailNodeIds, setTrailNodeIds] = useStateGX([]);
+  const [trailEdgeKeys, setTrailEdgeKeys] = useStateGX([]);
+  const [selectedEdgeKey, setSelectedEdgeKey] = useStateGX("");
+  const [edgeSearch, setEdgeSearch] = useStateGX("");
+  const [edgeSort, setEdgeSort] = useStateGX("rank");
+  const [showNearbyCandidates, setShowNearbyCandidates] = useStateGX(true);
   const [nodePositions, setNodePositions] = useStateGX({});
   const [hideUnrelated, setHideUnrelated] = useStateGX(false);
   const [collapseOffTrailEdges, setCollapseOffTrailEdges] = useStateGX(true);
@@ -465,6 +511,10 @@ function GraphExplorer({ data, tenant, language }) {
   useEffectGX(() => {
     setSelected(null);
     setTrailNodeIds([]);
+    setTrailEdgeKeys([]);
+    setSelectedEdgeKey("");
+    setEdgeSearch("");
+    setShowNearbyCandidates(true);
     setHoverId(null);
     setPendingCenterFocus("");
     setFocusMessage("");
@@ -490,6 +540,12 @@ function GraphExplorer({ data, tenant, language }) {
       const next = prev.filter(id => nodeIds.has(id));
       return next.length === prev.length ? prev : next;
     });
+    const edgeKeys = new Set(graphWithPositions.edges.map(graphEdgeKeyGX));
+    setTrailEdgeKeys(prev => {
+      const next = prev.filter(key => edgeKeys.has(key));
+      return next.length === prev.length ? prev : next;
+    });
+    setSelectedEdgeKey(prev => !prev || edgeKeys.has(prev) ? prev : "");
   }, [graphWithPositions]);
   useEffectGX(() => {
     if (!selected && hideUnrelated) setHideUnrelated(false);
@@ -499,25 +555,88 @@ function GraphExplorer({ data, tenant, language }) {
   const connectedEdgesAll = selected
     ? graphWithPositions.edges.filter(e => e.s === selected.id || e.t === selected.id)
     : [];
-  const connectedEdgesVisible = connectedEdgesAll.slice(0, 1000);
+  const connectedEdgeLimit = 20;
+  const connectedEdgesRanked = connectedEdgesAll.slice().sort((a, b) => {
+    if (edgeSort === "kind") {
+      return String(a.kind || "").localeCompare(String(b.kind || "")) || String(a.s || "").localeCompare(String(b.s || ""));
+    }
+    if (edgeSort === "target") {
+      const ao = a.s === selected?.id ? a.t : a.s;
+      const bo = b.s === selected?.id ? b.t : b.s;
+      return labelGX(map[ao]?.label || ao, language).localeCompare(labelGX(map[bo]?.label || bo, language));
+    }
+    return graphEdgeRankGX(b, selected?.id) - graphEdgeRankGX(a, selected?.id)
+      || String(a.kind || "").localeCompare(String(b.kind || ""))
+      || String(a.s || "").localeCompare(String(b.s || ""));
+  });
+  const edgeSearchText = edgeSearch.trim().toLowerCase();
+  const connectedEdgesFiltered = edgeSearchText
+    ? connectedEdgesRanked.filter(edge => graphEdgeSearchTextGX(edge, map).includes(edgeSearchText))
+    : connectedEdgesRanked;
+  const connectedEdgesVisible = connectedEdgesFiltered.slice(0, 1000);
+  const canvasCandidateEdges = showNearbyCandidates
+    ? connectedEdgesRanked.slice(0, connectedEdgeLimit)
+    : [];
+  const canvasCandidateEdgeKeys = canvasCandidateEdges.map(graphEdgeKeyGX);
+  const hiddenCanvasEdgeCount = Math.max(0, connectedEdgesAll.length - canvasCandidateEdges.length);
+  const rememberTrailEdge = (edge) => {
+    if (!edge) return;
+    const key = graphEdgeKeyGX(edge);
+    setTrailEdgeKeys(prev => prev.includes(key) ? prev : [...prev, key]);
+    setSelectedEdgeKey(key);
+  };
+  const appendTrailNodes = (nodeIds) => {
+    setTrailNodeIds(prev => {
+      const next = [...prev];
+      nodeIds.forEach(id => {
+        if (id && !next.includes(id)) next.push(id);
+      });
+      return next;
+    });
+  };
   const selectGraphNode = (node, options = {}) => {
     if (!node) return;
+    const previousId = selected?.id || "";
     setSelected(node);
-    setTrailNodeIds(prev => {
-      const current = options.reset ? [] : prev;
-      if (!node.id || current.includes(node.id)) return current;
-      return [...current, node.id];
-    });
+    if (options.reset) {
+      setTrailNodeIds(node.id ? [node.id] : []);
+      setTrailEdgeKeys([]);
+      setSelectedEdgeKey("");
+      setShowNearbyCandidates(true);
+      return;
+    }
+    appendTrailNodes([node.id]);
+    if (previousId && node.id && previousId !== node.id) {
+      const edge = graphWithPositions.edges.find(e => (
+        (e.s === previousId && e.t === node.id) || (e.t === previousId && e.s === node.id)
+      ));
+      if (edge) rememberTrailEdge(edge);
+    }
+  };
+  const selectConnectedEdge = (edge) => {
+    if (!edge || !selected) return;
+    const other = edge.s === selected.id ? edge.t : edge.s;
+    appendTrailNodes([selected.id, other]);
+    rememberTrailEdge(edge);
+    setHideUnrelated(true);
+    setCollapseOffTrailEdges(true);
+    setShowNearbyCandidates(true);
+    if (map[other]) setSelected(map[other]);
   };
   const clearGraphTrail = () => {
     setTrailNodeIds([]);
+    setTrailEdgeKeys([]);
+    setSelectedEdgeKey("");
     setSelected(null);
     setHideUnrelated(false);
   };
   const stepBackGraphTrail = () => {
     if (!trailNodeIds.length) return;
     const next = trailNodeIds.slice(0, -1);
+    const nextEdges = trailEdgeKeys.slice(0, Math.max(0, next.length - 1));
     setTrailNodeIds(next);
+    setTrailEdgeKeys(nextEdges);
+    setSelectedEdgeKey(nextEdges[nextEdges.length - 1] || "");
     const nextSelected = next.length ? map[next[next.length - 1]] : null;
     setSelected(nextSelected || null);
     if (!next.length) setHideUnrelated(false);
@@ -556,6 +675,8 @@ function GraphExplorer({ data, tenant, language }) {
     }
     setPendingCenterFocus(centerKey);
     setTrailNodeIds([]);
+    setTrailEdgeKeys([]);
+    setSelectedEdgeKey("");
     setHideUnrelated(false);
     setFocusMessage(`Loading full graph for ${centerKey}…`);
     window.dispatchEvent(new CustomEvent("aletheia:retry"));
@@ -703,10 +824,19 @@ function GraphExplorer({ data, tenant, language }) {
               {hideUnrelated ? tGX(language, "Show all graph nodes", "显示所有图节点") : tGX(language, "Hide unrelated to trail", "隐藏路径外节点")}
             </button>
             {hideUnrelated && selected && (
-              <label style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 8, fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--muted)", lineHeight: 1.35 }}>
-                <input type="checkbox" checked={collapseOffTrailEdges} onChange={e => setCollapseOffTrailEdges(e.target.checked)} />
-                <span>{tGX(language, "Collapse off-trail edges", "折叠路径外边")}</span>
-              </label>
+              <button
+                className="btn ghost"
+                style={{ marginTop: 8, width: "100%" }}
+                onClick={() => setShowNearbyCandidates(value => !value)}>
+                {showNearbyCandidates
+                  ? tGX(language, "Hide nearby candidates", "隐藏附近候选")
+                  : tGX(language, "Show nearby candidates", "显示附近候选")}
+              </button>
+            )}
+            {hideUnrelated && selected && (
+              <div style={{ marginTop: 8, fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--muted)", lineHeight: 1.35 }}>
+                {tGX(language, "Canvas limit: trail plus top 20 candidate edges. Full edge set stays in the right list.", "画布限制：路径加 top 20 候选边；完整边集保留在右侧列表。")}
+              </div>
             )}
             <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
               <button className="btn ghost" style={{ flex: 1 }} disabled={trailNodes.length < 2} onClick={stepBackGraphTrail}>{tGX(language, "Back", "回退一步")}</button>
@@ -730,7 +860,7 @@ function GraphExplorer({ data, tenant, language }) {
                 <div>{tGX(language, "tenant", "租户")} — {tenantId} · {tenant?.graph || tGX(language, "graph db unknown", "未知图数据库")}</div>
                 <div>{tGX(language, "focus", "聚焦")} — {selected ? selected.id : tGX(language, "none; full graph contrast", "无；全图对比")}</div>
                 <div>{tGX(language, "trail", "路径")} — {trailNodes.length ? trailNodes.map(n => n.id).join(" → ") : tGX(language, "none", "无")}</div>
-                <div>{tGX(language, "visibility", "可见性")} — {hideUnrelated && selected ? tGX(language, "visited trail plus one-hop neighbors", "已访问路径和一跳邻居") : tGX(language, "all graph nodes", "全部图节点")}</div>
+                <div>{tGX(language, "visibility", "可见性")} — {hideUnrelated && selected ? tGX(language, "trail plus top candidates", "路径和少量候选") : tGX(language, "all graph nodes", "全部图节点")}</div>
               </div>
             </div>
           </div>
@@ -770,6 +900,11 @@ function GraphExplorer({ data, tenant, language }) {
               hideUnrelated={hideUnrelated}
               collapseOffTrailEdges={collapseOffTrailEdges}
               trailNodeIds={trailNodeIds}
+              trailEdgeKeys={trailEdgeKeys}
+              selectedEdgeKey={selectedEdgeKey}
+              candidateEdgeKeys={canvasCandidateEdgeKeys}
+              candidateEdgeLimit={connectedEdgeLimit}
+              showNearbyCandidates={showNearbyCandidates}
               onNodePositionChange={updateNodePosition}
               language={language}
             />
@@ -782,7 +917,8 @@ function GraphExplorer({ data, tenant, language }) {
                 <div><span style={{ color: "var(--dim)" }}>{tGX(language, "FOCUS", "聚焦")}</span><span className="v">{selected ? tGX(language, "ON", "开") : tGX(language, "ALL", "全部")}</span></div>
                 <div><span style={{ color: "var(--dim)" }}>{tGX(language, "TRAIL", "路径")}</span><span className="v">{trailNodes.length}</span></div>
                 <div><span style={{ color: "var(--dim)" }}>{tGX(language, "VISIBLE", "可见")}</span><span className="v">{hideUnrelated && selected ? tGX(language, "TRAIL", "路径") : tGX(language, "ALL", "全部")}</span></div>
-                {hideUnrelated && selected && <div><span style={{ color: "var(--dim)" }}>{tGX(language, "EDGES", "边")}</span><span className="v">{collapseOffTrailEdges ? tGX(language, "COLLAPSED", "已折叠") : tGX(language, "EXPANDED", "已展开")}</span></div>}
+                {hideUnrelated && selected && <div><span style={{ color: "var(--dim)" }}>{tGX(language, "EDGES", "边")}</span><span className="v">{tGX(language, "LIMITED", "已限制")}</span></div>}
+                {hideUnrelated && selected && <div><span style={{ color: "var(--dim)" }}>{tGX(language, "CANVAS", "画布")}</span><span className="v">{canvasCandidateEdges.length}/{connectedEdgesAll.length}</span></div>}
                 <div><span style={{ color: "var(--dim)" }}>SOURCE</span><span className="v" style={{ color: graphQ.source === "live" ? "var(--approved)" : graphQ.source === "live-stale" ? "var(--changes)" : "var(--rejected)" }}>{graphQ.source === "live" ? "LIVE" : graphQ.source === "live-stale" ? "STALE" : graphQ.source === "loading" ? "…" : "NONE"}</span></div>
               </div>
             </div>
@@ -813,10 +949,10 @@ function GraphExplorer({ data, tenant, language }) {
               </button>
               <button
                 className="icon-btn"
-                title={collapseOffTrailEdges ? tGX(language, "Expand off-trail edges", "展开路径外边") : tGX(language, "Collapse off-trail edges", "折叠路径外边")}
+                title={showNearbyCandidates ? tGX(language, "Hide nearby candidates", "隐藏附近候选") : tGX(language, "Show nearby candidates", "显示附近候选")}
                 disabled={!selected || !hideUnrelated}
-                onClick={() => setCollapseOffTrailEdges(v => !v)}>
-                {collapseOffTrailEdges ? "≋" : "≣"}
+                onClick={() => setShowNearbyCandidates(value => !value)}>
+                {showNearbyCandidates ? "·" : "⋯"}
               </button>
               <button className="icon-btn" title={tGX(language, "Expand", "展开")}>⊕</button>
               <button className="icon-btn" title={tGX(language, "Collapse", "收起")}>⊖</button>
@@ -877,10 +1013,30 @@ function GraphExplorer({ data, tenant, language }) {
             <div className="section-head">
               <span>{tGX(language, "Connected edges", "相连边")}</span>
               <span className="ct">
-                {connectedEdgesVisible.length < connectedEdgesAll.length
-                  ? `${connectedEdgesVisible.length}/${connectedEdgesAll.length}`
+                {connectedEdgesVisible.length < connectedEdgesFiltered.length
+                  ? `${connectedEdgesVisible.length}/${connectedEdgesFiltered.length}/${connectedEdgesAll.length}`
                   : connectedEdgesAll.length}
               </span>
+            </div>
+            <div style={{ padding: "10px 14px", borderBottom: "1px solid var(--line-soft)", display: "grid", gridTemplateColumns: "1fr 120px", gap: 8 }}>
+              <input
+                className="input"
+                value={edgeSearch}
+                onChange={event => setEdgeSearch(event.target.value)}
+                placeholder={tGX(language, "Search edges, endpoints, source rows", "搜索边、端点、来源行")}
+                style={{ minWidth: 0 }}
+              />
+              <select className="select" value={edgeSort} onChange={event => setEdgeSort(event.target.value)}>
+                <option value="rank">{tGX(language, "Rank", "排序")}</option>
+                <option value="kind">{tGX(language, "Type", "类型")}</option>
+                <option value="target">{tGX(language, "Endpoint", "端点")}</option>
+              </select>
+              {hideUnrelated && selected && (
+                <div style={{ gridColumn: "1 / -1", fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--muted)", lineHeight: 1.4 }}>
+                  {tGX(language, "Canvas shows only trail + top candidate edges; use this list to choose another edge.", "画布只展示路径和 top 候选边；从这里选择其它边继续分析。")}
+                  {hiddenCanvasEdgeCount > 0 ? ` ${hiddenCanvasEdgeCount} ${tGX(language, "edges are list-only.", "条边仅在列表中。")}` : ""}
+                </div>
+              )}
             </div>
             {connectedEdgesAll.length > 1000 && (
               <div style={{ padding: "6px 14px", borderBottom: "1px solid var(--line-soft)", fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--muted)" }}>
@@ -888,16 +1044,25 @@ function GraphExplorer({ data, tenant, language }) {
               </div>
             )}
             <div className="section-body" style={{ padding: 0, maxHeight: "min(620px, 58vh)", overflowY: "auto", overscrollBehavior: "contain" }}>
+              {connectedEdgesVisible.length === 0 && (
+                <div style={{ padding: "12px 14px", fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--muted)" }}>
+                  {edgeSearch ? tGX(language, "No connected edges match the filter.", "没有相连边匹配当前过滤。") : tGX(language, "No connected edges.", "没有相连边。")}
+                </div>
+              )}
               {connectedEdgesVisible.map((e, i) => {
                 const other = e.s === selected.id ? e.t : e.s;
                 const dir = e.s === selected.id ? "→" : "←";
+                const edgeKey = graphEdgeKeyGX(e);
+                const selectedEdge = edgeKey === selectedEdgeKey;
+                const listOnly = hideUnrelated && !canvasCandidateEdgeKeys.includes(edgeKey) && !trailEdgeKeys.includes(edgeKey);
                 return (
-                  <div key={i} style={{ padding: "8px 14px", borderBottom: "1px solid var(--line-soft)", display: "flex", flexDirection: "column", gap: 6 }}>
+                  <div key={edgeKey || i} style={{ padding: "8px 14px", borderBottom: "1px solid var(--line-soft)", display: "flex", flexDirection: "column", gap: 6, background: selectedEdge ? "var(--accent-bg)" : "transparent" }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}
-                         onClick={() => selectGraphNode(map[other])}>
+                         onClick={() => selectConnectedEdge(e)}>
                       <span style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--accent)", textTransform: "uppercase", letterSpacing: "0.08em" }}>{edgeKindLabelGX(e.kind, language)}</span>
                       <span style={{ color: "var(--dim)" }}>{dir}</span>
                       <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-dim)" }}>{labelGX(other, language)}</span>
+                      {listOnly && <span className="pill" style={{ marginLeft: "auto", fontSize: 9 }}>{tGX(language, "list-only", "仅列表")}</span>}
                     </div>
                     {e.aggregate && e.layers?.length > 0 && (
                       <div style={{ border: "1px solid var(--line-soft)", background: "var(--bg-2)", padding: 8, display: "flex", flexDirection: "column", gap: 5 }}>
@@ -1269,7 +1434,23 @@ function ProposedGraphDetail({ item, reason, setReason, busy, message, onReview,
   );
 }
 
-function BigGraph({ data, selected, onSelect, hoverId, setHoverId, hideUnrelated, collapseOffTrailEdges = true, trailNodeIds = [], onNodePositionChange, language }) {
+function BigGraph({
+  data,
+  selected,
+  onSelect,
+  hoverId,
+  setHoverId,
+  hideUnrelated,
+  collapseOffTrailEdges = true,
+  trailNodeIds = [],
+  trailEdgeKeys = [],
+  selectedEdgeKey = "",
+  candidateEdgeKeys = [],
+  candidateEdgeLimit = 20,
+  showNearbyCandidates = true,
+  onNodePositionChange,
+  language,
+}) {
   const svgRef = useRefGX(null);
   const [dragging, setDragging] = useStateGX(null);
   const [expandedEdgeGroupNodeIds, setExpandedEdgeGroupNodeIds] = useStateGX([]);
@@ -1283,41 +1464,46 @@ function BigGraph({ data, selected, onSelect, hoverId, setHoverId, hideUnrelated
   const focusActive = !!sel || trailIds.size > 0;
   const activeNeighborIds = new Set();
   const trailNeighborIds = new Set();
-  const trailContextEdgeKeys = new Set();
+  const trailEdgeKeySet = new Set(trailEdgeKeys || []);
+  const candidateEdgeKeySet = new Set(candidateEdgeKeys || []);
   data.edges.forEach(e => {
+    const edgeKey = graphEdgeKeyGX(e);
     if (sel) {
       if (e.s === sel) activeNeighborIds.add(e.t);
       if (e.t === sel) activeNeighborIds.add(e.s);
     }
-    if (trailIds.has(e.s)) {
+    if (trailEdgeKeySet.has(edgeKey)) {
       trailNeighborIds.add(e.t);
-      trailContextEdgeKeys.add(`${e.s}→${e.t}`);
-    }
-    if (trailIds.has(e.t)) {
       trailNeighborIds.add(e.s);
-      trailContextEdgeKeys.add(`${e.s}→${e.t}`);
+    } else if (!trailEdgeKeySet.size && trailIds.has(e.s) && trailIds.has(e.t)) {
+      trailEdgeKeySet.add(edgeKey);
+      trailNeighborIds.add(e.t);
+      trailNeighborIds.add(e.s);
+    }
+    if (candidateEdgeKeySet.has(edgeKey)) {
+      trailNeighborIds.add(e.s);
+      trailNeighborIds.add(e.t);
     }
   });
   const visibleNodeIds = new Set();
   if (focusActive && hideUnrelated) {
     trailIds.forEach(id => visibleNodeIds.add(id));
-    trailNeighborIds.forEach(id => visibleNodeIds.add(id));
+    data.edges.forEach(e => {
+      const edgeKey = graphEdgeKeyGX(e);
+      if (trailEdgeKeySet.has(edgeKey) || (showNearbyCandidates && candidateEdgeKeySet.has(edgeKey))) {
+        visibleNodeIds.add(e.s);
+        visibleNodeIds.add(e.t);
+      }
+    });
   }
-  const trailEdgeKeys = new Set();
-  data.edges.forEach(e => {
-    if (trailIds.has(e.s) && trailIds.has(e.t)) {
-      trailEdgeKeys.add(`${e.s}→${e.t}`);
-      trailEdgeKeys.add(`${e.t}→${e.s}`);
-    }
-  });
-  const topRelatedEdgeLimit = 10;
+  const topRelatedEdgeLimit = candidateEdgeLimit || 20;
   const expandedEdgeGroupIds = new Set(expandedEdgeGroupNodeIds.filter(id => trailIds.has(id)));
   const offTrailEdgesByTrailNode = new Map();
   const visibleOffTrailEdgeKeys = new Set();
   if (focusActive && hideUnrelated && collapseOffTrailEdges) {
     data.edges.forEach(e => {
-      const edgeKey = `${e.s}→${e.t}`;
-      if (trailEdgeKeys.has(edgeKey)) return;
+      const edgeKey = graphEdgeKeyGX(e);
+      if (trailEdgeKeySet.has(edgeKey)) return;
       [e.s, e.t].forEach(nodeId => {
         if (!trailIds.has(nodeId)) return;
         if (!offTrailEdgesByTrailNode.has(nodeId)) offTrailEdgesByTrailNode.set(nodeId, []);
@@ -1328,11 +1514,12 @@ function BigGraph({ data, selected, onSelect, hoverId, setHoverId, hideUnrelated
       const shouldShowTopRelated = nodeId === sel || expandedEdgeGroupIds.has(nodeId);
       if (!shouldShowTopRelated) return;
       (offTrailEdgesByTrailNode.get(nodeId) || []).slice(0, topRelatedEdgeLimit).forEach(e => {
-        visibleOffTrailEdgeKeys.add(`${e.s}→${e.t}`);
+        if (candidateEdgeKeySet.size && !candidateEdgeKeySet.has(graphEdgeKeyGX(e))) return;
+        visibleOffTrailEdgeKeys.add(graphEdgeKeyGX(e));
       });
     });
   }
-  const collapsedEdgeGroups = Array.from(trailIds).map(nodeId => {
+  const collapsedEdgeGroups = Array.from(trailIds).filter(nodeId => nodeId === sel).map(nodeId => {
     const node = map[nodeId];
     const edges = offTrailEdgesByTrailNode.get(nodeId) || [];
     if (!node || !edges.length) return null;
@@ -1404,21 +1591,23 @@ function BigGraph({ data, selected, onSelect, hoverId, setHoverId, hideUnrelated
       {data.edges.map((e, i) => {
         const s = map[e.s], t = map[e.t];
         if (!s || !t) return null;
+        const edgeKey = graphEdgeKeyGX(e);
         const involved = e.s === sel || e.t === sel;
-        const inTrail = trailEdgeKeys.has(`${e.s}→${e.t}`);
-        const inVisibleOffTrail = visibleOffTrailEdgeKeys.has(`${e.s}→${e.t}`);
-        const inTrailContext = trailContextEdgeKeys.has(`${e.s}→${e.t}`);
-        if (focusActive && hideUnrelated && !inTrailContext) return null;
+        const inTrail = trailEdgeKeySet.has(edgeKey);
+        const inCandidate = showNearbyCandidates && candidateEdgeKeySet.has(edgeKey);
+        const inVisibleOffTrail = visibleOffTrailEdgeKeys.has(edgeKey) || inCandidate;
+        const isSelectedEdge = selectedEdgeKey && edgeKey === selectedEdgeKey;
+        if (focusActive && hideUnrelated && !inTrail && !inCandidate) return null;
         if (focusActive && hideUnrelated && (!visibleNodeIds.has(e.s) || !visibleNodeIds.has(e.t))) return null;
         if (focusActive && hideUnrelated && collapseOffTrailEdges && !inTrail && !inVisibleOffTrail) return null;
-        const dimmed = focusActive && !involved && !inTrail && !inTrailContext && !(activeNeighborIds.has(e.s) || activeNeighborIds.has(e.t));
-        const emphasized = involved || inTrail;
-        const showEdgeLabel = emphasized || inVisibleOffTrail || (hideUnrelated && inTrailContext);
+        const dimmed = focusActive && !involved && !inTrail && !inCandidate && !(activeNeighborIds.has(e.s) || activeNeighborIds.has(e.t));
+        const emphasized = involved || inTrail || isSelectedEdge;
+        const showEdgeLabel = emphasized || inVisibleOffTrail;
         return (
-          <g key={i} opacity={dimmed ? 0.16 : (hideUnrelated && inTrailContext && !emphasized ? 0.78 : 1)}>
+          <g key={edgeKey || i} opacity={dimmed ? 0.16 : (hideUnrelated && inCandidate && !emphasized ? 0.78 : 1)}>
             <line x1={s.x} y1={s.y} x2={t.x} y2={t.y}
-                  stroke={e.flag ? "oklch(0.66 0.18 25 / 0.7)" : (emphasized ? "var(--accent)" : inTrailContext ? "var(--approved)" : e.muted ? "var(--faint)" : "var(--line-strong)")}
-                  strokeWidth={emphasized ? 1.8 : inTrailContext ? 1.35 : 1}
+                  stroke={e.flag ? "oklch(0.66 0.18 25 / 0.7)" : (emphasized ? "var(--accent)" : inCandidate ? "var(--approved)" : e.muted ? "var(--faint)" : "var(--line-strong)")}
+                  strokeWidth={emphasized ? 2.2 : inCandidate ? 1.35 : 1}
                   strokeDasharray={inTrail && !involved ? "2 2" : e.muted ? "4 3" : ""}
                   markerEnd={emphasized ? "url(#arrow-accent)" : "url(#arrow)"} />
             {showEdgeLabel && (
