@@ -459,6 +459,7 @@ function GraphExplorer({ data, tenant, language }) {
   const [trailNodeIds, setTrailNodeIds] = useStateGX([]);
   const [nodePositions, setNodePositions] = useStateGX({});
   const [hideUnrelated, setHideUnrelated] = useStateGX(false);
+  const [collapseOffTrailEdges, setCollapseOffTrailEdges] = useStateGX(true);
   const [pendingCenterFocus, setPendingCenterFocus] = useStateGX("");
   const [focusMessage, setFocusMessage] = useStateGX("");
   useEffectGX(() => {
@@ -701,6 +702,12 @@ function GraphExplorer({ data, tenant, language }) {
               onClick={toggleTrailFocus}>
               {hideUnrelated ? tGX(language, "Show all graph nodes", "显示所有图节点") : tGX(language, "Hide unrelated to trail", "隐藏路径外节点")}
             </button>
+            {hideUnrelated && selected && (
+              <label style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 8, fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--muted)", lineHeight: 1.35 }}>
+                <input type="checkbox" checked={collapseOffTrailEdges} onChange={e => setCollapseOffTrailEdges(e.target.checked)} />
+                <span>{tGX(language, "Collapse off-trail edges", "折叠路径外边")}</span>
+              </label>
+            )}
             <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
               <button className="btn ghost" style={{ flex: 1 }} disabled={trailNodes.length < 2} onClick={stepBackGraphTrail}>{tGX(language, "Back", "回退一步")}</button>
               <button className="btn ghost" style={{ flex: 1 }} disabled={!trailNodes.length} onClick={clearGraphTrail}>{tGX(language, "Clear trail", "清空路径")}</button>
@@ -761,6 +768,7 @@ function GraphExplorer({ data, tenant, language }) {
               hoverId={hoverId}
               setHoverId={setHoverId}
               hideUnrelated={hideUnrelated}
+              collapseOffTrailEdges={collapseOffTrailEdges}
               trailNodeIds={trailNodeIds}
               onNodePositionChange={updateNodePosition}
               language={language}
@@ -774,6 +782,7 @@ function GraphExplorer({ data, tenant, language }) {
                 <div><span style={{ color: "var(--dim)" }}>{tGX(language, "FOCUS", "聚焦")}</span><span className="v">{selected ? tGX(language, "ON", "开") : tGX(language, "ALL", "全部")}</span></div>
                 <div><span style={{ color: "var(--dim)" }}>{tGX(language, "TRAIL", "路径")}</span><span className="v">{trailNodes.length}</span></div>
                 <div><span style={{ color: "var(--dim)" }}>{tGX(language, "VISIBLE", "可见")}</span><span className="v">{hideUnrelated && selected ? tGX(language, "TRAIL", "路径") : tGX(language, "ALL", "全部")}</span></div>
+                {hideUnrelated && selected && <div><span style={{ color: "var(--dim)" }}>{tGX(language, "EDGES", "边")}</span><span className="v">{collapseOffTrailEdges ? tGX(language, "COLLAPSED", "已折叠") : tGX(language, "EXPANDED", "已展开")}</span></div>}
                 <div><span style={{ color: "var(--dim)" }}>SOURCE</span><span className="v" style={{ color: graphQ.source === "live" ? "var(--approved)" : graphQ.source === "live-stale" ? "var(--changes)" : "var(--rejected)" }}>{graphQ.source === "live" ? "LIVE" : graphQ.source === "live-stale" ? "STALE" : graphQ.source === "loading" ? "…" : "NONE"}</span></div>
               </div>
             </div>
@@ -801,6 +810,13 @@ function GraphExplorer({ data, tenant, language }) {
                 disabled={!selected}
                 onClick={toggleTrailFocus}>
                 {hideUnrelated ? "◉" : "◌"}
+              </button>
+              <button
+                className="icon-btn"
+                title={collapseOffTrailEdges ? tGX(language, "Expand off-trail edges", "展开路径外边") : tGX(language, "Collapse off-trail edges", "折叠路径外边")}
+                disabled={!selected || !hideUnrelated}
+                onClick={() => setCollapseOffTrailEdges(v => !v)}>
+                {collapseOffTrailEdges ? "≋" : "≣"}
               </button>
               <button className="icon-btn" title={tGX(language, "Expand", "展开")}>⊕</button>
               <button className="icon-btn" title={tGX(language, "Collapse", "收起")}>⊖</button>
@@ -1253,7 +1269,7 @@ function ProposedGraphDetail({ item, reason, setReason, busy, message, onReview,
   );
 }
 
-function BigGraph({ data, selected, onSelect, hoverId, setHoverId, hideUnrelated, trailNodeIds = [], onNodePositionChange, language }) {
+function BigGraph({ data, selected, onSelect, hoverId, setHoverId, hideUnrelated, collapseOffTrailEdges = true, trailNodeIds = [], onNodePositionChange, language }) {
   const svgRef = useRefGX(null);
   const [dragging, setDragging] = useStateGX(null);
   const map = Object.fromEntries(data.nodes.map(n => [n.id, n]));
@@ -1293,6 +1309,16 @@ function BigGraph({ data, selected, onSelect, hoverId, setHoverId, hideUnrelated
       trailEdgeKeys.add(`${e.t}→${e.s}`);
     }
   });
+  const topRelatedEdgeLimit = 10;
+  const selectedOffTrailEdges = sel
+    ? data.edges.filter(e => (e.s === sel || e.t === sel) && !trailEdgeKeys.has(`${e.s}→${e.t}`))
+    : [];
+  const selectedTopRelatedEdgeKeys = new Set(
+    selectedOffTrailEdges.slice(0, topRelatedEdgeLimit).map(e => `${e.s}→${e.t}`)
+  );
+  const selectedCollapsedEdgeCount = sel && focusActive && hideUnrelated && collapseOffTrailEdges
+    ? Math.max(0, selectedOffTrailEdges.length - selectedTopRelatedEdgeKeys.size)
+    : 0;
 
   const eventPoint = (event) => {
     const svg = svgRef.current;
@@ -1340,12 +1366,14 @@ function BigGraph({ data, selected, onSelect, hoverId, setHoverId, hideUnrelated
         if (!s || !t) return null;
         const involved = e.s === sel || e.t === sel;
         const inTrail = trailEdgeKeys.has(`${e.s}→${e.t}`);
+        const inSelectedTopRelated = selectedTopRelatedEdgeKeys.has(`${e.s}→${e.t}`);
         const inTrailContext = trailContextEdgeKeys.has(`${e.s}→${e.t}`);
         if (focusActive && hideUnrelated && !inTrailContext) return null;
         if (focusActive && hideUnrelated && (!visibleNodeIds.has(e.s) || !visibleNodeIds.has(e.t))) return null;
+        if (focusActive && hideUnrelated && collapseOffTrailEdges && !inTrail && !inSelectedTopRelated) return null;
         const dimmed = focusActive && !involved && !inTrail && !inTrailContext && !(activeNeighborIds.has(e.s) || activeNeighborIds.has(e.t));
         const emphasized = involved || inTrail;
-        const showEdgeLabel = emphasized || (hideUnrelated && inTrailContext);
+        const showEdgeLabel = emphasized || inSelectedTopRelated || (hideUnrelated && inTrailContext);
         return (
           <g key={i} opacity={dimmed ? 0.16 : (hideUnrelated && inTrailContext && !emphasized ? 0.78 : 1)}>
             <line x1={s.x} y1={s.y} x2={t.x} y2={t.y}
@@ -1364,6 +1392,29 @@ function BigGraph({ data, selected, onSelect, hoverId, setHoverId, hideUnrelated
           </g>
         );
       })}
+
+      {selectedCollapsedEdgeCount > 0 && map[sel] && (
+        <g style={{ pointerEvents: "none" }}>
+          <rect
+            x={Math.min(850, map[sel].x + 18)}
+            y={Math.max(18, map[sel].y - 34)}
+            width={language === "zh" ? 112 : 132}
+            height="22"
+            rx="6"
+            fill="var(--bg-1)"
+            stroke="var(--line-strong)"
+            opacity="0.94"
+          />
+          <text
+            x={Math.min(850, map[sel].x + 28)}
+            y={Math.max(18, map[sel].y - 19)}
+            fontSize="10"
+            fontFamily="var(--font-mono)"
+            fill="var(--muted)">
+            {language === "zh" ? `已折叠 ${selectedCollapsedEdgeCount} 条边` : `${selectedCollapsedEdgeCount} edges collapsed`}
+          </text>
+        </g>
+      )}
 
       {/* nodes */}
       {data.nodes.map((n, i) => {
