@@ -146,7 +146,7 @@ class ReasoningEngine:
             props.append({"col": k, "value": v_str})
         return props
 
-    def _source_key_profile(self, tenant, object_type, instance_id, cfg):
+    def _source_key_profile(self, tenant, object_type, instance_id, cfg, depth=1):
         """Aggregate source tables that share the center entity key.
 
         This intentionally uses schema evidence (shared key columns, numeric
@@ -205,6 +205,7 @@ class ReasoningEngine:
         label_candidates = ("canal", "chokepoint", "strait", "route", "corridor", "port", "location")
         risk_metric_hints = ("risk", "impacted", "impact", "at_risk", "share", "dependency", "v_canal", "q_canal", "revenue")
         top_paths = []
+        second_hop_paths = []
 
         with source_engine.connect() as conn:
             for table in table_names:
@@ -276,14 +277,46 @@ class ReasoningEngine:
                     except Exception:
                         top_rows = []
                     for top in top_rows:
+                        label_value = str(top["label"])
                         top_paths.append({
                             "table": table,
                             "label_col": label_col,
-                            "label": str(top["label"]),
+                            "label": label_value,
                             "metric": preferred,
                             "metric_value": float(top["metric"] or 0),
                             "row_count": int(top["cnt"] or 0),
                         })
+                        if int(depth or 1) >= 2:
+                            try:
+                                peer_rows = conn.execute(
+                                    text(
+                                        f"SELECT {qk} AS peer_key, "
+                                        f"COUNT(*) AS cnt, COALESCE(SUM({_quote_ident(preferred)}), 0) AS metric "
+                                        f"FROM {qt} "
+                                        f"WHERE {_quote_ident(label_col)} = :label AND {qk} != :id "
+                                        f"GROUP BY {qk} ORDER BY metric DESC LIMIT 12"
+                                    ),
+                                    {"label": label_value, "id": instance_id},
+                                ).mappings().all()
+                            except Exception:
+                                peer_rows = []
+                            if peer_rows:
+                                second_hop_paths.append({
+                                    "table": table,
+                                    "label_col": label_col,
+                                    "label": label_value,
+                                    "metric": preferred,
+                                    "metric_value": float(top["metric"] or 0),
+                                    "peer_count": len(peer_rows),
+                                    "top_peers": [
+                                        {
+                                            "key": str(peer["peer_key"]),
+                                            "metric_value": float(peer["metric"] or 0),
+                                            "row_count": int(peer["cnt"] or 0),
+                                        }
+                                        for peer in peer_rows
+                                    ],
+                                })
 
                 related_tables.append({
                     "table": table,
@@ -297,12 +330,15 @@ class ReasoningEngine:
         if not related_tables:
             return None
         top_paths.sort(key=lambda item: item.get("metric_value", 0), reverse=True)
+        second_hop_paths.sort(key=lambda item: item.get("metric_value", 0), reverse=True)
         return {
             "center_key_col": key_col,
+            "scope_depth": int(depth or 1),
             "related_tables": related_tables,
             "total_key_rows": total_rows,
             "numeric_totals": numeric_totals,
             "top_paths": top_paths[:8],
+            "second_hop_paths": second_hop_paths[:8],
         }
 
     # ------------------------------------------------------------------
@@ -631,7 +667,7 @@ class ReasoningEngine:
     # Main entry: analyze
     # ------------------------------------------------------------------
 
-    def analyze(self, tenant, center_node, question=None):
+    def analyze(self, tenant, center_node, question=None, depth=1, limit=200):
         if not center_node or ":" not in center_node:
             return None
         object_type, instance_id = center_node.split(":", 1)
@@ -650,7 +686,7 @@ class ReasoningEngine:
                 "next_questions": ["Verify entity ID exists in the current tenant data source."],
             }
 
-        graph = self.repo.neighborhood(tenant, object_type, instance_id, depth=1, limit=200)
+        graph = self.repo.neighborhood(tenant, object_type, instance_id, depth=depth, limit=limit)
         if not graph or not graph.get("approved"):
             return None
 
@@ -695,7 +731,7 @@ class ReasoningEngine:
         # inventing graph writes or ontology terms.
         source_key_profile = None
         if not rankings:
-            source_key_profile = self._source_key_profile(tenant, object_type, instance_id, cfg)
+            source_key_profile = self._source_key_profile(tenant, object_type, instance_id, cfg, depth=depth)
 
         # --- Neighbors by type (from graph) ---
         neighbors_by_type = {}
@@ -748,6 +784,7 @@ class ReasoningEngine:
         # Activity level sentence
         if source_key_profile and source_key_profile.get("related_tables"):
             top_paths = source_key_profile.get("top_paths") or []
+            second_hop_paths = source_key_profile.get("second_hop_paths") or []
             table_count = len(source_key_profile.get("related_tables") or [])
             row_count = source_key_profile.get("total_key_rows", 0)
             distinct_labels = sum(int(t.get("distinct_labels") or 0) for t in source_key_profile.get("related_tables") or [])
@@ -760,6 +797,14 @@ class ReasoningEngine:
                     f"{identity} has {row_count} source rows across {table_count} related source table(s), "
                     f"covering {distinct_labels} distinct path labels. The largest current exposure paths are {top_text}."
                 )
+                if second_hop_paths:
+                    peer_text = "; ".join(
+                        f"{p['label']} also connects {', '.join(peer['key'] for peer in p.get('top_peers', [])[:4])}"
+                        for p in second_hop_paths[:3]
+                    )
+                    sentences.append(
+                        f"At depth {source_key_profile.get('scope_depth', 1)}, shared-path context adds peer countries through the same path labels: {peer_text}."
+                    )
             else:
                 sentences.append(
                     f"{identity} has {row_count} source rows across {table_count} related source table(s), "
@@ -1018,6 +1063,22 @@ class ReasoningEngine:
             else:
                 interpretations.append(
                     f"{label} has {total_key_rows} source-backed relationship rows, but no numeric risk/trade metric column was found for ranking connected paths."
+                )
+            second_hop_paths = source_key_profile.get("second_hop_paths") or []
+            if second_hop_paths:
+                second_hop_text = "; ".join(
+                    f"{p['label']} -> {', '.join(peer['key'] for peer in p.get('top_peers', [])[:6])}"
+                    for p in second_hop_paths[:5]
+                )
+                key_facts.append({
+                    "label": f"depth-{source_key_profile.get('scope_depth', 2)} shared path peers",
+                    "value": second_hop_text,
+                    "source_ref": "source-key path peer aggregation",
+                })
+                interpretations.append(
+                    f"Depth {source_key_profile.get('scope_depth', 2)} changes the reading from a single-country profile to shared-path exposure: "
+                    f"{', '.join(p['label'] for p in second_hop_paths[:3])} connect {label} with other high-exposure countries such as "
+                    f"{', '.join(peer['key'] for p in second_hop_paths[:2] for peer in p.get('top_peers', [])[:3])}."
                 )
 
         # -- Multi-hop value aggregation --

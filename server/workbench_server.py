@@ -5933,8 +5933,10 @@ class ReasoningRepository:
             yield {"event": "run_complete", "data": {"tenant": tenant.public_dict(), "task": task, "run": run, "findings": [], "approved": False}}
             return
         center_node = scope.get("center_node")
+        scope_depth = int(scope.get("depth") or 1)
+        scope_limit = int(scope.get("node_limit") or 200)
         engine = ReasoningEngine(self.instance_repository)
-        structured_answer = engine.analyze(tenant, center_node, task.get("question"))
+        structured_answer = engine.analyze(tenant, center_node, task.get("question"), depth=scope_depth, limit=scope_limit)
         if structured_answer:
             query_plan = [
                 "Validate tenant-scoped entity profile task and approved-only graph scope.",
@@ -5952,6 +5954,13 @@ class ReasoningRepository:
                 top_paths = source_key_profile.get("top_paths") or []
                 path_summary = ", ".join(f"{p['label']} ({p['metric']} {_fmt_number(p['metric_value'])})" for p in top_paths[:3]) or "no ranked paths"
                 ranking_summary = f"{source_key_profile.get('total_key_rows', 0)} source rows; top paths: {path_summary}"
+                second_hop_paths = source_key_profile.get("second_hop_paths") or []
+                if second_hop_paths:
+                    shared_summary = "; ".join(
+                        f"{p['label']} -> {', '.join(peer['key'] for peer in p.get('top_peers', [])[:4])}"
+                        for p in second_hop_paths[:3]
+                    )
+                    ranking_summary += f"; depth-{source_key_profile.get('scope_depth', scope_depth)} shared paths: {shared_summary}"
                 source_tables = [str(t.get("table") or "") for t in source_key_profile.get("related_tables", [])]
                 profile_label = "Maritime Exposure Profile" if any(table.startswith("maritime_") for table in source_tables) else "Source Evidence Profile"
                 aggregate_label = f"{label} {profile_label}"
@@ -6037,8 +6046,10 @@ class ReasoningRepository:
             run = self._record_run(tenant, task, query_plan, tool_calls, [], output, eval_result, "blocked", started)
             return {"tenant": tenant.public_dict(), "task": task, "run": run, "findings": [], "approved": False}
         center_node = scope.get("center_node")
+        scope_depth = int(scope.get("depth") or 1)
+        scope_limit = int(scope.get("node_limit") or 200)
         engine = ReasoningEngine(self.instance_repository)
-        structured_answer = engine.analyze(tenant, center_node, task.get("question"))
+        structured_answer = engine.analyze(tenant, center_node, task.get("question"), depth=scope_depth, limit=scope_limit)
         if structured_answer:
             query_plan = [
                 "Validate tenant-scoped entity profile task and approved-only graph scope.",
@@ -6064,6 +6075,13 @@ class ReasoningRepository:
                 top_paths = source_key_profile.get("top_paths") or []
                 path_summary = ", ".join(f"{p['label']} ({p['metric']} {_fmt_number(p['metric_value'])})" for p in top_paths[:3]) or "no ranked paths"
                 ranking_summary = f"{source_key_profile.get('total_key_rows', 0)} source rows; top paths: {path_summary}"
+                second_hop_paths = source_key_profile.get("second_hop_paths") or []
+                if second_hop_paths:
+                    shared_summary = "; ".join(
+                        f"{p['label']} -> {', '.join(peer['key'] for peer in p.get('top_peers', [])[:4])}"
+                        for p in second_hop_paths[:3]
+                    )
+                    ranking_summary += f"; depth-{source_key_profile.get('scope_depth', scope_depth)} shared paths: {shared_summary}"
                 source_tables = [str(t.get("table") or "") for t in source_key_profile.get("related_tables", [])]
                 profile_label = "Maritime Exposure Profile" if any(table.startswith("maritime_") for table in source_tables) else "Source Evidence Profile"
                 aggregate_label = f"{label} {profile_label}"
@@ -6183,7 +6201,13 @@ class ReasoningRepository:
         if not structured_answer:
             center_node = scope.get("center_node")
             engine = ReasoningEngine(self.instance_repository)
-            structured_answer = engine.analyze(tenant, center_node, task.get("question"))
+            structured_answer = engine.analyze(
+                tenant,
+                center_node,
+                task.get("question"),
+                depth=int(scope.get("depth") or 1),
+                limit=int(scope.get("node_limit") or 200),
+            )
             if structured_answer:
                 raw_recommended_action = finding.get("recommended_action") or {}
                 finding["recommended_action"] = {
