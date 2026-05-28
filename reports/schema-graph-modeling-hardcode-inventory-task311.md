@@ -18,6 +18,8 @@ There are still hardcoded schema-to-graph paths. They should be treated as demo 
 | Maritime graph hydration | `review_workbench.py` maritime branches in `full_graph` | Hardcoded creation of `TradeDependency`, `SystemicRiskResult`, `RiskFinding`, `MitigationAction`, hazard/risk edges from specific maritime tables. | Move to reviewed graph projection specs. `RiskFinding` should only appear when a reviewed ontology/policy defines it, not because source column names match. |
 | Tenant-specific playbooks | `review_workbench.py` `run_creditcardfraud_autopilot_playbook` and `run_maritime_risk_autopilot_playbook` | Finding candidates are created from tenant-specific hardcoded hypotheses and metrics. | Keep as named demo playbooks only. General reasoning should consume graph paths and ontology contracts. |
 | Maritime import ontology seed | `scripts/import_maritime_risk_dataset.py` `OBJECT_SPECS` / `LINK_SPECS` | Seeds `Chokepoint`, `TradeDependency`, `SystemicRiskResult`, `RiskFinding`, `MitigationAction` and link specs directly. | Treat as fixture/import demo. Default path should import raw source tables, then invoke schema graph modeling agent to produce draft ontology. |
+| US-Iran import ontology seed | `scripts/import_us_iran_war_dataset.py` `OBJECT_SPECS` / `LINK_SPECS`, `_seed_object`, `_seed_link` | Seeds `ConflictEvent`, `EconomicChannel`, `CountryExposure`, `RecommendedAction`, `SourceDocument`, `GraphEdge` and semantic links such as `raises_risk_of`, `impacts`, `requires_action`, `supports` directly via `upsert_artifact`. | Treat as curated demo/bootstrap fixture only. For a real import, load raw source tables/web-source snapshots first, then invoke `SchemaGraphModelingAgent` to produce draft ontology artifacts from source schema/profile evidence. |
+| Demo bootstrap ontology seed | `scripts/bootstrap_demo_environment.py` `NORTHWIND_OBJECTS` / `NORTHWIND_LINKS`, `CREDITCARDFRAUD_OBJECTS` / `CREDITCARDFRAUD_LINKS`, `_seed_object`, `_seed_link` | Seeds approved default/Northwind object-link artifacts and draft creditcardfraud artifacts directly via `upsert_artifact`. | May remain as explicit test/demo bootstrap fixture because it creates known baseline/golden data. It must not be used as production schema->graph modeling. Any new tenant or imported source should use `SchemaGraphModelingAgent`; bootstrap seed should be guarded/documented as fixture setup. |
 | Web/iterative extraction terms | `agents/iterative_graph_enrichment_agent.py` `COUNTRY_ALIASES`, `METRIC_TERMS`, `RELATION_TERMS`, `_extract_graph_semantics` | Hardcoded maritime extraction terms and relation construction (`trade_dependency`, `raises_risk_for`, `TradeDependency:*`). | Replace extraction heuristics with an LLM extraction contract constrained by approved ontology + source evidence. Fixed aliases can remain as optional normalizers, not ontology decisions. |
 
 ## Migration Order
@@ -25,7 +27,7 @@ There are still hardcoded schema-to-graph paths. They should be treated as demo 
 1. Route new schema-to-graph jobs through `SchemaGraphModelingAgent`.
 2. Add a reviewed graph projection spec generated from approved object/link artifacts.
 3. Replace `GraphRepository.ENTITY_CONFIG` and `LINK_CONFIG` reads with artifact-driven specs.
-4. Move import scripts to raw-table import only; seed demo ontologies only behind explicit fixture flags.
+4. Move import scripts to raw-table import by default; keep `import_maritime_risk_dataset.py`, `import_us_iran_war_dataset.py`, and `bootstrap_demo_environment.py` ontology seeding only as explicit demo/fixture modes.
 5. Keep tenant playbooks as demo-specific reasoning fixtures, clearly separated from core ontology modeling.
 6. Replace iterative enrichment term heuristics with a model call that receives approved ontology constraints and source evidence, then emits typed proposed nodes/edges/finding candidates with provenance.
 
@@ -38,4 +40,3 @@ No schema-to-graph decision should be accepted without:
 - draft/proposed status;
 - provenance and confidence;
 - explicit review gate before canonical ontology or formal graph writes.
-

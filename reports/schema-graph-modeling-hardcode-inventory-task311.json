@@ -33,6 +33,16 @@
       "migration": "make raw import default; fixture ontology seed only behind explicit flag"
     },
     {
+      "area": "us_iran_import_seed",
+      "location": "scripts/import_us_iran_war_dataset.py OBJECT_SPECS/LINK_SPECS/_seed_object/_seed_link",
+      "migration": "treat as curated demo/bootstrap fixture; real imports should load raw tables first and invoke SchemaGraphModelingAgent for draft ontology"
+    },
+    {
+      "area": "demo_bootstrap_seed",
+      "location": "scripts/bootstrap_demo_environment.py NORTHWIND/CREDITCARDFRAUD specs and _seed_object/_seed_link",
+      "migration": "may remain as explicit test/demo fixture; must not be used as production schema-to-graph modeling"
+    },
+    {
       "area": "iterative_extraction_terms",
       "location": "agents/iterative_graph_enrichment_agent.py terms and _extract_graph_semantics",
       "migration": "replace ontology decisions with LLM extraction contract constrained by approved ontology"
