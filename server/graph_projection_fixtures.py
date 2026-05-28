@@ -1,8 +1,13 @@
 """Legacy graph projection fixtures for demo tenants.
 
+Do not use this module for production schema inference. Production
+schema-to-graph semantics must come from source schema/profile evidence,
+``SchemaGraphModelingAgent`` structured output, and the human review gate.
+
 These constants are intentionally isolated from the workbench server entry.
-They remain only as bootstrap/demo compatibility while production schema->graph
-modeling migrates to SchemaGraphModelingAgent + reviewed projection specs.
+They remain only as bootstrap/demo compatibility and graph projection fallbacks
+for tenants whose reviewed SchemaGraphModelingAgent artifacts are not yet
+available.
 """
 
 SOURCE_LINK_SCHEMAS = {

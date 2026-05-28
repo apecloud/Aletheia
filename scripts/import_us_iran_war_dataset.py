@@ -6,6 +6,11 @@ query, URL, publisher, retrieval date, confidence, and review/licensing notes.
 It loads source tables into the shared MySQL source DB, registers a tenant graph
 space, and seeds draft ontology artifacts only. No canonical ontology or graph
 writes happen in this import.
+
+The `OBJECT_SPECS` and `LINK_SPECS` below are curated demo/bootstrap fixtures
+for this snapshot. They are not a production schema-to-graph decision path.
+Production imports should persist raw source tables and route schema/profile
+evidence through SchemaGraphModelingAgent before creating reviewable drafts.
 """
 
 from __future__ import annotations

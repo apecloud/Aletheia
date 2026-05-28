@@ -5,6 +5,11 @@ The import is intentionally small and repeatable: it downloads the three
 Zenodo CSV files when missing, loads them into the shared source MySQL
 database, registers the `maritime-risk` tenant, and seeds draft ontology
 artifacts for graph reasoning validation.
+
+The `OBJECT_SPECS` and `LINK_SPECS` below are curated demo/bootstrap fixtures.
+They are not the production schema-to-graph modeling path. Production rebuilds
+must load raw source tables first and let SchemaGraphModelingAgent infer draft
+node/edge types from source schema/profile evidence before human review.
 """
 
 from __future__ import annotations

@@ -1,3 +1,12 @@
+"""Iterative proposed-graph enrichment.
+
+This agent extracts proposed graph elements from approved ontology context and
+allowed crawl/search evidence. Local term dictionaries in this file are
+extraction hints for legacy/demo coverage only; they must not become canonical
+ontology, formal graph writes, or schema-to-graph decisions. New node/edge type
+semantics belong in SchemaGraphModelingAgent output plus the review gate.
+"""
+
 import argparse
 import hashlib
 import json

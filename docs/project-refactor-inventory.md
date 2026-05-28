@@ -8,6 +8,10 @@ The rule for this phase is conservative: do not delete files without import or
 runtime evidence. Production schema-to-graph semantics must flow through
 `SchemaGraphModelingAgent` or reviewed equivalent artifacts.
 
+See `docs/schema-graph-hardcode-boundary.md` for the current boundary between
+production schema-to-graph modeling, legacy adapters, and demo/bootstrap
+fixtures.
+
 ## Root Files
 
 | File | Current role | Evidence | Decision |
