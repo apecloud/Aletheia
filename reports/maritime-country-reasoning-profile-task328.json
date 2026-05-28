@@ -1,0 +1,65 @@
+{
+  "task": 328,
+  "tenant": "maritime-risk",
+  "center": "Country:CHN",
+  "result": {
+    "title": "CHN Maritime Exposure Profile: 49 source rows, top path Taiwan Strait",
+    "source_key_rows": 49,
+    "source_tables": [
+      {
+        "table": "maritime_chokepoint_country_dependencies",
+        "row_count": 25,
+        "distinct_labels": 25
+      },
+      {
+        "table": "maritime_chokepoint_systemic_risk_results",
+        "row_count": 24,
+        "distinct_labels": 24
+      }
+    ],
+    "top_paths": [
+      {
+        "label": "Taiwan Strait",
+        "metric": "v_canal",
+        "metric_value": 1317678393429.96
+      },
+      {
+        "label": "Malacca Strait",
+        "metric": "v_canal",
+        "metric_value": 935959649509.61
+      },
+      {
+        "label": "Korea Strait",
+        "metric": "v_canal",
+        "metric_value": 608710804232.77
+      },
+      {
+        "label": "Bohai Strait",
+        "metric": "v_canal",
+        "metric_value": 523403323432.31
+      },
+      {
+        "label": "Bab el-Mandeb Strait",
+        "metric": "v_canal",
+        "metric_value": 520457813488.98
+      }
+    ]
+  },
+  "boundary": {
+    "tenant_source_table_filter": "approved ontology artifact source_refs/mapped_table_names",
+    "excluded_cross_tenant_tables": ["us_iran_war_country_exposures"],
+    "canonical_ontology_write": false,
+    "formal_graph_write": false
+  },
+  "http_smoke": {
+    "service_url": "http://127.0.0.1:8772",
+    "task_key": "reasoning:graph-scope:maritime-risk-question-center-graph-node-country-chn-d1-n200-e200-q0137446113",
+    "run_output_contains": [
+      "CHN Maritime Exposure Profile",
+      "49 source rows"
+    ],
+    "run_output_excludes": [
+      "0 related entities"
+    ]
+  }
+}

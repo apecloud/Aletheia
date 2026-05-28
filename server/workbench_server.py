@@ -100,6 +100,14 @@ def _json_dump(value):
     return json.dumps(value, ensure_ascii=False, sort_keys=True)
 
 
+def _fmt_number(value):
+    if isinstance(value, float):
+        if value == int(value):
+            return str(int(value))
+        return f"{value:,.2f}"
+    return f"{value:,}" if isinstance(value, int) else str(value)
+
+
 def _slug(value):
     return re.sub(r"[^a-z0-9]+", "-", str(value).lower()).strip("-") or "scope"
 
@@ -5938,17 +5946,29 @@ class ReasoningRepository:
             tool_calls.insert(1, {"tool": "entity_profile_aggregate", "tenant_id": tenant.tenant_id, "approved_only": True, "write_scope": "read_only_source_aggregate", "status": "completed"})
             metrics = structured_answer.get("metrics") or {}
             rankings = metrics.get("rankings") or []
+            source_key_profile = metrics.get("source_key_profile") or {}
             label = metrics.get("label") or center_node
-            ranking_summary = "; ".join(
-                f"{r['my_count']} {r['target_type']}(s) (#{r['rank']}/{r['total_peers']}, {r['level']})"
-                for r in rankings if r.get("my_count", 0) > 0
-            ) or "no ranked relationships"
+            if source_key_profile.get("related_tables"):
+                top_paths = source_key_profile.get("top_paths") or []
+                path_summary = ", ".join(f"{p['label']} ({p['metric']} {_fmt_number(p['metric_value'])})" for p in top_paths[:3]) or "no ranked paths"
+                ranking_summary = f"{source_key_profile.get('total_key_rows', 0)} source rows; top paths: {path_summary}"
+                source_tables = [str(t.get("table") or "") for t in source_key_profile.get("related_tables", [])]
+                profile_label = "Maritime Exposure Profile" if any(table.startswith("maritime_") for table in source_tables) else "Source Evidence Profile"
+                aggregate_label = f"{label} {profile_label}"
+                aggregate_source_ref = f"{metrics.get('object_type', 'entity')} + degree + source-key metric aggregation"
+            else:
+                ranking_summary = "; ".join(
+                    f"{r['my_count']} {r['target_type']}(s) (#{r['rank']}/{r['total_peers']}, {r['level']})"
+                    for r in rankings if r.get("my_count", 0) > 0
+                ) or "no ranked relationships"
+                aggregate_label = f"{label} Business Profile"
+                aggregate_source_ref = f"{metrics.get('object_type', 'entity')} + peer ranking + value aggregation"
             evidence_paths.append({
                 "kind": "controlled_aggregate",
-                "label": f"{label} Business Profile",
+                "label": aggregate_label,
                 "summary": f"{label}: {ranking_summary}",
                 "url": f"/reasoning.html?tenant={tenant.tenant_id}&task={quote(task_key)}",
-                "source_ref": f"{metrics.get('object_type', 'entity')} + peer ranking + value aggregation",
+                "source_ref": aggregate_source_ref,
                 "payload": metrics,
             })
             yield {"event": "step", "data": {"tool": "entity_profile_aggregate", "status": "completed", "step": 2, "total": 3}}
@@ -5963,7 +5983,7 @@ class ReasoningRepository:
             "conclusion": conclusion,
             "confidence": 0.78 if structured_answer else 0.72,
             "supporting_evidence": evidence_paths,
-            "counter_evidence": [{"kind": "scope_limit", "summary": ("Conclusions are based solely on the approved graph and controlled aggregation; performance targets, utilization, profitability, or satisfaction data are not included." if structured_answer else "The task cannot expand beyond the selected approved graph scope without a new bounded graph request.")}],
+            "counter_evidence": [{"kind": "scope_limit", "summary": ("Conclusions are based solely on the approved graph and controlled aggregation; external benchmarks, thresholds, and unapproved evidence are not included." if structured_answer else "The task cannot expand beyond the selected approved graph scope without a new bounded graph request.")}],
             "recommended_action": {
                 "type": "review_graph_scope",
                 "title": "Review scoped graph evidence before operational action",
@@ -6038,18 +6058,30 @@ class ReasoningRepository:
             )
             metrics = structured_answer.get("metrics") or {}
             rankings = metrics.get("rankings") or []
+            source_key_profile = metrics.get("source_key_profile") or {}
             label = metrics.get("label") or center_node
-            ranking_summary = "; ".join(
-                f"{r['my_count']} {r['target_type']}(s) (#{r['rank']}/{r['total_peers']}, {r['level']})"
-                for r in rankings if r.get("my_count", 0) > 0
-            ) or "no ranked relationships"
+            if source_key_profile.get("related_tables"):
+                top_paths = source_key_profile.get("top_paths") or []
+                path_summary = ", ".join(f"{p['label']} ({p['metric']} {_fmt_number(p['metric_value'])})" for p in top_paths[:3]) or "no ranked paths"
+                ranking_summary = f"{source_key_profile.get('total_key_rows', 0)} source rows; top paths: {path_summary}"
+                source_tables = [str(t.get("table") or "") for t in source_key_profile.get("related_tables", [])]
+                profile_label = "Maritime Exposure Profile" if any(table.startswith("maritime_") for table in source_tables) else "Source Evidence Profile"
+                aggregate_label = f"{label} {profile_label}"
+                aggregate_source_ref = f"{metrics.get('object_type', 'entity')} + degree + source-key metric aggregation"
+            else:
+                ranking_summary = "; ".join(
+                    f"{r['my_count']} {r['target_type']}(s) (#{r['rank']}/{r['total_peers']}, {r['level']})"
+                    for r in rankings if r.get("my_count", 0) > 0
+                ) or "no ranked relationships"
+                aggregate_label = f"{label} Business Profile"
+                aggregate_source_ref = f"{metrics.get('object_type', 'entity')} + peer ranking + value aggregation"
             evidence_paths.append(
                 {
                     "kind": "controlled_aggregate",
-                    "label": f"{label} Business Profile",
+                    "label": aggregate_label,
                     "summary": f"{label}: {ranking_summary}",
                     "url": f"/reasoning.html?tenant={tenant.tenant_id}&task={quote(task_key)}",
-                    "source_ref": f"{metrics.get('object_type', 'entity')} + peer ranking + value aggregation",
+                    "source_ref": aggregate_source_ref,
                     "payload": metrics,
                 }
             )
@@ -6067,7 +6099,7 @@ class ReasoningRepository:
                 {
                     "kind": "scope_limit",
                     "summary": (
-                        "Conclusions are based solely on the approved graph and controlled aggregation; performance targets, utilization, profitability, or satisfaction data are not included."
+                        "Conclusions are based solely on the approved graph and controlled aggregation; external benchmarks, thresholds, and unapproved evidence are not included."
                         if structured_answer
                         else "The task cannot expand beyond the selected approved graph scope without a new bounded graph request."
                     ),
@@ -7043,6 +7075,11 @@ class ReasoningRepository:
     def _record_run(self, tenant, task, query_plan, tool_calls, evidence_paths, output, eval_result, status, started):
         run_key = f"{task['canonical_key']}:run:{int(time.time() * 1000)}"
         latency_ms = int((time.monotonic() - started) * 1000)
+        prompt_version = (
+            "graph-scope-reasoning-v1"
+            if str(task.get("canonical_key") or "").startswith("reasoning:graph-scope:")
+            else "northwind-workload-v1"
+        )
         with self.metadata_engine_for(tenant).begin() as conn:
             row = conn.execute(
                 text(
@@ -7050,9 +7087,9 @@ class ReasoningRepository:
                     INSERT INTO aletheia_reasoning_runs
                     (task_id, project_id, run_key, agent_name, prompt_version,
                      query_plan_json, tool_calls_json, evidence_paths_json,
-                     output_json, eval_result_json, status, latency_ms, cost_estimate, created_at)
+                    output_json, eval_result_json, status, latency_ms, cost_estimate, created_at)
                     VALUES
-                    (:task_id, :tenant_id, :run_key, 'ReasoningWorkbenchAgent', 'northwind-workload-v1',
+                    (:task_id, :tenant_id, :run_key, 'ReasoningWorkbenchAgent', :prompt_version,
                      :query_plan_json, :tool_calls_json, :evidence_paths_json,
                      :output_json, :eval_result_json, :status, :latency_ms, 0.0, NOW())
                     RETURNING id, project_id, run_key, agent_name, prompt_version,
@@ -7065,6 +7102,7 @@ class ReasoningRepository:
                     "task_id": task["id"],
                     "tenant_id": tenant.tenant_id,
                     "run_key": run_key,
+                    "prompt_version": prompt_version,
                     "query_plan_json": _json_dump(query_plan),
                     "tool_calls_json": _json_dump(tool_calls),
                     "evidence_paths_json": _json_dump(evidence_paths),

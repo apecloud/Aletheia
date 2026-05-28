@@ -13,7 +13,7 @@ Usage:
 
 import json
 from datetime import datetime
-from sqlalchemy import text
+from sqlalchemy import inspect, text
 
 
 def _jsonable(value):
@@ -28,6 +28,10 @@ def _fmt_number(v):
             return str(int(v))
         return f"{v:,.2f}"
     return f"{v:,}" if isinstance(v, int) else str(v)
+
+
+def _quote_ident(name):
+    return "`" + str(name).replace("`", "``") + "`"
 
 
 class TableMeta:
@@ -141,6 +145,165 @@ class ReasoningEngine:
                 v_str = v_str[:10]
             props.append({"col": k, "value": v_str})
         return props
+
+    def _source_key_profile(self, tenant, object_type, instance_id, cfg):
+        """Aggregate source tables that share the center entity key.
+
+        This intentionally uses schema evidence (shared key columns, numeric
+        columns, and candidate label columns) instead of domain-coded graph
+        relation names, so it can improve sparse graph profiles without
+        minting ontology or graph semantics.
+        """
+        source_engine = self.repo.source_engine_for(tenant)
+        center_table = cfg.get("table")
+        key_col = cfg.get("pk")
+        if not center_table or not key_col:
+            return None
+        inspector = inspect(source_engine)
+        try:
+            table_names = inspector.get_table_names()
+        except Exception:
+            return None
+
+        allowed_tables = set()
+        try:
+            with self.repo.metadata_engine_for(tenant).connect() as conn:
+                artifact_rows = conn.execute(
+                    text(
+                        """
+                        SELECT source_refs_json, payload_json
+                        FROM aletheia_ontology_artifacts
+                        WHERE project_id = :tenant_id AND status = 'approved'
+                        """
+                    ),
+                    {"tenant_id": tenant.tenant_id},
+                ).mappings().all()
+            for artifact in artifact_rows:
+                source_refs = artifact.get("source_refs_json") or []
+                if isinstance(source_refs, str):
+                    source_refs = json.loads(source_refs or "[]")
+                for ref in source_refs or []:
+                    if isinstance(ref, str) and ref.startswith("table:"):
+                        allowed_tables.add(ref.removeprefix("table:"))
+
+                payload = artifact.get("payload_json") or {}
+                if isinstance(payload, str):
+                    payload = json.loads(payload or "{}")
+                for table in payload.get("mapped_table_names") or []:
+                    allowed_tables.add(table)
+                for key in ("source_table", "target_table"):
+                    if payload.get(key):
+                        allowed_tables.add(payload[key])
+        except Exception:
+            allowed_tables = set()
+        if allowed_tables:
+            table_names = [table for table in table_names if table in allowed_tables]
+
+        related_tables = []
+        total_rows = 0
+        numeric_totals = {}
+        label_candidates = ("canal", "chokepoint", "strait", "route", "corridor", "port", "location")
+        risk_metric_hints = ("risk", "impacted", "impact", "at_risk", "share", "dependency", "v_canal", "q_canal", "revenue")
+        top_paths = []
+
+        with source_engine.connect() as conn:
+            for table in table_names:
+                try:
+                    meta = self._introspect_table(source_engine, table)
+                except Exception:
+                    continue
+                if key_col not in meta.all_cols:
+                    continue
+                qt = _quote_ident(table)
+                qk = _quote_ident(key_col)
+                try:
+                    row_count = int(conn.execute(
+                        text(f"SELECT COUNT(*) FROM {qt} WHERE {qk} = :id"),
+                        {"id": instance_id},
+                    ).scalar() or 0)
+                except Exception:
+                    continue
+                if row_count <= 0:
+                    continue
+
+                total_rows += row_count
+                label_col = next((c for c in meta.all_cols if c.lower() in label_candidates), None)
+                distinct_labels = 0
+                if label_col:
+                    try:
+                        distinct_labels = int(conn.execute(
+                            text(f"SELECT COUNT(DISTINCT {_quote_ident(label_col)}) FROM {qt} WHERE {qk} = :id AND {_quote_ident(label_col)} IS NOT NULL"),
+                            {"id": instance_id},
+                        ).scalar() or 0)
+                    except Exception:
+                        distinct_labels = 0
+
+                metric_cols = [
+                    c for c in meta.numeric_cols
+                    if c != key_col and any(hint in c.lower() for hint in risk_metric_hints)
+                ][:8]
+                table_totals = {}
+                if metric_cols:
+                    expr = ", ".join(f"COALESCE(SUM({_quote_ident(c)}), 0) AS {_quote_ident('sum_' + c)}" for c in metric_cols)
+                    try:
+                        sums = conn.execute(
+                            text(f"SELECT {expr} FROM {qt} WHERE {qk} = :id"),
+                            {"id": instance_id},
+                        ).mappings().first()
+                    except Exception:
+                        sums = None
+                    if sums:
+                        for col in metric_cols:
+                            val = float(sums.get("sum_" + col) or 0)
+                            table_totals[col] = val
+                            numeric_totals[col] = numeric_totals.get(col, 0.0) + val
+
+                if label_col and metric_cols:
+                    preferred = next((c for c in metric_cols if "at_risk" in c.lower()), None)
+                    preferred = preferred or next((c for c in metric_cols if "impacted" in c.lower()), None)
+                    preferred = preferred or next((c for c in metric_cols if "v_canal" in c.lower()), None)
+                    preferred = preferred or metric_cols[0]
+                    try:
+                        top_rows = conn.execute(
+                            text(
+                                f"SELECT {_quote_ident(label_col)} AS label, "
+                                f"COUNT(*) AS cnt, COALESCE(SUM({_quote_ident(preferred)}), 0) AS metric "
+                                f"FROM {qt} WHERE {qk} = :id AND {_quote_ident(label_col)} IS NOT NULL "
+                                f"GROUP BY {_quote_ident(label_col)} ORDER BY metric DESC LIMIT 5"
+                            ),
+                            {"id": instance_id},
+                        ).mappings().all()
+                    except Exception:
+                        top_rows = []
+                    for top in top_rows:
+                        top_paths.append({
+                            "table": table,
+                            "label_col": label_col,
+                            "label": str(top["label"]),
+                            "metric": preferred,
+                            "metric_value": float(top["metric"] or 0),
+                            "row_count": int(top["cnt"] or 0),
+                        })
+
+                related_tables.append({
+                    "table": table,
+                    "key_col": key_col,
+                    "row_count": row_count,
+                    "label_col": label_col,
+                    "distinct_labels": distinct_labels,
+                    "metric_totals": table_totals,
+                })
+
+        if not related_tables:
+            return None
+        top_paths.sort(key=lambda item: item.get("metric_value", 0), reverse=True)
+        return {
+            "center_key_col": key_col,
+            "related_tables": related_tables,
+            "total_key_rows": total_rows,
+            "numeric_totals": numeric_totals,
+            "top_paths": top_paths[:8],
+        }
 
     # ------------------------------------------------------------------
     # Step 4: Peer ranking (unchanged logic, moved here)
@@ -525,6 +688,15 @@ class ReasoningEngine:
         # --- Multi-hop value ---
         value_aggs = self._multihop_value(tenant, object_type, instance_id)
 
+        # --- Source-key profile ---
+        # Some tenants have reviewed graph projections whose semantics are
+        # carried by source-table evidence rather than legacy LINK_CONFIG rows.
+        # Use shared source keys to produce degree/metric evidence without
+        # inventing graph writes or ontology terms.
+        source_key_profile = None
+        if not rankings:
+            source_key_profile = self._source_key_profile(tenant, object_type, instance_id, cfg)
+
         # --- Neighbors by type (from graph) ---
         neighbors_by_type = {}
         for node in nodes:
@@ -547,6 +719,7 @@ class ReasoningEngine:
             rankings=rankings,
             link_stats=link_stats,
             value_aggs=value_aggs,
+            source_key_profile=source_key_profile,
             neighbors_by_type=neighbors_by_type,
             nodes=nodes,
             edges=edges,
@@ -558,7 +731,8 @@ class ReasoningEngine:
     # ------------------------------------------------------------------
 
     def _build_narrative(self, label, object_type, entity_desc, props, self_refs,
-                         rankings, link_stats, value_aggs, neighbors_by_type, question):
+                         rankings, link_stats, value_aggs, neighbors_by_type, question,
+                         source_key_profile=None):
         """Synthesize computed data into an analytical paragraph."""
         sentences = []
 
@@ -572,7 +746,26 @@ class ReasoningEngine:
             identity += f", reporting to {ref['label']}"
 
         # Activity level sentence
-        if rankings:
+        if source_key_profile and source_key_profile.get("related_tables"):
+            top_paths = source_key_profile.get("top_paths") or []
+            table_count = len(source_key_profile.get("related_tables") or [])
+            row_count = source_key_profile.get("total_key_rows", 0)
+            distinct_labels = sum(int(t.get("distinct_labels") or 0) for t in source_key_profile.get("related_tables") or [])
+            if top_paths:
+                top_text = ", ".join(
+                    f"{p['label']} ({p['metric']} {_fmt_number(p['metric_value'])})"
+                    for p in top_paths[:3]
+                )
+                sentences.append(
+                    f"{identity} has {row_count} source rows across {table_count} related source table(s), "
+                    f"covering {distinct_labels} distinct path labels. The largest current exposure paths are {top_text}."
+                )
+            else:
+                sentences.append(
+                    f"{identity} has {row_count} source rows across {table_count} related source table(s), "
+                    f"with {distinct_labels} distinct connected path labels in the controlled source data."
+                )
+        elif rankings:
             r = rankings[0]
             ratio = r["my_count"] / r["avg"] if r["avg"] > 0 else 1
             if r["level"] == "high":
@@ -674,7 +867,7 @@ class ReasoningEngine:
 
     def _compose(self, *, center_node, object_type, instance_id, label, cfg,
                  entity_desc, descriptions, props, self_refs, rankings,
-                 link_stats, value_aggs, neighbors_by_type, nodes, edges, question):
+                 link_stats, value_aggs, source_key_profile, neighbors_by_type, nodes, edges, question):
 
         key_facts = []
         interpretations = []
@@ -785,6 +978,48 @@ class ReasoningEngine:
                     f"near avg {r['avg']} — average level."
                 )
 
+        if source_key_profile and source_key_profile.get("related_tables"):
+            related_tables = source_key_profile.get("related_tables") or []
+            top_paths = source_key_profile.get("top_paths") or []
+            total_key_rows = source_key_profile.get("total_key_rows", 0)
+            distinct_path_labels = sum(int(t.get("distinct_labels") or 0) for t in related_tables)
+            key_facts.append({
+                "label": "source-key degree",
+                "value": (
+                    f"{total_key_rows} matching source rows across {len(related_tables)} source table(s); "
+                    f"{distinct_path_labels} distinct path label(s)"
+                ),
+                "source_ref": f"source tables sharing {source_key_profile.get('center_key_col')}",
+            })
+            table_text = "; ".join(
+                f"{t['table']}: {t['row_count']} rows"
+                + (f", {t['distinct_labels']} distinct {t['label_col']}" if t.get("label_col") else "")
+                for t in related_tables[:6]
+            )
+            key_facts.append({
+                "label": "connected source tables",
+                "value": table_text,
+                "source_ref": "schema/profile evidence",
+            })
+            if top_paths:
+                path_text = "; ".join(
+                    f"{p['label']} via {p['table']} ({p['metric']} {_fmt_number(p['metric_value'])}, {p['row_count']} rows)"
+                    for p in top_paths[:5]
+                )
+                key_facts.append({
+                    "label": "top chokepoint/risk paths",
+                    "value": path_text,
+                    "source_ref": "source-key metric aggregation",
+                })
+                interpretations.append(
+                    f"{label} is not just present in the graph: it has {total_key_rows} source-backed relationship rows. "
+                    f"The highest metric paths are {', '.join(p['label'] for p in top_paths[:3])}, so review should start from those connected chokepoints/routes."
+                )
+            else:
+                interpretations.append(
+                    f"{label} has {total_key_rows} source-backed relationship rows, but no numeric risk/trade metric column was found for ranking connected paths."
+                )
+
         # -- Multi-hop value aggregation --
         for va in value_aggs:
             share_pct = round(va["value_share"] * 100, 1)
@@ -829,6 +1064,7 @@ class ReasoningEngine:
         profile_summary = self._build_narrative(
             label, object_type, entity_desc, props, self_refs,
             rankings, link_stats, value_aggs, neighbors_by_type, question,
+            source_key_profile=source_key_profile,
         )
 
         # --- Title ---
@@ -838,10 +1074,25 @@ class ReasoningEngine:
         value_highlights = []
         for va in value_aggs:
             value_highlights.append(f"value {_fmt_number(va['my_value'])} ({round(va['value_share'] * 100, 1)}% share)")
-        title_parts = ranking_highlights[:2]
+        source_key_highlights = []
+        if source_key_profile and source_key_profile.get("related_tables"):
+            source_key_highlights.append(f"{source_key_profile.get('total_key_rows', 0)} source rows")
+            top_paths = source_key_profile.get("top_paths") or []
+            if top_paths:
+                source_key_highlights.append(f"top path {top_paths[0]['label']}")
+        title_parts = source_key_highlights[:2] or ranking_highlights[:2]
         if value_highlights and len(title_parts) < 2:
             title_parts.extend(value_highlights[:1])
-        title = f"{label} Business Profile"
+        source_tables = [
+            str(t.get("table") or "")
+            for t in (source_key_profile or {}).get("related_tables", [])
+        ]
+        source_profile_label = (
+            "Maritime Exposure Profile"
+            if any(table.startswith("maritime_") for table in source_tables)
+            else "Source Evidence Profile"
+        )
+        title = f"{label} {source_profile_label if source_key_profile else 'Business Profile'}"
         if title_parts:
             title += ": " + ", ".join(title_parts)
 
@@ -853,7 +1104,7 @@ class ReasoningEngine:
             "evidence_limits": [
                 f"Profile based on {source_table} source table and approved graph controlled aggregation.",
                 "Rankings reflect a current snapshot — no time-series trends or external benchmarks.",
-                "Conclusions are based solely on the approved graph; performance targets, utilization, or satisfaction data are not included.",
+                "Conclusions are based solely on the approved graph; external benchmarks, thresholds, and unapproved evidence are not included.",
             ],
             "next_questions": [
                 f"How do {label}'s relationship patterns change over time?",
@@ -871,6 +1122,7 @@ class ReasoningEngine:
                 "rankings": rankings,
                 "link_stats": link_stats,
                 "value_aggregations": value_aggs,
+                "source_key_profile": source_key_profile,
             },
         }
 
