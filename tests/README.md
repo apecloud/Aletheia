@@ -12,6 +12,7 @@ python -m unittest \
   tests/test_iterative_graph_enrichment.py \
   tests/test_continuous_enrichment_frontier.py \
   tests/test_reasoning_deep_graph.py \
+  tests/test_schema_graph_modeling_agent.py \
   tests/test_us_iran_war_import.py
 ```
 
@@ -30,4 +31,5 @@ python -m unittest discover -s tests -p 'test_*.py'
 | `test_iterative_graph_enrichment.py` | Proposed graph expansion and multi-hop finding artifacts |
 | `test_continuous_enrichment_frontier.py` | Priority frontier, cooldown, graph coverage fallback |
 | `test_reasoning_deep_graph.py` | Deep graph reasoning finding/evidence shape |
+| `test_schema_graph_modeling_agent.py` | LLM schema-to-graph draft contract and review boundary |
 | `test_us_iran_war_import.py` | US-Iran impact dataset fixtures |

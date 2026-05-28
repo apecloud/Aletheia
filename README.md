@@ -51,10 +51,12 @@ Important boundary: automatic agents may create draft/proposed objects, but they
 do not bypass review gates. Canonical ontology writes, formal graph writes, and
 finding approvals remain separately controlled.
 
-## Install Smoke Test
+## Zero-To-Local Workspace
 
-Use this path first on a new machine. It installs dependencies and runs tests
-that do not require Docker databases or an LLM API key.
+Use this path first on a new machine. It starts with a clean Python
+environment, installs dependencies, starts local databases, bootstraps metadata,
+runs the server, opens the browser UI, and then runs the deterministic test
+suite.
 
 ### 1. Create a clean Python environment
 
@@ -67,47 +69,36 @@ python -m pip install --upgrade pip
 If `python3.11` is not available, use any Python 3.11+ interpreter:
 
 ```bash
+python3 --version
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
 ```
 
-### 2. Install dependencies
+Python 3.9 is not supported because the codebase uses modern type syntax such as
+`A | B`.
+
+### 2. Install Python dependencies
 
 ```bash
-pip install -r requirements.txt
+python -m pip install -r requirements.txt
 ```
 
-### 3. Run the fast validation suite
+`requirements.txt` is the default install set. The legacy split files remain
+only for old agent-specific runners:
 
-```bash
-python -m py_compile review_workbench.py server/workbench_server.py agents/iterative_graph_enrichment_agent.py agents/web_enrichment_agent.py
-python -m unittest \
-  tests/test_ontology_eval.py \
-  tests/test_web_enrichment.py \
-  tests/test_iterative_graph_enrichment.py \
-  tests/test_continuous_enrichment_frontier.py \
-  tests/test_reasoning_deep_graph.py \
-  tests/test_us_iran_war_import.py
-```
+| File | Current use |
+| --- | --- |
+| `requirements.txt` | Default local workspace, server, agents, tests, and demos |
+| `requirements_metadata.txt` | Legacy metadata scraper subset |
+| `requirements_profiler.txt` | Legacy data profiler/object modeling subset |
+| `requirements_scraper.txt` | Legacy source scraper subset |
+| `requirements_hf_scraper.txt` | Hugging Face dataset scraper experiment |
 
-### 4. Check frontend bundles
+Prefer `requirements.txt` unless you are deliberately running one of the old
+standalone scripts.
 
-The repo does not require a checked-in `node_modules` directory. Use `npx` for
-one-off bundle checks:
-
-```bash
-node --check web/app/api.js
-npx esbuild web/app/workbench.jsx --bundle --outfile=/tmp/aletheia-workbench.js --format=iife --global-name=AletheiaWorkbench --log-level=warning
-npx esbuild web/app/graph.jsx --bundle --outfile=/tmp/aletheia-graph.js --format=iife --global-name=AletheiaGraph --log-level=warning
-npx esbuild web/app/reasoning.jsx --bundle --outfile=/tmp/aletheia-reasoning.js --format=iife --global-name=AletheiaReasoning --log-level=warning
-```
-
-## Full Local Demo
-
-This path starts the local databases and launches the browser workspace.
-
-### 1. Start infrastructure
+### 3. Start local databases
 
 ```bash
 docker compose -f docker/docker-compose.yml up -d
@@ -119,7 +110,11 @@ This starts:
 - PostGIS 15 on `127.0.0.1:5432`
 - Nebula Graph 3.6 on `127.0.0.1:9669`
 
-### 2. Configure optional LLM access
+If Docker is not available, you can still run the fast unit tests below, but the
+browser workspace and bootstrap scripts need a reachable metadata/source
+database.
+
+### 4. Configure optional LLM access
 
 LLM-backed modeling and reasoning scripts use LiteLLM. Set one API key before
 running those scripts:
@@ -130,19 +125,21 @@ export GEMINI_API_KEY="your-key"
 export OPENAI_API_KEY="your-key"
 ```
 
-The deterministic tests and most review UI smoke tests do not require an API key.
+The deterministic tests, server startup, and most review UI smoke tests do not
+require an API key.
 
-### 3. Bootstrap demo metadata
+### 5. Bootstrap demo metadata
 
 ```bash
-source .venv/bin/activate
 python scripts/bootstrap_demo_environment.py
 ```
 
 The bootstrap creates metadata/review tables, registers demo tenants, and seeds
 repeatable ontology artifacts for the local review server.
 
-### 4. Start the review server
+### 6. Start the server
+
+Run this in a separate terminal and keep it running while you use the browser UI:
 
 ```bash
 python server/workbench_server.py --host 127.0.0.1 --port 8772 --ensure-schema
@@ -150,7 +147,7 @@ python server/workbench_server.py --host 127.0.0.1 --port 8772 --ensure-schema
 
 Open <http://127.0.0.1:8772>.
 
-The legacy launcher still works for existing scripts:
+The legacy launcher still works for old scripts:
 
 ```bash
 python review_workbench.py --host 127.0.0.1 --port 8772 --ensure-schema
@@ -166,6 +163,32 @@ Useful direct links:
 - Proposed graph review: <http://127.0.0.1:8772/?screen=graph&tenant=maritime-risk&graph_tab=proposed>
 - Reasoning: <http://127.0.0.1:8772/?screen=reasoning&tenant=maritime-risk>
 - Settings: <http://127.0.0.1:8772/?screen=settings&tenant=maritime-risk>
+
+### 7. Run backend validation
+
+```bash
+python -m py_compile review_workbench.py server/workbench_server.py agents/iterative_graph_enrichment_agent.py agents/web_enrichment_agent.py
+python -m unittest \
+  tests/test_ontology_eval.py \
+  tests/test_web_enrichment.py \
+  tests/test_iterative_graph_enrichment.py \
+  tests/test_continuous_enrichment_frontier.py \
+  tests/test_reasoning_deep_graph.py \
+  tests/test_schema_graph_modeling_agent.py \
+  tests/test_us_iran_war_import.py
+```
+
+### 8. Check frontend bundles
+
+The repo does not require a checked-in `node_modules` directory. Use `npx` for
+one-off bundle checks:
+
+```bash
+node --check web/app/api.js
+npx --yes esbuild web/app/workbench.jsx --bundle --outfile=/tmp/aletheia-workbench.js --format=iife --global-name=AletheiaWorkbench --log-level=warning
+npx --yes esbuild web/app/graph.jsx --bundle --outfile=/tmp/aletheia-graph.js --format=iife --global-name=AletheiaGraph --log-level=warning
+npx --yes esbuild web/app/reasoning.jsx --bundle --outfile=/tmp/aletheia-reasoning.js --format=iife --global-name=AletheiaReasoning --log-level=warning
+```
 
 ## Data Import And Enrichment
 
