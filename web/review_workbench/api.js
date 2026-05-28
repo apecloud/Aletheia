@@ -32,16 +32,38 @@
   }
 
   // ---------- fetch helper ----------
+  function normalizeFetchError(err, url, path) {
+    if (err && err.status) return err;
+    const message = err && err.message ? String(err.message) : String(err || "network error");
+    const isNetworkFetchError =
+      message.toLowerCase().includes("failed to fetch")
+      || message.toLowerCase().includes("load failed")
+      || (err && err.name === "TypeError");
+    if (!isNetworkFetchError) return err;
+    const friendly = new Error(
+      `Cannot reach Aletheia API at ${url}. Check that the workbench server is running and the API base URL is correct. · ${path}`
+    );
+    friendly.status = 0;
+    friendly.path = path;
+    friendly.cause = err;
+    return friendly;
+  }
+
   async function fetchJson(path, opts = {}) {
     const url = getBaseUrl() + path;
-    const res = await fetch(url, {
-      ...opts,
-      headers: {
-        "Accept": "application/json",
-        ...(opts.body ? { "Content-Type": "application/json" } : {}),
-        ...(opts.headers || {}),
-      },
-    });
+    let res;
+    try {
+      res = await fetch(url, {
+        ...opts,
+        headers: {
+          "Accept": "application/json",
+          ...(opts.body ? { "Content-Type": "application/json" } : {}),
+          ...(opts.headers || {}),
+        },
+      });
+    } catch (err) {
+      throw normalizeFetchError(err, url, path);
+    }
     if (!res.ok) {
       let detail = "";
       try { const b = await res.json(); detail = b.error || b.message || b.detail || ""; } catch {}
@@ -647,16 +669,21 @@
         const t0 = performance.now();
         try {
           if (cb.onDiag) cb.onDiag("request_start", { url });
-          const res = await fetch(url, {
-            method: "POST",
-            headers: {
-              "Accept": "text/event-stream",
-              "Content-Type": "application/json",
-              "Cache-Control": "no-cache",
-            },
-            body: JSON.stringify({}),
-            signal: controller.signal,
-          });
+          let res;
+          try {
+            res = await fetch(url, {
+              method: "POST",
+              headers: {
+                "Accept": "text/event-stream",
+                "Content-Type": "application/json",
+                "Cache-Control": "no-cache",
+              },
+              body: JSON.stringify({}),
+              signal: controller.signal,
+            });
+          } catch (err) {
+            throw normalizeFetchError(err, url, `/api/reasoning/tasks/${encodeURIComponent(taskKey)}/run/stream`);
+          }
           if (cb.onDiag) cb.onDiag("response_headers", {
             status: res.status,
             statusText: res.statusText,
@@ -664,7 +691,13 @@
             elapsed_ms: Math.round(performance.now() - t0),
           });
           if (!res.ok || !res.body) {
-            const err = new Error(`HTTP ${res.status} ${res.statusText} · /run/stream`);
+            let detail = "";
+            try {
+              const body = await res.clone().json();
+              detail = body.error || body.message || body.detail || "";
+            } catch {}
+            const msg = detail || `HTTP ${res.status} ${res.statusText}`;
+            const err = new Error(`${msg} · /run/stream`);
             err.status = res.status;
             throw err;
           }
