@@ -1272,6 +1272,7 @@ function ProposedGraphDetail({ item, reason, setReason, busy, message, onReview,
 function BigGraph({ data, selected, onSelect, hoverId, setHoverId, hideUnrelated, collapseOffTrailEdges = true, trailNodeIds = [], onNodePositionChange, language }) {
   const svgRef = useRefGX(null);
   const [dragging, setDragging] = useStateGX(null);
+  const [expandedEdgeGroupNodeIds, setExpandedEdgeGroupNodeIds] = useStateGX([]);
   const map = Object.fromEntries(data.nodes.map(n => [n.id, n]));
   const palette = ["var(--accent)", "var(--changes)", "var(--proposed)", "var(--approved)", "var(--dim)"];
   const graphTypes = Array.from(new Set(data.nodes.map(n => n.type).filter(Boolean)));
@@ -1310,15 +1311,54 @@ function BigGraph({ data, selected, onSelect, hoverId, setHoverId, hideUnrelated
     }
   });
   const topRelatedEdgeLimit = 10;
-  const selectedOffTrailEdges = sel
-    ? data.edges.filter(e => (e.s === sel || e.t === sel) && !trailEdgeKeys.has(`${e.s}→${e.t}`))
-    : [];
-  const selectedTopRelatedEdgeKeys = new Set(
-    selectedOffTrailEdges.slice(0, topRelatedEdgeLimit).map(e => `${e.s}→${e.t}`)
-  );
-  const selectedCollapsedEdgeCount = sel && focusActive && hideUnrelated && collapseOffTrailEdges
-    ? Math.max(0, selectedOffTrailEdges.length - selectedTopRelatedEdgeKeys.size)
-    : 0;
+  const expandedEdgeGroupIds = new Set(expandedEdgeGroupNodeIds.filter(id => trailIds.has(id)));
+  const offTrailEdgesByTrailNode = new Map();
+  const visibleOffTrailEdgeKeys = new Set();
+  if (focusActive && hideUnrelated && collapseOffTrailEdges) {
+    data.edges.forEach(e => {
+      const edgeKey = `${e.s}→${e.t}`;
+      if (trailEdgeKeys.has(edgeKey)) return;
+      [e.s, e.t].forEach(nodeId => {
+        if (!trailIds.has(nodeId)) return;
+        if (!offTrailEdgesByTrailNode.has(nodeId)) offTrailEdgesByTrailNode.set(nodeId, []);
+        offTrailEdgesByTrailNode.get(nodeId).push(e);
+      });
+    });
+    Array.from(trailIds).forEach(nodeId => {
+      const shouldShowTopRelated = nodeId === sel || expandedEdgeGroupIds.has(nodeId);
+      if (!shouldShowTopRelated) return;
+      (offTrailEdgesByTrailNode.get(nodeId) || []).slice(0, topRelatedEdgeLimit).forEach(e => {
+        visibleOffTrailEdgeKeys.add(`${e.s}→${e.t}`);
+      });
+    });
+  }
+  const collapsedEdgeGroups = Array.from(trailIds).map(nodeId => {
+    const node = map[nodeId];
+    const edges = offTrailEdgesByTrailNode.get(nodeId) || [];
+    if (!node || !edges.length) return null;
+    const expanded = nodeId === sel || expandedEdgeGroupIds.has(nodeId);
+    const shown = expanded ? Math.min(edges.length, topRelatedEdgeLimit) : 0;
+    return {
+      nodeId,
+      node,
+      total: edges.length,
+      shown,
+      hidden: Math.max(0, edges.length - shown),
+      expanded,
+    };
+  }).filter(Boolean);
+  const trailKey = Array.from(trailIds).join("|");
+  useEffectGX(() => {
+    const activeTrailIds = new Set(trailKey ? trailKey.split("|") : []);
+    setExpandedEdgeGroupNodeIds(prev => prev.filter(id => activeTrailIds.has(id)));
+  }, [trailKey]);
+  const toggleEdgeGroup = (event, nodeId) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setExpandedEdgeGroupNodeIds(prev => (
+      prev.includes(nodeId) ? prev.filter(id => id !== nodeId) : [...prev, nodeId]
+    ));
+  };
 
   const eventPoint = (event) => {
     const svg = svgRef.current;
@@ -1366,14 +1406,14 @@ function BigGraph({ data, selected, onSelect, hoverId, setHoverId, hideUnrelated
         if (!s || !t) return null;
         const involved = e.s === sel || e.t === sel;
         const inTrail = trailEdgeKeys.has(`${e.s}→${e.t}`);
-        const inSelectedTopRelated = selectedTopRelatedEdgeKeys.has(`${e.s}→${e.t}`);
+        const inVisibleOffTrail = visibleOffTrailEdgeKeys.has(`${e.s}→${e.t}`);
         const inTrailContext = trailContextEdgeKeys.has(`${e.s}→${e.t}`);
         if (focusActive && hideUnrelated && !inTrailContext) return null;
         if (focusActive && hideUnrelated && (!visibleNodeIds.has(e.s) || !visibleNodeIds.has(e.t))) return null;
-        if (focusActive && hideUnrelated && collapseOffTrailEdges && !inTrail && !inSelectedTopRelated) return null;
+        if (focusActive && hideUnrelated && collapseOffTrailEdges && !inTrail && !inVisibleOffTrail) return null;
         const dimmed = focusActive && !involved && !inTrail && !inTrailContext && !(activeNeighborIds.has(e.s) || activeNeighborIds.has(e.t));
         const emphasized = involved || inTrail;
-        const showEdgeLabel = emphasized || inSelectedTopRelated || (hideUnrelated && inTrailContext);
+        const showEdgeLabel = emphasized || inVisibleOffTrail || (hideUnrelated && inTrailContext);
         return (
           <g key={i} opacity={dimmed ? 0.16 : (hideUnrelated && inTrailContext && !emphasized ? 0.78 : 1)}>
             <line x1={s.x} y1={s.y} x2={t.x} y2={t.y}
@@ -1393,28 +1433,37 @@ function BigGraph({ data, selected, onSelect, hoverId, setHoverId, hideUnrelated
         );
       })}
 
-      {selectedCollapsedEdgeCount > 0 && map[sel] && (
-        <g style={{ pointerEvents: "none" }}>
-          <rect
-            x={Math.min(850, map[sel].x + 18)}
-            y={Math.max(18, map[sel].y - 34)}
-            width={language === "zh" ? 112 : 132}
-            height="22"
-            rx="6"
-            fill="var(--bg-1)"
-            stroke="var(--line-strong)"
-            opacity="0.94"
-          />
-          <text
-            x={Math.min(850, map[sel].x + 28)}
-            y={Math.max(18, map[sel].y - 19)}
-            fontSize="10"
-            fontFamily="var(--font-mono)"
-            fill="var(--muted)">
-            {language === "zh" ? `已折叠 ${selectedCollapsedEdgeCount} 条边` : `${selectedCollapsedEdgeCount} edges collapsed`}
-          </text>
-        </g>
-      )}
+      {collapsedEdgeGroups.map((group, index) => {
+        const x = Math.min(840, Math.max(18, group.node.x + 18));
+        const y = Math.min(560, Math.max(18, group.node.y - 34 - (index % 3) * 5));
+        const label = group.expanded
+          ? (language === "zh" ? `显示 ${group.shown} / 折叠 ${group.hidden}` : `${group.shown} shown / ${group.hidden} collapsed`)
+          : (language === "zh" ? `+ ${group.total} 条相关边` : `+ ${group.total} related edges`);
+        return (
+          <g key={`edge-group-${group.nodeId}`} onClick={(event) => toggleEdgeGroup(event, group.nodeId)}
+             onPointerDown={(event) => event.stopPropagation()}
+             style={{ cursor: "pointer" }}>
+            <rect
+              x={x}
+              y={y}
+              width={language === "zh" ? 130 : 156}
+              height="24"
+              rx="7"
+              fill={group.expanded ? "var(--accent-bg)" : "var(--bg-1)"}
+              stroke={group.expanded ? "var(--accent-line)" : "var(--line-strong)"}
+              opacity="0.96"
+            />
+            <text
+              x={x + 10}
+              y={y + 16}
+              fontSize="10"
+              fontFamily="var(--font-mono)"
+              fill={group.expanded ? "var(--accent)" : "var(--muted)"}>
+              {label}
+            </text>
+          </g>
+        );
+      })}
 
       {/* nodes */}
       {data.nodes.map((n, i) => {
