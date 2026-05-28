@@ -825,7 +825,8 @@ class ReviewRepository:
         return used_by
 
     def review_status(self, tenant, canonical_key, status, reviewer, reason):
-        _require_reason(status, reason or "")
+        if status != "approved":
+            _require_reason(status, reason or "")
         with self.engine_for(tenant).begin() as conn:
             artifact = self._fetch_for_update(conn, tenant, canonical_key)
             before_status = artifact["status"]

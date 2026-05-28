@@ -108,8 +108,8 @@ function Ontology({ data, tenant, language }) {
   async function reviewArtifact(action) {
     if (!canonicalKey) return;
     const reason = reviewReason.trim();
-    if ((action === "approve" || action === "reject") && !reason) {
-      setReviewMsg({ kind: "err", msg: tXS(language, "Decision rationale is required for approve / reject.", "批准或拒绝时必须填写决策理由。") });
+    if ((action === "reject" || action === "needs-changes") && !reason) {
+      setReviewMsg({ kind: "err", msg: tXS(language, "Decision rationale is required for reject / needs changes.", "拒绝或要求修改时必须填写决策理由。") });
       return;
     }
     try {
@@ -418,7 +418,7 @@ function OntologyReviewControls({ selected, reason, setReason, msg, onAction, la
         className="reason-input"
         value={reason}
         onChange={e => setReason(e.target.value)}
-        placeholder={tXS(language, "Decision rationale (required for approve / reject)...", "决策理由（批准 / 拒绝时必填）...")}
+                         placeholder={tXS(language, "Decision rationale (optional for approve; required for reject / needs changes)...", "决策理由（批准时可选；拒绝 / 要求修改时必填）...")}
       />
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
         <button className="btn approve" onClick={() => onAction("approve")} disabled={!canDecide}>{tXS(language, "Approve artifact", "批准 artifact")}</button>
