@@ -1,7 +1,7 @@
 /* Aletheia API client
    ------------------------------------------------------------------
-   Talks to the same endpoints the existing review_workbench.py
-   server exposes. Base URL is configurable + persisted to localStorage.
+   Talks to the Aletheia workbench server endpoints. Base URL is configurable
+   + persisted to localStorage.
 
    Normalizes the server's snake_case artifact shape into the
    camelCase shape this prototype's components consume.

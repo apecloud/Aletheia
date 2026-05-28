@@ -249,7 +249,7 @@ function ConnectionDialog({ open, onClose }) {
                 <div style={{ marginTop: 8, color: "var(--changes)", lineHeight: 1.5 }}>
                   Likely CORS or network — the backend exists but the browser blocked the response. Fix on server:
                   <pre style={{ marginTop: 6, padding: 8, background: "var(--bg-1)", border: "1px solid var(--line)", color: "var(--text-dim)", whiteSpace: "pre-wrap" }}>
-{`# enable CORS in review_workbench.py (FastAPI example)
+{`# enable CORS in the workbench server (FastAPI example)
 from fastapi.middleware.cors import CORSMiddleware
 app.add_middleware(CORSMiddleware,
   allow_origins=["*"],     # tighten in prod
