@@ -8329,11 +8329,14 @@ class ReviewWorkbenchHandler(BaseHTTPRequestHandler):
             return
         if parsed.path == "/api/graph/context":
             query = parse_qs(parsed.query)
-            object_type = query.get("type", ["Employee"])[0]
-            instance_id = query.get("id", ["4"])[0]
             depth = int(query.get("depth", ["1"])[0])
             limit = int(query.get("limit", ["200"])[0])
             view = query.get("view", ["scope"])[0]
+            object_type = (query.get("type", [""])[0] or "").strip()
+            instance_id = (query.get("id", [""])[0] or "").strip()
+            if view != "all":
+                object_type = object_type or "Employee"
+                instance_id = instance_id or "4"
             graph = (
                 self.instance_repository.full_graph(tenant, object_type, instance_id, limit=limit)
                 if view == "all"
