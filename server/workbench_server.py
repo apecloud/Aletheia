@@ -6156,14 +6156,52 @@ class ReasoningRepository:
         center_node = scope.get("center_node")
         scope_depth = int(scope.get("depth") or 1)
         scope_limit = int(scope.get("node_limit") or 200)
+        scope_edge_limit = int(scope.get("edge_limit") or scope_limit)
         engine = ReasoningEngine(self.instance_repository)
+        graph_context = self._scoped_graph_prompt_context(tenant, center_node, scope_depth, scope_limit, scope_edge_limit)
+        yield {
+            "event": "llm_request_body",
+            "data": self._llm_request_trace_payload(
+                tenant,
+                task,
+                scope,
+                request_body=self._formatted_scoped_reasoning_prompt_request(
+                    tenant,
+                    task,
+                    scope,
+                    evidence_paths,
+                    scope_depth,
+                    scope_limit,
+                    scope_edge_limit,
+                    graph_context=graph_context,
+                ),
+            ),
+        }
         structured_answer = engine.analyze(tenant, center_node, task.get("question"), depth=scope_depth, limit=scope_limit)
+        structured_response = (
+            self._reasoning_response_v1(tenant, task, scope, structured_answer, evidence_paths, graph_context)
+            if structured_answer
+            else None
+        )
+        yield {
+            "event": "llm_response_body",
+            "data": self._llm_response_trace_payload(
+                tenant,
+                task,
+                scope,
+                response_body=structured_response or {
+                    "schema_version": "reasoning_response_v1",
+                    "structured_answer": None,
+                    "note": "No structured entity profile answer was produced; fallback finding text will be used.",
+                },
+            ),
+        }
         if structured_answer:
             query_plan = [
                 "Validate tenant-scoped entity profile task and approved-only graph scope.",
                 "Read the selected entity node evidence path from the approved graph.",
-                "Run controlled source aggregations for entity profile facts.",
-                "Produce a draft structured profile finding with evidence limits and next validation questions.",
+                "Materialize the response metrics into controlled evidence for review.",
+                "Persist a draft finding from reasoning_response_v1 with evidence limits and next validation questions.",
             ]
             yield {"event": "plan", "data": {"query_plan": query_plan, "task": task}}
             tool_calls.insert(1, {"tool": "entity_profile_aggregate", "tenant_id": tenant.tenant_id, "approved_only": True, "write_scope": "read_only_source_aggregate", "status": "completed"})
@@ -6201,9 +6239,17 @@ class ReasoningRepository:
                 "source_ref": aggregate_source_ref,
                 "payload": metrics,
             })
+            yield {
+                "event": "no_llm_call",
+                "data": {
+                    "stage": "entity_profile_aggregate",
+                    "reason": "No additional LLM request is made. This stage materializes the metrics already used in reasoning_response_v1 into supporting evidence so reviewers can audit degree, related edges, source rows, and ranked paths.",
+                    "output_summary": ranking_summary,
+                },
+            }
             yield {"event": "step", "data": {"tool": "entity_profile_aggregate", "status": "completed", "step": 2, "total": 3}}
-            title = structured_answer["title"]
-            conclusion = structured_answer["profile_summary"]
+            title = structured_response["answer"]["title"]
+            conclusion = structured_response["answer"]["conclusion"]
         else:
             title, conclusion = self._edge_or_fallback_finding_text(tenant, task, scope)
         yield {"event": "evidence", "data": {"evidence_paths": evidence_paths}}
@@ -6219,16 +6265,504 @@ class ReasoningRepository:
                 "title": "Review scoped graph evidence before operational action",
                 "description": "Use this draft as a reviewer prompt; do not treat it as an approved finding until it passes the review gate.",
                 "execution_boundary": "proposal_only",
-                **({"structured_answer": structured_answer} if structured_answer else {}),
+                **({"structured_answer": structured_answer, "structured_response": structured_response} if structured_answer else {}),
             },
         }
-        output = {"summary": conclusion, "finding_keys": [finding["canonical_key"]], "unsupported_claims": [], "draft_only": True, **({"structured_answer": structured_answer} if structured_answer else {})}
+        output = {
+            "summary": conclusion,
+            "finding_keys": [finding["canonical_key"]],
+            "unsupported_claims": [],
+            "draft_only": True,
+            **({"structured_answer": structured_answer, "structured_response": structured_response} if structured_answer else {}),
+        }
         eval_result = {"passed": True, "approved_only": True, "draft_only": True, "unsupported_claims": [], "evidence_path_count": len(evidence_paths), "tenant_id": tenant.tenant_id}
         run = self._record_run(tenant, task, query_plan, tool_calls, evidence_paths, output, eval_result, "completed", started)
+        yield {
+            "event": "no_llm_call",
+            "data": {
+                "stage": "propose_finding",
+                "reason": "No additional LLM request is made. The draft finding title, conclusion, actions, and boundaries are persisted from reasoning_response_v1 plus the supporting evidence chain.",
+                "output_summary": conclusion,
+            },
+        }
         yield {"event": "step", "data": {"tool": "propose_finding", "status": "completed", "step": 3, "total": 3}}
         finding_row = self._record_finding(tenant, run, finding)
         yield {"event": "finding", "data": {"finding": finding_row}}
         yield {"event": "run_complete", "data": {"tenant": tenant.public_dict(), "task": task, "run": run, "findings": [finding_row], "approved": True}}
+
+    def _llm_request_trace_payload(self, tenant, task, scope=None, request_body=None):
+        scope = scope or task.get("scope") or {}
+        return {
+            "request_body": request_body or {},
+            "request_title": "formatted prompt request",
+            "tenant_id": tenant.tenant_id,
+            "task_key": task.get("task_key") or task.get("key"),
+            "center_node": scope.get("center_node"),
+            "center_edge": scope.get("center_edge"),
+            "depth": scope.get("depth"),
+            "node_limit": scope.get("node_limit") or scope.get("limit"),
+            "write_boundary": "draft_only",
+        }
+
+    def _llm_response_trace_payload(self, tenant, task, scope=None, response_body=None):
+        scope = scope or task.get("scope") or {}
+        return {
+            "response_body": response_body or {},
+            "response_title": "structured reasoning response",
+            "tenant_id": tenant.tenant_id,
+            "task_key": task.get("task_key") or task.get("key"),
+            "center_node": scope.get("center_node"),
+            "depth": scope.get("depth"),
+            "node_limit": scope.get("node_limit") or scope.get("limit"),
+            "write_boundary": "draft_only",
+        }
+
+    def _reasoning_response_v1(self, tenant, task, scope, structured_answer, evidence_paths, graph_context=None):
+        scope = scope or task.get("scope") or {}
+        structured_answer = structured_answer or {}
+        metrics = structured_answer.get("metrics") or {}
+        source_key_profile = metrics.get("source_key_profile") or {}
+        graph_context = graph_context or self._scoped_graph_prompt_context(
+            tenant,
+            scope.get("center_node"),
+            int(scope.get("depth") or 1),
+            int(scope.get("node_limit") or 200),
+            int(scope.get("edge_limit") or scope.get("node_limit") or 200),
+        )
+
+        ranked_paths = []
+        for idx, path in enumerate(source_key_profile.get("top_paths") or [], start=1):
+            ranked_paths.append({
+                "rank": idx,
+                "label": path.get("label"),
+                "metric": path.get("metric"),
+                "metric_value": path.get("metric_value"),
+                "row_count": path.get("row_count"),
+                "source_table": path.get("table"),
+                "label_column": path.get("label_col"),
+                "evidence_role": "source_key_path_metric",
+            })
+        if not ranked_paths:
+            source_node_labels = {
+                node.get("id"): node.get("label")
+                for node in graph_context.get("source_backed_related_nodes") or []
+                if node.get("id") and node.get("label")
+            }
+            seen_paths = set()
+            for edge in graph_context.get("source_backed_related_edges") or []:
+                target = edge.get("target")
+                label = source_node_labels.get(target) or str(target or "").split(":", 1)[-1]
+                metric = edge.get("metric")
+                marker = (label, metric, edge.get("source_table"))
+                if not label or marker in seen_paths:
+                    continue
+                seen_paths.add(marker)
+                ranked_paths.append({
+                    "rank": len(ranked_paths) + 1,
+                    "label": label,
+                    "metric": metric,
+                    "metric_value": edge.get("metric_value"),
+                    "row_count": edge.get("row_count"),
+                    "source_table": edge.get("source_table"),
+                    "label_column": None,
+                    "evidence_role": "source_backed_graph_edge_metric",
+                })
+        second_hop_paths = []
+        for path in source_key_profile.get("second_hop_paths") or []:
+            second_hop_paths.append({
+                "label": path.get("label"),
+                "source_table": path.get("table"),
+                "metric": path.get("metric"),
+                "top_peers": path.get("top_peers") or [],
+                "evidence_role": "shared_path_peer_context",
+            })
+
+        graph_degree = graph_context.get("degree") or {}
+        display_label = metrics.get("label") or scope.get("center_node")
+        for node in graph_context.get("related_nodes") or []:
+            if node.get("id") == scope.get("center_node") and node.get("label"):
+                display_label = node.get("label")
+                break
+        evidence_refs = []
+        for item in evidence_paths or []:
+            evidence_refs.append({
+                "kind": item.get("kind"),
+                "label": item.get("label") or item.get("title"),
+                "summary": item.get("summary"),
+                "source_ref": item.get("source_ref"),
+                "url": item.get("url"),
+            })
+        plain_conclusion = self._plain_reasoning_conclusion(
+            task.get("question"),
+            display_label,
+            structured_answer.get("profile_summary") or "",
+            ranked_paths,
+            second_hop_paths,
+            graph_degree,
+        )
+        plain_title = self._plain_reasoning_title(
+            task.get("question"),
+            display_label,
+            ranked_paths,
+            second_hop_paths,
+        )
+
+        return {
+            "schema_version": "reasoning_response_v1",
+            "answer": {
+                "title": plain_title or structured_answer.get("title") or task.get("question") or "Scoped graph reasoning",
+                "plain_conclusion": plain_conclusion,
+                "conclusion": plain_conclusion,
+                "detailed_conclusion": structured_answer.get("profile_summary") or "",
+                "confidence": 0.78,
+                "status": "draft",
+            },
+            "scope": {
+                "tenant_id": tenant.tenant_id,
+                "task_key": task.get("task_key") or task.get("key") or task.get("canonical_key"),
+                "question": task.get("question"),
+                "center_node": scope.get("center_node"),
+                "depth": int(scope.get("depth") or 1),
+                "node_limit": int(scope.get("node_limit") or 200),
+                "edge_limit": int(scope.get("edge_limit") or scope.get("node_limit") or 200),
+                "approved_only": True,
+            },
+            "graph_context": {
+                "center_node": graph_context.get("center_node") or scope.get("center_node"),
+                "degree": {
+                    "visible_graph_center": graph_degree.get("visible_graph_center", graph_degree.get("center")),
+                    "center": graph_degree.get("center"),
+                    "by_link": graph_degree.get("by_link") or {},
+                    "neighbor_type_counts": graph_degree.get("neighbor_type_counts") or {},
+                    "source_key_row_degree": graph_degree.get("source_key_row_degree"),
+                    "source_key_top_path_count": graph_degree.get("source_key_top_path_count"),
+                },
+                "related_nodes": graph_context.get("related_nodes") or [],
+                "related_edges": graph_context.get("related_edges") or [],
+                "source_backed_related_nodes": graph_context.get("source_backed_related_nodes") or [],
+                "source_backed_related_edges": graph_context.get("source_backed_related_edges") or [],
+                "truncated": graph_context.get("truncated") or {},
+            },
+            "key_facts": structured_answer.get("key_facts") or [],
+            "ranked_paths": ranked_paths,
+            "second_hop_paths": second_hop_paths,
+            "business_interpretation": structured_answer.get("business_interpretation") or [],
+            "evidence": evidence_refs,
+            "metrics": metrics,
+            "limits": structured_answer.get("evidence_limits") or [],
+            "next_questions": structured_answer.get("next_questions") or [],
+            "actions": [
+                {
+                    "type": "review_graph_scope",
+                    "title": "Review scoped graph evidence before operational action",
+                    "description": "Use this draft as a reviewer prompt; do not treat it as an approved finding until it passes the review gate.",
+                    "execution_boundary": "proposal_only",
+                }
+            ],
+            "write_boundary": {
+                "status": "draft_only",
+                "approved_finding_write": "review_gate_required",
+                "must_not_write": ["canonical_ontology", "formal_graph"],
+            },
+        }
+
+    def _plain_reasoning_title(self, question, label, ranked_paths, second_hop_paths):
+        wants_zh = bool(re.search(r"[\u4e00-\u9fff]", question or ""))
+        label = self._display_label_from_question(question, label)
+        top_labels = [str(path.get("label")) for path in (ranked_paths or []) if path.get("label")][:3]
+        if not top_labels:
+            return f"{label} 风险画像" if wants_zh else f"{label} risk profile"
+        usa_paths = self._paths_with_peer(second_hop_paths, {"USA"})
+        if wants_zh:
+            if usa_paths and ("美国" in (question or "") or "USA" in (question or "").upper()):
+                return f"{label} 与 USA 的风险重叠：{'、'.join(usa_paths[:3])}"
+            return f"{label} 主要敏感海峡：{'、'.join(top_labels)}"
+        if usa_paths and "USA" in (question or "").upper():
+            return f"{label} USA risk overlap: {', '.join(usa_paths[:3])}"
+        return f"{label} main chokepoint exposure: {', '.join(top_labels)}"
+
+    def _plain_reasoning_conclusion(self, question, label, detailed_conclusion, ranked_paths, second_hop_paths, graph_degree):
+        wants_zh = bool(re.search(r"[\u4e00-\u9fff]", question or ""))
+        label = self._display_label_from_question(question, label or "selected entity")
+        top_labels = [str(path.get("label")) for path in (ranked_paths or []) if path.get("label")][:3]
+        usa_paths = self._paths_with_peer(second_hop_paths, {"USA"})
+        peer_keys = []
+        for path in second_hop_paths or []:
+            for peer in path.get("top_peers") or []:
+                key = peer.get("key") or peer.get("label") or peer.get("id")
+                if key and key not in peer_keys:
+                    peer_keys.append(str(key))
+                if len(peer_keys) >= 5:
+                    break
+            if len(peer_keys) >= 5:
+                break
+        source_rows = (graph_degree or {}).get("source_key_row_degree")
+        if top_labels:
+            paths_text = "、".join(top_labels) if wants_zh else ", ".join(top_labels)
+            if usa_paths and ("美国" in (question or "") or "USA" in (question or "").upper()):
+                usa_text = "、".join(usa_paths[:3]) if wants_zh else ", ".join(usa_paths[:3])
+                if wants_zh:
+                    return (
+                        f"{label} 最敏感的海上通道集中在 {paths_text}；其中 {usa_text} 也连接 USA，"
+                        "是中美风险重叠最需要优先核查的海峡。"
+                    )
+                return (
+                    f"{label}'s strongest maritime exposure is concentrated in {paths_text}. "
+                    f"{usa_text} also connects USA, so those chokepoints should be reviewed first for US overlap."
+                )
+            if peer_keys:
+                peers_text = "、".join(peer_keys) if wants_zh else ", ".join(peer_keys)
+                if wants_zh:
+                    return (
+                        f"{label} 的主要敏感路径集中在 {paths_text}。这些路径还连接 {peers_text} 等相关方，"
+                        "说明风险来自高价值路径和关键国家/地区的重叠。"
+                    )
+                return (
+                    f"{label}'s main exposure is concentrated in {paths_text}. "
+                    f"Those paths also connect {peers_text}, so the risk is driven by overlap between high-value routes and key counterparties."
+                )
+            if wants_zh:
+                return f"{label} 的主要敏感路径集中在 {paths_text}；具体排序和数值见下方关键路径。"
+            return f"{label}'s main exposure is concentrated in {paths_text}; see the ranked paths below for the supporting metrics."
+        if source_rows:
+            if wants_zh:
+                return f"{label} 在受控源数据中有 {source_rows} 条相关记录；当前证据足以做画像，但还需要关键路径指标来判断风险优先级。"
+            return f"{label} has {source_rows} related controlled source rows; it can be profiled, but path-level metrics are needed to rank risk priority."
+        return detailed_conclusion or (f"{label} 暂无足够的关联证据形成直白结论。" if wants_zh else f"{label} does not yet have enough related evidence for a clear conclusion.")
+
+    def _display_label_from_question(self, question, fallback):
+        question = question or ""
+        fallback = fallback or "selected entity"
+        match = re.search(r"([A-Z][A-Za-z .'-]{1,80}\s+\([A-Z]{3}\))", question)
+        return match.group(1) if match else fallback
+
+    def _paths_with_peer(self, second_hop_paths, peer_keys):
+        wanted = {str(key).upper() for key in peer_keys}
+        labels = []
+        for path in second_hop_paths or []:
+            path_label = path.get("label")
+            if not path_label:
+                continue
+            for peer in path.get("top_peers") or []:
+                key = str(peer.get("key") or peer.get("label") or peer.get("id") or "").upper()
+                if key in wanted:
+                    labels.append(str(path_label))
+                    break
+        return labels
+
+
+    def _formatted_scoped_reasoning_prompt_request(self, tenant, task, scope, evidence_paths, scope_depth, scope_limit, scope_edge_limit, graph_context=None):
+        question = task.get("question") or ""
+        center_node = scope.get("center_node")
+        graph_context = graph_context or self._scoped_graph_prompt_context(tenant, center_node, scope_depth, scope_limit, scope_edge_limit)
+        evidence_text = json.dumps(evidence_paths, ensure_ascii=False, indent=2)
+        graph_context_text = json.dumps(graph_context, ensure_ascii=False, indent=2)
+        system_prompt = (
+            "You are Aletheia's tenant-scoped graph reasoning agent. "
+            "Use only approved graph evidence and controlled source aggregations. "
+            "Do not ingest new data, approve findings, or write canonical ontology/formal graph data. "
+            "Return a draft finding with evidence limits and review boundaries."
+        )
+        user_prompt = (
+            f"Tenant: {tenant.tenant_id}\n"
+            f"Question: {question}\n"
+            f"Center node: {center_node or '—'}\n"
+            f"Depth: {scope_depth}\n"
+            f"Node limit: {scope_limit}\n"
+            "Evidence paths:\n"
+            f"{evidence_text}\n\n"
+            "Graph scope context:\n"
+            f"{graph_context_text}\n\n"
+            "Expected output:\n"
+            "- answer.plain_conclusion: 1-2 plain-language sentences. Explain impact first; mention only top paths and key counterparties. Do not list long metric rows here.\n"
+            "- answer.detailed_conclusion: longer reasoning narrative when needed\n"
+            "- ranked_paths, second_hop_paths, graph_context.degree, and key_facts carry the numbers, degree, related node data, and edge data\n"
+            "- limitations / counter-evidence\n"
+            "- draft-only write boundary"
+        )
+        return {
+            "provider": "internal_reasoning_engine",
+            "model": "ReasoningEngine.analyze",
+            "prompt_version": "graph_scope_reasoning_v1",
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            "parameters": {
+                "tenant_id": tenant.tenant_id,
+                "task_key": task.get("task_key") or task.get("key"),
+                "center_node": center_node,
+                "depth": scope_depth,
+                "node_limit": scope_limit,
+                "edge_limit": scope_edge_limit,
+                "approved_only": True,
+            },
+            "response_contract": {
+                "schema_version": "reasoning_response_v1",
+                "status": "draft",
+                "answer": {
+                    "plain_conclusion": "1-2 human-readable sentences, not an evidence dump",
+                    "detailed_conclusion": "long-form support text",
+                },
+                "required_sections": ["graph_context", "key_facts", "ranked_paths", "second_hop_paths", "limits", "next_questions", "write_boundary"],
+                "write_boundary": "draft_only",
+                "must_not_write": ["canonical_ontology", "formal_graph"],
+            },
+        }
+
+    def _scoped_graph_prompt_context(self, tenant, center_node, depth, node_limit, edge_limit):
+        if not center_node or ":" not in str(center_node):
+            return {"center_node": center_node, "nodes": [], "edges": [], "degree": {"center": 0}}
+        object_type, instance_id = str(center_node).split(":", 1)
+        node_limit = max(1, min(int(node_limit or 200), 300))
+        edge_limit = max(1, min(int(edge_limit or node_limit), 300))
+        depth = max(1, min(int(depth or 1), 2))
+        graph = self.instance_repository.full_graph(tenant, object_type, instance_id, limit=max(node_limit, edge_limit)) or {}
+        nodes = graph.get("nodes") or []
+        edges = graph.get("edges") or []
+        nodes_by_id = {node.get("id"): node for node in nodes if node.get("id")}
+        adjacency = {}
+        for edge in edges:
+            source = edge.get("source")
+            target = edge.get("target")
+            if not source or not target:
+                continue
+            adjacency.setdefault(source, []).append(edge)
+            adjacency.setdefault(target, []).append(edge)
+
+        visited = {center_node}
+        frontier = {center_node}
+        for _ in range(depth):
+            next_frontier = set()
+            for node_id in frontier:
+                for edge in adjacency.get(node_id, []):
+                    other = edge.get("target") if edge.get("source") == node_id else edge.get("source")
+                    if other and other not in visited:
+                        visited.add(other)
+                        next_frontier.add(other)
+            frontier = next_frontier
+            if not frontier:
+                break
+
+        center_edges = adjacency.get(center_node, [])
+        center_neighbor_ids = []
+        for edge in center_edges:
+            other = edge.get("target") if edge.get("source") == center_node else edge.get("source")
+            if other:
+                center_neighbor_ids.append(other)
+        ordered_node_ids = [center_node] + center_neighbor_ids + [node_id for node_id in visited if node_id not in {center_node, *center_neighbor_ids}]
+        seen_ordered_nodes = set()
+        scoped_nodes = []
+        for node_id in ordered_node_ids:
+            if node_id in seen_ordered_nodes or node_id not in nodes_by_id:
+                continue
+            seen_ordered_nodes.add(node_id)
+            scoped_nodes.append(nodes_by_id[node_id])
+        center_edge_ids = {edge.get("id") for edge in center_edges}
+        scoped_edges = [
+            *center_edges,
+            *[
+                edge for edge in edges
+                if edge.get("id") not in center_edge_ids and edge.get("source") in visited and edge.get("target") in visited
+            ],
+        ]
+        degree_by_link = {}
+        neighbor_type_counts = {}
+        for edge in center_edges:
+            degree_by_link[edge.get("label") or edge.get("link_key") or "edge"] = degree_by_link.get(edge.get("label") or edge.get("link_key") or "edge", 0) + 1
+            other = edge.get("target") if edge.get("source") == center_node else edge.get("source")
+            node_type = (nodes_by_id.get(other) or {}).get("type") or "unknown"
+            neighbor_type_counts[node_type] = neighbor_type_counts.get(node_type, 0) + 1
+
+        source_key_profile = None
+        try:
+            cfg_key = self.instance_repository._cfg_key(object_type)
+            if hasattr(self.instance_repository, "reasoning_entity_config"):
+                cfg = self.instance_repository.reasoning_entity_config(tenant).get(cfg_key)
+            else:
+                cfg = self.instance_repository.ENTITY_CONFIG.get(cfg_key)
+            if cfg:
+                source_key_profile = ReasoningEngine(self.instance_repository)._source_key_profile(
+                    tenant,
+                    object_type,
+                    instance_id,
+                    cfg,
+                    depth=depth,
+                )
+        except Exception:
+            source_key_profile = None
+
+        top_source_paths = (source_key_profile or {}).get("top_paths") or []
+        source_backed_related_nodes = [
+            {
+                "id": f"MaritimeChokepoint:{path.get('label')}",
+                "type": "MaritimeChokepoint",
+                "label": path.get("label"),
+                "source_table": path.get("table"),
+                "source_pk": f"{(source_key_profile or {}).get('center_key_col', 'key')}={instance_id}; {path.get('label_col') or 'label'}={path.get('label')}",
+            }
+            for path in top_source_paths
+        ]
+        source_backed_related_edges = [
+            {
+                "source": center_node,
+                "target": f"MaritimeChokepoint:{path.get('label')}",
+                "label": "trade dependency",
+                "metric": path.get("metric"),
+                "metric_value": path.get("metric_value"),
+                "row_count": path.get("row_count"),
+                "source_table": path.get("table"),
+                "provenance": "source-key metric aggregation",
+            }
+            for path in top_source_paths
+        ]
+
+        def compact_node(node):
+            return {
+                "id": node.get("id"),
+                "type": node.get("type"),
+                "label": node.get("label"),
+                "source_table": node.get("source_table"),
+                "source_pk": node.get("source_pk"),
+                "ontology_artifact": node.get("ontology_artifact"),
+                "status": node.get("status"),
+            }
+
+        def compact_edge(edge):
+            return {
+                "id": edge.get("id"),
+                "source": edge.get("source"),
+                "target": edge.get("target"),
+                "label": edge.get("label"),
+                "link_key": edge.get("link_key"),
+                "status": edge.get("status"),
+                "projection_source": edge.get("projection_source"),
+            }
+
+        return {
+            "center_node": center_node,
+            "depth": depth,
+            "node_limit": node_limit,
+            "edge_limit": edge_limit,
+            "degree": {
+                "center": len(center_edges),
+                "visible_graph_center": len(center_edges),
+                "by_link": degree_by_link,
+                "neighbor_type_counts": neighbor_type_counts,
+                "source_key_row_degree": (source_key_profile or {}).get("total_key_rows"),
+                "source_key_top_path_count": len(top_source_paths),
+            },
+            "related_nodes": [compact_node(node) for node in scoped_nodes[:node_limit]],
+            "related_edges": [compact_edge(edge) for edge in scoped_edges[:edge_limit]],
+            "source_backed_related_nodes": source_backed_related_nodes[:node_limit],
+            "source_backed_related_edges": source_backed_related_edges[:edge_limit],
+            "truncated": {
+                "nodes": len(scoped_nodes) > node_limit,
+                "edges": len(scoped_edges) > edge_limit,
+                "source_graph": (graph.get("limits") or {}).get("truncated"),
+            },
+            "source_key_metrics": source_key_profile,
+        }
 
     def run_scoped_graph_task(self, tenant, task_key):
         started = time.monotonic()
@@ -6269,14 +6803,21 @@ class ReasoningRepository:
         center_node = scope.get("center_node")
         scope_depth = int(scope.get("depth") or 1)
         scope_limit = int(scope.get("node_limit") or 200)
+        scope_edge_limit = int(scope.get("edge_limit") or scope_limit)
+        graph_context = self._scoped_graph_prompt_context(tenant, center_node, scope_depth, scope_limit, scope_edge_limit)
         engine = ReasoningEngine(self.instance_repository)
         structured_answer = engine.analyze(tenant, center_node, task.get("question"), depth=scope_depth, limit=scope_limit)
+        structured_response = (
+            self._reasoning_response_v1(tenant, task, scope, structured_answer, evidence_paths, graph_context)
+            if structured_answer
+            else None
+        )
         if structured_answer:
             query_plan = [
                 "Validate tenant-scoped entity profile task and approved-only graph scope.",
                 "Read the selected entity node evidence path from the approved graph.",
-                "Run controlled source aggregations for entity profile facts.",
-                "Produce a draft structured profile finding with evidence limits and next validation questions.",
+                "Materialize the response metrics into controlled evidence for review.",
+                "Persist a draft finding from reasoning_response_v1 with evidence limits and next validation questions.",
             ]
             tool_calls.insert(
                 1,
@@ -6324,8 +6865,8 @@ class ReasoningRepository:
                     "payload": metrics,
                 }
             )
-            title = structured_answer["title"]
-            conclusion = structured_answer["profile_summary"]
+            title = structured_response["answer"]["title"]
+            conclusion = structured_response["answer"]["conclusion"]
         else:
             title, conclusion = self._edge_or_fallback_finding_text(tenant, task, scope)
         finding = {
@@ -6349,7 +6890,7 @@ class ReasoningRepository:
                 "title": "Review scoped graph evidence before operational action",
                 "description": "Use this draft as a reviewer prompt; do not treat it as an approved finding until it passes the review gate.",
                 "execution_boundary": "proposal_only",
-                **({"structured_answer": structured_answer} if structured_answer else {}),
+                **({"structured_answer": structured_answer, "structured_response": structured_response} if structured_answer else {}),
             },
         }
         output = {
@@ -6357,7 +6898,7 @@ class ReasoningRepository:
             "finding_keys": [finding["canonical_key"]],
             "unsupported_claims": [],
             "draft_only": True,
-            **({"structured_answer": structured_answer} if structured_answer else {}),
+            **({"structured_answer": structured_answer, "structured_response": structured_response} if structured_answer else {}),
         }
         eval_result = {
             "passed": True,
@@ -6419,8 +6960,9 @@ class ReasoningRepository:
             }
         scope = task.get("scope") or finding.get("task_scope") or {}
         structured_answer = finding.get("structured_answer") or (finding.get("recommended_action") or {}).get("structured_answer")
+        structured_response = finding.get("structured_response") or (finding.get("recommended_action") or {}).get("structured_response")
+        center_node = scope.get("center_node")
         if not structured_answer:
-            center_node = scope.get("center_node")
             engine = ReasoningEngine(self.instance_repository)
             structured_answer = engine.analyze(
                 tenant,
@@ -6438,13 +6980,50 @@ class ReasoningRepository:
                 finding["structured_answer"] = structured_answer
                 for key in ("profile_summary", "key_facts", "business_interpretation", "evidence_limits", "next_questions"):
                     finding[key] = structured_answer.get(key) or ([] if key != "profile_summary" else "")
+        elif center_node and not ((structured_answer.get("metrics") or {}).get("source_key_profile") or {}).get("related_tables"):
+            try:
+                refreshed_answer = ReasoningEngine(self.instance_repository).analyze(
+                    tenant,
+                    center_node,
+                    task.get("question"),
+                    depth=int(scope.get("depth") or 1),
+                    limit=int(scope.get("node_limit") or 200),
+                )
+            except Exception:
+                refreshed_answer = None
+            if refreshed_answer:
+                structured_answer = refreshed_answer
+                raw_recommended_action = finding.get("recommended_action") or {}
+                finding["recommended_action"] = {
+                    **raw_recommended_action,
+                    "structured_answer": structured_answer,
+                }
+                finding["structured_answer"] = structured_answer
+                for key in ("profile_summary", "key_facts", "business_interpretation", "evidence_limits", "next_questions"):
+                    finding[key] = structured_answer.get(key) or ([] if key != "profile_summary" else "")
         if not structured_answer and not self._is_legacy_scoped_finding(finding):
             return finding
         raw_title = finding.get("title")
         raw_conclusion = finding.get("conclusion")
         if structured_answer:
-            title = structured_answer.get("title") or raw_title
-            conclusion = structured_answer.get("profile_summary") or raw_conclusion
+            existing_graph_context = (structured_response or {}).get("graph_context") if isinstance(structured_response, dict) else None
+            structured_response = self._reasoning_response_v1(
+                tenant,
+                task,
+                scope,
+                structured_answer,
+                finding.get("supporting_evidence") or [],
+                graph_context=existing_graph_context,
+            )
+            raw_recommended_action = finding.get("recommended_action") or {}
+            finding["recommended_action"] = {
+                **raw_recommended_action,
+                "structured_response": structured_response,
+            }
+            finding["structured_response"] = structured_response
+            answer = structured_response.get("answer") or {}
+            title = answer.get("title") or structured_answer.get("title") or raw_title
+            conclusion = answer.get("conclusion") or structured_answer.get("profile_summary") or raw_conclusion
             finding["confidence"] = max(float(finding.get("confidence") or 0), 0.78)
             metrics = structured_answer.get("metrics") or {}
             evidence_paths = list(finding.get("supporting_evidence") or [])
@@ -7442,6 +8021,7 @@ class ReasoningRepository:
     def _finding_to_dict(self, row):
         recommended_action = _load_json(row["recommended_action_json"], {})
         structured_answer = recommended_action.get("structured_answer") or {}
+        structured_response = recommended_action.get("structured_response") or {}
         supporting_evidence = _load_json(row["supporting_evidence_json"], [])
         deep_graph_profile = recommended_action.get("deep_graph_profile") or self._deep_graph_profile(supporting_evidence)
         finding = {
@@ -7467,6 +8047,8 @@ class ReasoningRepository:
             finding["structured_answer"] = structured_answer
             for key in ("profile_summary", "key_facts", "business_interpretation", "evidence_limits", "next_questions"):
                 finding[key] = structured_answer.get(key) or ([] if key != "profile_summary" else "")
+        if structured_response:
+            finding["structured_response"] = structured_response
         return finding
 
     def _autopilot_session_to_dict(self, row):
@@ -7618,7 +8200,7 @@ class AgentGatewayRepository:
                 ),
                 {
                     "tenant_id": tenant.tenant_id,
-                    "allowed_paths_json": _json_dump(["reports", "web/review_workbench", "agents", "README.md"]),
+                    "allowed_paths_json": _json_dump(["reports", "web/app", "agents", "README.md"]),
                     "allowed_tools_json": _json_dump(["read", "test", "propose_patch", "propose_finding", "write_report"]),
                     "blocked_tools_json": _json_dump(sorted(self.BLOCKED_TOOLS)),
                 },
@@ -9314,6 +9896,8 @@ class ReviewWorkbenchHandler(BaseHTTPRequestHandler):
         mime_type = mimetypes.guess_type(file_path.name)[0] or "application/octet-stream"
         self.send_response(HTTPStatus.OK)
         self.send_header("Content-Type", mime_type)
+        if file_path.suffix in {".js", ".jsx", ".html"}:
+            self.send_header("Cache-Control", "no-store")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)

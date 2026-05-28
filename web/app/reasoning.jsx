@@ -208,6 +208,10 @@ const RESULT_TEXT_ZH_RX = [
     "将该草稿作为审核提示使用；在通过审核关口前，不要把它当作已批准发现。"],
   [/Conclusions are based solely on the approved graph and controlled aggregation; performance targets, utilization, profitability, or satisfaction data are not included\./,
     "结论仅基于已批准图谱和受控聚合；不包含绩效目标、利用率、利润率或满意度数据。"],
+  [/Conclusions are based solely on the approved graph and controlled aggregation; external benchmarks, thresholds, and unapproved evidence are not included\./,
+    "结论仅基于已批准图谱和受控聚合；不包含外部基准、阈值或未批准证据。"],
+  [/Conclusions are based solely on the approved graph; external benchmarks, thresholds, and unapproved evidence are not included\./,
+    "结论仅基于已批准图谱；不包含外部基准、阈值或未批准证据。"],
   [/Profile based on employees source table and approved graph controlled aggregation\./,
     "画像基于 employees 源表和已批准图谱的受控聚合。"],
   [/Rankings reflect a current snapshot — no time-series trends or external benchmarks\./,
@@ -373,6 +377,9 @@ function structuredEmployeeSummaryRX(finding, language) {
   }
   const s = finding.structured_answer;
   const m = s.metrics || {};
+  if (m.object_type !== "Employee") {
+    return s.profile_summary || finding.conclusion || "";
+  }
   if (isZhRX(language) && m.object_type === "Employee") {
     const name = m.label || m.name || `Employee:${m.instance_id || m.employee_id || ""}`;
     const facts = s.key_facts || [];
@@ -454,6 +461,144 @@ function displayActionTextRX(value, language) {
     "Use this draft as a reviewer prompt; do not treat it as an approved finding until it passes the review gate.": "将该草稿作为审核提示使用；在通过审核关口前，不要把它当作已批准发现。",
   };
   return map[text] || resultTextRX(text, language);
+}
+
+function reasoningResponseV1RX(finding) {
+  if (!finding) return null;
+  const direct = finding.structured_response;
+  const action = finding.recommended_action && finding.recommended_action.structured_response;
+  const structured = direct || action;
+  return structured && structured.schema_version === "reasoning_response_v1" ? structured : null;
+}
+
+function compactMetricRX(value) {
+  const n = asNumberRX(value);
+  if (n == null) return value == null ? "—" : String(value);
+  return n.toLocaleString(undefined, { maximumFractionDigits: 2 });
+}
+
+function ReasoningResponseV1View({ response, finding, language }) {
+  if (!response) return null;
+  const answer = response.answer || {};
+  const graph = response.graph_context || {};
+  const degree = graph.degree || {};
+  const rankedPaths = response.ranked_paths || [];
+  const secondHop = response.second_hop_paths || [];
+  const keyFacts = response.key_facts || [];
+  const interpretations = response.business_interpretation || [];
+  const limits = response.limits || [];
+  const nextQuestions = response.next_questions || [];
+  const relatedEdges = graph.related_edges || [];
+  const sourceEdges = graph.source_backed_related_edges || [];
+  const sectionStyle = { paddingTop: 12, borderTop: "1px solid var(--line)" };
+  const labelStyle = { fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--accent)", letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 6 };
+  const listStyle = { margin: 0, paddingLeft: 18, color: "var(--text-dim)", fontSize: 13, lineHeight: 1.6 };
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+      <div style={{ fontSize: 15, color: "var(--text)", lineHeight: 1.6 }}>
+        {resultTextRX(answer.conclusion || finding?.conclusion || "", language)}
+      </div>
+
+      <div style={sectionStyle}>
+        <div style={labelStyle}>{tRX(language, "Graph degree and scope", "图谱度数与范围")}</div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 8 }}>
+          {[
+            [tRX(language, "Visible degree", "可见度数"), degree.visible_graph_center ?? degree.center],
+            [tRX(language, "Source rows", "源数据行"), degree.source_key_row_degree],
+            [tRX(language, "Ranked paths", "排序路径"), degree.source_key_top_path_count],
+            [tRX(language, "Related edges", "关联边"), relatedEdges.length || sourceEdges.length],
+          ].map(([k, v]) => (
+            <div key={k} style={{ border: "1px solid var(--line)", padding: "8px 10px", background: "var(--surface)" }}>
+              <div style={{ fontSize: 10, color: "var(--muted)", fontFamily: "var(--font-mono)", textTransform: "uppercase" }}>{k}</div>
+              <div style={{ fontSize: 16, color: "var(--text)", fontFamily: "var(--font-mono)" }}>{compactMetricRX(v)}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {rankedPaths.length > 0 && (
+        <div style={sectionStyle}>
+          <div style={labelStyle}>{tRX(language, "Ranked exposure paths", "排序暴露路径")}</div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            {rankedPaths.slice(0, 8).map((p, i) => (
+              <div key={`${p.label || i}-${p.metric || ""}`} style={{ display: "grid", gridTemplateColumns: "34px minmax(0, 1fr) auto", gap: 8, alignItems: "center", fontSize: 12, color: "var(--text-dim)" }}>
+                <span style={{ fontFamily: "var(--font-mono)", color: "var(--accent)" }}>#{p.rank || i + 1}</span>
+                <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "var(--text)" }}>{resultTextRX(p.label || "—", language)}</span>
+                <span style={{ fontFamily: "var(--font-mono)", color: "var(--muted)" }}>{p.metric || "metric"} {compactMetricRX(p.metric_value)} · {p.row_count || 0} rows</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {secondHop.length > 0 && (
+        <div style={sectionStyle}>
+          <div style={labelStyle}>{tRX(language, "Depth context", "深度上下文")}</div>
+          <ul style={listStyle}>
+            {secondHop.slice(0, 5).map((p, i) => (
+              <li key={`${p.label || i}-hop`}>
+                <span style={{ color: "var(--text)" }}>{resultTextRX(p.label || "—", language)}</span>
+                {" → "}
+                {(p.top_peers || []).slice(0, 6).map(peer => peer.key || peer.label || peer.id).filter(Boolean).join(", ") || "—"}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {keyFacts.length > 0 && (
+        <div style={sectionStyle}>
+          <div style={labelStyle}>{tRX(language, "Key facts", "关键事实")}</div>
+          <ul style={listStyle}>
+            {keyFacts.slice(0, 8).map((fact, i) => (
+              <li key={`${fact.label || i}-fact`}>
+                <span style={{ color: "var(--text)" }}>{resultTextRX(fact.label || "Fact", language)}</span>
+                {": "}
+                {resultTextRX(fact.value || fact.summary || "", language)}
+                {fact.source_ref && <span style={{ color: "var(--muted)" }}> · {fact.source_ref}</span>}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {interpretations.length > 0 && (
+        <div style={sectionStyle}>
+          <div style={labelStyle}>{tRX(language, "Interpretation", "解读")}</div>
+          <ul style={listStyle}>
+            {resultListRX(interpretations.slice(0, 5), language).map((text, i) => <li key={`${i}-interp`}>{text}</li>)}
+          </ul>
+        </div>
+      )}
+
+      {limits.length > 0 && (
+        <div style={sectionStyle}>
+          <div style={{ ...labelStyle, color: "var(--rejected)" }}>{tRX(language, "Limits", "边界")}</div>
+          <ul style={listStyle}>
+            {resultListRX(limits, language).map((text, i) => <li key={`${i}-limit`}>{text}</li>)}
+          </ul>
+        </div>
+      )}
+
+      {nextQuestions.length > 0 && (
+        <div style={sectionStyle}>
+          <div style={labelStyle}>{tRX(language, "Next questions", "后续问题")}</div>
+          <ul style={listStyle}>
+            {resultListRX(nextQuestions.slice(0, 5), language).map((text, i) => <li key={`${i}-next`}>{text}</li>)}
+          </ul>
+        </div>
+      )}
+
+      <div style={{ ...sectionStyle, display: "flex", gap: 8, alignItems: "center" }}>
+        <div className="eyebrow" style={{ color: "var(--changes)" }}>{tRX(language, "Canonical boundary", "正式边界")}</div>
+        <div style={{ fontSize: 11, color: "var(--muted)" }}>
+          {tRX(language,
+            "This response is draft-only; approving it cites the finding layer and does not modify canonical ontology or formal graph.",
+            "该响应仅为草稿；批准后只引用到发现层，不会修改正式本体或正式图谱。")}
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function firstAggregatePayload(finding) {
@@ -732,6 +877,7 @@ function Reasoning({ tenant, language }) {
   }
   const [evidenceFilter, setEvidenceFilter] = useStateRX("all");
   const [localTasks, setLocalTasks] = useStateRX([]);  // mock-mode submitted tasks
+  const [deletedTaskKeys, setDeletedTaskKeys] = useStateRX(new Set());
   // live SSE trace, keyed by canonical_key so it persists when user switches tasks
   const [traceByKey, setTraceByKey] = useStateRX({});
   const streamRef = useRefRX(null);
@@ -813,12 +959,13 @@ function Reasoning({ tenant, language }) {
     const out = [];
     for (const t of merged) {
       const k = t.canonical_key || t.id;
+      if (k && deletedTaskKeys.has(k)) continue;
       if (k && seen.has(k)) continue;
       if (k) seen.add(k);
       out.push(t);
     }
     return out;
-  }, [localTasks, tasksQ.data]);
+  }, [localTasks, tasksQ.data, deletedTaskKeys]);
 
   const STATUS_ORDER = { active: 0, running: 0, in_progress: 0, pending: 0, queued: 0, started: 0 };
   function taskSortCmp(a, b) {
@@ -871,7 +1018,7 @@ function Reasoning({ tenant, language }) {
   const detailQ = useApiData(
     "reasoningTask",
     [selectedKey, tenant ? tenant.id : "default"],
-    { enabled: !!selectedKey }
+    { enabled: !!selectedKey && allTasks.some(t => t.canonical_key === selectedKey) }
   );
   // Use list-item immediately when user clicks; detail backfills when it arrives.
   // This prevents the "click does nothing" feeling while /api/reasoning/tasks/{key} loads.
@@ -1343,6 +1490,11 @@ function Reasoning({ tenant, language }) {
     try {
       try { await window.AL_API.closeTask(taskKey, tenant.id); } catch (_) {}
       await window.AL_API.deleteTask(taskKey, tenant.id);
+      setDeletedTaskKeys(prev => {
+        const next = new Set(prev);
+        next.add(taskKey);
+        return next;
+      });
       setLocalTasks(prev => prev.filter(t => t.canonical_key !== taskKey));
       if (selectedKey === taskKey) setSelectedKey(null);
       setActionMsg({ kind: "ok", msg: tRX(language, "Task deleted.", "任务已删除。") });
@@ -1702,6 +1854,10 @@ function Reasoning({ tenant, language }) {
                     </div>
                   ) : finding ? (
                     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                      {(() => {
+                        const responseV1 = reasoningResponseV1RX(finding);
+                        return responseV1 ? <ReasoningResponseV1View response={responseV1} finding={finding} language={language} /> : null;
+                      })()}
                       {backendRunning && (
                         <div style={{
                           display: "flex", alignItems: "center", gap: 10, padding: "10px 14px",
@@ -1718,10 +1874,14 @@ function Reasoning({ tenant, language }) {
                           </span>
                         </div>
                       )}
-                      <div style={{ fontSize: 15, color: "var(--text)", lineHeight: 1.55 }}>
-                        {displayFindingConclusionRX(finding, language)}
-                      </div>
-                      <FraudFindingSummary finding={finding} language={language} />
+                      {!reasoningResponseV1RX(finding) && (
+                        <>
+                          <div style={{ fontSize: 15, color: "var(--text)", lineHeight: 1.55 }}>
+                            {displayFindingConclusionRX(finding, language)}
+                          </div>
+                          <FraudFindingSummary finding={finding} language={language} />
+                        </>
+                      )}
                       {finding.action_proposal && (
                         <div style={{ paddingTop: 12, borderTop: "1px solid var(--line)" }}>
                           <div className="eyebrow" style={{ marginBottom: 6 }}>{tRX(language, "Proposed action", "建议动作")}</div>
@@ -1977,7 +2137,18 @@ function Reasoning({ tenant, language }) {
 
       <CleanupModal open={cleanupModal} onClose={() => setCleanupModal(false)}
                     allTasks={allTasks} taskState={taskState} tenant={tenant}
-                    onDone={() => { window.dispatchEvent(new CustomEvent("aletheia:retry")); setSelectedKey(null); }} />
+                    onDone={(deletedKeys = []) => {
+                      if (deletedKeys.length) {
+                        setDeletedTaskKeys(prev => {
+                          const next = new Set(prev);
+                          for (const key of deletedKeys) next.add(key);
+                          return next;
+                        });
+                        setLocalTasks(prev => prev.filter(t => !deletedKeys.includes(t.canonical_key)));
+                      }
+                      window.dispatchEvent(new CustomEvent("aletheia:retry"));
+                      setSelectedKey(null);
+                    }} />
     </div>
   );
 }
@@ -2461,17 +2632,19 @@ function CleanupModal({ open, onClose, allTasks, taskState, tenant, onDone }) {
     const total = filtered.length;
     setProgress({ done: 0, total, ok: 0, fail: 0, running: true });
     let done = 0, ok = 0, fail = 0;
+    const deletedKeys = [];
     for (const t of filtered) {
       try {
         try { await window.AL_API.closeTask(t.canonical_key, tenant.id); } catch (_) {}
         await window.AL_API.deleteTask(t.canonical_key, tenant.id);
+        if (t.canonical_key) deletedKeys.push(t.canonical_key);
         ok++;
       } catch (_) { fail++; }
       done++;
       setProgress({ done, total, ok, fail, running: done < total });
     }
     setProgress({ done, total, ok, fail, running: false });
-    if (onDone) onDone();
+    if (onDone) onDone(deletedKeys);
   }
 
   const summary = progress;
@@ -2854,6 +3027,10 @@ function TraceLog({ events }) {
   const stepTotal = lastStep && lastStep.data && (lastStep.data.total || lastStep.data.steps);
 
   const colors = {
+    llm_request_body: "var(--accent)",
+    llm_response_body: "var(--approved)",
+    no_llm_call: "var(--dim)",
+    question_body: "var(--accent)",
     plan:         "var(--proposed)",
     step:         "var(--accent)",
     evidence:     "var(--approved)",
@@ -2864,6 +3041,10 @@ function TraceLog({ events }) {
     _diag:        "var(--dim)",
   };
   const labels = {
+    llm_request_body: "LLM REQUEST",
+    llm_response_body: "LLM RESPONSE",
+    no_llm_call: "NO LLM CALL",
+    question_body: "QUESTION",
     plan:         "PLAN",
     step:         "STEP",
     evidence:     "EVIDENCE",
@@ -2980,8 +3161,29 @@ function TraceEventBody({ name, data, stage }) {
   if (data == null) return <span style={{ color: "var(--dim)" }}>—</span>;
   if (typeof data === "string") return <span>{data}</span>;
   if (typeof data !== "object") return <span>{String(data)}</span>;
+  if (data.response_body != null || data.response_title) {
+    return <RequestBodyPreview data={data} title={data.response_title || "response body"} />;
+  }
+  if (data.request_body != null || data.request_title) {
+    return <RequestBodyPreview data={data} title={data.request_title || "request body"} />;
+  }
+  if (data.stage && data.reason) {
+    return <RequestBodyPreview data={data} title={`${data.stage} result`} />;
+  }
 
   switch (name) {
+    case "llm_request_body": {
+      return <RequestBodyPreview data={data} title={data.request_title || "request body"} />;
+    }
+    case "llm_response_body": {
+      return <RequestBodyPreview data={data} title={data.response_title || "response body"} />;
+    }
+    case "no_llm_call": {
+      return <RequestBodyPreview data={data} title={data.stage ? `${data.stage} result` : "no llm call"} />;
+    }
+    case "question_body": {
+      return <RequestBodyPreview data={data} title="question body" />;
+    }
     case "plan": {
       const steps = data.query_plan || data.steps || data.plan;
       const taskLabel = data.task && typeof data.task === "string" ? data.task
@@ -3046,6 +3248,55 @@ function TraceEventBody({ name, data, stage }) {
       } catch { return <span>{JSON.stringify(data)}</span>; }
   }
 }
+
+function splitRequestPreviewTokensRX(text) {
+  const raw = String(text || "");
+  const words = raw.trim().split(/\s+/).filter(Boolean);
+  if (words.length > 1) return { tokens: words, joiner: " " };
+  return { tokens: Array.from(raw), joiner: "" };
+}
+
+function RequestBodyPreview({ data, title }) {
+  const [expanded, setExpanded] = React.useState(false);
+  const bodySource = data && (data.request_body || data.response_body || data.question_body || data.body || data.question || data);
+  const body = typeof bodySource === "string" ? bodySource : JSON.stringify(bodySource || {}, null, 2);
+  const limit = 50;
+  const { tokens, joiner } = splitRequestPreviewTokensRX(body);
+  const overLimit = tokens.length > limit;
+  const preview = overLimit && !expanded ? `${tokens.slice(0, limit).join(joiner)}…` : body;
+  const meta = [];
+  if (data && data.tenant_id) meta.push(data.tenant_id);
+  if (data && data.center_node) meta.push(data.center_node);
+  if (data && data.depth != null) meta.push(`d${data.depth}`);
+  if (data && data.node_limit != null) meta.push(`n${data.node_limit}`);
+  return (
+    <span>
+      <strong style={{ color: "var(--text)", fontWeight: 500 }}>{title || "request body"}</strong>
+      {meta.length > 0 && <span style={{ color: "var(--dim)" }}> · {meta.join(" · ")}</span>}
+      <div style={{
+        color: "var(--muted)",
+        marginTop: 2,
+        fontFamily: "var(--font-sans)",
+        fontSize: 12,
+        lineHeight: 1.5,
+        whiteSpace: "pre-wrap",
+      }}>
+        {preview || "—"}
+      </div>
+      {overLimit && (
+        <button
+          type="button"
+          className="btn xs ghost"
+          onClick={() => setExpanded(v => !v)}
+          style={{ marginTop: 4, padding: "2px 7px", minHeight: 0 }}
+        >
+          {expanded ? "less" : "more"}
+        </button>
+      )}
+    </span>
+  );
+}
+
 function truncJson(v) {
   if (v == null) return "—";
   const s = typeof v === "string" ? v : JSON.stringify(v);

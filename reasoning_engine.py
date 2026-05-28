@@ -750,9 +750,7 @@ class ReasoningEngine:
         # carried by source-table evidence rather than legacy LINK_CONFIG rows.
         # Use shared source keys to produce degree/metric evidence without
         # inventing graph writes or ontology terms.
-        source_key_profile = None
-        if not rankings:
-            source_key_profile = self._source_key_profile(tenant, object_type, instance_id, cfg, depth=depth)
+        source_key_profile = self._source_key_profile(tenant, object_type, instance_id, cfg, depth=depth)
 
         # --- Neighbors by type (from graph) ---
         neighbors_by_type = {}

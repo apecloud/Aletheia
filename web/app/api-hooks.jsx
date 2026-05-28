@@ -77,7 +77,15 @@ function useConnectionState() {
   const [state, setState] = useStateLive({ status: "unknown", lastChecked: null });
   useEffectLive(() => {
     function ok()  { setState({ status: "live", lastChecked: new Date() }); }
-    function fail(e) { setState({ status: "down", lastChecked: new Date(), error: e?.detail?.error }); }
+    function fail(e) {
+      const err = e?.detail?.error;
+      const status = Number(err && err.status);
+      if (status && status < 500) {
+        setState({ status: "live", lastChecked: new Date(), error: null });
+        return;
+      }
+      setState({ status: "down", lastChecked: new Date(), error: err });
+    }
     window.addEventListener("aletheia:api-ok", ok);
     window.addEventListener("aletheia:api-fail", fail);
     return () => {
