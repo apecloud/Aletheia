@@ -62,8 +62,8 @@ class ColumnProfile(Base):
     column = relationship("ExtractedColumn", back_populates="profile")
 
 
-class BusinessObject(Base):
-    __tablename__ = "aletheia_business_objects"
+class SchemaObjectCandidate(Base):
+    __tablename__ = "aletheia_schema_object_candidates"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     project_id = Column(String(255), nullable=False, default="default")
@@ -76,21 +76,21 @@ class BusinessObject(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
-class ObjectTableMapping(Base):
-    __tablename__ = "aletheia_object_mappings"
+class SchemaObjectTableMapping(Base):
+    __tablename__ = "aletheia_schema_object_mappings"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    object_id = Column(Integer, ForeignKey("aletheia_business_objects.id"))
+    object_id = Column(Integer, ForeignKey("aletheia_schema_object_candidates.id"))
     table_id = Column(Integer, ForeignKey("aletheia_extracted_tables.id"))
 
 
-class BusinessLink(Base):
-    __tablename__ = "aletheia_business_links"
+class SchemaLinkCandidate(Base):
+    __tablename__ = "aletheia_schema_link_candidates"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     project_id = Column(String(255), nullable=False, default="default")
-    source_object_id = Column(Integer, ForeignKey("aletheia_business_objects.id"), nullable=False)
-    target_object_id = Column(Integer, ForeignKey("aletheia_business_objects.id"), nullable=False)
+    source_object_id = Column(Integer, ForeignKey("aletheia_schema_object_candidates.id"), nullable=False)
+    target_object_id = Column(Integer, ForeignKey("aletheia_schema_object_candidates.id"), nullable=False)
     link_type = Column(String(50))
     description = Column(Text)
     artifact_id = Column(Integer, ForeignKey("aletheia_ontology_artifacts.id"))
@@ -98,6 +98,11 @@ class BusinessLink(Base):
     extraction_sql = Column(Text)
     ngql_schema = Column(Text)
     created_at = Column(DateTime, default=datetime.utcnow)
+
+
+BusinessObject = SchemaObjectCandidate
+ObjectTableMapping = SchemaObjectTableMapping
+BusinessLink = SchemaLinkCandidate
 
 
 class BusinessAction(Base):
@@ -545,7 +550,35 @@ def delete_artifacts_by_type(session, artifact_types: Iterable[str], project_id:
     )
 
 
+def _rename_legacy_schema_modeling_tables(engine) -> None:
+    if engine.dialect.name == "sqlite":
+        return
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                DO $$
+                BEGIN
+                    IF to_regclass('public.aletheia_business_objects') IS NOT NULL
+                       AND to_regclass('public.aletheia_schema_object_candidates') IS NULL THEN
+                        ALTER TABLE aletheia_business_objects RENAME TO aletheia_schema_object_candidates;
+                    END IF;
+                    IF to_regclass('public.aletheia_object_mappings') IS NOT NULL
+                       AND to_regclass('public.aletheia_schema_object_mappings') IS NULL THEN
+                        ALTER TABLE aletheia_object_mappings RENAME TO aletheia_schema_object_mappings;
+                    END IF;
+                    IF to_regclass('public.aletheia_business_links') IS NOT NULL
+                       AND to_regclass('public.aletheia_schema_link_candidates') IS NULL THEN
+                        ALTER TABLE aletheia_business_links RENAME TO aletheia_schema_link_candidates;
+                    END IF;
+                END $$;
+                """
+            )
+        )
+
+
 def ensure_artifact_schema(engine) -> None:
+    _rename_legacy_schema_modeling_tables(engine)
     Base.metadata.create_all(engine)
     if engine.dialect.name == "sqlite":
         return
@@ -553,19 +586,19 @@ def ensure_artifact_schema(engine) -> None:
         conn.execute(text("ALTER TABLE aletheia_artifact_reviews ADD COLUMN IF NOT EXISTS project_id VARCHAR(255) DEFAULT 'default'"))
         conn.execute(text("UPDATE aletheia_artifact_reviews r SET project_id = a.project_id FROM aletheia_ontology_artifacts a WHERE r.artifact_id = a.id AND (r.project_id IS NULL OR r.project_id = 'default')"))
         conn.execute(text("ALTER TABLE aletheia_artifact_reviews ALTER COLUMN project_id SET NOT NULL"))
-        conn.execute(text("ALTER TABLE aletheia_business_objects ADD COLUMN IF NOT EXISTS project_id VARCHAR(255) DEFAULT 'default'"))
-        conn.execute(text("ALTER TABLE aletheia_business_links ADD COLUMN IF NOT EXISTS project_id VARCHAR(255) DEFAULT 'default'"))
+        conn.execute(text("ALTER TABLE aletheia_schema_object_candidates ADD COLUMN IF NOT EXISTS project_id VARCHAR(255) DEFAULT 'default'"))
+        conn.execute(text("ALTER TABLE aletheia_schema_link_candidates ADD COLUMN IF NOT EXISTS project_id VARCHAR(255) DEFAULT 'default'"))
         conn.execute(text("ALTER TABLE aletheia_business_actions ADD COLUMN IF NOT EXISTS project_id VARCHAR(255) DEFAULT 'default'"))
         conn.execute(text("ALTER TABLE aletheia_ontology_artifacts DROP CONSTRAINT IF EXISTS aletheia_ontology_artifacts_canonical_key_key"))
         conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_aletheia_artifacts_project_key ON aletheia_ontology_artifacts (project_id, canonical_key)"))
-        conn.execute(text("ALTER TABLE aletheia_business_objects ADD COLUMN IF NOT EXISTS artifact_id INTEGER"))
-        conn.execute(text("ALTER TABLE aletheia_business_objects ADD COLUMN IF NOT EXISTS graph_label VARCHAR(255)"))
-        conn.execute(text("ALTER TABLE aletheia_business_objects ADD COLUMN IF NOT EXISTS extraction_sql TEXT"))
-        conn.execute(text("ALTER TABLE aletheia_business_objects ADD COLUMN IF NOT EXISTS ngql_schema TEXT"))
-        conn.execute(text("ALTER TABLE aletheia_business_links ADD COLUMN IF NOT EXISTS artifact_id INTEGER"))
-        conn.execute(text("ALTER TABLE aletheia_business_links ADD COLUMN IF NOT EXISTS graph_edge_name VARCHAR(255)"))
-        conn.execute(text("ALTER TABLE aletheia_business_links ADD COLUMN IF NOT EXISTS extraction_sql TEXT"))
-        conn.execute(text("ALTER TABLE aletheia_business_links ADD COLUMN IF NOT EXISTS ngql_schema TEXT"))
+        conn.execute(text("ALTER TABLE aletheia_schema_object_candidates ADD COLUMN IF NOT EXISTS artifact_id INTEGER"))
+        conn.execute(text("ALTER TABLE aletheia_schema_object_candidates ADD COLUMN IF NOT EXISTS graph_label VARCHAR(255)"))
+        conn.execute(text("ALTER TABLE aletheia_schema_object_candidates ADD COLUMN IF NOT EXISTS extraction_sql TEXT"))
+        conn.execute(text("ALTER TABLE aletheia_schema_object_candidates ADD COLUMN IF NOT EXISTS ngql_schema TEXT"))
+        conn.execute(text("ALTER TABLE aletheia_schema_link_candidates ADD COLUMN IF NOT EXISTS artifact_id INTEGER"))
+        conn.execute(text("ALTER TABLE aletheia_schema_link_candidates ADD COLUMN IF NOT EXISTS graph_edge_name VARCHAR(255)"))
+        conn.execute(text("ALTER TABLE aletheia_schema_link_candidates ADD COLUMN IF NOT EXISTS extraction_sql TEXT"))
+        conn.execute(text("ALTER TABLE aletheia_schema_link_candidates ADD COLUMN IF NOT EXISTS ngql_schema TEXT"))
         conn.execute(text("ALTER TABLE aletheia_business_actions ADD COLUMN IF NOT EXISTS artifact_id INTEGER"))
         conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_aletheia_reasoning_tasks_project_key ON aletheia_reasoning_tasks (project_id, canonical_key)"))
         conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_aletheia_reasoning_runs_project_key ON aletheia_reasoning_runs (project_id, run_key)"))

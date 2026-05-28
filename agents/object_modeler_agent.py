@@ -15,9 +15,9 @@ try:
         ColumnProfile,
         ExtractedColumn,
         ExtractedTable,
-        BusinessObject,
-        BusinessLink,
-        ObjectTableMapping,
+        SchemaObjectCandidate,
+        SchemaLinkCandidate,
+        SchemaObjectTableMapping,
         ensure_artifact_schema,
     )
 except ModuleNotFoundError:
@@ -26,9 +26,9 @@ except ModuleNotFoundError:
         ColumnProfile,
         ExtractedColumn,
         ExtractedTable,
-        BusinessObject,
-        BusinessLink,
-        ObjectTableMapping,
+        SchemaObjectCandidate,
+        SchemaLinkCandidate,
+        SchemaObjectTableMapping,
         ensure_artifact_schema,
     )
 try:
@@ -152,21 +152,21 @@ class ObjectModelerAgent:
             # Clear old mappings (Idempotency)
             object_ids = [
                 row[0]
-                for row in session.query(BusinessObject.id).filter_by(project_id=project_id).all()
+                for row in session.query(SchemaObjectCandidate.id).filter_by(project_id=project_id).all()
             ]
-            session.query(BusinessLink).filter_by(project_id=project_id).delete()
+            session.query(SchemaLinkCandidate).filter_by(project_id=project_id).delete()
             if object_ids:
-                session.query(ObjectTableMapping).filter(ObjectTableMapping.object_id.in_(object_ids)).delete(
+                session.query(SchemaObjectTableMapping).filter(SchemaObjectTableMapping.object_id.in_(object_ids)).delete(
                     synchronize_session=False
                 )
-            session.query(BusinessObject).filter_by(project_id=project_id).delete()
+            session.query(SchemaObjectCandidate).filter_by(project_id=project_id).delete()
             session.commit()
 
             # Save objects and mappings
             for obj_draft in llm_ontology.business_objects:
                 logger.info(f"Identified Business Object: {obj_draft.name}")
                 
-                new_obj = BusinessObject(project_id=project_id, name=obj_draft.name, description=obj_draft.description)
+                new_obj = SchemaObjectCandidate(project_id=project_id, name=obj_draft.name, description=obj_draft.description)
                 session.add(new_obj)
                 session.flush() # Get ID
                 mapped_tables = []
@@ -175,7 +175,7 @@ class ObjectModelerAgent:
                     table = session.query(ExtractedTable).filter_by(table_name=table_name).first()
                     if table:
                         mapped_tables.append(table)
-                        mapping = ObjectTableMapping(object_id=new_obj.id, table_id=table.id)
+                        mapping = SchemaObjectTableMapping(object_id=new_obj.id, table_id=table.id)
                         session.add(mapping)
                     else:
                         logger.warning(f"LLM mapped unknown table: {table_name}")

@@ -88,7 +88,7 @@ class GraphIngestionAgent:
             objects = conn.execute(text(f"""
                 SELECT o.id, o.name, o.description, o.graph_label, o.extraction_sql, o.ngql_schema,
                        COALESCE(a.status, 'legacy') AS artifact_status
-                FROM aletheia_business_objects o
+                FROM aletheia_schema_object_candidates o
                 LEFT JOIN aletheia_ontology_artifacts a ON o.artifact_id = a.id
                 {status_filter}
                 {"AND" if status_filter else "WHERE"} COALESCE(o.project_id, 'default') = :tenant_id
@@ -124,7 +124,7 @@ Rules:
                     
                     with self.target_engine.begin() as save_conn:
                         save_conn.execute(
-                            text("UPDATE aletheia_business_objects SET graph_label = :gl, extraction_sql = :es, ngql_schema = :ns WHERE id = :id"),
+                            text("UPDATE aletheia_schema_object_candidates SET graph_label = :gl, extraction_sql = :es, ngql_schema = :ns WHERE id = :id"),
                             {"gl": extraction.node_label, "es": extraction.sql_query, "ns": extraction.ngql_schema, "id": obj['id']}
                         )
                 except Exception as e:
@@ -161,9 +161,9 @@ Rules:
                 SELECT l.id, l.description, s.name AS source_name, t.name AS target_name, 
                        l.graph_edge_name, l.extraction_sql, l.ngql_schema,
                        COALESCE(a.status, 'legacy') AS artifact_status
-                FROM aletheia_business_links l
-                JOIN aletheia_business_objects s ON l.source_object_id = s.id
-                JOIN aletheia_business_objects t ON l.target_object_id = t.id
+                FROM aletheia_schema_link_candidates l
+                JOIN aletheia_schema_object_candidates s ON l.source_object_id = s.id
+                JOIN aletheia_schema_object_candidates t ON l.target_object_id = t.id
                 LEFT JOIN aletheia_ontology_artifacts a ON l.artifact_id = a.id
                 """ + status_filter + f"""
                 {"AND" if status_filter else "WHERE"} COALESCE(l.project_id, 'default') = :tenant_id
@@ -204,7 +204,7 @@ Rules:
                     
                     with self.target_engine.begin() as save_conn:
                         save_conn.execute(
-                            text("UPDATE aletheia_business_links SET graph_edge_name = :gen, extraction_sql = :es, ngql_schema = :ns WHERE id = :id"),
+                            text("UPDATE aletheia_schema_link_candidates SET graph_edge_name = :gen, extraction_sql = :es, ngql_schema = :ns WHERE id = :id"),
                             {"gen": extraction.relationship_type, "es": extraction.sql_query, "ns": extraction.ngql_schema, "id": link['id']}
                         )
                 except Exception as e:

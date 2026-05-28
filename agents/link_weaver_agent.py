@@ -11,18 +11,18 @@ from litellm import completion
 import instructor
 try:
     from ontology_artifacts import (
-        BusinessLink,
-        BusinessObject,
+        SchemaLinkCandidate,
+        SchemaObjectCandidate,
         ExtractedTable,
-        ObjectTableMapping,
+        SchemaObjectTableMapping,
         ensure_artifact_schema,
     )
 except ModuleNotFoundError:
     from agents.ontology_artifacts import (
-        BusinessLink,
-        BusinessObject,
+        SchemaLinkCandidate,
+        SchemaObjectCandidate,
         ExtractedTable,
-        ObjectTableMapping,
+        SchemaObjectTableMapping,
         ensure_artifact_schema,
     )
 try:
@@ -61,11 +61,11 @@ class LinkWeaverAgent:
 
     def fetch_ontology_dump(self, session) -> list:
         logger.info("Fetching mapped Business Objects from PostGIS...")
-        objects = session.query(BusinessObject).all()
+        objects = session.query(SchemaObjectCandidate).all()
         ontology_dump = []
         
         for obj in objects:
-            tables = session.query(ExtractedTable).join(ObjectTableMapping).filter(ObjectTableMapping.object_id == obj.id).all()
+            tables = session.query(ExtractedTable).join(SchemaObjectTableMapping).filter(SchemaObjectTableMapping.object_id == obj.id).all()
             table_names = [t.table_name for t in tables]
             ontology_dump.append({
                 "object_name": obj.name,
@@ -135,18 +135,18 @@ class LinkWeaverAgent:
             )
 
             # Clear old links
-            session.query(BusinessLink).filter_by(project_id=project_id).delete()
+            session.query(SchemaLinkCandidate).filter_by(project_id=project_id).delete()
             session.commit()
 
             # Save new links
             for link_draft in llm_links.links:
                 logger.info(f"Weaved Link: {link_draft.source_object_name} --({link_draft.link_type})--> {link_draft.target_object_name}")
                 
-                source_obj = session.query(BusinessObject).filter_by(project_id=project_id, name=link_draft.source_object_name).first()
-                target_obj = session.query(BusinessObject).filter_by(project_id=project_id, name=link_draft.target_object_name).first()
+                source_obj = session.query(SchemaObjectCandidate).filter_by(project_id=project_id, name=link_draft.source_object_name).first()
+                target_obj = session.query(SchemaObjectCandidate).filter_by(project_id=project_id, name=link_draft.target_object_name).first()
                 
                 if source_obj and target_obj:
-                    new_link = BusinessLink(
+                    new_link = SchemaLinkCandidate(
                         project_id=project_id,
                         source_object_id=source_obj.id,
                         target_object_id=target_obj.id,

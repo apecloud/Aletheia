@@ -45,7 +45,7 @@ def print_extracted_columns(conn, table_name=None):
 def print_business_objects(conn):
     print("\n=== Business Objects ===")
     try:
-        res = conn.execute(text("SELECT id, name, description FROM aletheia_business_objects")).fetchall()
+        res = conn.execute(text("SELECT id, name, description FROM aletheia_schema_object_candidates")).fetchall()
         if not res:
             print("  (No business objects found. Run Object Modeler Agent.)")
         for row in res:
@@ -58,9 +58,9 @@ def print_business_links(conn):
     try:
         res = conn.execute(text("""
             SELECT l.id, s.name, t.name, l.link_type, l.description 
-            FROM aletheia_business_links l
-            JOIN aletheia_business_objects s ON l.source_object_id = s.id
-            JOIN aletheia_business_objects t ON l.target_object_id = t.id
+            FROM aletheia_schema_link_candidates l
+            JOIN aletheia_schema_object_candidates s ON l.source_object_id = s.id
+            JOIN aletheia_schema_object_candidates t ON l.target_object_id = t.id
         """)).fetchall()
         if not res:
             print("  (No business links found. Run Link Weaver Agent.)")

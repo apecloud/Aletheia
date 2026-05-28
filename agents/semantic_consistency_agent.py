@@ -37,8 +37,8 @@ class SemanticConsistencyAgent:
         logger.info("Fetching ontology data from PostGIS...")
         try:
             with self.target_engine.connect() as conn:
-                objects = conn.execute(text("SELECT id, name, description FROM aletheia_business_objects")).fetchall()
-                links = conn.execute(text("SELECT source_object_id, target_object_id, link_type, description FROM aletheia_business_links")).fetchall()
+                objects = conn.execute(text("SELECT id, name, description FROM aletheia_schema_object_candidates")).fetchall()
+                links = conn.execute(text("SELECT source_object_id, target_object_id, link_type, description FROM aletheia_schema_link_candidates")).fetchall()
                 actions = conn.execute(text("SELECT name, action_type, is_safe, description FROM aletheia_business_actions")).fetchall()
         except Exception as e:
             logger.error(f"Failed to fetch data: {e}")

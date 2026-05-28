@@ -147,8 +147,8 @@ class OntologyReasoningAgent:
         
         # Fetch available Tags (Nodes) and Edges (Relationships) directly from Metadata to form the dynamic prompt
         with self.target_engine.connect() as conn:
-            objects = conn.execute(text("SELECT name, graph_label FROM aletheia_business_objects WHERE graph_label IS NOT NULL")).fetchall()
-            links = conn.execute(text("SELECT graph_edge_name FROM aletheia_business_links WHERE graph_edge_name IS NOT NULL")).fetchall()
+            objects = conn.execute(text("SELECT name, graph_label FROM aletheia_schema_object_candidates WHERE graph_label IS NOT NULL")).fetchall()
+            links = conn.execute(text("SELECT graph_edge_name FROM aletheia_schema_link_candidates WHERE graph_edge_name IS NOT NULL")).fetchall()
         
         graph_entities = "Available Nodes (TAGS):\n" + "\n".join([f"- {o[1]} (Business Object: {o[0]})" for o in objects])
         graph_relations = "Available Edges (RELATIONSHIPS):\n" + "\n".join([f"- {l[0]}" for l in links])

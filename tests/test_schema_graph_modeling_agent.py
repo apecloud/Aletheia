@@ -9,6 +9,14 @@ from agents.schema_graph_modeling_agent import (
     GraphNodeTypeDraft,
     SchemaGraphModelingAgent,
 )
+from agents.ontology_artifacts import (
+    BusinessLink,
+    BusinessObject,
+    ObjectTableMapping,
+    SchemaLinkCandidate,
+    SchemaObjectCandidate,
+    SchemaObjectTableMapping,
+)
 
 
 class SchemaGraphModelingAgentTest(unittest.TestCase):
@@ -136,6 +144,14 @@ class SchemaGraphModelingAgentTest(unittest.TestCase):
         self.assertEqual(draft.edge_types[0].target_node_key, "invoice")
         self.assertEqual(draft.edge_types[0].source_table, "customers")
         self.assertEqual(draft.edge_types[0].target_table, "invoices")
+
+    def test_legacy_candidate_tables_use_schema_modeling_names(self):
+        self.assertEqual(SchemaObjectCandidate.__tablename__, "aletheia_schema_object_candidates")
+        self.assertEqual(SchemaLinkCandidate.__tablename__, "aletheia_schema_link_candidates")
+        self.assertEqual(SchemaObjectTableMapping.__tablename__, "aletheia_schema_object_mappings")
+        self.assertIs(BusinessObject, SchemaObjectCandidate)
+        self.assertIs(BusinessLink, SchemaLinkCandidate)
+        self.assertIs(ObjectTableMapping, SchemaObjectTableMapping)
 
 
 if __name__ == "__main__":
