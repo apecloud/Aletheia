@@ -3,7 +3,10 @@ Aletheia Universal Reasoning Engine
 ====================================
 Schema-agnostic deep analysis for any entity type. Discovers table structures,
 column types, FK relationships, and aggregatable dimensions at runtime from
-ENTITY_CONFIG + LINK_CONFIG + SQL introspection + ontology artifact descriptions.
+approved schema-graph projection metadata, SQL introspection, and ontology
+artifact descriptions. Legacy ENTITY_CONFIG/LINK_CONFIG fixtures are repository
+fallbacks only when approved SchemaGraphModelingAgent projection metadata is not
+available.
 
 Usage:
     from reasoning_engine import ReasoningEngine
@@ -53,11 +56,21 @@ class ReasoningEngine:
         self.repo = instance_repository
         self._table_meta_cache = {}
 
+    def _entity_config(self, tenant):
+        if hasattr(self.repo, "reasoning_entity_config"):
+            return self.repo.reasoning_entity_config(tenant)
+        return getattr(self.repo, "ENTITY_CONFIG")
+
+    def _link_config(self, tenant):
+        if hasattr(self.repo, "reasoning_link_config"):
+            return self.repo.reasoning_link_config(tenant)
+        return getattr(self.repo, "LINK_CONFIG")
+
     # ------------------------------------------------------------------
     # Step 1: Schema introspection
     # ------------------------------------------------------------------
 
-    def _introspect_table(self, engine, table_name):
+    def _introspect_table(self, engine, table_name, tenant=None):
         cache_key = f"{id(engine)}:{table_name}"
         if cache_key in self._table_meta_cache:
             return self._table_meta_cache[cache_key]
@@ -93,13 +106,13 @@ class ReasoningEngine:
                 else:
                     text_cols.append(col_name)
 
-        for lc in self.repo.LINK_CONFIG:
+        for lc in self._link_config(tenant) if tenant is not None else getattr(self.repo, "LINK_CONFIG"):
             if lc["fk_table"] == table_name:
                 fk_cols.add(lc["fk_col"])
                 if lc.get("target_fk"):
                     fk_cols.add(lc["target_fk"])
 
-        for cfg in self.repo.ENTITY_CONFIG.values():
+        for cfg in (self._entity_config(tenant) if tenant is not None else getattr(self.repo, "ENTITY_CONFIG")).values():
             if cfg["table"] == table_name:
                 fk_cols.add(cfg["pk"])
 
@@ -127,8 +140,8 @@ class ReasoningEngine:
     # Step 3: Format entity properties
     # ------------------------------------------------------------------
 
-    def _format_properties(self, row, cfg, source_engine):
-        meta = self._introspect_table(source_engine, cfg["table"])
+    def _format_properties(self, row, cfg, source_engine, tenant=None):
+        meta = self._introspect_table(source_engine, cfg["table"], tenant=tenant)
         skip = meta.fk_cols | {meta.pk_col}
         import re
         _date_re = re.compile(r"^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}")
@@ -210,7 +223,7 @@ class ReasoningEngine:
         with source_engine.connect() as conn:
             for table in table_names:
                 try:
-                    meta = self._introspect_table(source_engine, table)
+                    meta = self._introspect_table(source_engine, table, tenant=tenant)
                 except Exception:
                     continue
                 if key_col not in meta.all_cols:
@@ -346,13 +359,15 @@ class ReasoningEngine:
     # ------------------------------------------------------------------
 
     def _peer_rankings(self, tenant, object_type, instance_id):
-        cfg = self.repo.ENTITY_CONFIG.get(object_type.lower())
+        entity_config = self._entity_config(tenant)
+        link_config = self._link_config(tenant)
+        cfg = entity_config.get(object_type.lower())
         if not cfg:
             return []
         rankings = []
         source_engine = self.repo.source_engine_for(tenant)
         with source_engine.connect() as conn:
-            for lc in self.repo.LINK_CONFIG:
+            for lc in link_config:
                 if lc["from"] != object_type.lower() or lc.get("reverse"):
                     continue
                 fk_table, fk_col = lc["fk_table"], lc["fk_col"]
@@ -397,7 +412,9 @@ class ReasoningEngine:
     def _link_deep_stats(self, tenant, object_type, instance_id, lc, ranking):
         """For one link, compute numeric stats, date range, top counterparties, time bucketing."""
         source_engine = self.repo.source_engine_for(tenant)
-        meta = self._introspect_table(source_engine, lc["fk_table"])
+        entity_config = self._entity_config(tenant)
+        link_config = self._link_config(tenant)
+        meta = self._introspect_table(source_engine, lc["fk_table"], tenant=tenant)
         fk_col = lc["fk_col"]
         result = {"link": lc["link"], "target_type": lc["to"]}
 
@@ -446,14 +463,14 @@ class ReasoningEngine:
 
             # Top-N counterparties (other FK columns on the same table)
             other_fks = []
-            for other_lc in self.repo.LINK_CONFIG:
+            for other_lc in link_config:
                 if other_lc["fk_table"] == meta.table and other_lc["fk_col"] != fk_col:
                     other_fks.append((other_lc["fk_col"], other_lc["to"] if other_lc["from"] == lc["to"] else other_lc["from"]))
             if lc.get("target_fk"):
                 other_fks.append((lc["target_fk"], lc["to"]))
 
             for other_fk, other_type in other_fks[:2]:
-                other_cfg = self.repo.ENTITY_CONFIG.get(other_type.lower())
+                other_cfg = entity_config.get(other_type.lower())
                 try:
                     top_rows = conn.execute(text(
                         f"SELECT `{other_fk}` AS fk_val, COUNT(*) AS cnt "
@@ -523,8 +540,10 @@ class ReasoningEngine:
 
         # Collect (detail_lc, inter_table, inter_pk, inter_fk) tuples to process
         chains = []
+        entity_config = self._entity_config(tenant)
+        link_config = self._link_config(tenant)
 
-        for lc in self.repo.LINK_CONFIG:
+        for lc in link_config:
             if not lc.get("target_fk"):
                 continue
 
@@ -532,18 +551,18 @@ class ReasoningEngine:
                 # Direct n:m from this entity type — find the intermediary
                 detail_table = lc["fk_table"]
                 fk_col = lc["fk_col"]
-                for olc in self.repo.LINK_CONFIG:
+                for olc in link_config:
                     if olc["from"] == object_type.lower() and olc["to"] != lc["to"]:
-                        inter_cfg = self.repo.ENTITY_CONFIG.get(olc["to"])
+                        inter_cfg = entity_config.get(olc["to"])
                         if inter_cfg and inter_cfg["pk"] == fk_col:
                             chains.append((lc, inter_cfg["table"], inter_cfg["pk"], olc["fk_col"]))
                             break
             else:
                 # Indirect: entity → 1:n → intermediary, and intermediary has the n:m link
                 inter_type = lc["from"]
-                for bridge_lc in self.repo.LINK_CONFIG:
+                for bridge_lc in link_config:
                     if bridge_lc["from"] == object_type.lower() and bridge_lc["to"] == inter_type and not bridge_lc.get("reverse"):
-                        inter_cfg = self.repo.ENTITY_CONFIG.get(inter_type)
+                        inter_cfg = entity_config.get(inter_type)
                         if inter_cfg:
                             chains.append((lc, inter_cfg["table"], inter_cfg["pk"], bridge_lc["fk_col"]))
                             break
@@ -552,7 +571,7 @@ class ReasoningEngine:
             detail_table = lc["fk_table"]
             fk_col = lc["fk_col"]
             target_fk = lc["target_fk"]
-            meta = self._introspect_table(source_engine, detail_table)
+            meta = self._introspect_table(source_engine, detail_table, tenant=tenant)
 
             value_cols = [c for c in meta.numeric_cols if c not in meta.fk_cols]
             if len(value_cols) < 2:
@@ -602,12 +621,12 @@ class ReasoningEngine:
 
                 category_breakdown = []
                 target_type = lc["to"]
-                target_cfg = self.repo.ENTITY_CONFIG.get(target_type)
+                target_cfg = entity_config.get(target_type)
                 if target_cfg:
-                    for cat_lc in self.repo.LINK_CONFIG:
+                    for cat_lc in link_config:
                         if cat_lc["to"] == target_type and cat_lc["from"] != object_type.lower() and not cat_lc.get("target_fk"):
                             cat_type = cat_lc["from"]
-                            cat_cfg = self.repo.ENTITY_CONFIG.get(cat_type)
+                            cat_cfg = entity_config.get(cat_type)
                             if not cat_cfg:
                                 continue
                             cat_fk = cat_lc["fk_col"]
@@ -652,7 +671,7 @@ class ReasoningEngine:
 
     def _resolve_self_refs(self, tenant, object_type, row, cfg):
         refs = {}
-        for lc in self.repo.LINK_CONFIG:
+        for lc in self._link_config(tenant):
             if lc["from"] == object_type.lower() and lc["to"] == object_type.lower() and lc.get("reverse"):
                 fk_col = lc["fk_col"]
                 fk_val = row.get(fk_col)
@@ -671,7 +690,9 @@ class ReasoningEngine:
         if not center_node or ":" not in center_node:
             return None
         object_type, instance_id = center_node.split(":", 1)
-        cfg = self.repo.ENTITY_CONFIG.get(object_type.lower())
+        entity_config = self._entity_config(tenant)
+        link_config = self._link_config(tenant)
+        cfg = entity_config.get(object_type.lower())
         if not cfg:
             return None
 
@@ -698,7 +719,7 @@ class ReasoningEngine:
 
         # --- Artifact descriptions ---
         desc_keys = [cfg.get("artifact", f"object:{object_type}")]
-        for lc in self.repo.LINK_CONFIG:
+        for lc in link_config:
             if lc["from"] == object_type.lower() or lc["to"] == object_type.lower():
                 desc_keys.append(lc["link"])
         descriptions = self._artifact_descriptions(tenant, desc_keys)
@@ -708,7 +729,7 @@ class ReasoningEngine:
         self_refs = self._resolve_self_refs(tenant, object_type, row, cfg)
 
         # --- Properties ---
-        props = self._format_properties(row, cfg, source_engine)
+        props = self._format_properties(row, cfg, source_engine, tenant=tenant)
 
         # --- Peer rankings ---
         rankings = self._peer_rankings(tenant, object_type, instance_id)
@@ -716,7 +737,7 @@ class ReasoningEngine:
         # --- Deep per-link stats ---
         link_stats = []
         for r in rankings:
-            lc = next((l for l in self.repo.LINK_CONFIG if l["link"] == r["link"]), None)
+            lc = next((l for l in link_config if l["link"] == r["link"]), None)
             if lc:
                 stats = self._link_deep_stats(tenant, object_type, instance_id, lc, r)
                 link_stats.append(stats)
@@ -1197,16 +1218,18 @@ class ReasoningEngine:
             yield ("error", {"message": "No center_node provided"})
             return
         object_type, instance_id = center_node.split(":", 1)
-        cfg = self.repo.ENTITY_CONFIG.get(object_type.lower())
+        entity_config = self._entity_config(tenant)
+        link_config = self._link_config(tenant)
+        cfg = entity_config.get(object_type.lower())
         if not cfg:
             yield ("error", {"message": f"Unknown entity type: {object_type}"})
             return
 
         steps = ["graph_query", "base_entity"]
-        relevant_links = [lc for lc in self.repo.LINK_CONFIG if lc["from"] == object_type.lower() and not lc.get("reverse")]
+        relevant_links = [lc for lc in link_config if lc["from"] == object_type.lower() and not lc.get("reverse")]
         for lc in relevant_links:
             steps.append(f"link_analysis:{lc['link']}")
-        nm_links = [lc for lc in self.repo.LINK_CONFIG if lc["from"] == object_type.lower() and lc.get("target_fk")]
+        nm_links = [lc for lc in link_config if lc["from"] == object_type.lower() and lc.get("target_fk")]
         if nm_links:
             steps.append("value_aggregation")
         steps.append("compose_narrative")

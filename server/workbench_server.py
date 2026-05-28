@@ -1277,6 +1277,41 @@ class InstanceRepository:
             return None
         return f"{left_table}.{left_col} = {right_table}.{right_col}"
 
+    def _schema_graph_join_parts(self, tenant, join_condition):
+        safe = self._schema_graph_safe_join_condition(tenant, join_condition)
+        if not safe:
+            return None
+        match = re.fullmatch(r"([A-Za-z_][A-Za-z0-9_]*)\.([A-Za-z_][A-Za-z0-9_]*) = ([A-Za-z_][A-Za-z0-9_]*)\.([A-Za-z_][A-Za-z0-9_]*)", safe)
+        if not match:
+            return None
+        left_table, left_col, right_table, right_col = match.groups()
+        return {
+            "condition": safe,
+            "left_table": left_table,
+            "left_col": left_col,
+            "right_table": right_table,
+            "right_col": right_col,
+        }
+
+    def _schema_graph_object_artifact(self, tenant, object_type):
+        objects, _ = self._schema_graph_artifacts(tenant)
+        compact_type = re.sub(r"[^0-9A-Za-z]", "", str(object_type or "")).lower()
+        for key, artifact in objects.items():
+            compact_name = re.sub(r"[^0-9A-Za-z]", "", artifact["name"]).lower()
+            compact_key = re.sub(r"[^0-9A-Za-z]", "", key).lower()
+            compact_canonical = re.sub(r"[^0-9A-Za-z]", "", artifact["canonical_key"].split(":", 1)[-1]).lower()
+            if compact_type in {compact_name, compact_key, compact_canonical}:
+                return key, artifact
+        return None, None
+
+    def _schema_graph_table_and_pk(self, tenant, artifact):
+        source_tables = set(inspect(self.source_engine_for(tenant)).get_table_names())
+        table = next((item for item in artifact["payload"].get("mapped_table_names") or [] if item in source_tables), None)
+        pk = artifact["payload"].get("primary_key")
+        if not table or not pk or pk not in self._source_columns(tenant, table):
+            return None, None
+        return table, pk
+
     def _schema_graph_node(self, tenant, artifact, table, pk_value):
         node_type = self._schema_graph_node_type(artifact)
         return {
@@ -1291,6 +1326,187 @@ class InstanceRepository:
             "ontology_artifact": artifact["canonical_key"],
             "status": "approved",
             "projection_source": "SchemaGraphModelingAgent",
+        }
+
+    def _schema_graph_reasoning_configs(self, tenant):
+        objects, links = self._schema_graph_artifacts(tenant)
+        if not objects:
+            return None, None
+        entity_config = {}
+        object_meta = {}
+        for natural_key, artifact in objects.items():
+            table, pk = self._schema_graph_table_and_pk(tenant, artifact)
+            if not table or not pk:
+                continue
+            type_name = self._schema_graph_node_type(artifact)
+            cfg = {
+                "artifact": artifact["canonical_key"],
+                "table": table,
+                "pk": pk,
+                "label_cols": [pk],
+                "type": type_name,
+                "projection_source": "SchemaGraphModelingAgent",
+            }
+            entity_config[natural_key] = cfg
+            entity_config[type_name.lower()] = cfg
+            object_meta[natural_key] = {"artifact": artifact, "table": table, "pk": pk, "type": type_name}
+
+        link_config = []
+        for link in links:
+            payload = link["payload"]
+            source_key = payload.get("source_object_key")
+            target_key = payload.get("target_object_key")
+            source_meta = object_meta.get(source_key)
+            target_meta = object_meta.get(target_key)
+            join = self._schema_graph_join_parts(tenant, payload.get("join_condition"))
+            if not source_meta or not target_meta or not join:
+                continue
+            source_table = payload.get("source_table")
+            target_table = payload.get("target_table")
+            if {source_table, target_table} != {join["left_table"], join["right_table"]} and source_table != target_table:
+                continue
+            # Reasoning treats link config as "source object -> rows carrying
+            # the source key". For approved SchemaGraphModelingAgent links, use
+            # the source table/key from the reviewed artifact instead of the
+            # old fixture convention.
+            fk_table, fk_col = source_table, source_meta["pk"]
+            link_config.append({
+                "link": link["canonical_key"],
+                "from": source_key,
+                "to": target_key,
+                "fk_table": fk_table,
+                "fk_col": fk_col,
+                "source_table": source_table,
+                "target_table": target_table,
+                "source_pk": source_meta["pk"],
+                "target_pk": target_meta["pk"],
+                "join_condition": join["condition"],
+                "projection_source": "SchemaGraphModelingAgent",
+            })
+        return entity_config, link_config
+
+    def reasoning_entity_config(self, tenant):
+        entity_config, _ = self._schema_graph_reasoning_configs(tenant)
+        return entity_config or self.ENTITY_CONFIG
+
+    def reasoning_link_config(self, tenant):
+        _, link_config = self._schema_graph_reasoning_configs(tenant)
+        return link_config or self.LINK_CONFIG
+
+    def _schema_graph_neighborhood(self, tenant, object_type, instance_id, depth=1, limit=200):
+        objects, links = self._schema_graph_artifacts(tenant)
+        if not objects:
+            return None
+        object_key, center_artifact = self._schema_graph_object_artifact(tenant, object_type)
+        if not center_artifact:
+            return None
+        center_table, center_pk = self._schema_graph_table_and_pk(tenant, center_artifact)
+        if not center_table or not center_pk:
+            return None
+        depth = max(1, min(int(depth), 2))
+        requested_limit = int(limit)
+        limit = max(1, min(requested_limit, 300))
+        with self.source_engine_for(tenant).connect() as conn:
+            center_exists = conn.execute(
+                text(f"SELECT 1 FROM {center_table} WHERE {center_pk} = :pk LIMIT 1"),
+                {"pk": instance_id},
+            ).first()
+            if not center_exists:
+                return None
+
+            center = self._schema_graph_node(tenant, center_artifact, center_table, instance_id)
+            nodes = [center]
+            edges = []
+            seen_nodes = {center["id"]}
+            seen_edges = set()
+            allowed_node_types = {center["type"]}
+            allowed_link_keys = []
+
+            def remember_node(node):
+                if node and node["id"] not in seen_nodes:
+                    nodes.append(node)
+                    seen_nodes.add(node["id"])
+                return node
+
+            for link in links:
+                payload = link["payload"]
+                source_key = payload.get("source_object_key")
+                target_key = payload.get("target_object_key")
+                if object_key not in {source_key, target_key}:
+                    continue
+                source_artifact = objects.get(source_key)
+                target_artifact = objects.get(target_key)
+                if not source_artifact or not target_artifact:
+                    continue
+                source_table, source_pk = self._schema_graph_table_and_pk(tenant, source_artifact)
+                target_table, target_pk = self._schema_graph_table_and_pk(tenant, target_artifact)
+                join = self._schema_graph_join_parts(tenant, payload.get("join_condition"))
+                if not source_table or not target_table or not join:
+                    continue
+                if object_key == source_key:
+                    other_artifact, other_table, other_pk = target_artifact, target_table, target_pk
+                    where_table, where_pk = source_table, source_pk
+                else:
+                    other_artifact, other_table, other_pk = source_artifact, source_table, source_pk
+                    where_table, where_pk = target_table, target_pk
+                try:
+                    rows = conn.execute(
+                        text(
+                            f"SELECT DISTINCT {other_table}.{other_pk} AS other_pk "
+                            f"FROM {source_table} JOIN {target_table} ON {join['condition']} "
+                            f"WHERE {where_table}.{where_pk} = :pk AND {other_table}.{other_pk} IS NOT NULL "
+                            f"ORDER BY {other_table}.{other_pk} LIMIT :lim"
+                        ),
+                        {"pk": instance_id, "lim": limit},
+                    ).mappings().all()
+                except Exception:
+                    continue
+                allowed_link_keys.append(link["canonical_key"])
+                for row in rows:
+                    other_node = remember_node(self._schema_graph_node(tenant, other_artifact, other_table, row["other_pk"]))
+                    allowed_node_types.add(other_node["type"])
+                    source_node = center if object_key == source_key else other_node
+                    target_node = other_node if object_key == source_key else center
+                    edge_id = f"{source_node['id']}->{target_node['id']}:{link['canonical_key']}"
+                    if edge_id in seen_edges:
+                        continue
+                    seen_edges.add(edge_id)
+                    edges.append({
+                        "id": edge_id,
+                        "tenant_id": tenant.tenant_id,
+                        "source": source_node["id"],
+                        "target": target_node["id"],
+                        "link_key": link["canonical_key"],
+                        "label": link["name"],
+                        "status": "approved",
+                        "projection_source": "SchemaGraphModelingAgent",
+                    })
+                    if len(nodes) >= limit and len(edges) >= limit:
+                        break
+
+        return {
+            "approved": True,
+            "tenant": tenant.public_dict(),
+            "graph_database": tenant.graph_database,
+            "depth": depth,
+            "limit": limit,
+            "limits": {"requested_limit": requested_limit, "applied_limit": limit, "hard_limit": 300, "truncated": len(nodes) >= limit or len(edges) >= limit},
+            "center": center,
+            "nodes": nodes[:limit],
+            "edges": edges[:limit],
+            "scope": {
+                "tenant_id": tenant.tenant_id,
+                "center_node": center["id"],
+                "type": center["type"],
+                "id": str(instance_id),
+                "depth": depth,
+                "node_limit": limit,
+                "edge_limit": limit,
+                "allowed_node_types": sorted(allowed_node_types),
+                "allowed_link_keys": allowed_link_keys,
+                "approved_only": True,
+                "projection_source": "SchemaGraphModelingAgent",
+            },
         }
 
     def _schema_graph_full_graph(self, tenant, object_type=None, instance_id=None, limit=200):
@@ -1410,6 +1626,9 @@ class InstanceRepository:
         }
 
     def neighborhood(self, tenant, object_type, instance_id, depth=1, limit=200):
+        schema_graph = self._schema_graph_neighborhood(tenant, object_type, instance_id, depth=depth, limit=limit)
+        if schema_graph is not None:
+            return schema_graph
         cfg_key = self._cfg_key(object_type)
         cfg = self.ENTITY_CONFIG.get(cfg_key)
         if not cfg:
@@ -1503,6 +1722,7 @@ class InstanceRepository:
                 "allowed_node_types": sorted(allowed_node_types),
                 "allowed_link_keys": allowed_link_keys,
                 "approved_only": True,
+                "projection_source": "fallback_fixture",
             },
         }
 
@@ -1768,6 +1988,7 @@ class InstanceRepository:
                 "node_limit": limit,
                 "edge_limit": limit * 3,
                 "approved_only": True,
+                "projection_source": "fallback_fixture",
             },
         }
 
