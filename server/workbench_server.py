@@ -39,7 +39,7 @@ SOURCE_DB_URL = os.environ.get(
     "ALETHEIA_MYSQL_URL",
     f"mysql+pymysql://aletheia_user:aletheia_password@127.0.0.1:3306/{os.environ.get('ALETHEIA_MYSQL_DB', 'aletheia_test_data')}",
 )
-STATIC_ROOT = ROOT / "web" / "review_workbench"
+STATIC_ROOT = ROOT / "web" / "app"
 
 
 class LocalThreadingHTTPServer(ThreadingHTTPServer):
@@ -9099,7 +9099,7 @@ class ReviewWorkbenchHandler(BaseHTTPRequestHandler):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Run the Aletheia Review Workbench")
+    parser = argparse.ArgumentParser(description="Run the Aletheia Workbench API and frontend app")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8765)
     parser.add_argument("--db-url", default=DB_URL)
@@ -9131,7 +9131,7 @@ def main():
         ctx.load_cert_chain(args.tls_cert, args.tls_key)
         server.socket = ctx.wrap_socket(server.socket, server_side=True)
         scheme = "https"
-    print(f"Review Workbench: {scheme}://{args.host}:{args.port}", flush=True)
+    print(f"Aletheia Workbench: {scheme}://{args.host}:{args.port}", flush=True)
     try:
         server.serve_forever()
     except KeyboardInterrupt:

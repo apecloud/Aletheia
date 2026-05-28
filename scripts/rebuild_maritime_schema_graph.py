@@ -248,7 +248,7 @@ def main() -> None:
         "boundaries": {
             "used_schema_graph_modeling_agent": True,
             "used_import_maritime_object_specs": False,
-            "used_review_workbench_entity_config_for_semantics": False,
+            "used_static_entity_config_for_semantics": False,
             "canonical_write": False,
             "formal_graph_write": False,
             "review_gate": "draft_only_until_human_review",

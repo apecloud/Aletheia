@@ -1,6 +1,6 @@
 import unittest
 
-from review_workbench import ReasoningRepository
+from server.workbench_server import ReasoningRepository
 
 
 class DeepGraphReasoningTest(unittest.TestCase):

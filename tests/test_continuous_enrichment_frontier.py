@@ -1,7 +1,7 @@
 import unittest
 from datetime import datetime
 
-from review_workbench import InstanceRepository
+from server.workbench_server import InstanceRepository
 
 
 class ContinuousEnrichmentFrontierTest(unittest.TestCase):

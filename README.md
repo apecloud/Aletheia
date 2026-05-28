@@ -30,9 +30,9 @@ The current demo has three main tenants:
 | `reports/` | Generated implementation and validation reports |
 | `scripts/` | Dataset import, bootstrap, and pipeline runner scripts |
 | `tests/` | Unit and integration-style regression tests |
-| `web/review_workbench/` | Browser UI for Workspace, Ontology, Graph, Reasoning, and Settings |
+| `web/app/` | Frontend app for Workspace, Ontology, Graph, Reasoning, and Settings |
 | `server/workbench_server.py` | Local API server and metadata/review backend |
-| `review_workbench.py` | Compatibility launcher for legacy server commands |
+| `review_workbench.py` | Compatibility launcher for legacy server commands; new entrypoint is `server/workbench_server.py` |
 | `query_artifacts.py`, `query_graph.py`, `query_metadata.py` | CLI inspection tools |
 
 ## Core Concepts
@@ -97,10 +97,10 @@ The repo does not require a checked-in `node_modules` directory. Use `npx` for
 one-off bundle checks:
 
 ```bash
-node --check web/review_workbench/api.js
-npx esbuild web/review_workbench/workbench.jsx --bundle --outfile=/tmp/aletheia-workbench.js --format=iife --global-name=AletheiaWorkbench --log-level=warning
-npx esbuild web/review_workbench/graph.jsx --bundle --outfile=/tmp/aletheia-graph.js --format=iife --global-name=AletheiaGraph --log-level=warning
-npx esbuild web/review_workbench/reasoning.jsx --bundle --outfile=/tmp/aletheia-reasoning.js --format=iife --global-name=AletheiaReasoning --log-level=warning
+node --check web/app/api.js
+npx esbuild web/app/workbench.jsx --bundle --outfile=/tmp/aletheia-workbench.js --format=iife --global-name=AletheiaWorkbench --log-level=warning
+npx esbuild web/app/graph.jsx --bundle --outfile=/tmp/aletheia-graph.js --format=iife --global-name=AletheiaGraph --log-level=warning
+npx esbuild web/app/reasoning.jsx --bundle --outfile=/tmp/aletheia-reasoning.js --format=iife --global-name=AletheiaReasoning --log-level=warning
 ```
 
 ## Full Local Demo
