@@ -9,15 +9,26 @@ from typing import List
 
 from litellm import completion
 import instructor
-from ontology_artifacts import (
-    BusinessLink,
-    BusinessObject,
-    ExtractedTable,
-    ObjectTableMapping,
-    delete_artifacts_by_type,
-    ensure_artifact_schema,
-    sync_link_artifact,
-)
+try:
+    from ontology_artifacts import (
+        BusinessLink,
+        BusinessObject,
+        ExtractedTable,
+        ObjectTableMapping,
+        ensure_artifact_schema,
+    )
+except ModuleNotFoundError:
+    from agents.ontology_artifacts import (
+        BusinessLink,
+        BusinessObject,
+        ExtractedTable,
+        ObjectTableMapping,
+        ensure_artifact_schema,
+    )
+try:
+    from schema_graph_modeling_agent import SchemaGraphModelingAgent
+except ModuleNotFoundError:
+    from agents.schema_graph_modeling_agent import SchemaGraphModelingAgent
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger("LinkWeaverAgent")
@@ -34,6 +45,8 @@ class LinksDraft(BaseModel):
 
 # --- Agent Class ---
 class LinkWeaverAgent:
+    unified_modeling_agent = SchemaGraphModelingAgent
+
     def __init__(self, metadata_db_url: str, model_name: str = "gpt-4o"):
         logger.info(f"Initializing Link Weaver Agent with LiteLLM (Model: {model_name})...")
         self.metadata_engine = create_engine(metadata_db_url)
@@ -92,6 +105,10 @@ class LinkWeaverAgent:
             logger.error(f"LLM Link Discovery failed: {e}")
             return None
 
+    def to_graph_model_draft(self, links_draft: LinksDraft, ontology_dump: list) -> object:
+        """Compatibility adapter for the unified schema graph modeling contract."""
+        return self.unified_modeling_agent.draft_from_legacy_link_model(links_draft, ontology_dump)
+
     def run(self):
         logger.info("Starting Link Weaving workflow...")
         project_id = os.environ.get("ALETHEIA_TENANT", "default")
@@ -105,10 +122,20 @@ class LinkWeaverAgent:
             llm_links = self.weave_links_with_llm(ontology_dump)
             if not llm_links:
                 return
+            graph_model_draft = self.to_graph_model_draft(llm_links, ontology_dump)
+            logger.info(
+                "Adapted LinkWeaver output to SchemaGraphModelingAgent draft contract: %s edge types",
+                len(graph_model_draft.edge_types),
+            )
+            self.unified_modeling_agent.persist_draft_artifacts_in_session(
+                session,
+                graph_model_draft,
+                project_id=project_id,
+                source_agent=self.unified_modeling_agent.source_agent,
+            )
 
             # Clear old links
             session.query(BusinessLink).filter_by(project_id=project_id).delete()
-            delete_artifacts_by_type(session, ["link"], project_id=project_id)
             session.commit()
 
             # Save new links
@@ -128,12 +155,11 @@ class LinkWeaverAgent:
                     )
                     session.add(new_link)
                     session.flush()
-                    sync_link_artifact(session, new_link, source_obj, target_obj)
                 else:
                     logger.warning(f"LLM referenced unknown objects in link: {link_draft.source_object_name} -> {link_draft.target_object_name}")
 
             session.commit()
-            logger.info("Successfully saved Business Links and Ontology Artifacts to PostGIS.")
+            logger.info("Successfully saved Business Links and unified draft ontology artifacts to PostGIS.")
         except Exception as e:
             session.rollback()
             logger.error(f"Workflow error: {e}")

@@ -1,0 +1,48 @@
+{
+  "task": 311,
+  "status": "inventory_complete",
+  "inventory": [
+    {
+      "area": "source_link_schema_registry",
+      "location": "review_workbench.py SOURCE_LINK_SCHEMAS",
+      "migration": "replace with approved link ontology artifacts and reviewed join specs"
+    },
+    {
+      "area": "graph_entity_config",
+      "location": "review_workbench.py GraphRepository.ENTITY_CONFIG",
+      "migration": "generate from approved object artifacts and graph projection specs"
+    },
+    {
+      "area": "graph_link_config",
+      "location": "review_workbench.py GraphRepository.LINK_CONFIG",
+      "migration": "generate from approved link artifacts and FK evidence"
+    },
+    {
+      "area": "maritime_graph_hydration",
+      "location": "review_workbench.py maritime full_graph branches",
+      "migration": "move to reviewed graph projection specs"
+    },
+    {
+      "area": "tenant_specific_playbooks",
+      "location": "review_workbench.py autopilot playbooks",
+      "migration": "keep as explicit demo playbooks; do not use for ontology modeling"
+    },
+    {
+      "area": "maritime_import_seed",
+      "location": "scripts/import_maritime_risk_dataset.py OBJECT_SPECS/LINK_SPECS",
+      "migration": "make raw import default; fixture ontology seed only behind explicit flag"
+    },
+    {
+      "area": "iterative_extraction_terms",
+      "location": "agents/iterative_graph_enrichment_agent.py terms and _extract_graph_semantics",
+      "migration": "replace ontology decisions with LLM extraction contract constrained by approved ontology"
+    }
+  ],
+  "non_negotiable_boundary": [
+    "source schema/profiling evidence",
+    "LLM structured output or reviewed human-edited equivalent",
+    "draft/proposed status",
+    "provenance and confidence",
+    "review gate before canonical ontology or formal graph writes"
+  ]
+}

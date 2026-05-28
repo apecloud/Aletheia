@@ -1,6 +1,7 @@
 import argparse
 import json
 import os
+import re
 from dataclasses import dataclass
 from typing import Any, Iterable
 
@@ -71,6 +72,48 @@ class SchemaGraphModelingResult:
     schema: list[dict[str, Any]]
     draft: GraphModelDraft
     artifacts: list[str]
+
+
+def stable_graph_key(value: str) -> str:
+    """Return a stable snake_case key without relying on domain vocabulary."""
+    normalized = re.sub(r"[^0-9A-Za-z]+", "_", str(value or "").strip()).strip("_").lower()
+    return normalized or "unnamed"
+
+
+def _column_names_for_tables(metadata_dump: list[dict[str, Any]], mapped_tables: Iterable[str]) -> list[str]:
+    mapped = set(mapped_tables)
+    columns: list[str] = []
+    for table in metadata_dump:
+        if table.get("table_name") not in mapped:
+            continue
+        for column in table.get("columns") or []:
+            name = column.get("column") or column.get("name")
+            if name and name not in columns:
+                columns.append(name)
+    return columns
+
+
+def _table_evidence(metadata_dump: list[dict[str, Any]], mapped_tables: Iterable[str]) -> list[str]:
+    mapped = set(mapped_tables)
+    evidence: list[str] = []
+    for table in metadata_dump:
+        table_name = table.get("table_name")
+        if table_name not in mapped:
+            continue
+        comment = table.get("table_comment")
+        if comment:
+            evidence.append(f"table:{table_name} comment: {comment}")
+        for column in table.get("columns") or []:
+            name = column.get("column") or column.get("name")
+            data_type = column.get("type") or column.get("data_type")
+            semantic_type = column.get("semantic_type")
+            hint = f"table:{table_name} column:{name}"
+            if data_type:
+                hint += f" type:{data_type}"
+            if semantic_type and semantic_type != "Unknown":
+                hint += f" semantic_type:{semantic_type}"
+            evidence.append(hint)
+    return evidence
 
 
 class SchemaGraphModelingAgent:
@@ -194,7 +237,74 @@ Raw schema:
             temperature=0.1,
         )
 
-    def artifact_specs(self, draft: GraphModelDraft) -> list[dict[str, Any]]:
+    @classmethod
+    def draft_from_legacy_object_model(cls, ontology_draft: Any, metadata_dump: list[dict[str, Any]]) -> GraphModelDraft:
+        """Adapt the old ObjectModelerAgent output into the unified graph contract.
+
+        Phase 1 keeps existing object-modeling call sites usable, but the
+        persisted contract is the same draft graph model used by the new schema
+        modeling agent. This adapter must stay vocabulary-free: it only copies
+        names/tables/descriptions supplied by the LLM and schema metadata.
+        """
+        node_types: list[GraphNodeTypeDraft] = []
+        for obj in getattr(ontology_draft, "business_objects", []) or []:
+            name = getattr(obj, "name", "")
+            mapped_tables = list(getattr(obj, "mapped_table_names", []) or [])
+            columns = _column_names_for_tables(metadata_dump, mapped_tables)
+            evidence = _table_evidence(metadata_dump, mapped_tables)
+            node_types.append(
+                GraphNodeTypeDraft(
+                    key=stable_graph_key(name),
+                    name=name,
+                    description=getattr(obj, "description", "") or f"Business object inferred from {', '.join(mapped_tables)}.",
+                    mapped_tables=mapped_tables,
+                    primary_key=None,
+                    properties=columns,
+                    evidence=evidence or [f"legacy object model mapped tables: {', '.join(mapped_tables)}"],
+                    confidence=0.75,
+                )
+            )
+        return GraphModelDraft(node_types=node_types)
+
+    @classmethod
+    def draft_from_legacy_link_model(cls, links_draft: Any, ontology_dump: list[dict[str, Any]]) -> GraphModelDraft:
+        """Adapt the old LinkWeaverAgent output into unified graph edge drafts."""
+        table_by_object = {
+            item.get("object_name"): list(item.get("underlying_tables") or [])
+            for item in ontology_dump
+            if item.get("object_name")
+        }
+        edge_types: list[GraphEdgeTypeDraft] = []
+        for link in getattr(links_draft, "links", []) or []:
+            source_name = getattr(link, "source_object_name", "")
+            target_name = getattr(link, "target_object_name", "")
+            source_tables = table_by_object.get(source_name) or []
+            target_tables = table_by_object.get(target_name) or []
+            link_type = getattr(link, "link_type", None)
+            evidence = [
+                f"legacy link model source object: {source_name} tables: {', '.join(source_tables)}",
+                f"legacy link model target object: {target_name} tables: {', '.join(target_tables)}",
+            ]
+            edge_types.append(
+                GraphEdgeTypeDraft(
+                    key=stable_graph_key(f"{source_name}_{link_type or 'related'}_{target_name}"),
+                    name=f"{source_name} {link_type or 'related_to'} {target_name}",
+                    description=getattr(link, "description", "") or "Relationship inferred by legacy link model.",
+                    source_node_key=stable_graph_key(source_name),
+                    target_node_key=stable_graph_key(target_name),
+                    cardinality=link_type,
+                    source_table=source_tables[0] if source_tables else source_name,
+                    target_table=target_tables[0] if target_tables else target_name,
+                    join_condition=None,
+                    evidence=evidence,
+                    confidence=0.7,
+                )
+            )
+        return GraphModelDraft(edge_types=edge_types)
+
+    @classmethod
+    def artifact_specs_for_draft(cls, draft: GraphModelDraft, *, prompt_version: str | None = None) -> list[dict[str, Any]]:
+        prompt_version = prompt_version or cls.prompt_version
         specs: list[dict[str, Any]] = []
         for node in draft.node_types:
             specs.append(
@@ -209,7 +319,7 @@ Raw schema:
                         "primary_key": node.primary_key,
                         "properties": node.properties,
                         "llm_inferred": True,
-                        "prompt_version": self.prompt_version,
+                        "prompt_version": prompt_version,
                         "canonical_write_boundary": draft.review_boundary,
                     },
                     "source_refs": [f"table:{table}" for table in node.mapped_tables],
@@ -232,7 +342,7 @@ Raw schema:
                         "target_table": edge.target_table,
                         "join_condition": edge.join_condition,
                         "llm_inferred": True,
-                        "prompt_version": self.prompt_version,
+                        "prompt_version": prompt_version,
                         "canonical_write_boundary": draft.review_boundary,
                     },
                     "source_refs": [f"table:{edge.source_table}", f"table:{edge.target_table}"],
@@ -242,44 +352,64 @@ Raw schema:
             )
         return specs
 
+    def artifact_specs(self, draft: GraphModelDraft) -> list[dict[str, Any]]:
+        return self.artifact_specs_for_draft(draft, prompt_version=self.prompt_version)
+
+    @classmethod
+    def persist_draft_artifacts_in_session(
+        cls,
+        session,
+        draft: GraphModelDraft,
+        *,
+        project_id: str | None = None,
+        source_agent: str | None = None,
+    ) -> list[str]:
+        canonical_keys: list[str] = []
+        for spec in cls.artifact_specs_for_draft(draft):
+            artifact = upsert_artifact(
+                session,
+                artifact_type=spec["artifact_type"],
+                natural_key=spec["natural_key"],
+                name=spec["name"],
+                description=spec["description"],
+                payload=spec["payload"],
+                source_refs=spec["source_refs"],
+                source_agent=source_agent or cls.source_agent,
+                project_id=project_id,
+                confidence=spec["confidence"],
+                status="draft",
+            )
+            replace_evidence(
+                session,
+                artifact,
+                [
+                    {
+                        "evidence_type": "schema_graph_inference",
+                        "source_ref": source_ref,
+                        "summary": evidence,
+                        "payload": {
+                            "prompt_version": cls.prompt_version,
+                            "artifact": spec["natural_key"],
+                            "review_boundary": draft.review_boundary,
+                        },
+                        "confidence": spec["confidence"],
+                    }
+                    for source_ref, evidence in zip(spec["source_refs"] or ["schema"], spec["evidence"] or [spec["description"]])
+                ],
+            )
+            canonical_keys.append(artifact.canonical_key)
+        return canonical_keys
+
     def persist_draft_artifacts(self, draft: GraphModelDraft) -> list[str]:
         if self.Session is None:
             raise ValueError("metadata_db_url is required to persist artifacts")
-        canonical_keys: list[str] = []
         with self.Session() as session:
-            for spec in self.artifact_specs(draft):
-                artifact = upsert_artifact(
-                    session,
-                    artifact_type=spec["artifact_type"],
-                    natural_key=spec["natural_key"],
-                    name=spec["name"],
-                    description=spec["description"],
-                    payload=spec["payload"],
-                    source_refs=spec["source_refs"],
-                    source_agent=self.source_agent,
-                    project_id=self.project_id,
-                    confidence=spec["confidence"],
-                    status="draft",
-                )
-                replace_evidence(
-                    session,
-                    artifact,
-                    [
-                        {
-                            "evidence_type": "schema_graph_inference",
-                            "source_ref": source_ref,
-                            "summary": evidence,
-                            "payload": {
-                                "prompt_version": self.prompt_version,
-                                "artifact": spec["natural_key"],
-                                "review_boundary": draft.review_boundary,
-                            },
-                            "confidence": spec["confidence"],
-                        }
-                        for source_ref, evidence in zip(spec["source_refs"] or ["schema"], spec["evidence"] or [spec["description"]])
-                    ],
-                )
-                canonical_keys.append(artifact.canonical_key)
+            canonical_keys = self.persist_draft_artifacts_in_session(
+                session,
+                draft,
+                project_id=self.project_id,
+                source_agent=self.source_agent,
+            )
             session.commit()
         return canonical_keys
 

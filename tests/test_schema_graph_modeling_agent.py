@@ -1,4 +1,5 @@
 import unittest
+from types import SimpleNamespace
 
 from sqlalchemy import create_engine, text
 
@@ -82,6 +83,59 @@ class SchemaGraphModelingAgentTest(unittest.TestCase):
             self.assertEqual(spec["payload"]["canonical_write_boundary"], "draft_only_until_human_review")
             self.assertTrue(spec["payload"]["llm_inferred"])
             self.assertEqual(spec["payload"]["prompt_version"], "schema_graph_modeling_v1")
+
+    def test_legacy_object_model_adapter_uses_unified_contract(self):
+        legacy_objects = SimpleNamespace(
+            business_objects=[
+                SimpleNamespace(
+                    name="Customer Account",
+                    description="Customer account grouped from source schema.",
+                    mapped_table_names=["customers"],
+                )
+            ]
+        )
+        metadata_dump = [
+            {
+                "table_name": "customers",
+                "table_comment": "Customer master table",
+                "columns": [
+                    {"column": "customer_id", "type": "INTEGER", "semantic_type": "Identifier"},
+                    {"column": "customer_name", "type": "TEXT", "semantic_type": "Name"},
+                ],
+            }
+        ]
+
+        draft = SchemaGraphModelingAgent.draft_from_legacy_object_model(legacy_objects, metadata_dump)
+
+        self.assertEqual(len(draft.node_types), 1)
+        self.assertEqual(draft.node_types[0].key, "customer_account")
+        self.assertEqual(draft.node_types[0].mapped_tables, ["customers"])
+        self.assertIn("customer_id", draft.node_types[0].properties)
+        self.assertEqual(draft.review_boundary, "draft_only_until_human_review")
+
+    def test_legacy_link_model_adapter_uses_unified_contract(self):
+        legacy_links = SimpleNamespace(
+            links=[
+                SimpleNamespace(
+                    source_object_name="Customer",
+                    target_object_name="Invoice",
+                    link_type="1:N",
+                    description="Invoices reference customers.",
+                )
+            ]
+        )
+        ontology_dump = [
+            {"object_name": "Customer", "underlying_tables": ["customers"]},
+            {"object_name": "Invoice", "underlying_tables": ["invoices"]},
+        ]
+
+        draft = SchemaGraphModelingAgent.draft_from_legacy_link_model(legacy_links, ontology_dump)
+
+        self.assertEqual(len(draft.edge_types), 1)
+        self.assertEqual(draft.edge_types[0].source_node_key, "customer")
+        self.assertEqual(draft.edge_types[0].target_node_key, "invoice")
+        self.assertEqual(draft.edge_types[0].source_table, "customers")
+        self.assertEqual(draft.edge_types[0].target_table, "invoices")
 
 
 if __name__ == "__main__":

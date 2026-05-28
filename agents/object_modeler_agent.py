@@ -9,18 +9,32 @@ from typing import List
 
 from litellm import completion
 import instructor
-from ontology_artifacts import (
-    Base,
-    ColumnProfile,
-    ExtractedColumn,
-    ExtractedTable,
-    BusinessObject,
-    BusinessLink,
-    ObjectTableMapping,
-    delete_artifacts_by_type,
-    ensure_artifact_schema,
-    sync_object_artifact,
-)
+try:
+    from ontology_artifacts import (
+        Base,
+        ColumnProfile,
+        ExtractedColumn,
+        ExtractedTable,
+        BusinessObject,
+        BusinessLink,
+        ObjectTableMapping,
+        ensure_artifact_schema,
+    )
+except ModuleNotFoundError:
+    from agents.ontology_artifacts import (
+        Base,
+        ColumnProfile,
+        ExtractedColumn,
+        ExtractedTable,
+        BusinessObject,
+        BusinessLink,
+        ObjectTableMapping,
+        ensure_artifact_schema,
+    )
+try:
+    from schema_graph_modeling_agent import SchemaGraphModelingAgent
+except ModuleNotFoundError:
+    from agents.schema_graph_modeling_agent import SchemaGraphModelingAgent
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger("ObjectModelerAgent")
@@ -36,6 +50,8 @@ class OntologyDraft(BaseModel):
 
 # --- Agent Class ---
 class ObjectModelerAgent:
+    unified_modeling_agent = SchemaGraphModelingAgent
+
     def __init__(self, metadata_db_url: str, model_name: str = "gpt-4o"):
         logger.info(f"Initializing Object Modeler Agent with LiteLLM (Model: {model_name})...")
         self.metadata_engine = create_engine(metadata_db_url)
@@ -104,6 +120,10 @@ class ObjectModelerAgent:
             logger.error(f"LLM Modeling failed: {e}")
             return None
 
+    def to_graph_model_draft(self, llm_ontology: OntologyDraft, metadata_dump: list) -> object:
+        """Compatibility adapter for the unified schema graph modeling contract."""
+        return self.unified_modeling_agent.draft_from_legacy_object_model(llm_ontology, metadata_dump)
+
     def run(self):
         logger.info("Starting Object Modeling workflow...")
         project_id = os.environ.get("ALETHEIA_TENANT", "default")
@@ -117,6 +137,17 @@ class ObjectModelerAgent:
             llm_ontology = self.model_objects_with_llm(metadata_dump)
             if not llm_ontology:
                 return
+            graph_model_draft = self.to_graph_model_draft(llm_ontology, metadata_dump)
+            logger.info(
+                "Adapted ObjectModeler output to SchemaGraphModelingAgent draft contract: %s node types",
+                len(graph_model_draft.node_types),
+            )
+            self.unified_modeling_agent.persist_draft_artifacts_in_session(
+                session,
+                graph_model_draft,
+                project_id=project_id,
+                source_agent=self.unified_modeling_agent.source_agent,
+            )
 
             # Clear old mappings (Idempotency)
             object_ids = [
@@ -129,7 +160,6 @@ class ObjectModelerAgent:
                     synchronize_session=False
                 )
             session.query(BusinessObject).filter_by(project_id=project_id).delete()
-            delete_artifacts_by_type(session, ["object", "link"], project_id=project_id)
             session.commit()
 
             # Save objects and mappings
@@ -149,10 +179,9 @@ class ObjectModelerAgent:
                         session.add(mapping)
                     else:
                         logger.warning(f"LLM mapped unknown table: {table_name}")
-                sync_object_artifact(session, new_obj, mapped_tables)
 
             session.commit()
-            logger.info("Successfully saved Business Objects, Mappings, and Ontology Artifacts to PostGIS.")
+            logger.info("Successfully saved Business Objects and unified draft ontology artifacts to PostGIS.")
         except Exception as e:
             session.rollback()
             logger.error(f"Workflow error: {e}")
