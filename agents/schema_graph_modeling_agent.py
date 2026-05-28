@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import Any, Iterable
 
 from pydantic import BaseModel, Field
-from sqlalchemy import create_engine, inspect
+from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.orm import sessionmaker
 
 try:
@@ -32,6 +32,9 @@ class SchemaTable(BaseModel):
     columns: list[SchemaColumn]
     primary_key: list[str] = Field(default_factory=list)
     foreign_keys: list[dict[str, Any]] = Field(default_factory=list)
+    row_count: int | None = None
+    sample_rows: list[dict[str, Any]] = Field(default_factory=list)
+    column_value_samples: dict[str, list[Any]] = Field(default_factory=dict)
 
 
 class GraphNodeTypeDraft(BaseModel):
@@ -145,7 +148,31 @@ class SchemaGraphModelingAgent:
         else:
             self.Session = None
 
-    def inspect_source_schema(self, *, schema: str | None = None, include_tables: Iterable[str] | None = None) -> list[dict[str, Any]]:
+    def _profile_table(self, table_name: str, *, schema: str | None = None, sample_size: int = 3) -> dict[str, Any]:
+        sample_size = max(0, min(int(sample_size), 10))
+        qualified = f"{schema}.{table_name}" if schema else table_name
+        profile: dict[str, Any] = {"row_count": None, "sample_rows": [], "column_value_samples": {}}
+        try:
+            with self.source_engine.connect() as conn:
+                profile["row_count"] = int(conn.execute(text(f"SELECT COUNT(*) FROM {qualified}")).scalar() or 0)
+                if sample_size:
+                    rows = conn.execute(text(f"SELECT * FROM {qualified} LIMIT :limit"), {"limit": sample_size}).mappings().all()
+                    profile["sample_rows"] = [
+                        {key: str(value)[:120] if value is not None else None for key, value in dict(row).items()}
+                        for row in rows
+                    ]
+        except Exception as exc:
+            profile["profile_error"] = f"{type(exc).__name__}: {str(exc)[:160]}"
+        return profile
+
+    def inspect_source_schema(
+        self,
+        *,
+        schema: str | None = None,
+        include_tables: Iterable[str] | None = None,
+        include_profile: bool = True,
+        sample_size: int = 3,
+    ) -> list[dict[str, Any]]:
         inspector = inspect(self.source_engine)
         include = set(include_tables or [])
         tables: list[dict[str, Any]] = []
@@ -179,15 +206,18 @@ class SchemaGraphModelingAgent:
                         comment=col.get("comment"),
                     ).model_dump()
                 )
+            table_payload = SchemaTable(
+                schema_name=schema,
+                table_name=table_name,
+                comment=table_comment,
+                columns=[SchemaColumn(**col) for col in columns],
+                primary_key=list(pk_columns),
+                foreign_keys=fk_constraints,
+            ).model_dump()
+            if include_profile:
+                table_payload.update(self._profile_table(table_name, schema=schema, sample_size=sample_size))
             tables.append(
-                SchemaTable(
-                    schema_name=schema,
-                    table_name=table_name,
-                    comment=table_comment,
-                    columns=[SchemaColumn(**col) for col in columns],
-                    primary_key=list(pk_columns),
-                    foreign_keys=fk_constraints,
-                ).model_dump()
+                table_payload
             )
         return tables
 
@@ -385,7 +415,7 @@ Raw schema:
                 [
                     {
                         "evidence_type": "schema_graph_inference",
-                        "source_ref": source_ref,
+                        "source_ref": (spec["source_refs"] or ["schema"])[idx % max(len(spec["source_refs"] or ["schema"]), 1)],
                         "summary": evidence,
                         "payload": {
                             "prompt_version": cls.prompt_version,
@@ -394,7 +424,7 @@ Raw schema:
                         },
                         "confidence": spec["confidence"],
                     }
-                    for source_ref, evidence in zip(spec["source_refs"] or ["schema"], spec["evidence"] or [spec["description"]])
+                    for idx, evidence in enumerate(spec["evidence"] or [spec["description"]])
                 ],
             )
             canonical_keys.append(artifact.canonical_key)
@@ -418,9 +448,16 @@ Raw schema:
         *,
         schema: str | None = None,
         include_tables: Iterable[str] | None = None,
+        include_profile: bool = True,
+        sample_size: int = 3,
         persist: bool = False,
     ) -> SchemaGraphModelingResult:
-        schema_dump = self.inspect_source_schema(schema=schema, include_tables=include_tables)
+        schema_dump = self.inspect_source_schema(
+            schema=schema,
+            include_tables=include_tables,
+            include_profile=include_profile,
+            sample_size=sample_size,
+        )
         draft = self.infer_graph_model_with_llm(schema_dump)
         artifacts = self.persist_draft_artifacts(draft) if persist else []
         return SchemaGraphModelingResult(schema=schema_dump, draft=draft, artifacts=artifacts)
@@ -433,6 +470,8 @@ def main() -> None:
     parser.add_argument("--model", default=os.environ.get("ALETHEIA_SCHEMA_GRAPH_MODEL", "gpt-4o"))
     parser.add_argument("--tenant", default=os.environ.get("ALETHEIA_TENANT", "default"))
     parser.add_argument("--table", action="append", dest="tables", help="Restrict inference to a table; can be repeated")
+    parser.add_argument("--no-profile", action="store_true", help="Disable generic row-count/sample evidence in the LLM prompt")
+    parser.add_argument("--sample-size", type=int, default=3, help="Number of source rows to include per table as generic profile evidence")
     parser.add_argument("--persist", action="store_true", help="Persist inferred artifacts as draft ontology proposals")
     parser.add_argument("--report-json", default=None)
     args = parser.parse_args()
@@ -443,7 +482,12 @@ def main() -> None:
         model_name=args.model,
         project_id=args.tenant,
     )
-    result = agent.run(include_tables=args.tables, persist=args.persist)
+    result = agent.run(
+        include_tables=args.tables,
+        include_profile=not args.no_profile,
+        sample_size=args.sample_size,
+        persist=args.persist,
+    )
     output = {
         "tenant": args.tenant,
         "prompt_version": agent.prompt_version,

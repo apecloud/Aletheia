@@ -21,7 +21,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.append(str(ROOT))
 sys.path.append(str(ROOT / "agents"))
 
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine, inspect, text
 
 from reasoning_engine import ReasoningEngine
 from server.graph_projection_fixtures import GRAPH_ENTITY_CONFIG, GRAPH_LINK_CONFIG, SOURCE_LINK_SCHEMAS
@@ -1218,6 +1218,188 @@ class InstanceRepository:
             "status": "approved",
         }
 
+    def _schema_graph_artifacts(self, tenant):
+        with self.metadata_engine_for(tenant).connect() as conn:
+            rows = conn.execute(
+                text(
+                    """
+                    SELECT canonical_key, artifact_type, name, payload_json, confidence
+                    FROM aletheia_ontology_artifacts
+                    WHERE project_id = :tenant_id
+                      AND status = 'approved'
+                      AND source_agent = 'SchemaGraphModelingAgent'
+                    ORDER BY artifact_type, canonical_key
+                    """
+                ),
+                {"tenant_id": tenant.tenant_id},
+            ).mappings().all()
+        objects = {}
+        links = []
+        for row in rows:
+            payload = _load_json(row["payload_json"], {})
+            if payload.get("prompt_version") != "schema_graph_modeling_v1" or payload.get("llm_inferred") is not True:
+                continue
+            item = {**dict(row), "payload": payload}
+            natural_key = row["canonical_key"].split(":", 1)[1] if ":" in row["canonical_key"] else row["canonical_key"]
+            if row["artifact_type"] == "object":
+                objects[natural_key] = item
+            elif row["artifact_type"] == "link":
+                links.append(item)
+        return objects, links
+
+    def _schema_graph_node_type(self, artifact):
+        return re.sub(r"[^0-9A-Za-z]", "", artifact["name"]) or artifact["canonical_key"].split(":", 1)[-1]
+
+    def _source_columns(self, tenant, table):
+        inspector = inspect(self.source_engine_for(tenant))
+        if table not in inspector.get_table_names():
+            return set()
+        return {column["name"] for column in inspector.get_columns(table)}
+
+    def _schema_graph_safe_join_condition(self, tenant, join_condition):
+        match = re.fullmatch(r"\s*([A-Za-z_][A-Za-z0-9_]*)\.([A-Za-z_][A-Za-z0-9_]*)\s*=\s*([A-Za-z_][A-Za-z0-9_]*)\.([A-Za-z_][A-Za-z0-9_]*)\s*", str(join_condition or ""))
+        if not match:
+            return None
+        left_table, left_col, right_table, right_col = match.groups()
+        source_tables = set(inspect(self.source_engine_for(tenant)).get_table_names())
+        if left_table not in source_tables or right_table not in source_tables:
+            return None
+        if left_col not in self._source_columns(tenant, left_table) or right_col not in self._source_columns(tenant, right_table):
+            return None
+        return f"{left_table}.{left_col} = {right_table}.{right_col}"
+
+    def _schema_graph_node(self, tenant, artifact, table, pk_value):
+        node_type = self._schema_graph_node_type(artifact)
+        return {
+            "id": f"{node_type}:{pk_value}",
+            "tenant_id": tenant.tenant_id,
+            "namespace": tenant.namespace,
+            "graph_database": tenant.graph_database,
+            "type": node_type,
+            "label": str(pk_value),
+            "source_table": table,
+            "source_pk": f"{artifact['payload'].get('primary_key')}={pk_value}",
+            "ontology_artifact": artifact["canonical_key"],
+            "status": "approved",
+            "projection_source": "SchemaGraphModelingAgent",
+        }
+
+    def _schema_graph_full_graph(self, tenant, object_type=None, instance_id=None, limit=200):
+        objects, links = self._schema_graph_artifacts(tenant)
+        if not objects:
+            return None
+        requested_limit = int(limit)
+        limit = max(1, min(requested_limit, 300))
+        nodes = []
+        edges = []
+        seen_nodes = set()
+        seen_edges = set()
+
+        def remember_node(node):
+            if node and node["id"] not in seen_nodes:
+                nodes.append(node)
+                seen_nodes.add(node["id"])
+            return node
+
+        source_engine = self.source_engine_for(tenant)
+        inspector = inspect(source_engine)
+        source_tables = set(inspector.get_table_names())
+        per_type_limit = max(1, min(40, limit // max(len(objects), 1) + 1))
+
+        with source_engine.connect() as conn:
+            for artifact in objects.values():
+                payload = artifact["payload"]
+                pk = payload.get("primary_key")
+                table = next((item for item in payload.get("mapped_table_names") or [] if item in source_tables), None)
+                if not table or not pk or pk not in self._source_columns(tenant, table):
+                    continue
+                rows = conn.execute(
+                    text(f"SELECT DISTINCT {table}.{pk} AS node_pk FROM {table} WHERE {table}.{pk} IS NOT NULL ORDER BY {table}.{pk} LIMIT :limit"),
+                    {"limit": per_type_limit},
+                ).mappings().all()
+                for row in rows:
+                    remember_node(self._schema_graph_node(tenant, artifact, table, row["node_pk"]))
+                    if len(nodes) >= limit:
+                        break
+                if len(nodes) >= limit:
+                    break
+
+            for link in links:
+                payload = link["payload"]
+                source_artifact = objects.get(payload.get("source_object_key"))
+                target_artifact = objects.get(payload.get("target_object_key"))
+                source_table = payload.get("source_table")
+                target_table = payload.get("target_table")
+                join_condition = self._schema_graph_safe_join_condition(tenant, payload.get("join_condition"))
+                if not source_artifact or not target_artifact or not source_table or not target_table or not join_condition:
+                    continue
+                if source_table not in source_tables or target_table not in source_tables:
+                    continue
+                source_pk = source_artifact["payload"].get("primary_key")
+                target_pk = target_artifact["payload"].get("primary_key")
+                if source_pk not in self._source_columns(tenant, source_table) or target_pk not in self._source_columns(tenant, target_table):
+                    continue
+                try:
+                    rows = conn.execute(
+                        text(
+                            f"SELECT DISTINCT {source_table}.{source_pk} AS source_pk, "
+                            f"{target_table}.{target_pk} AS target_pk "
+                            f"FROM {source_table} JOIN {target_table} ON {join_condition} "
+                            f"WHERE {source_table}.{source_pk} IS NOT NULL AND {target_table}.{target_pk} IS NOT NULL "
+                            "LIMIT :limit"
+                        ),
+                        {"limit": limit * 3},
+                    ).mappings().all()
+                except Exception:
+                    continue
+                for row in rows:
+                    source_node = remember_node(self._schema_graph_node(tenant, source_artifact, source_table, row["source_pk"]))
+                    target_node = remember_node(self._schema_graph_node(tenant, target_artifact, target_table, row["target_pk"]))
+                    edge_id = f"{source_node['id']}->{target_node['id']}:{link['canonical_key']}"
+                    if edge_id in seen_edges:
+                        continue
+                    seen_edges.add(edge_id)
+                    edges.append({
+                        "id": edge_id,
+                        "tenant_id": tenant.tenant_id,
+                        "source": source_node["id"],
+                        "target": target_node["id"],
+                        "link_key": link["canonical_key"],
+                        "label": link["name"],
+                        "status": "approved",
+                        "projection_source": "SchemaGraphModelingAgent",
+                    })
+                    if len(edges) >= limit * 3:
+                        break
+        center = None
+        if object_type and instance_id:
+            compact_type = re.sub(r"[^0-9A-Za-z]", "", str(object_type)).lower()
+            for artifact in objects.values():
+                if re.sub(r"[^0-9A-Za-z]", "", artifact["name"]).lower() == compact_type:
+                    table = next((item for item in artifact["payload"].get("mapped_table_names") or [] if item in source_tables), None)
+                    if table:
+                        center = remember_node(self._schema_graph_node(tenant, artifact, table, instance_id))
+                    break
+        return {
+            "approved": True,
+            "tenant": tenant.public_dict(),
+            "graph_database": tenant.graph_database,
+            "depth": 0,
+            "limit": limit,
+            "limits": {"requested_limit": requested_limit, "applied_limit": limit, "hard_limit": 300, "truncated": len(nodes) >= limit or len(edges) >= limit * 3},
+            "center": center,
+            "nodes": nodes[:limit],
+            "edges": edges[: limit * 3],
+            "scope": {
+                "tenant_id": tenant.tenant_id,
+                "view": "all",
+                "node_limit": limit,
+                "edge_limit": limit * 3,
+                "approved_only": True,
+                "projection_source": "SchemaGraphModelingAgent",
+            },
+        }
+
     def neighborhood(self, tenant, object_type, instance_id, depth=1, limit=200):
         cfg_key = self._cfg_key(object_type)
         cfg = self.ENTITY_CONFIG.get(cfg_key)
@@ -1316,6 +1498,9 @@ class InstanceRepository:
         }
 
     def full_graph(self, tenant, object_type=None, instance_id=None, limit=200):
+        schema_graph = self._schema_graph_full_graph(tenant, object_type=object_type, instance_id=instance_id, limit=limit)
+        if schema_graph is not None:
+            return schema_graph
         requested_limit = int(limit)
         limit = max(1, min(requested_limit, 300))
         cfg_items = list(self.ENTITY_CONFIG.items())

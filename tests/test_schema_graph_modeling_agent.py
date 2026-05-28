@@ -34,6 +34,7 @@ class SchemaGraphModelingAgentTest(unittest.TestCase):
                     ")"
                 )
             )
+            conn.execute(text("INSERT INTO customers (customer_id, customer_name) VALUES (1, 'Acme')"))
         self.agent = SchemaGraphModelingAgent(source_db_url="sqlite:///:memory:")
         self.agent.source_engine = self.engine
 
@@ -46,6 +47,9 @@ class SchemaGraphModelingAgentTest(unittest.TestCase):
         customer_id = next(column for column in invoice["columns"] if column["name"] == "customer_id")
         self.assertTrue(customer_id["foreign_key"])
         self.assertEqual(customer_id["references"], "customers.customer_id")
+        customers = next(table for table in schema if table["table_name"] == "customers")
+        self.assertEqual(customers["row_count"], 1)
+        self.assertEqual(customers["sample_rows"][0]["customer_name"], "Acme")
 
         prompt = self.agent.build_prompt(schema)
         self.assertIn("Do not use any built-in tenant/domain vocabulary", prompt)
