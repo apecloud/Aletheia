@@ -1,0 +1,43 @@
+{
+  "task": 306,
+  "status": "implemented",
+  "implemented_files": [
+    "agents/schema_graph_modeling_agent.py",
+    "tests/test_schema_graph_modeling_agent.py",
+    "reports/schema-graph-modeling-agent-task306.md"
+  ],
+  "contract": {
+    "agent": "SchemaGraphModelingAgent",
+    "prompt_version": "schema_graph_modeling_v1",
+    "input_evidence": [
+      "table_names",
+      "column_names",
+      "primary_keys",
+      "foreign_keys",
+      "comments"
+    ],
+    "output": [
+      "draft_node_types",
+      "draft_edge_types",
+      "rejected_candidates",
+      "assumptions",
+      "review_boundary"
+    ],
+    "hard_boundaries": [
+      "no built-in tenant/domain vocabulary",
+      "no project demo terms in generic prompt",
+      "no invented review/finding/action/insight nodes without source schema evidence",
+      "draft only until human review"
+    ]
+  },
+  "remaining_migration": [
+    "review_workbench.py ENTITY_CONFIG/LINK_CONFIG",
+    "review_workbench.py maritime-specific graph hydration",
+    "scripts/import_maritime_risk_dataset.py OBJECT_SPECS/LINK_SPECS",
+    "agents/iterative_graph_enrichment_agent.py tenant-specific demo parsing"
+  ],
+  "validation": [
+    ".venv/bin/python -m unittest tests/test_schema_graph_modeling_agent.py",
+    ".venv/bin/python -m py_compile agents/schema_graph_modeling_agent.py"
+  ]
+}
