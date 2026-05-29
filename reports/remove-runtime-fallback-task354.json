@@ -23,7 +23,10 @@
   "frontend_rerun": {
     "workbench_runtime_mock_fallback_removed": true,
     "static_scan_workbench_employee_northwind": "pass",
-    "default_workbench_html_contains_employee_or_northwind": false
+    "hardcoded_employee_order_basis_removed": true,
+    "missing_scope_basis_behavior": "neutral_empty_state_without_ontology_link",
+    "default_workbench_html_contains_employee_or_northwind": false,
+    "default_workbench_html_contains_employee_order_basis": false
   },
   "api_smoke": {
     "creditcardfraud_full_graph": {

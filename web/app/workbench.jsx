@@ -1330,7 +1330,7 @@ function agentOutputTitle(item) {
 
 function taskToCase(task) {
   const scope = task.scope || {};
-  const basisKey = firstBasisKey(scope) || "link:employee:1:n:order";
+  const basisKey = firstBasisKey(scope);
   const center = scope.center_node || scope.center_edge?.source || "tenant";
   const rawStatus = (task.status || "active").toLowerCase();
   const status =
@@ -1353,7 +1353,7 @@ function taskToCase(task) {
     updated: task.updated_at || task.updated || task.created_at || "",
     updatedLabel: fmtCaseTime(task.updated_at || task.updated || task.created_at),
     reasoningHref: `/?screen=reasoning&tenant=${encodeURIComponent(task.tenant_id || "default")}&task=${encodeURIComponent(task.canonical_key || task.id || "")}`,
-    ontologyHref: `/?screen=ontology&tenant=${encodeURIComponent(task.tenant_id || "default")}&artifact=${encodeURIComponent(basisKey)}`,
+    ontologyHref: basisKey ? `/?screen=ontology&tenant=${encodeURIComponent(task.tenant_id || "default")}&artifact=${encodeURIComponent(basisKey)}` : "",
   };
 }
 
@@ -1367,6 +1367,7 @@ function ownerFor(task, scope) {
 function summaryFor(task, center, basisKey) {
   const output = task.latest_run?.output?.summary || task.finding?.conclusion || "";
   if (output) return output;
+  if (!basisKey) return `Case centered on ${center}; ontology basis is not available until data import, schema-to-graph modeling, and review are complete.`;
   return `Case centered on ${center}, using ${ontologyBasisLabelWB(basisKey)} as compact ontology basis.`;
 }
 

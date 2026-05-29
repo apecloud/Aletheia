@@ -60,12 +60,14 @@ Saskue's first #355 pass found that server fallback was removed, but Workbench s
 Additional rerun checks:
 
 - Static scan: `web/app/workbench.jsx` and `server/workbench_server.py` no longer contain `FALLBACK_CASES`, `reasoningTasks` fallback, `Employee`, `Northwind`, `object:employee`, `object:order`, or `object:customer`.
+- Second static scan: `web/app/workbench.jsx` and `server/workbench_server.py` no longer contain `link:employee:1:n:order`, `Employee`, `Order`, `Northwind`, `FALLBACK_CASES`, or `reasoningTasks` fallback. When a task has no ontology basis, Workbench now shows a neutral import/model/review-needed summary and leaves `ontologyHref` empty.
 - Workbench bundle builds without Employee/Order mock data.
 - API smoke on `8877`:
   - `creditcardfraud` full graph remains `approved=false`, `0/0`, `scope.projection_source=none`.
   - `default&type=Employee&id=1` remains `approved=false`, `0/0`, `scope.projection_source=none`; the requested type is echoed only in request scope, not used to synthesize data.
   - `maritime-risk Country:CHN` remains reviewed SchemaGraph projection with `25/24`.
   - default Workbench HTML does not contain `Employee`, `Northwind`, or `FALLBACK_CASES`.
+  - second default Workbench HTML smoke does not contain `Employee`, `Order`, `Northwind`, or `link:employee:1:n:order`.
 
 ## Dirty Worktree Boundary
 
