@@ -24,7 +24,11 @@ sys.path.append(str(ROOT / "agents"))
 from sqlalchemy import create_engine, inspect, text
 
 from reasoning_engine import ReasoningEngine
-from server.graph_projection_fixtures import GRAPH_ENTITY_CONFIG, GRAPH_LINK_CONFIG, SOURCE_LINK_SCHEMAS
+from server.graph_projection_fixtures import (
+    GRAPH_ENTITY_CONFIG as FALLBACK_GRAPH_ENTITY_CONFIG,
+    GRAPH_LINK_CONFIG as FALLBACK_GRAPH_LINK_CONFIG,
+    SOURCE_LINK_SCHEMAS as FALLBACK_SOURCE_LINK_SCHEMAS,
+)
 
 from iterative_graph_enrichment_agent import IterativeGraphEnrichmentAgent  # noqa: E402
 from ontology_artifacts import ensure_artifact_schema  # noqa: E402
@@ -186,7 +190,10 @@ def _artifact_to_dict(row):
     }
 
 
-SOURCE_TABLE_SCHEMAS = {
+EXPLICIT_DEMO_FALLBACK_TENANTS = {"default", "northwind-sandbox", "creditcardfraud"}
+
+
+FALLBACK_SOURCE_TABLE_SCHEMAS = {
     "employee": {
         "table": "employees",
         "primary_key": "employeeID",
@@ -385,10 +392,13 @@ SOURCE_TABLE_SCHEMAS = {
 }
 
 
-# SOURCE_LINK_SCHEMAS lives in server.graph_projection_fixtures
+# FALLBACK_SOURCE_LINK_SCHEMAS lives in server.graph_projection_fixtures.
+# These are not production schema->graph decisions; they support explicit
+# demo/bootstrap fallback when reviewed SchemaGraphModelingAgent artifacts are
+# unavailable.
 
 
-SOURCE_TABLE_HINTS_BY_TABLE = {schema["table"]: schema for schema in SOURCE_TABLE_SCHEMAS.values()}
+FALLBACK_SOURCE_TABLE_HINTS_BY_TABLE = {schema["table"]: schema for schema in FALLBACK_SOURCE_TABLE_SCHEMAS.values()}
 
 
 def _fallback_fields(table_schema):
@@ -440,8 +450,51 @@ def _ontology_source_schema(artifact, table_fields=None):
     canonical_key = artifact.get("canonical_key") or ""
     payload = artifact.get("payload") or {}
     artifact_type = artifact.get("artifact_type")
-    if canonical_key in SOURCE_LINK_SCHEMAS:
-        schema = dict(SOURCE_LINK_SCHEMAS[canonical_key])
+    if artifact_type == "link" and payload.get("source_table") and payload.get("target_table"):
+        table_fields = table_fields or {}
+        source_table = payload.get("source_table")
+        target_table = payload.get("target_table")
+        field_map = _field_by_qualified_name(
+            table_fields.get(source_table, {}).get("fields", [])
+            + table_fields.get(target_table, {}).get("fields", [])
+        )
+        source_tables = [table_fields.get(t, {}) for t in (source_table, target_table)]
+        schema = {
+            "kind": "relationship_source_schema",
+            "source_table": source_table,
+            "target_table": target_table,
+            "join_condition": payload.get("join_condition"),
+            "cardinality": payload.get("cardinality"),
+            "graph_edge": f"{payload.get('source_object_name') or payload.get('source_object_key')} -> {payload.get('target_object_name') or payload.get('target_object_key')}",
+            "source_ref": payload.get("source_ref") or payload.get("join_condition"),
+            "schema_source": (
+                "live"
+                if all(t.get("schema_source") == "live" for t in source_tables)
+                else "degraded"
+                if any(t.get("schema_source") == "degraded" for t in source_tables)
+                else "artifact_payload"
+            ),
+            "source_object": payload.get("source_object_name") or payload.get("source_object_key"),
+            "target_object": payload.get("target_object_name") or payload.get("target_object_key"),
+            "link_type": payload.get("link_type") or payload.get("cardinality"),
+            "modeling_source": payload.get("source_agent") or artifact.get("source_agent") or "SchemaGraphModelingAgent",
+        }
+        for field_name, role in (
+            (payload.get("source_field"), "source_identity_field"),
+            (payload.get("target_field"), "target_reference_field"),
+        ):
+            if not field_name:
+                continue
+            prop = dict(field_map.get(field_name, {}))
+            if prop:
+                prop["relationship_role"] = role
+                schema[f"{role}_property"] = prop
+        schema["field_properties"] = [
+            value for key, value in schema.items() if key.endswith("_property") and isinstance(value, dict)
+        ]
+        return schema
+    if canonical_key in FALLBACK_SOURCE_LINK_SCHEMAS:
+        schema = dict(FALLBACK_SOURCE_LINK_SCHEMAS[canonical_key])
         table_fields = table_fields or {}
         field_map = _field_by_qualified_name(
             table_fields.get(schema["source_table"], {}).get("fields", [])
@@ -490,7 +543,37 @@ def _ontology_source_schema(artifact, table_fields=None):
         return schema
     if artifact_type == "object":
         object_name = str(payload.get("object_name") or artifact.get("name") or canonical_key.removeprefix("object:")).lower().replace(" ", "_")
-        table_schema = SOURCE_TABLE_SCHEMAS.get(object_name)
+        mapped_tables = payload.get("mapped_table_names") or payload.get("mapped_tables") or []
+        primary_key = payload.get("primary_key")
+        if mapped_tables:
+            table = mapped_tables[0]
+            live = (table_fields or {}).get(table)
+            schema = {
+                "table": table,
+                "primary_key": primary_key,
+                "columns": live.get("columns") if live else list(payload.get("properties") or []),
+                "fields": (
+                    _apply_table_hints({"primary_key": primary_key}, live.get("fields"))
+                    if live
+                    else _fallback_fields(
+                        {
+                            "table": table,
+                            "primary_key": primary_key,
+                            "columns": list(payload.get("properties") or []),
+                        }
+                    )
+                ),
+                "schema_source": live.get("schema_source") if live else "artifact_payload",
+                "kind": "object_source_schema",
+                "object_name": artifact.get("name"),
+                "modeling_source": payload.get("source_agent") or artifact.get("source_agent") or "SchemaGraphModelingAgent",
+            }
+            if live and live.get("schema_source") != "live":
+                schema["degraded"] = True
+                schema["degraded_reason"] = live.get("degraded_reason")
+                schema["connection_error"] = live.get("connection_error")
+            return schema
+        table_schema = FALLBACK_SOURCE_TABLE_SCHEMAS.get(object_name)
         if table_schema:
             schema = dict(table_schema)
             live = (table_fields or {}).get(schema["table"])
@@ -574,22 +657,27 @@ class ReviewRepository:
         payload = artifact.get("payload") or {}
         artifact_type = artifact.get("artifact_type")
         table_names = set()
-        if canonical_key in SOURCE_LINK_SCHEMAS:
-            link_schema = SOURCE_LINK_SCHEMAS[canonical_key]
+        if artifact_type == "link" and payload.get("source_table") and payload.get("target_table"):
+            table_names.add(payload["source_table"])
+            table_names.add(payload["target_table"])
+        elif canonical_key in FALLBACK_SOURCE_LINK_SCHEMAS:
+            link_schema = FALLBACK_SOURCE_LINK_SCHEMAS[canonical_key]
             table_names.add(link_schema["source_table"])
             table_names.add(link_schema["target_table"])
         elif artifact_type == "object":
             object_name = str(payload.get("object_name") or artifact.get("name") or canonical_key.removeprefix("object:")).lower().replace(" ", "_")
-            if object_name in SOURCE_TABLE_SCHEMAS:
-                table_names.add(SOURCE_TABLE_SCHEMAS[object_name]["table"])
+            mapped_tables = payload.get("mapped_table_names") or payload.get("mapped_tables") or []
+            table_names.update(table for table in mapped_tables if table)
+            if not mapped_tables and object_name in FALLBACK_SOURCE_TABLE_SCHEMAS:
+                table_names.add(FALLBACK_SOURCE_TABLE_SCHEMAS[object_name]["table"])
         schemas = {}
         object_hint = None
         if artifact_type == "object":
             object_name = str(payload.get("object_name") or artifact.get("name") or canonical_key.removeprefix("object:")).lower().replace(" ", "_")
-            object_hint = SOURCE_TABLE_SCHEMAS.get(object_name)
+            object_hint = FALLBACK_SOURCE_TABLE_SCHEMAS.get(object_name)
         for table in table_names:
             schema = self.source_table_schema(tenant, table)
-            hint = object_hint if object_hint and object_hint.get("table") == table else SOURCE_TABLE_HINTS_BY_TABLE.get(table)
+            hint = object_hint if object_hint and object_hint.get("table") == table else FALLBACK_SOURCE_TABLE_HINTS_BY_TABLE.get(table)
             if hint and schema.get("fields"):
                 schema["fields"] = _apply_table_hints(hint, schema["fields"])
             schemas[table] = schema
@@ -796,29 +884,26 @@ class ReviewRepository:
 
     def used_by(self, tenant, artifact):
         canonical_key = artifact.get("canonical_key")
+        payload = artifact.get("payload") or {}
         used_by = []
-        if canonical_key == "link:employee:1:n:order":
-            used_by.extend(
-                [
-                    {
-                        "kind": "graph_path",
-                        "label": "Employee -> Order approved graph paths",
-                        "href": f"/?screen=graph&tenant={quote(tenant.tenant_id)}&type=Employee&id=4&depth=1&limit=200",
-                        "summary": "Employee order neighborhoods use orders.employeeID = employees.employeeID.",
-                    },
-                    {
-                        "kind": "reasoning",
-                        "label": "Employee workload and profile reasoning",
-                        "href": f"/?screen=reasoning&tenant={quote(tenant.tenant_id)}&ontology_basis=link%3Aemployee%3A1%3An%3Aorder",
-                        "summary": "Scoped Employee reasoning cites this relationship as ontology basis.",
-                    },
-                    {
-                        "kind": "instance",
-                        "label": "Employee instance explorer",
-                        "href": f"/?screen=graph&tenant={quote(tenant.tenant_id)}&type=Employee&id=4",
-                        "summary": "Instance edge provenance is backed by this canonical link.",
-                    },
-                ]
+        if canonical_key and canonical_key.startswith("link:"):
+            source = payload.get("source_object_name") or payload.get("source_object_key") or "source"
+            target = payload.get("target_object_name") or payload.get("target_object_key") or "target"
+            used_by.append(
+                {
+                    "kind": "graph_path",
+                    "label": f"{source} -> {target} approved graph paths",
+                    "href": f"/?screen=graph&tenant={quote(tenant.tenant_id)}&ontology_basis={quote(canonical_key)}",
+                    "summary": "Approved links are eligible for graph path projection when a matching reviewed schema projection exists.",
+                }
+            )
+            used_by.append(
+                {
+                    "kind": "reasoning",
+                    "label": f"{source} -> {target} scoped reasoning",
+                    "href": f"/?screen=reasoning&tenant={quote(tenant.tenant_id)}&ontology_basis={quote(canonical_key)}",
+                    "summary": "Reasoning may cite this reviewed link through tenant-scoped projection metadata.",
+                }
             )
         elif canonical_key and canonical_key.startswith("object:"):
             object_type = canonical_key.removeprefix("object:").capitalize()
@@ -1048,6 +1133,11 @@ class InstanceRepository:
         return {row["canonical_key"]: dict(row) for row in rows}
 
     def types(self, tenant, include_draft=False):
+        schema_types = self._schema_graph_types(tenant)
+        if schema_types:
+            return {"tenant": tenant.public_dict(), "types": schema_types}
+        if tenant.tenant_id not in EXPLICIT_DEMO_FALLBACK_TENANTS:
+            return {"tenant": tenant.public_dict(), "types": []}
         all_keys = [cfg["artifact"] for cfg in self.ENTITY_CONFIG.values()]
         artifacts = self._artifact_statuses(tenant, all_keys) if include_draft else self._approved_artifacts(tenant, all_keys)
         types = []
@@ -1067,6 +1157,16 @@ class InstanceRepository:
         return {"tenant": tenant.public_dict(), "types": types}
 
     def search(self, tenant, object_type, query, limit=25, include_draft=False):
+        schema_search = self._schema_graph_search(tenant, object_type, query, limit=limit)
+        if schema_search is not None:
+            return schema_search
+        if tenant.tenant_id not in EXPLICIT_DEMO_FALLBACK_TENANTS:
+            return {
+                "tenant": tenant.public_dict(),
+                "instances": [],
+                "approved": False,
+                "reason": f"No approved SchemaGraphModelingAgent projection for type {object_type}",
+            }
         cfg_key = self._cfg_key(object_type)
         cfg = self.ENTITY_CONFIG.get(cfg_key)
         if not cfg:
@@ -1113,71 +1213,45 @@ class InstanceRepository:
             "tenant": tenant.public_dict(),
         }
 
+    def default_center(self, tenant, include_draft=False):
+        """Return a tenant-local default graph center without domain fixtures."""
+        for type_info in self.types(tenant, include_draft=include_draft).get("types", []):
+            object_type = type_info.get("type")
+            if not object_type:
+                continue
+            result = self.search(tenant, object_type, "", limit=1, include_draft=include_draft)
+            instances = result.get("instances") or []
+            if not instances:
+                continue
+            node_id = instances[0].get("id") or ""
+            instance_id = node_id.split(":", 1)[1] if ":" in node_id else instances[0].get("source_pk", "").split("=", 1)[-1]
+            if instance_id:
+                return {"type": object_type, "id": str(instance_id), "node": instances[0]}
+        return None
+
     def detail(self, tenant, object_type, instance_id):
+        schema_detail = self._schema_graph_detail(tenant, object_type, instance_id)
+        if schema_detail is not None:
+            return schema_detail
+        if tenant.tenant_id not in EXPLICIT_DEMO_FALLBACK_TENANTS:
+            return None
         canonical_key = self._object_key(object_type)
         artifacts = self._approved_artifacts(tenant, [canonical_key])
         if canonical_key not in artifacts:
             return None
         cfg_key = self._cfg_key(object_type)
-        if cfg_key == "employee":
-            employee = self._fetch_employee(tenant, instance_id)
-            if not employee:
-                return None
-            order_count = self._order_count_for_employee(tenant, instance_id)
-            reports = self._employee_reports(tenant, instance_id)
-            return {
-                "id": f"Employee:{employee['employeeID']}",
-                "tenant_id": tenant.tenant_id,
-                "namespace": tenant.namespace,
-                "graph_database": tenant.graph_database,
-                "type": "Employee",
-                "label": self._employee_label(employee),
-                "source_table": "employees",
-                "source_pk": f"employeeID={employee['employeeID']}",
-                "source_row": self._row(employee),
-                "ontology_artifact": "object:employee",
-                "key_properties": {
-                    "employeeID": employee["employeeID"],
-                    "name": self._employee_label(employee),
-                    "title": employee.get("title"),
-                    "city": employee.get("city"),
-                    "reportsTo": employee.get("reportsTo"),
-                },
-                "relations_summary": {
-                    "handled_orders": order_count,
-                    "reports_to": reports.get("manager"),
-                    "direct_reports": reports.get("direct_reports", 0),
-                },
-            }
-        if cfg_key == "order":
-            order = self._fetch_order(tenant, instance_id)
-            if not order:
-                return None
-            return {
-                "id": f"Order:{order['orderID']}",
-                "tenant_id": tenant.tenant_id,
-                "namespace": tenant.namespace,
-                "graph_database": tenant.graph_database,
-                "type": "Order",
-                "label": f"Order #{order['orderID']}",
-                "source_table": "orders",
-                "source_pk": f"orderID={order['orderID']}",
-                "source_row": self._row(order),
-                "ontology_artifact": "object:order",
-                "key_properties": {
-                    "orderID": order["orderID"],
-                    "customerID": order.get("customerID"),
-                    "employeeID": order.get("employeeID"),
-                    "orderDate": _jsonable(order.get("orderDate")),
-                    "shipName": order.get("shipName"),
-                },
-            }
         cfg = self.ENTITY_CONFIG.get(cfg_key)
         row = self._fetch_entity(tenant, object_type, instance_id)
         if cfg and row:
             node = self._entity_node(tenant, self._cfg_type(cfg, cfg_key), row)
             if not node:
                 return None
+            graph = self.neighborhood(tenant, object_type, instance_id, depth=1, limit=300)
+            by_relation = {}
+            if graph and graph.get("approved"):
+                for edge in graph.get("edges", []):
+                    relation = edge.get("link_key") or edge.get("ontology_link") or edge.get("label") or "edge"
+                    by_relation[relation] = by_relation.get(relation, 0) + 1
             return {
                 **node,
                 "source_row": self._row(row),
@@ -1186,12 +1260,18 @@ class InstanceRepository:
                     for key in dict.fromkeys([cfg["pk"], *cfg.get("label_cols", [])])
                     if key in row
                 },
+                "relations_summary": {
+                    "nodes": len(graph.get("nodes", [])) if graph and graph.get("approved") else 1,
+                    "edges": len(graph.get("edges", [])) if graph and graph.get("approved") else 0,
+                    "by_relation": by_relation,
+                    "projection_source": (graph.get("scope") or {}).get("projection_source") if graph else None,
+                },
             }
         return None
 
     # ---- generic entity config ----
-    ENTITY_CONFIG = GRAPH_ENTITY_CONFIG
-    LINK_CONFIG = GRAPH_LINK_CONFIG
+    ENTITY_CONFIG = FALLBACK_GRAPH_ENTITY_CONFIG
+    LINK_CONFIG = FALLBACK_GRAPH_LINK_CONFIG
 
     def _fetch_entity(self, tenant, object_type, instance_id):
         cfg = self.ENTITY_CONFIG.get(self._cfg_key(object_type))
@@ -1328,6 +1408,106 @@ class InstanceRepository:
             "projection_source": "SchemaGraphModelingAgent",
         }
 
+    def _schema_graph_types(self, tenant):
+        objects, _ = self._schema_graph_artifacts(tenant)
+        result = []
+        for artifact in objects.values():
+            table, _ = self._schema_graph_table_and_pk(tenant, artifact)
+            if not table:
+                continue
+            type_name = self._schema_graph_node_type(artifact)
+            result.append(
+                {
+                    "type": type_name,
+                    "label": artifact.get("name") or type_name,
+                    "table": table,
+                    "ontology_artifact": artifact["canonical_key"],
+                    "artifact_status": "approved",
+                    "approved": True,
+                    "tenant_id": tenant.tenant_id,
+                    "projection_source": "SchemaGraphModelingAgent",
+                }
+            )
+        return result
+
+    def _schema_graph_search(self, tenant, object_type, query, limit=25):
+        _, artifact = self._schema_graph_object_artifact(tenant, object_type)
+        if not artifact:
+            return None
+        table, pk = self._schema_graph_table_and_pk(tenant, artifact)
+        if not table or not pk:
+            return None
+        limit = max(1, min(int(limit), 100))
+        query = str(query or "")
+        columns = self._source_columns(tenant, table)
+        label_columns = [
+            column
+            for column in artifact["payload"].get("properties", [])
+            if column in columns and column != pk
+        ][:4]
+        conditions = [f"CAST({table}.{pk} AS CHAR) = :query"]
+        for column in label_columns:
+            conditions.append(f"CAST({table}.{column} AS CHAR) LIKE :like_query")
+        where = " OR ".join(conditions)
+        with self.source_engine_for(tenant).connect() as conn:
+            rows = conn.execute(
+                text(
+                    f"SELECT DISTINCT {table}.{pk} AS node_pk "
+                    f"FROM {table} "
+                    f"WHERE (:query = '' OR {where}) "
+                    f"ORDER BY {table}.{pk} LIMIT :limit"
+                ),
+                {"query": query, "like_query": f"%{query}%", "limit": limit},
+            ).mappings().all()
+        return {
+            "instances": [
+                self._schema_graph_node(tenant, artifact, table, row["node_pk"])
+                for row in rows
+            ],
+            "approved": True,
+            "artifact_status": "approved",
+            "tenant": tenant.public_dict(),
+            "projection_source": "SchemaGraphModelingAgent",
+        }
+
+    def _schema_graph_detail(self, tenant, object_type, instance_id):
+        _, artifact = self._schema_graph_object_artifact(tenant, object_type)
+        if not artifact:
+            return None
+        table, pk = self._schema_graph_table_and_pk(tenant, artifact)
+        if not table or not pk:
+            return None
+        with self.source_engine_for(tenant).connect() as conn:
+            row = conn.execute(
+                text(f"SELECT * FROM {table} WHERE {pk} = :pk LIMIT 1"),
+                {"pk": instance_id},
+            ).mappings().first()
+        if not row:
+            return None
+        node = self._schema_graph_node(tenant, artifact, table, instance_id)
+        row_dict = dict(row)
+        graph = self._schema_graph_neighborhood(tenant, object_type, instance_id, depth=1, limit=300)
+        by_relation = {}
+        if graph and graph.get("approved"):
+            for edge in graph.get("edges", []):
+                relation = edge.get("link_key") or edge.get("label") or "edge"
+                by_relation[relation] = by_relation.get(relation, 0) + 1
+        return {
+            **node,
+            "source_row": self._row(row_dict),
+            "key_properties": {
+                key: _jsonable(row_dict.get(key))
+                for key in dict.fromkeys([pk, *artifact["payload"].get("properties", [])])
+                if key in row_dict
+            },
+            "relations_summary": {
+                "nodes": len(graph.get("nodes", [])) if graph and graph.get("approved") else 1,
+                "edges": len(graph.get("edges", [])) if graph and graph.get("approved") else 0,
+                "by_relation": by_relation,
+                "projection_source": "SchemaGraphModelingAgent",
+            },
+        }
+
     def _schema_graph_reasoning_configs(self, tenant):
         objects, links = self._schema_graph_artifacts(tenant)
         if not objects:
@@ -1387,11 +1567,15 @@ class InstanceRepository:
 
     def reasoning_entity_config(self, tenant):
         entity_config, _ = self._schema_graph_reasoning_configs(tenant)
-        return entity_config or self.ENTITY_CONFIG
+        if entity_config:
+            return entity_config
+        return self.ENTITY_CONFIG if tenant.tenant_id in EXPLICIT_DEMO_FALLBACK_TENANTS else {}
 
     def reasoning_link_config(self, tenant):
         _, link_config = self._schema_graph_reasoning_configs(tenant)
-        return link_config or self.LINK_CONFIG
+        if link_config:
+            return link_config
+        return self.LINK_CONFIG if tenant.tenant_id in EXPLICIT_DEMO_FALLBACK_TENANTS else []
 
     def _schema_graph_neighborhood(self, tenant, object_type, instance_id, depth=1, limit=200):
         objects, links = self._schema_graph_artifacts(tenant)
@@ -1629,6 +1813,8 @@ class InstanceRepository:
         schema_graph = self._schema_graph_neighborhood(tenant, object_type, instance_id, depth=depth, limit=limit)
         if schema_graph is not None:
             return schema_graph
+        if tenant.tenant_id not in EXPLICIT_DEMO_FALLBACK_TENANTS:
+            return None
         cfg_key = self._cfg_key(object_type)
         cfg = self.ENTITY_CONFIG.get(cfg_key)
         if not cfg:
@@ -1730,6 +1916,8 @@ class InstanceRepository:
         schema_graph = self._schema_graph_full_graph(tenant, object_type=object_type, instance_id=instance_id, limit=limit)
         if schema_graph is not None:
             return schema_graph
+        if tenant.tenant_id not in EXPLICIT_DEMO_FALLBACK_TENANTS:
+            return None
         requested_limit = int(limit)
         limit = max(1, min(requested_limit, 300))
         cfg_items = list(self.ENTITY_CONFIG.items())
@@ -1993,27 +2181,42 @@ class InstanceRepository:
         }
 
     def edge_detail(self, tenant, source, target):
-        if not source.startswith("Employee:") or not target.startswith("Order:"):
+        if ":" not in source or ":" not in target:
             return None
-        artifacts = self._approved_artifacts(
-            tenant,
-            ["object:employee", "object:order", "link:employee:1:n:order"]
+        source_type, source_id = source.split(":", 1)
+        graph = self.neighborhood(tenant, source_type, source_id, depth=1, limit=1000)
+        if not graph or not graph.get("approved"):
+            return None
+        nodes_by_id = {node.get("id"): node for node in graph.get("nodes", [])}
+        match = next(
+            (
+                edge
+                for edge in graph.get("edges", [])
+                if (edge.get("source"), edge.get("target")) in {(source, target), (target, source)}
+            ),
+            None,
         )
-        if "link:employee:1:n:order" not in artifacts:
+        if not match:
             return None
-        employee_id = source.split(":", 1)[1]
-        order_id = target.split(":", 1)[1]
-        employee = self._fetch_employee(tenant, employee_id)
-        order = self._fetch_order(tenant, order_id)
-        if not employee or not order or str(order.get("employeeID")) != str(employee_id):
-            return None
-        return self._employee_order_edge(
-            tenant,
-            employee,
-            order,
-            include_rows=True,
-            artifact=artifacts.get("link:employee:1:n:order"),
-        )
+        link_key = match.get("link_key") or match.get("ontology_link")
+        artifact = self._approved_artifacts(tenant, [link_key]).get(link_key) if link_key else None
+        return {
+            **match,
+            "namespace": tenant.namespace,
+            "graph_database": tenant.graph_database,
+            "ontology_link": link_key,
+            "artifact_status": artifact.get("status") if artifact else match.get("status"),
+            "artifact_version": artifact.get("version") if artifact else None,
+            "source_instance": nodes_by_id.get(match.get("source")),
+            "target_instance": nodes_by_id.get(match.get("target")),
+            "projection_source": match.get("projection_source") or (graph.get("scope") or {}).get("projection_source"),
+            "evidence": "Approved graph edge resolved from tenant-scoped projection metadata.",
+            "write_boundary": {
+                "canonical_write": False,
+                "formal_graph_write": False,
+                "source": "approved_projection_read",
+            },
+        }
 
     def _approved_artifacts(self, tenant, keys):
         with self.metadata_engine_for(tenant).connect() as conn:
@@ -3618,116 +3821,14 @@ class InstanceRepository:
             },
         }
 
-    def _fetch_employee(self, tenant, employee_id):
-        with self.source_engine_for(tenant).connect() as conn:
-            return conn.execute(
-                text("SELECT * FROM employees WHERE employeeID = :employee_id"),
-                {"employee_id": employee_id},
-            ).mappings().first()
-
-    def _fetch_order(self, tenant, order_id):
-        with self.source_engine_for(tenant).connect() as conn:
-            return conn.execute(
-                text("SELECT * FROM orders WHERE orderID = :order_id"),
-                {"order_id": order_id},
-            ).mappings().first()
-
-    def _order_count_for_employee(self, tenant, employee_id):
-        with self.source_engine_for(tenant).connect() as conn:
-            return conn.execute(
-                text("SELECT COUNT(*) FROM orders WHERE employeeID = :employee_id"),
-                {"employee_id": employee_id},
-            ).scalar()
-
-    def _employee_reports(self, tenant, employee_id):
-        with self.source_engine_for(tenant).connect() as conn:
-            manager = conn.execute(
-                text(
-                    """
-                    SELECT m.employeeID, m.firstName, m.lastName
-                    FROM employees e
-                    LEFT JOIN employees m ON e.reportsTo = m.employeeID
-                    WHERE e.employeeID = :employee_id
-                    """
-                ),
-                {"employee_id": employee_id},
-            ).mappings().first()
-            direct_reports = conn.execute(
-                text("SELECT COUNT(*) FROM employees WHERE reportsTo = :employee_id"),
-                {"employee_id": employee_id},
-            ).scalar()
-        manager_label = None
-        if manager and manager.get("employeeID"):
-            manager_label = self._employee_label(manager)
-        return {"manager": manager_label, "direct_reports": direct_reports}
-
-    def _employee_label(self, row):
-        return f"{row.get('firstName', '')} {row.get('lastName', '')}".strip()
-
-    def _employee_node(self, tenant, row):
-        return {
-            "id": f"Employee:{row['employeeID']}",
-            "tenant_id": tenant.tenant_id,
-            "namespace": tenant.namespace,
-            "graph_database": tenant.graph_database,
-            "type": "Employee",
-            "label": self._employee_label(row),
-            "summary": row.get("title"),
-            "source_table": "employees",
-            "source_pk": f"employeeID={row['employeeID']}",
-            "ontology_artifact": "object:employee",
-            "status": "approved",
-        }
-
-    def _order_node(self, tenant, row):
-        return {
-            "id": f"Order:{row['orderID']}",
-            "tenant_id": tenant.tenant_id,
-            "namespace": tenant.namespace,
-            "graph_database": tenant.graph_database,
-            "type": "Order",
-            "label": f"Order #{row['orderID']}",
-            "summary": f"Customer {row.get('customerID')} · {row.get('orderDate')}",
-            "source_table": "orders",
-            "source_pk": f"orderID={row['orderID']}",
-            "ontology_artifact": "object:order",
-            "status": "approved",
-        }
-
-    def _employee_order_edge(self, tenant, employee, order, include_rows=False, artifact=None):
-        edge = {
-            "id": f"Employee:{employee['employeeID']}->Order:{order['orderID']}",
-            "tenant_id": tenant.tenant_id,
-            "namespace": tenant.namespace,
-            "graph_database": tenant.graph_database,
-            "type": "EMPLOYEE_HANDLED_ORDER",
-            "source": f"Employee:{employee['employeeID']}",
-            "target": f"Order:{order['orderID']}",
-            "label": "handled order",
-            "source_ref": "orders.employeeID",
-            "join_condition": "orders.employeeID = employees.employeeID",
-            "ontology_link": "link:employee:1:n:order",
-            "evidence": "orders.employeeID matches employees.employeeID for this Employee-Order relationship.",
-            "source_field": "orders.employeeID",
-            "target_field": "employees.employeeID",
-            "artifact_status": artifact.get("status") if artifact else "approved",
-            "artifact_version": artifact.get("version") if artifact else None,
-        }
-        if include_rows:
-            edge["source_instance"] = self._employee_node(tenant, employee)
-            edge["target_instance"] = self._order_node(tenant, order)
-            edge["source_row"] = self._row(employee)
-            edge["target_row"] = self._row(order)
-        return edge
-
     def _row(self, row):
         return {key: _jsonable(value) for key, value in dict(row).items()}
 
 
 class ReasoningRepository:
-    TASK_KEY = "reasoning:employee-4-workload-analysis"
-    QUESTION = "Why did Employee #4 handle so many orders? Is there abnormal workload or customer concentration risk?"
-    REQUIRED_ARTIFACTS = ["object:employee", "object:order", "link:employee:1:n:order"]
+    DEMO_TASK_KEY = "reasoning:employee-4-workload-analysis"
+    DEMO_QUESTION = "Why did Employee #4 handle so many orders? Is there abnormal workload or customer concentration risk?"
+    DEMO_REQUIRED_ARTIFACTS = ["object:employee", "object:order", "link:employee:1:n:order"]
 
     def __init__(self, tenant_registry, instance_repository, ensure_schema=False):
         self.tenant_registry = tenant_registry
@@ -3737,6 +3838,9 @@ class ReasoningRepository:
         self.source_engines = {}
         self._autopilot_schema_ready = set()
         self._finding_experience_schema_ready = set()
+
+    def _is_explicit_demo_fallback(self, tenant):
+        return tenant.tenant_id in EXPLICIT_DEMO_FALLBACK_TENANTS
 
     def tenant(self, tenant_id=None):
         return self.tenant_registry.get(tenant_id)
@@ -5641,7 +5745,7 @@ class ReasoningRepository:
         graph_scope = {}
         if center_node:
             if ":" not in center_node:
-                raise ValueError("center_node must be like Employee:4")
+                raise ValueError("center_node must be in the form Type:Id")
             object_type, instance_id = center_node.split(":", 1)
             graph = self.instance_repository.neighborhood(tenant, object_type, instance_id, depth=depth, limit=node_limit)
             if not graph or not graph.get("approved"):
@@ -5660,8 +5764,8 @@ class ReasoningRepository:
             "depth": depth,
             "node_limit": node_limit,
             "edge_limit": edge_limit,
-            "allowed_node_types": scope.get("allowed_node_types") if scope.get("allowed_node_types") is not None else (graph_scope.get("allowed_node_types") or ["Employee", "Order"]),
-            "allowed_link_keys": scope.get("allowed_link_keys") if scope.get("allowed_link_keys") is not None else (graph_scope.get("allowed_link_keys") or ["link:employee:1:n:order"]),
+            "allowed_node_types": scope.get("allowed_node_types") if scope.get("allowed_node_types") is not None else (graph_scope.get("allowed_node_types") or []),
+            "allowed_link_keys": scope.get("allowed_link_keys") if scope.get("allowed_link_keys") is not None else (graph_scope.get("allowed_link_keys") or []),
             "approved_only": True,
             "evidence_paths": evidence_paths,
             "review_gate": "draft_only",
@@ -5816,13 +5920,17 @@ class ReasoningRepository:
         return {"closed_count": result.rowcount}
 
     def ensure_default_task(self, tenant):
+        if not self._is_explicit_demo_fallback(tenant):
+            return None
         scope = {
             "object_type": "Employee",
             "instance_id": "4",
             "depth": 1,
-            "required_artifacts": self.REQUIRED_ARTIFACTS,
+            "required_artifacts": self.DEMO_REQUIRED_ARTIFACTS,
             "graph_database": tenant.graph_database,
-            "mvp_boundary": "fixed Northwind Employee #4 workload analysis",
+            "demo_boundary": "explicit Northwind fixture fallback only; production tasks use scoped graph metadata",
+            "projection_source": "fallback_fixture",
+            "demo_only": True,
         }
         allowed_tools = ["graph_query", "instance_lookup", "artifact_lookup", "propose_finding", "propose_action"]
         with self.metadata_engine_for(tenant).begin() as conn:
@@ -5842,8 +5950,8 @@ class ReasoningRepository:
                 ),
                 {
                     "tenant_id": tenant.tenant_id,
-                    "canonical_key": self.TASK_KEY,
-                    "question": self.QUESTION,
+                    "canonical_key": self.DEMO_TASK_KEY,
+                    "question": self.DEMO_QUESTION,
                     "scope_json": _json_dump(scope),
                     "allowed_tools_json": _json_dump(allowed_tools),
                 },
@@ -5857,21 +5965,21 @@ class ReasoningRepository:
                     WHERE project_id = :tenant_id AND canonical_key = :canonical_key
                     """
                 ),
-                {"tenant_id": tenant.tenant_id, "canonical_key": self.TASK_KEY},
+                {"tenant_id": tenant.tenant_id, "canonical_key": self.DEMO_TASK_KEY},
             ).mappings().first()
         return self._task_to_dict(row)
 
     def run_task(self, tenant, task_key):
-        if task_key != self.TASK_KEY:
+        if task_key != self.DEMO_TASK_KEY or not self._is_explicit_demo_fallback(tenant):
             return self.run_scoped_graph_task(tenant, task_key)
         started = time.monotonic()
-        task = self._get_task_row(tenant, self.TASK_KEY)
+        task = self._get_task_row(tenant, self.DEMO_TASK_KEY)
         if task is None:
             raise ValueError("Default task not found — it may have been deleted")
         if task.get("status") == "closed":
             raise ValueError("Cannot run a closed task")
         if task.get("status") == "completed":
-            self.update_task_status(tenant, self.TASK_KEY, "active")
+            self.update_task_status(tenant, self.DEMO_TASK_KEY, "active")
             task["status"] = "active"
         graph = self.graph_query(tenant, "Employee", "4")
         query_plan = [
@@ -5882,7 +5990,14 @@ class ReasoningRepository:
             "Propose draft finding and action proposal with evidence paths.",
         ]
         tool_calls = [
-            {"tool": "graph_query", "tenant_id": tenant.tenant_id, "approved_only": True, "status": "completed" if graph.get("approved") else "blocked"},
+            {
+                "tool": "graph_query",
+                "tenant_id": tenant.tenant_id,
+                "approved_only": True,
+                "projection_source": "fallback_fixture",
+                "demo_only": True,
+                "status": "completed" if graph.get("approved") else "blocked",
+            },
         ]
         if not graph.get("approved"):
             output = {
@@ -6013,11 +6128,11 @@ class ReasoningRepository:
         }
 
     def run_task_streaming(self, tenant, task_key):
-        if task_key != self.TASK_KEY:
+        if task_key != self.DEMO_TASK_KEY or not self._is_explicit_demo_fallback(tenant):
             yield from self.run_scoped_graph_task_streaming(tenant, task_key)
             return
         started = time.monotonic()
-        task = self._get_task_row(tenant, self.TASK_KEY)
+        task = self._get_task_row(tenant, self.DEMO_TASK_KEY)
         if task is None:
             yield {"event": "error", "data": {"message": "Default task not found — it may have been deleted"}}
             return
@@ -6025,7 +6140,7 @@ class ReasoningRepository:
             yield {"event": "error", "data": {"message": "Cannot run a closed task"}}
             return
         if task.get("status") == "completed":
-            self.update_task_status(tenant, self.TASK_KEY, "active")
+            self.update_task_status(tenant, self.DEMO_TASK_KEY, "active")
             task["status"] = "active"
         query_plan = [
             "Validate current tenant and approved-only artifact gate.",
@@ -6037,7 +6152,14 @@ class ReasoningRepository:
         yield {"event": "plan", "data": {"query_plan": query_plan, "task": task}}
         graph = self.graph_query(tenant, "Employee", "4")
         tool_calls = [
-            {"tool": "graph_query", "tenant_id": tenant.tenant_id, "approved_only": True, "status": "completed" if graph.get("approved") else "blocked"},
+            {
+                "tool": "graph_query",
+                "tenant_id": tenant.tenant_id,
+                "approved_only": True,
+                "projection_source": "fallback_fixture",
+                "demo_only": True,
+                "status": "completed" if graph.get("approved") else "blocked",
+            },
         ]
         yield {"event": "step", "data": {"tool": "graph_query", "status": tool_calls[0]["status"], "step": 1, "total": 5}}
         if not graph.get("approved"):
@@ -7890,7 +8012,7 @@ class ReasoningRepository:
                 "kind": "aggregate",
                 "label": "Tenant source-row workload aggregate",
                 "summary": f"Employee #4 handled {workload['order_count']} of {workload['total_orders']} orders.",
-                "url": f"/reasoning.html?tenant={tenant.tenant_id}&task={self.TASK_KEY}",
+                "url": f"/reasoning.html?tenant={tenant.tenant_id}&task={self.DEMO_TASK_KEY}",
                 "source_ref": "orders.employeeID=4",
                 "payload": workload,
             },
@@ -7902,7 +8024,7 @@ class ReasoningRepository:
         prompt_version = (
             "graph-scope-reasoning-v1"
             if str(task.get("canonical_key") or "").startswith("reasoning:graph-scope:")
-            else "northwind-workload-v1"
+            else "fallback-fixture-northwind-workload-v1"
         )
         with self.metadata_engine_for(tenant).begin() as conn:
             row = conn.execute(
@@ -9102,9 +9224,11 @@ class ReviewWorkbenchHandler(BaseHTTPRequestHandler):
             view = query.get("view", ["scope"])[0]
             object_type = (query.get("type", [""])[0] or "").strip()
             instance_id = (query.get("id", [""])[0] or "").strip()
-            if view != "all":
-                object_type = object_type or "Employee"
-                instance_id = instance_id or "4"
+            if view != "all" and (not object_type or not instance_id):
+                default_center = self.instance_repository.default_center(tenant)
+                if default_center:
+                    object_type = object_type or default_center["type"]
+                    instance_id = instance_id or default_center["id"]
             graph = (
                 self.instance_repository.full_graph(tenant, object_type, instance_id, limit=limit)
                 if view == "all"
@@ -9154,29 +9278,31 @@ class ReviewWorkbenchHandler(BaseHTTPRequestHandler):
         if parsed.path.startswith("/api/graph/node/"):
             node_key = unquote(parsed.path.removeprefix("/api/graph/node/"))
             if ":" not in node_key:
-                self._send_error(HTTPStatus.BAD_REQUEST, "Expected node key like Employee:4")
+                self._send_error(HTTPStatus.BAD_REQUEST, "Expected node key in the form Type:Id")
                 return
             object_type, instance_id = node_key.split(":", 1)
             detail = self.instance_repository.detail(tenant, object_type, instance_id)
             if detail is None:
                 self._send_error(HTTPStatus.NOT_FOUND, "Graph node not found or not approved")
                 return
-            if object_type.lower() == "employee":
-                graph = self.instance_repository.neighborhood(tenant, object_type, instance_id, depth=1, limit=300)
-                if graph and graph.get("approved"):
-                    detail["neighborhood_summary"] = {
-                        "nodes": len(graph.get("nodes", [])),
-                        "edges": len(graph.get("edges", [])),
-                        "by_relation": {"link:employee:1:n:order": len(graph.get("edges", []))},
-                    }
-            else:
-                detail["neighborhood_summary"] = {"nodes": 1, "edges": 0, "by_relation": {}}
+            graph = self.instance_repository.neighborhood(tenant, object_type, instance_id, depth=1, limit=300)
+            by_relation = {}
+            if graph and graph.get("approved"):
+                for edge in graph.get("edges", []):
+                    relation = edge.get("link_key") or edge.get("ontology_link") or edge.get("label") or "edge"
+                    by_relation[relation] = by_relation.get(relation, 0) + 1
+            detail["neighborhood_summary"] = {
+                "nodes": len(graph.get("nodes", [])) if graph and graph.get("approved") else 1,
+                "edges": len(graph.get("edges", [])) if graph and graph.get("approved") else 0,
+                "by_relation": by_relation,
+                "projection_source": (graph.get("scope") or {}).get("projection_source") if graph else None,
+            }
             self._send_json({"tenant": tenant.public_dict(), "node": detail})
             return
         if parsed.path.startswith("/api/graph/edge/"):
             edge_key = unquote(parsed.path.removeprefix("/api/graph/edge/"))
             if "->" not in edge_key:
-                self._send_error(HTTPStatus.BAD_REQUEST, "Expected edge key like Employee:4->Order:10250")
+                self._send_error(HTTPStatus.BAD_REQUEST, "Expected edge key in the form Type:Id->Type:Id")
                 return
             source, target = edge_key.split("->", 1)
             edge = self.instance_repository.edge_detail(tenant, source, target)
@@ -9192,7 +9318,13 @@ class ReviewWorkbenchHandler(BaseHTTPRequestHandler):
             return
         if parsed.path == "/api/instances/search":
             query = parse_qs(parsed.query)
-            object_type = query.get("type", ["Employee"])[0]
+            object_type = query.get("type", [""])[0].strip()
+            if not object_type:
+                default_center = self.instance_repository.default_center(tenant, include_draft=query.get("include_draft", ["0"])[0] in {"1", "true", "yes"})
+                object_type = default_center["type"] if default_center else ""
+            if not object_type:
+                self._send_error(HTTPStatus.BAD_REQUEST, "type is required when the tenant has no approved graph center")
+                return
             search = query.get("q", [""])[0]
             limit = int(query.get("limit", ["25"])[0])
             include_draft = query.get("include_draft", ["0"])[0] in {"1", "true", "yes"}
@@ -9320,9 +9452,14 @@ class ReviewWorkbenchHandler(BaseHTTPRequestHandler):
         if parsed.path == "/api/graph/expand":
             try:
                 body = self._read_json()
-                node_key = body.get("node_key") or body.get("center_node") or "Employee:4"
+                node_key = body.get("node_key") or body.get("center_node")
+                if not node_key:
+                    default_center = self.instance_repository.default_center(tenant)
+                    node_key = default_center["node"]["id"] if default_center and default_center.get("node") else None
+                if not node_key:
+                    raise ValueError("node_key is required when the tenant has no approved graph center")
                 if ":" not in node_key:
-                    raise ValueError("node_key must be like Employee:4")
+                    raise ValueError("node_key must be in the form Type:Id")
                 object_type, instance_id = node_key.split(":", 1)
                 depth = int(body.get("depth") or 1)
                 limit = int(body.get("limit") or body.get("node_limit") or 200)
@@ -9715,11 +9852,22 @@ class ReviewWorkbenchHandler(BaseHTTPRequestHandler):
         runs = self.reasoning_repository.list_runs_overview(tenant, limit=25)
         agent_settings = self.agent_gateway_repository.list_settings(tenant)
         agent_runs = agent_settings.get("runs", [])
-        default_graph = self.instance_repository.neighborhood(tenant, "Employee", "4", depth=1, limit=200)
+        default_center = self.instance_repository.default_center(tenant)
+        default_graph = (
+            self.instance_repository.neighborhood(tenant, default_center["type"], default_center["id"], depth=1, limit=200)
+            if default_center
+            else self.instance_repository.full_graph(tenant, limit=200)
+        )
         sandbox_graph = None
         try:
-            sandbox_graph = self.instance_repository.neighborhood(
-                self.repository.tenant_registry.get("northwind-sandbox"), "Employee", "4", depth=1, limit=200
+            sandbox_tenant = self.repository.tenant_registry.get("northwind-sandbox")
+            sandbox_center = self.instance_repository.default_center(sandbox_tenant)
+            sandbox_graph = (
+                self.instance_repository.neighborhood(
+                    sandbox_tenant, sandbox_center["type"], sandbox_center["id"], depth=1, limit=200
+                )
+                if sandbox_center
+                else None
             )
         except Exception:
             sandbox_graph = None
@@ -9823,9 +9971,29 @@ class ReviewWorkbenchHandler(BaseHTTPRequestHandler):
             "quick_tasks": [
                 {"label": "Ask a question", "href": f"/questions.html?tenant={quote(tenant.tenant_id)}"},
                 {"label": "Explain a finding", "href": f"/findings.html?tenant={quote(tenant.tenant_id)}"},
-                {"label": "Inspect an entity", "href": f"/instances.html?tenant={quote(tenant.tenant_id)}&type=Employee&id=4"},
+                {
+                    "label": "Inspect an entity",
+                    "href": (
+                        f"/instances.html?tenant={quote(tenant.tenant_id)}"
+                        + (
+                            f"&type={quote(default_center['type'])}&id={quote(default_center['id'])}"
+                            if default_center
+                            else ""
+                        )
+                    ),
+                },
                 {"label": "View evidence chain", "href": f"/findings.html?tenant={quote(tenant.tenant_id)}"},
-                {"label": "Trace graph path", "href": f"/graph.html?tenant={quote(tenant.tenant_id)}&type=Employee&id=4&depth=1&limit=200"},
+                {
+                    "label": "Trace graph path",
+                    "href": (
+                        f"/graph.html?tenant={quote(tenant.tenant_id)}"
+                        + (
+                            f"&type={quote(default_center['type'])}&id={quote(default_center['id'])}&depth=1&limit=200"
+                            if default_center
+                            else "&view=all&limit=200"
+                        )
+                    ),
+                },
                 {"label": "Check quality issues", "href": f"/quality.html?tenant={quote(tenant.tenant_id)}"},
                 {"label": "Run scoped reasoning", "href": f"/questions.html?tenant={quote(tenant.tenant_id)}&template=scoped"},
             ],
