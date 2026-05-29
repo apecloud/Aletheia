@@ -1,7 +1,7 @@
 import unittest
 from datetime import datetime
 
-from server.workbench_server import InstanceRepository
+from server.workbench_server import InstanceRepository, _dedup_audit_from_payload
 
 
 class ContinuousEnrichmentFrontierTest(unittest.TestCase):
@@ -95,6 +95,34 @@ class ContinuousEnrichmentFrontierTest(unittest.TestCase):
             tenant = type("Tenant", (), {"tenant_id": tenant_id})()
             self.assertEqual(repo.reasoning_entity_config(tenant), {})
             self.assertEqual(repo.reasoning_link_config(tenant), [])
+
+    def test_dedup_audit_preserves_merge_boundary_false(self):
+        audit = _dedup_audit_from_payload(
+            {
+                "candidate_id": "candidate:country:chn",
+                "task_id": "task-1",
+                "run_id": "run-1",
+                "frontier_id": "frontier-1",
+                "dedup_decision": "needs_review",
+                "matched_node_key": "Country:CHN",
+                "match_score": 0.91,
+                "match_evidence": [{"field": "label", "reason": "same normalized name"}],
+                "conflict_fields": ["source_url"],
+                "decision_reason": "High identity match with conflicting source evidence",
+                "source_fingerprint": "source123",
+                "evidence_fingerprint": "evidence123",
+                "llm_merge_decision_allowed": False,
+                "empty_field": "",
+            }
+        )
+
+        self.assertEqual(audit["candidate_id"], "candidate:country:chn")
+        self.assertEqual(audit["dedup_decision"], "needs_review")
+        self.assertEqual(audit["matched_node_key"], "Country:CHN")
+        self.assertEqual(audit["match_score"], 0.91)
+        self.assertEqual(audit["conflict_fields"], ["source_url"])
+        self.assertIs(audit["llm_merge_decision_allowed"], False)
+        self.assertNotIn("empty_field", audit)
 
 
 if __name__ == "__main__":

@@ -98,6 +98,44 @@ def _json_dump(value):
     return json.dumps(value, ensure_ascii=False, sort_keys=True)
 
 
+DEDUP_AUDIT_FIELDS = (
+    "candidate_id",
+    "task_id",
+    "run_id",
+    "frontier_id",
+    "dedup_decision",
+    "matched_node_key",
+    "matched_edge_key",
+    "matched_element_key",
+    "matched_status",
+    "matched_source",
+    "match_score",
+    "match_evidence",
+    "conflict_fields",
+    "decision_reason",
+    "source_fingerprint",
+    "evidence_fingerprint",
+    "llm_merge_decision_allowed",
+)
+
+
+def _dedup_audit_from_payload(payload):
+    payload = payload or {}
+    audit = {}
+    for field in DEDUP_AUDIT_FIELDS:
+        if field not in payload:
+            continue
+        value = payload.get(field)
+        if value in (None, "", [], {}):
+            continue
+        audit[field] = value
+    if "llm_merge_decision_allowed" in payload:
+        audit["llm_merge_decision_allowed"] = bool(payload.get("llm_merge_decision_allowed"))
+    elif audit:
+        audit["llm_merge_decision_allowed"] = False
+    return audit
+
+
 def _fmt_number(value):
     if isinstance(value, float):
         if value == int(value):
@@ -2743,6 +2781,7 @@ class InstanceRepository:
         elements = []
         runs = {}
         for row in rows:
+            payload = _load_json(row["payload_json"], {})
             run = runs.setdefault(
                 row["run_key"],
                 {
@@ -2764,7 +2803,8 @@ class InstanceRepository:
                     "element_key": row["element_key"],
                     "element_type": row["element_type"],
                     "name": row["name"],
-                    "payload": _load_json(row["payload_json"], {}),
+                    "payload": payload,
+                    "dedup_audit": _dedup_audit_from_payload(payload),
                     "evidence_refs": _load_json(row["evidence_refs_json"], []),
                     "source_url": row["source_url"],
                     "confidence": row["confidence"],
@@ -2852,6 +2892,7 @@ class InstanceRepository:
             "element_type": row["element_type"],
             "name": row["name"],
             "payload": payload,
+            "dedup_audit": _dedup_audit_from_payload(payload),
             "evidence_refs": _load_json(row["evidence_refs_json"], []),
             "source_url": row["source_url"],
             "confidence": row["confidence"],

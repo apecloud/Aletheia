@@ -1,0 +1,63 @@
+{
+  "task": 360,
+  "status": "implemented",
+  "scope": "display-only dedup audit evidence for proposed graph review",
+  "changed_files": [
+    "server/workbench_server.py",
+    "web/app/graph.jsx",
+    "web/app/workbench.jsx",
+    "tests/test_continuous_enrichment_frontier.py"
+  ],
+  "api": {
+    "endpoint": "/api/graph/proposed-elements",
+    "added_field": "dedup_audit",
+    "fields": [
+      "candidate_id",
+      "task_id",
+      "run_id",
+      "frontier_id",
+      "dedup_decision",
+      "matched_node_key",
+      "matched_edge_key",
+      "matched_element_key",
+      "matched_status",
+      "matched_source",
+      "match_score",
+      "match_evidence",
+      "conflict_fields",
+      "decision_reason",
+      "source_fingerprint",
+      "evidence_fingerprint",
+      "llm_merge_decision_allowed"
+    ]
+  },
+  "ui": {
+    "graph_proposed_review": true,
+    "workspace_work_queue_inline_review": true,
+    "decision_labels": [
+      "merge_existing",
+      "duplicate_existing_proposal",
+      "duplicate_current_run",
+      "needs_review",
+      "new_proposal"
+    ]
+  },
+  "boundaries": {
+    "display_only": true,
+    "auto_approve": false,
+    "auto_merge": false,
+    "canonical_ontology_write": false,
+    "formal_graph_write": false,
+    "llm_merge_decision_allowed": false
+  },
+  "validation": {
+    "py_compile": "pass",
+    "targeted_unittest": "pass: 33 tests",
+    "unittest_discover": "pass: 38 tests",
+    "node_check_api": "pass",
+    "graph_esbuild": "pass",
+    "workbench_esbuild": "pass",
+    "api_smoke": "pass: proposed elements include dedup_audit field",
+    "git_diff_check": "pass"
+  }
+}

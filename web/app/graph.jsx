@@ -46,6 +46,60 @@ function statusLabelGraphGX(status, language) {
   return map[String(status || "").toLowerCase()] || status || "—";
 }
 
+const DEDUP_AUDIT_FIELDS_GX = [
+  "candidate_id",
+  "task_id",
+  "run_id",
+  "frontier_id",
+  "dedup_decision",
+  "matched_node_key",
+  "matched_edge_key",
+  "matched_element_key",
+  "matched_status",
+  "matched_source",
+  "match_score",
+  "match_evidence",
+  "conflict_fields",
+  "decision_reason",
+  "source_fingerprint",
+  "evidence_fingerprint",
+  "llm_merge_decision_allowed",
+];
+
+function dedupAuditGX(item) {
+  const payload = item?.payload || {};
+  const audit = { ...(item?.dedup_audit || payload.dedup_audit || {}) };
+  DEDUP_AUDIT_FIELDS_GX.forEach(field => {
+    if (audit[field] !== undefined) return;
+    const value = payload[field];
+    if (value === undefined || value === null || value === "" || (Array.isArray(value) && !value.length)) return;
+    audit[field] = value;
+  });
+  if (audit.llm_merge_decision_allowed === undefined && Object.keys(audit).length) audit.llm_merge_decision_allowed = false;
+  return audit;
+}
+
+function dedupDecisionLabelGX(decision, language) {
+  const key = String(decision || "");
+  const labels = {
+    merge_existing: tGX(language, "merge existing approved object", "命中已批准对象"),
+    duplicate_existing_proposal: tGX(language, "duplicate existing proposal", "重复候选"),
+    duplicate_current_run: tGX(language, "duplicate in current run", "本轮重复"),
+    needs_review: tGX(language, "needs human review", "需要人工判定"),
+    new_proposal: tGX(language, "new proposal", "新候选"),
+  };
+  return labels[key] || key || "—";
+}
+
+function auditValueGX(value) {
+  if (value === false) return "false";
+  if (value === true) return "true";
+  if (value === null || value === undefined || value === "") return "—";
+  if (Array.isArray(value)) return value.length ? value.map(auditValueGX).join(" · ") : "—";
+  if (typeof value === "object") return JSON.stringify(value);
+  return String(value);
+}
+
 function rawEdgeKindGX(edge) {
   return edge?.link_key || edge?.kind || edge?.ontology_link || edge?.label || "";
 }
@@ -1334,6 +1388,11 @@ function ProposedGraphPanel({ tenantId, proposed, loading, source, focusElementK
               <div style={{ fontFamily: "var(--font-mono)", color: "var(--muted)", fontSize: 10 }}>
                 {statusLabelGraphGX(item.status, language)} · {item.source_url || tGX(language, "source unknown", "来源未知")}
               </div>
+              {dedupAuditGX(item).dedup_decision && (
+                <div style={{ fontFamily: "var(--font-mono)", color: "var(--accent)", fontSize: 10, marginTop: 3 }}>
+                  {tGX(language, "dedup", "去重")} · {dedupDecisionLabelGX(dedupAuditGX(item).dedup_decision, language)}
+                </div>
+              )}
             </div>
           ))}
           {filteredElements.length === 0 && (
@@ -1371,6 +1430,10 @@ function ProposedGraphDetail({ item, reason, setReason, busy, message, onReview,
   const path = profile.path || payload.path || payload.evidence_path || [];
   const pathLabel = profile.path_label || payload.path_label || "";
   const conclusion = payload.conclusion || payload.summary || payload.description || "";
+  const dedupAudit = dedupAuditGX(item);
+  const matchedKey = dedupAudit.matched_node_key || dedupAudit.matched_edge_key || dedupAudit.matched_element_key || "";
+  const matchEvidence = Array.isArray(dedupAudit.match_evidence) ? dedupAudit.match_evidence : [];
+  const conflictFields = Array.isArray(dedupAudit.conflict_fields) ? dedupAudit.conflict_fields : [];
   return (
     <div style={{ marginTop: 14, borderTop: "1px solid var(--line)", paddingTop: 12 }}>
       <div className="eyebrow accent">{tGX(language, "Review selected", "审核选中的")} {tGX(language, item.element_type, item.element_type === "node" ? "节点" : item.element_type === "edge" ? "边" : item.element_type === "finding" ? "发现" : item.element_type)}</div>
@@ -1384,6 +1447,40 @@ function ProposedGraphDetail({ item, reason, setReason, busy, message, onReview,
         <dt>{tGX(language, "Evidence", "证据")}</dt><dd>{(item.evidence_refs || []).join(", ") || "—"}</dd>
         <dt>{tGX(language, "Boundary", "边界")}</dt><dd>{boundary.writes_canonical === false || boundary.canonical_write === false ? "canonical disabled" : "canonical disabled"} · {boundary.writes_formal_graph === false || boundary.formal_graph_write === false ? "formal graph disabled" : "formal graph disabled"}</dd>
       </dl>
+      {Object.keys(dedupAudit).length > 0 && (
+        <div style={{ marginTop: 10, padding: 10, border: "1px solid var(--line-soft)", background: "var(--bg-2)" }}>
+          <div className="eyebrow accent" style={{ marginBottom: 8 }}>{tGX(language, "Dedup audit", "去重审计")}</div>
+          <dl className="kv" style={{ marginTop: 0 }}>
+            <dt>{tGX(language, "Decision", "判定")}</dt><dd>{dedupDecisionLabelGX(dedupAudit.dedup_decision, language)}</dd>
+            <dt>{tGX(language, "Candidate", "候选")}</dt><dd>{auditValueGX(dedupAudit.candidate_id)}</dd>
+            <dt>{tGX(language, "Task / run / frontier", "任务 / 运行 / frontier")}</dt><dd>{[dedupAudit.task_id, dedupAudit.run_id, dedupAudit.frontier_id].filter(Boolean).join(" · ") || "—"}</dd>
+            <dt>{tGX(language, "Matched", "命中")}</dt><dd>{matchedKey || "—"}</dd>
+            <dt>{tGX(language, "Score", "分数")}</dt><dd>{dedupAudit.match_score === undefined ? "—" : dedupAudit.match_score}</dd>
+            <dt>{tGX(language, "Fingerprints", "指纹")}</dt><dd>{[dedupAudit.source_fingerprint, dedupAudit.evidence_fingerprint].filter(Boolean).join(" · ") || "—"}</dd>
+            <dt>{tGX(language, "LLM merge", "LLM 合并")}</dt><dd>{auditValueGX(dedupAudit.llm_merge_decision_allowed)} · {tGX(language, "deterministic review boundary", "确定性审核边界")}</dd>
+          </dl>
+          {dedupAudit.decision_reason && (
+            <div style={{ marginTop: 8, fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--text-dim)", overflowWrap: "anywhere" }}>
+              {tGX(language, "Reason", "原因")}: {labelGX(dedupAudit.decision_reason, language)}
+            </div>
+          )}
+          {conflictFields.length > 0 && (
+            <div style={{ marginTop: 8, fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--changes)", overflowWrap: "anywhere" }}>
+              {tGX(language, "Conflicts require review gate", "冲突字段需要审核入口判定")}: {conflictFields.join(", ")}
+            </div>
+          )}
+          {matchEvidence.length > 0 && (
+            <div style={{ marginTop: 8 }}>
+              <div className="eyebrow" style={{ marginBottom: 5 }}>{tGX(language, "Match evidence", "匹配证据")}</div>
+              {matchEvidence.slice(0, 4).map((evidence, index) => (
+                <div key={index} style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--muted)", borderTop: "1px solid var(--line-soft)", paddingTop: 4, marginTop: 4, overflowWrap: "anywhere" }}>
+                  {auditValueGX(evidence)}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
       {(pathLabel || conclusion) && (
         <div style={{ marginTop: 10, padding: 10, border: "1px solid var(--line-soft)", background: "var(--bg-2)" }}>
           {pathLabel && <div style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--accent)", marginBottom: 6 }}>{labelGX(pathLabel, language)}</div>}

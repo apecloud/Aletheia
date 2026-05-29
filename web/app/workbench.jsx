@@ -34,6 +34,61 @@ function statusLabelWB(status, language) {
   return map[String(status || "").toLowerCase()] || status || "—";
 }
 
+const DEDUP_AUDIT_FIELDS_WB = [
+  "candidate_id",
+  "task_id",
+  "run_id",
+  "frontier_id",
+  "dedup_decision",
+  "matched_node_key",
+  "matched_edge_key",
+  "matched_element_key",
+  "matched_status",
+  "matched_source",
+  "match_score",
+  "match_evidence",
+  "conflict_fields",
+  "decision_reason",
+  "source_fingerprint",
+  "evidence_fingerprint",
+  "llm_merge_decision_allowed",
+];
+
+function dedupAuditWB(item) {
+  const raw = item?.raw || item || {};
+  const payload = raw.payload || {};
+  const audit = { ...(item?.dedupAudit || raw.dedup_audit || payload.dedup_audit || {}) };
+  DEDUP_AUDIT_FIELDS_WB.forEach(field => {
+    if (audit[field] !== undefined) return;
+    const value = payload[field] ?? raw[field];
+    if (value === undefined || value === null || value === "" || (Array.isArray(value) && !value.length)) return;
+    audit[field] = value;
+  });
+  if (audit.llm_merge_decision_allowed === undefined && Object.keys(audit).length) audit.llm_merge_decision_allowed = false;
+  return audit;
+}
+
+function dedupDecisionLabelWB(decision, language) {
+  const key = String(decision || "");
+  const labels = {
+    merge_existing: tWB(language, "merge existing approved object", "命中已批准对象"),
+    duplicate_existing_proposal: tWB(language, "duplicate existing proposal", "重复候选"),
+    duplicate_current_run: tWB(language, "duplicate in current run", "本轮重复"),
+    needs_review: tWB(language, "needs human review", "需要人工判定"),
+    new_proposal: tWB(language, "new proposal", "新候选"),
+  };
+  return labels[key] || key || "—";
+}
+
+function auditValueWB(value) {
+  if (value === false) return "false";
+  if (value === true) return "true";
+  if (value === null || value === undefined || value === "") return "—";
+  if (Array.isArray(value)) return value.length ? value.map(auditValueWB).join(" · ") : "—";
+  if (typeof value === "object") return JSON.stringify(value);
+  return String(value);
+}
+
 function itemTypeLabelWB(type, language) {
   if (!isZhWB(language)) return type || "Work item";
   const map = {
@@ -955,6 +1010,7 @@ function buildWorkspaceReviewItems({ tenantId, artifacts, graphElements, agentRu
         reviewKindLabel: "Proposed graph review gate",
         runHref: e.run_key ? `/?screen=workbench&tenant=${encodeURIComponent(tenantId)}&workspace_tab=agents&agent_tab=enrichment&run_key=${encodeURIComponent(e.run_key)}` : "",
         boundary: "proposed graph space; formal graph writes disabled",
+        dedupAudit: dedupAuditWB(e),
         raw: e,
       });
     });
@@ -1016,6 +1072,10 @@ function InlineReviewDetails({ item, language }) {
   const evidenceRefs = workspaceEvidenceRefs(item);
   const path = workspacePathLabel(item);
   const boundary = workspaceBoundaryFacts(item);
+  const dedupAudit = dedupAuditWB(item);
+  const matchedKey = dedupAudit.matched_node_key || dedupAudit.matched_edge_key || dedupAudit.matched_element_key || "";
+  const matchEvidence = Array.isArray(dedupAudit.match_evidence) ? dedupAudit.match_evidence : [];
+  const conflictFields = Array.isArray(dedupAudit.conflict_fields) ? dedupAudit.conflict_fields : [];
   return (
     <div style={{ display: "grid", gap: 10 }}>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
@@ -1026,6 +1086,40 @@ function InlineReviewDetails({ item, language }) {
       </div>
       {path && <CaseField label={tWB(language, "Path / relation", "路径 / 关系")} value={textWB(path, language)} />}
       {sourceUrl && <CaseField label={tWB(language, "Source URL", "来源 URL")} value={sourceUrl} />}
+      {Object.keys(dedupAudit).length > 0 && (
+        <div style={{ border: "1px solid var(--line-soft)", background: "var(--bg-2)", padding: "10px 12px" }}>
+          <div className="eyebrow accent" style={{ marginBottom: 8 }}>{tWB(language, "Dedup audit", "去重审计")}</div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+            <CaseField label={tWB(language, "Decision", "判定")} value={dedupDecisionLabelWB(dedupAudit.dedup_decision, language)} />
+            <CaseField label={tWB(language, "Matched", "命中")} value={matchedKey || "—"} />
+            <CaseField label={tWB(language, "Candidate", "候选")} value={auditValueWB(dedupAudit.candidate_id)} />
+            <CaseField label={tWB(language, "Score", "分数")} value={dedupAudit.match_score === undefined ? "—" : String(dedupAudit.match_score)} />
+            <CaseField label={tWB(language, "Task / run / frontier", "任务 / 运行 / frontier")} value={[dedupAudit.task_id, dedupAudit.run_id, dedupAudit.frontier_id].filter(Boolean).join(" · ") || "—"} />
+            <CaseField label={tWB(language, "Fingerprints", "指纹")} value={[dedupAudit.source_fingerprint, dedupAudit.evidence_fingerprint].filter(Boolean).join(" · ") || "—"} />
+            <CaseField label={tWB(language, "LLM merge", "LLM 合并")} value={`${auditValueWB(dedupAudit.llm_merge_decision_allowed)} · ${tWB(language, "deterministic review boundary", "确定性审核边界")}`} />
+          </div>
+          {dedupAudit.decision_reason && (
+            <div style={{ marginTop: 8, fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-dim)", overflowWrap: "anywhere" }}>
+              {tWB(language, "Reason", "原因")}: {textWB(dedupAudit.decision_reason, language)}
+            </div>
+          )}
+          {conflictFields.length > 0 && (
+            <div style={{ marginTop: 8, fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--changes)", overflowWrap: "anywhere" }}>
+              {tWB(language, "Conflicts require review gate", "冲突字段需要审核入口判定")}: {conflictFields.join(", ")}
+            </div>
+          )}
+          {matchEvidence.length > 0 && (
+            <div style={{ marginTop: 8 }}>
+              <div className="eyebrow" style={{ marginBottom: 5 }}>{tWB(language, "Match evidence", "匹配证据")}</div>
+              {matchEvidence.slice(0, 4).map((evidence, index) => (
+                <div key={index} style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--muted)", borderTop: "1px solid var(--line-soft)", paddingTop: 4, marginTop: 4, overflowWrap: "anywhere" }}>
+                  {auditValueWB(evidence)}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
       {evidenceRefs.length > 0 && (
         <div style={{ border: "1px solid var(--line-soft)", background: "var(--bg-2)", padding: "10px 12px" }}>
           <div className="eyebrow" style={{ marginBottom: 6 }}>{tWB(language, "Evidence refs", "证据引用")}</div>
