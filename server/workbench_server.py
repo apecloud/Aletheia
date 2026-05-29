@@ -192,6 +192,67 @@ def _artifact_to_dict(row):
 
 EXPLICIT_DEMO_FALLBACK_TENANTS = {"default", "northwind-sandbox", "creditcardfraud"}
 
+NORTHWIND_FALLBACK_ENTITY_KEYS = frozenset(
+    {"employee", "order", "customer", "product", "category"}
+)
+NORTHWIND_FALLBACK_LINK_KEYS = frozenset(
+    {
+        "link:employee:1:n:order",
+        "link:customer:1:n:order",
+        "link:category:1:n:product",
+        "link:order:n:m:product",
+        "link:employee:1:n:employee",
+    }
+)
+CREDITCARDFRAUD_FALLBACK_ENTITY_KEYS = frozenset(
+    {"credit_card_transaction", "account", "card", "merchant"}
+)
+CREDITCARDFRAUD_FALLBACK_LINK_KEYS = frozenset(
+    {
+        "link:account:1:n:credit_card_transaction",
+        "link:card:1:n:credit_card_transaction",
+        "link:merchant:1:n:credit_card_transaction",
+    }
+)
+FALLBACK_ENTITY_KEYS_BY_TENANT = {
+    "default": NORTHWIND_FALLBACK_ENTITY_KEYS,
+    "northwind-sandbox": NORTHWIND_FALLBACK_ENTITY_KEYS,
+    "creditcardfraud": CREDITCARDFRAUD_FALLBACK_ENTITY_KEYS,
+}
+FALLBACK_LINK_KEYS_BY_TENANT = {
+    "default": NORTHWIND_FALLBACK_LINK_KEYS,
+    "northwind-sandbox": NORTHWIND_FALLBACK_LINK_KEYS,
+    "creditcardfraud": CREDITCARDFRAUD_FALLBACK_LINK_KEYS,
+}
+
+
+def _tenant_fallback_source_link_schemas(tenant_id):
+    allowed = FALLBACK_LINK_KEYS_BY_TENANT.get(tenant_id, frozenset())
+    return {key: value for key, value in FALLBACK_SOURCE_LINK_SCHEMAS.items() if key in allowed}
+
+
+def _tenant_fallback_source_table_schemas(tenant_id):
+    allowed = FALLBACK_ENTITY_KEYS_BY_TENANT.get(tenant_id, frozenset())
+    aliases = {
+        "credit_card_transaction": {"credit_card_transaction"},
+        "account": {"account"},
+        "card": {"card"},
+        "merchant": {"merchant"},
+        "employee": {"employee"},
+        "order": {"order"},
+        "customer": {"customer"},
+        "product": {"product"},
+        "category": {"category"},
+    }
+    allowed_schema_keys = set()
+    for key in allowed:
+        allowed_schema_keys.update(aliases.get(key, {key}))
+    return {
+        key: value
+        for key, value in FALLBACK_SOURCE_TABLE_SCHEMAS.items()
+        if key in allowed_schema_keys
+    }
+
 
 FALLBACK_SOURCE_TABLE_SCHEMAS = {
     "employee": {
@@ -446,7 +507,14 @@ def _apply_table_hints(table_schema, fields):
     return fields
 
 
-def _ontology_source_schema(artifact, table_fields=None):
+def _ontology_source_schema(
+    artifact,
+    table_fields=None,
+    fallback_link_schemas=None,
+    fallback_table_schemas=None,
+):
+    fallback_link_schemas = fallback_link_schemas if fallback_link_schemas is not None else FALLBACK_SOURCE_LINK_SCHEMAS
+    fallback_table_schemas = fallback_table_schemas if fallback_table_schemas is not None else FALLBACK_SOURCE_TABLE_SCHEMAS
     canonical_key = artifact.get("canonical_key") or ""
     payload = artifact.get("payload") or {}
     artifact_type = artifact.get("artifact_type")
@@ -493,8 +561,8 @@ def _ontology_source_schema(artifact, table_fields=None):
             value for key, value in schema.items() if key.endswith("_property") and isinstance(value, dict)
         ]
         return schema
-    if canonical_key in FALLBACK_SOURCE_LINK_SCHEMAS:
-        schema = dict(FALLBACK_SOURCE_LINK_SCHEMAS[canonical_key])
+    if canonical_key in fallback_link_schemas:
+        schema = dict(fallback_link_schemas[canonical_key])
         table_fields = table_fields or {}
         field_map = _field_by_qualified_name(
             table_fields.get(schema["source_table"], {}).get("fields", [])
@@ -573,7 +641,7 @@ def _ontology_source_schema(artifact, table_fields=None):
                 schema["degraded_reason"] = live.get("degraded_reason")
                 schema["connection_error"] = live.get("connection_error")
             return schema
-        table_schema = FALLBACK_SOURCE_TABLE_SCHEMAS.get(object_name)
+        table_schema = fallback_table_schemas.get(object_name)
         if table_schema:
             schema = dict(table_schema)
             live = (table_fields or {}).get(schema["table"])
@@ -656,25 +724,27 @@ class ReviewRepository:
         canonical_key = artifact.get("canonical_key") or ""
         payload = artifact.get("payload") or {}
         artifact_type = artifact.get("artifact_type")
+        fallback_link_schemas = _tenant_fallback_source_link_schemas(tenant.tenant_id)
+        fallback_table_schemas = _tenant_fallback_source_table_schemas(tenant.tenant_id)
         table_names = set()
         if artifact_type == "link" and payload.get("source_table") and payload.get("target_table"):
             table_names.add(payload["source_table"])
             table_names.add(payload["target_table"])
-        elif canonical_key in FALLBACK_SOURCE_LINK_SCHEMAS:
-            link_schema = FALLBACK_SOURCE_LINK_SCHEMAS[canonical_key]
+        elif canonical_key in fallback_link_schemas:
+            link_schema = fallback_link_schemas[canonical_key]
             table_names.add(link_schema["source_table"])
             table_names.add(link_schema["target_table"])
         elif artifact_type == "object":
             object_name = str(payload.get("object_name") or artifact.get("name") or canonical_key.removeprefix("object:")).lower().replace(" ", "_")
             mapped_tables = payload.get("mapped_table_names") or payload.get("mapped_tables") or []
             table_names.update(table for table in mapped_tables if table)
-            if not mapped_tables and object_name in FALLBACK_SOURCE_TABLE_SCHEMAS:
-                table_names.add(FALLBACK_SOURCE_TABLE_SCHEMAS[object_name]["table"])
+            if not mapped_tables and object_name in fallback_table_schemas:
+                table_names.add(fallback_table_schemas[object_name]["table"])
         schemas = {}
         object_hint = None
         if artifact_type == "object":
             object_name = str(payload.get("object_name") or artifact.get("name") or canonical_key.removeprefix("object:")).lower().replace(" ", "_")
-            object_hint = FALLBACK_SOURCE_TABLE_SCHEMAS.get(object_name)
+            object_hint = fallback_table_schemas.get(object_name)
         for table in table_names:
             schema = self.source_table_schema(tenant, table)
             hint = object_hint if object_hint and object_hint.get("table") == table else FALLBACK_SOURCE_TABLE_HINTS_BY_TABLE.get(table)
@@ -844,7 +914,12 @@ class ReviewRepository:
             ).mappings().all()
         result = _artifact_to_dict(artifact)
         result["tenant"] = tenant.public_dict()
-        result["source_schema"] = _ontology_source_schema(result, self.source_schemas_for_artifact(tenant, result))
+        result["source_schema"] = _ontology_source_schema(
+            result,
+            self.source_schemas_for_artifact(tenant, result),
+            fallback_link_schemas=_tenant_fallback_source_link_schemas(tenant.tenant_id),
+            fallback_table_schemas=_tenant_fallback_source_table_schemas(tenant.tenant_id),
+        )
         result["canonical"] = {
             "status": result["status"],
             "version": result["version"],
@@ -1103,13 +1178,29 @@ class InstanceRepository:
             self.source_engines[tenant.source_db_url] = engine
         return engine
 
-    def _cfg_key(self, object_type):
+    def _fallback_entity_config(self, tenant):
+        allowed = FALLBACK_ENTITY_KEYS_BY_TENANT.get(tenant.tenant_id, frozenset())
+        return {key: cfg for key, cfg in self.ENTITY_CONFIG.items() if key in allowed}
+
+    def _fallback_link_config(self, tenant):
+        entity_config = self._fallback_entity_config(tenant)
+        allowed = FALLBACK_LINK_KEYS_BY_TENANT.get(tenant.tenant_id, frozenset())
+        return [
+            link
+            for link in self.LINK_CONFIG
+            if link["link"] in allowed
+            and link.get("from") in entity_config
+            and link.get("to") in entity_config
+        ]
+
+    def _cfg_key(self, object_type, entity_config=None):
+        entity_config = entity_config or self.ENTITY_CONFIG
         raw = str(object_type or "").strip()
         if not raw:
             return ""
         snake = re.sub(r"(?<!^)(?=[A-Z])", "_", raw).replace("-", "_").lower()
         compact = re.sub(r"[^a-z0-9]", "", raw.lower())
-        for key in self.ENTITY_CONFIG:
+        for key in entity_config:
             key_compact = re.sub(r"[^a-z0-9]", "", key.lower())
             if raw.lower() == key.lower() or snake == key.lower() or compact == key_compact:
                 return key
@@ -1138,10 +1229,11 @@ class InstanceRepository:
             return {"tenant": tenant.public_dict(), "types": schema_types}
         if tenant.tenant_id not in EXPLICIT_DEMO_FALLBACK_TENANTS:
             return {"tenant": tenant.public_dict(), "types": []}
-        all_keys = [cfg["artifact"] for cfg in self.ENTITY_CONFIG.values()]
+        entity_config = self._fallback_entity_config(tenant)
+        all_keys = [cfg["artifact"] for cfg in entity_config.values()]
         artifacts = self._artifact_statuses(tenant, all_keys) if include_draft else self._approved_artifacts(tenant, all_keys)
         types = []
-        for type_key, cfg in self.ENTITY_CONFIG.items():
+        for type_key, cfg in entity_config.items():
             if cfg["artifact"] in artifacts:
                 artifact = artifacts[cfg["artifact"]]
                 type_name = self._cfg_type(cfg, type_key)
@@ -1167,14 +1259,15 @@ class InstanceRepository:
                 "approved": False,
                 "reason": f"No approved SchemaGraphModelingAgent projection for type {object_type}",
             }
-        cfg_key = self._cfg_key(object_type)
-        cfg = self.ENTITY_CONFIG.get(cfg_key)
+        entity_config = self._fallback_entity_config(tenant)
+        cfg_key = self._cfg_key(object_type, entity_config)
+        cfg = entity_config.get(cfg_key)
         if not cfg:
             return {
                 "tenant": tenant.public_dict(),
                 "instances": [],
                 "approved": False,
-                "reason": f"Unknown type {object_type}",
+                "reason": f"Type {object_type} is not available in tenant-scoped fallback projection for {tenant.tenant_id}",
             }
         canonical_key = cfg["artifact"]
         artifacts = self._artifact_statuses(tenant, [canonical_key]) if include_draft else self._approved_artifacts(tenant, [canonical_key])
@@ -1205,7 +1298,7 @@ class InstanceRepository:
         type_cap = self._cfg_type(cfg, cfg_key)
         return {
             "instances": [
-                self._entity_node(tenant, type_cap, dict(row))
+                self._entity_node(tenant, type_cap, dict(row), entity_config)
                 for row in rows
             ],
             "approved": artifacts[canonical_key].get("status") == "approved",
@@ -1235,15 +1328,18 @@ class InstanceRepository:
             return schema_detail
         if tenant.tenant_id not in EXPLICIT_DEMO_FALLBACK_TENANTS:
             return None
-        canonical_key = self._object_key(object_type)
+        entity_config = self._fallback_entity_config(tenant)
+        cfg_key = self._cfg_key(object_type, entity_config)
+        cfg = entity_config.get(cfg_key)
+        if not cfg:
+            return None
+        canonical_key = cfg["artifact"]
         artifacts = self._approved_artifacts(tenant, [canonical_key])
         if canonical_key not in artifacts:
             return None
-        cfg_key = self._cfg_key(object_type)
-        cfg = self.ENTITY_CONFIG.get(cfg_key)
-        row = self._fetch_entity(tenant, object_type, instance_id)
+        row = self._fetch_entity(tenant, object_type, instance_id, entity_config)
         if cfg and row:
-            node = self._entity_node(tenant, self._cfg_type(cfg, cfg_key), row)
+            node = self._entity_node(tenant, self._cfg_type(cfg, cfg_key), row, entity_config)
             if not node:
                 return None
             graph = self.neighborhood(tenant, object_type, instance_id, depth=1, limit=300)
@@ -1273,8 +1369,9 @@ class InstanceRepository:
     ENTITY_CONFIG = FALLBACK_GRAPH_ENTITY_CONFIG
     LINK_CONFIG = FALLBACK_GRAPH_LINK_CONFIG
 
-    def _fetch_entity(self, tenant, object_type, instance_id):
-        cfg = self.ENTITY_CONFIG.get(self._cfg_key(object_type))
+    def _fetch_entity(self, tenant, object_type, instance_id, entity_config=None):
+        entity_config = entity_config or self.ENTITY_CONFIG
+        cfg = entity_config.get(self._cfg_key(object_type, entity_config))
         if not cfg:
             return None
         with self.source_engine_for(tenant).connect() as conn:
@@ -1284,8 +1381,9 @@ class InstanceRepository:
             ).mappings().first()
         return dict(row) if row else None
 
-    def _entity_node(self, tenant, object_type, row):
-        cfg = self.ENTITY_CONFIG.get(self._cfg_key(object_type))
+    def _entity_node(self, tenant, object_type, row, entity_config=None):
+        entity_config = entity_config or self.ENTITY_CONFIG
+        cfg = entity_config.get(self._cfg_key(object_type, entity_config))
         if not cfg:
             return None
         pk_val = row[cfg["pk"]]
@@ -1569,13 +1667,13 @@ class InstanceRepository:
         entity_config, _ = self._schema_graph_reasoning_configs(tenant)
         if entity_config:
             return entity_config
-        return self.ENTITY_CONFIG if tenant.tenant_id in EXPLICIT_DEMO_FALLBACK_TENANTS else {}
+        return self._fallback_entity_config(tenant) if tenant.tenant_id in EXPLICIT_DEMO_FALLBACK_TENANTS else {}
 
     def reasoning_link_config(self, tenant):
         _, link_config = self._schema_graph_reasoning_configs(tenant)
         if link_config:
             return link_config
-        return self.LINK_CONFIG if tenant.tenant_id in EXPLICIT_DEMO_FALLBACK_TENANTS else []
+        return self._fallback_link_config(tenant) if tenant.tenant_id in EXPLICIT_DEMO_FALLBACK_TENANTS else []
 
     def _schema_graph_neighborhood(self, tenant, object_type, instance_id, depth=1, limit=200):
         objects, links = self._schema_graph_artifacts(tenant)
@@ -1815,8 +1913,10 @@ class InstanceRepository:
             return schema_graph
         if tenant.tenant_id not in EXPLICIT_DEMO_FALLBACK_TENANTS:
             return None
-        cfg_key = self._cfg_key(object_type)
-        cfg = self.ENTITY_CONFIG.get(cfg_key)
+        entity_config = self._fallback_entity_config(tenant)
+        link_config = self._fallback_link_config(tenant)
+        cfg_key = self._cfg_key(object_type, entity_config)
+        cfg = entity_config.get(cfg_key)
         if not cfg:
             return None
         depth = max(1, min(int(depth), 2))
@@ -1831,16 +1931,16 @@ class InstanceRepository:
                 "missing_approved_artifacts": [object_artifact],
                 "center": None, "nodes": [], "edges": [],
             }
-        center_row = self._fetch_entity(tenant, object_type, instance_id)
+        center_row = self._fetch_entity(tenant, object_type, instance_id, entity_config)
         if not center_row:
             return None
         center_type = self._cfg_type(cfg, cfg_key)
-        center = self._entity_node(tenant, center_type, center_row)
+        center = self._entity_node(tenant, center_type, center_row, entity_config)
         nodes = [center]
         edges = []
         allowed_node_types = {center_type}
         allowed_link_keys = []
-        for lc in self.LINK_CONFIG:
+        for lc in link_config:
             is_from = lc["from"] == cfg_key
             is_to = lc["to"] == cfg_key and lc.get("reverse")
             if not is_from and not is_to:
@@ -1850,7 +1950,7 @@ class InstanceRepository:
                 continue
             allowed_link_keys.append(lc["link"])
             target_type_key = lc["to"] if is_from else lc["from"]
-            target_cfg = self.ENTITY_CONFIG.get(target_type_key)
+            target_cfg = entity_config.get(target_type_key)
             if not target_cfg:
                 continue
             neighbor_type = self._cfg_type(target_cfg, target_type_key)
@@ -1876,7 +1976,7 @@ class InstanceRepository:
                     rows = []
             for row in rows:
                 row = dict(row)
-                n = self._entity_node(tenant, neighbor_type, row)
+                n = self._entity_node(tenant, neighbor_type, row, entity_config)
                 if n:
                     nodes.append(n)
                     edges.append({
@@ -1920,7 +2020,9 @@ class InstanceRepository:
             return None
         requested_limit = int(limit)
         limit = max(1, min(requested_limit, 300))
-        cfg_items = list(self.ENTITY_CONFIG.items())
+        entity_config = self._fallback_entity_config(tenant)
+        link_config = self._fallback_link_config(tenant)
+        cfg_items = list(entity_config.items())
         artifact_keys = [cfg["artifact"] for _, cfg in cfg_items]
         artifacts = self._approved_artifacts(tenant, artifact_keys)
         approved_cfgs = [(key, cfg) for key, cfg in cfg_items if cfg["artifact"] in artifacts]
@@ -1955,7 +2057,7 @@ class InstanceRepository:
                     sql = f"SELECT * FROM {cfg['table']} ORDER BY {cfg['pk']} LIMIT :lim"
                 rows = conn.execute(text(sql), {"lim": per_type_limit}).mappings().all()
                 for row in rows:
-                    node = self._entity_node(tenant, type_name, dict(row))
+                    node = self._entity_node(tenant, type_name, dict(row), entity_config)
                     if node:
                         remember_node(node)
                     if len(nodes) >= limit:
@@ -1965,11 +2067,12 @@ class InstanceRepository:
 
         center = None
         if object_type and instance_id:
-            center_row = self._fetch_entity(tenant, object_type, instance_id)
-            cfg = self.ENTITY_CONFIG.get(self._cfg_key(object_type))
+            center_row = self._fetch_entity(tenant, object_type, instance_id, entity_config)
+            cfg_key = self._cfg_key(object_type, entity_config)
+            cfg = entity_config.get(cfg_key)
             if center_row and cfg:
-                center_type = self._cfg_type(cfg, self._cfg_key(object_type))
-                center = self._entity_node(tenant, center_type, center_row)
+                center_type = self._cfg_type(cfg, cfg_key)
+                center = self._entity_node(tenant, center_type, center_row, entity_config)
                 if center:
                     center["center"] = True
                     if not remember_node(center):
@@ -1995,7 +2098,7 @@ class InstanceRepository:
             })
 
         def remember_entity_node(type_name, row):
-            node = self._entity_node(tenant, type_name, dict(row))
+            node = self._entity_node(tenant, type_name, dict(row), entity_config)
             if node:
                 remember_node(node)
 
@@ -2096,13 +2199,13 @@ class InstanceRepository:
                 "status": "approved",
             })
 
-        link_artifacts = self._approved_artifacts(tenant, [lc["link"] for lc in self.LINK_CONFIG])
+        link_artifacts = self._approved_artifacts(tenant, [lc["link"] for lc in link_config])
         with self.source_engine_for(tenant).connect() as conn:
-            for lc in self.LINK_CONFIG:
+            for lc in link_config:
                 if lc["link"] not in link_artifacts:
                     continue
-                from_cfg = self.ENTITY_CONFIG.get(lc["from"])
-                to_cfg = self.ENTITY_CONFIG.get(lc["to"])
+                from_cfg = entity_config.get(lc["from"])
+                to_cfg = entity_config.get(lc["to"])
                 if not from_cfg or not to_cfg:
                     continue
                 from_type = self._cfg_type(from_cfg, lc["from"])
