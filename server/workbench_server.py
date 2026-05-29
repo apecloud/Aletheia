@@ -24,12 +24,6 @@ sys.path.append(str(ROOT / "agents"))
 from sqlalchemy import create_engine, inspect, text
 
 from reasoning_engine import ReasoningEngine
-from server.graph_projection_fixtures import (
-    GRAPH_ENTITY_CONFIG as FALLBACK_GRAPH_ENTITY_CONFIG,
-    GRAPH_LINK_CONFIG as FALLBACK_GRAPH_LINK_CONFIG,
-    SOURCE_LINK_SCHEMAS as FALLBACK_SOURCE_LINK_SCHEMAS,
-)
-
 from iterative_graph_enrichment_agent import IterativeGraphEnrichmentAgent  # noqa: E402
 from ontology_artifacts import ensure_artifact_schema  # noqa: E402
 from tenant_registry import TenantRegistry  # noqa: E402
@@ -190,331 +184,11 @@ def _artifact_to_dict(row):
     }
 
 
-EXPLICIT_DEMO_FALLBACK_TENANTS = {"default", "northwind-sandbox", "creditcardfraud"}
-
-NORTHWIND_FALLBACK_ENTITY_KEYS = frozenset(
-    {"employee", "order", "customer", "product", "category"}
-)
-NORTHWIND_FALLBACK_LINK_KEYS = frozenset(
-    {
-        "link:employee:1:n:order",
-        "link:customer:1:n:order",
-        "link:category:1:n:product",
-        "link:order:n:m:product",
-        "link:employee:1:n:employee",
-    }
-)
-CREDITCARDFRAUD_FALLBACK_ENTITY_KEYS = frozenset(
-    {"credit_card_transaction", "account", "card", "merchant"}
-)
-CREDITCARDFRAUD_FALLBACK_LINK_KEYS = frozenset(
-    {
-        "link:account:1:n:credit_card_transaction",
-        "link:card:1:n:credit_card_transaction",
-        "link:merchant:1:n:credit_card_transaction",
-    }
-)
-FALLBACK_ENTITY_KEYS_BY_TENANT = {
-    "default": NORTHWIND_FALLBACK_ENTITY_KEYS,
-    "northwind-sandbox": NORTHWIND_FALLBACK_ENTITY_KEYS,
-    "creditcardfraud": CREDITCARDFRAUD_FALLBACK_ENTITY_KEYS,
-}
-FALLBACK_LINK_KEYS_BY_TENANT = {
-    "default": NORTHWIND_FALLBACK_LINK_KEYS,
-    "northwind-sandbox": NORTHWIND_FALLBACK_LINK_KEYS,
-    "creditcardfraud": CREDITCARDFRAUD_FALLBACK_LINK_KEYS,
-}
-
-
-def _tenant_fallback_source_link_schemas(tenant_id):
-    allowed = FALLBACK_LINK_KEYS_BY_TENANT.get(tenant_id, frozenset())
-    return {key: value for key, value in FALLBACK_SOURCE_LINK_SCHEMAS.items() if key in allowed}
-
-
-def _tenant_fallback_source_table_schemas(tenant_id):
-    allowed = FALLBACK_ENTITY_KEYS_BY_TENANT.get(tenant_id, frozenset())
-    aliases = {
-        "credit_card_transaction": {"credit_card_transaction"},
-        "account": {"account"},
-        "card": {"card"},
-        "merchant": {"merchant"},
-        "employee": {"employee"},
-        "order": {"order"},
-        "customer": {"customer"},
-        "product": {"product"},
-        "category": {"category"},
-    }
-    allowed_schema_keys = set()
-    for key in allowed:
-        allowed_schema_keys.update(aliases.get(key, {key}))
-    return {
-        key: value
-        for key, value in FALLBACK_SOURCE_TABLE_SCHEMAS.items()
-        if key in allowed_schema_keys
-    }
-
-
-FALLBACK_SOURCE_TABLE_SCHEMAS = {
-    "employee": {
-        "table": "employees",
-        "primary_key": "employeeID",
-        "columns": [
-            "employeeID", "lastName", "firstName", "title", "titleOfCourtesy",
-            "birthDate", "hireDate", "address", "city", "region", "postalCode",
-            "country", "homePhone", "extension", "photo", "notes", "reportsTo", "photoPath",
-        ],
-    },
-    "order": {
-        "table": "orders",
-        "primary_key": "orderID",
-        "columns": [
-            "orderID", "customerID", "employeeID", "orderDate", "requiredDate",
-            "shippedDate", "shipVia", "freight", "shipName", "shipAddress",
-            "shipCity", "shipRegion", "shipPostalCode", "shipCountry",
-        ],
-    },
-    "customer": {
-        "table": "customers",
-        "primary_key": "customerID",
-        "columns": [
-            "customerID", "companyName", "contactName", "contactTitle", "address",
-            "city", "region", "postalCode", "country", "phone", "fax",
-        ],
-    },
-    "product": {
-        "table": "products",
-        "primary_key": "productID",
-        "columns": [
-            "productID", "productName", "supplierID", "categoryID", "quantityPerUnit",
-            "unitPrice", "unitsInStock", "unitsOnOrder", "reorderLevel", "discontinued",
-        ],
-    },
-    "category": {
-        "table": "categories",
-        "primary_key": "categoryID",
-        "columns": ["categoryID", "categoryName", "description", "picture"],
-    },
-    "credit_card_transaction": {
-        "table": "credit_card_transactions_safe",
-        "primary_key": "transaction_id",
-        "columns": [
-            "transaction_id", "accountNumber", "customerId", "creditLimit",
-            "availableMoney", "transactionDateTime", "transactionAmount",
-            "merchantName", "merchantCategoryCode", "cardPresent", "cvvMatch",
-            "countryMismatch", "isFraud",
-        ],
-    },
-    "account": {
-        "table": "credit_card_transactions_safe",
-        "primary_key": "accountNumber",
-        "columns": ["accountNumber", "customerId", "creditLimit", "availableMoney", "currentBalance"],
-    },
-    "card": {
-        "table": "credit_card_transactions_safe",
-        "primary_key": "cardLast4Digits",
-        "columns": ["cardLast4Digits", "cvvMatch", "expirationDateKeyInMatch", "cardPresent"],
-    },
-    "merchant": {
-        "table": "credit_card_transactions_safe",
-        "primary_key": "merchantName",
-        "columns": ["merchantName", "merchantCategoryCode", "merchantCountryCode", "acqCountry"],
-    },
-    "chokepoint": {
-        "table": "maritime_chokepoint_risk_indicators",
-        "primary_key": "risk_indicator_id",
-        "columns": ["risk_indicator_id", "canal", "drought", "TC1", "TC3", "severity_conflict", "severity_piracy", "severity_geopolitical"],
-    },
-    "country": {
-        "table": "maritime_chokepoint_country_dependencies",
-        "primary_key": "iso3",
-        "columns": ["iso3", "q", "v", "q_sea_predict", "v_sea_predict", "revenue_USD"],
-    },
-    "tradedependency": {
-        "table": "maritime_chokepoint_country_dependencies",
-        "primary_key": "dependency_id",
-        "columns": ["dependency_id", "iso3", "canal", "q_canal", "v_canal", "q", "v", "revenue_USD"],
-    },
-    "trade_dependency": {
-        "table": "maritime_chokepoint_country_dependencies",
-        "primary_key": "dependency_id",
-        "columns": ["dependency_id", "iso3", "canal", "q_canal", "v_canal", "q", "v", "revenue_USD"],
-    },
-    "hazard": {
-        "table": "maritime_chokepoint_risk_indicators",
-        "primary_key": "risk_indicator_id",
-        "columns": [
-            "risk_indicator_id", "canal",
-            "likelihood_conflict", "timescale_conflict", "severity_conflict",
-            "likelihood_piracy", "timescale_piracy", "severity_piracy",
-            "likelihood_blockage", "timescale_blockage", "severity_blockage",
-            "likelihood_geopolitical", "timescale_geopolitical", "severity_geopolitical",
-        ],
-    },
-    "riskindicator": {
-        "table": "maritime_chokepoint_risk_indicators",
-        "primary_key": "risk_indicator_id",
-        "columns": ["risk_indicator_id", "canal", "piracy", "geopolitical", "drought", "TC1", "TC3", "likelihood_conflict", "severity_conflict", "likelihood_blockage", "severity_blockage"],
-    },
-    "risk_indicator": {
-        "table": "maritime_chokepoint_risk_indicators",
-        "primary_key": "risk_indicator_id",
-        "columns": ["risk_indicator_id", "canal", "piracy", "geopolitical", "drought", "TC1", "TC3", "likelihood_conflict", "severity_conflict", "likelihood_blockage", "severity_blockage"],
-    },
-    "systemicriskresult": {
-        "table": "maritime_chokepoint_systemic_risk_results",
-        "primary_key": "risk_result_id",
-        "columns": ["risk_result_id", "iso3", "canal", "v_share", "v_share_mar", "trade_at_risk_v", "trade_at_risk_q", "revenue_at_risk", "trade_impacted"],
-    },
-    "systemic_risk_result": {
-        "table": "maritime_chokepoint_systemic_risk_results",
-        "primary_key": "risk_result_id",
-        "columns": ["risk_result_id", "iso3", "canal", "v_share", "v_share_mar", "trade_at_risk_v", "trade_at_risk_q", "revenue_at_risk", "trade_impacted"],
-    },
-    "riskfinding": {
-        "table": "maritime_chokepoint_systemic_risk_results",
-        "primary_key": "risk_result_id",
-        "columns": ["risk_result_id", "iso3", "canal", "trade_at_risk_v", "trade_impacted"],
-    },
-    "risk_finding": {
-        "table": "maritime_chokepoint_systemic_risk_results",
-        "primary_key": "risk_result_id",
-        "columns": ["risk_result_id", "iso3", "canal", "trade_at_risk_v", "trade_impacted"],
-    },
-    "mitigationaction": {
-        "table": "maritime_chokepoint_systemic_risk_results",
-        "primary_key": "risk_result_id",
-        "columns": ["risk_result_id", "iso3", "canal", "trade_at_risk_v", "trade_impacted"],
-    },
-    "mitigation_action": {
-        "table": "maritime_chokepoint_systemic_risk_results",
-        "primary_key": "risk_result_id",
-        "columns": ["risk_result_id", "iso3", "canal", "trade_at_risk_v", "trade_impacted"],
-    },
-    "conflictevent": {
-        "table": "us_iran_war_conflict_events",
-        "primary_key": "event_id",
-        "columns": ["event_id", "event_date", "event_type", "actors", "location", "summary", "source_id", "confidence"],
-    },
-    "conflict_event": {
-        "table": "us_iran_war_conflict_events",
-        "primary_key": "event_id",
-        "columns": ["event_id", "event_date", "event_type", "actors", "location", "summary", "source_id", "confidence"],
-    },
-    "economicchannel": {
-        "table": "us_iran_war_economic_channels",
-        "primary_key": "channel_id",
-        "columns": ["channel_id", "channel_name", "mechanism", "primary_metric", "source_id", "confidence"],
-    },
-    "economic_channel": {
-        "table": "us_iran_war_economic_channels",
-        "primary_key": "channel_id",
-        "columns": ["channel_id", "channel_name", "mechanism", "primary_metric", "source_id", "confidence"],
-    },
-    "countryexposure": {
-        "table": "us_iran_war_country_exposures",
-        "primary_key": "country_id",
-        "columns": ["country_id", "iso3", "country_name", "exposure_type", "exposure_level", "impact_summary", "key_metric", "source_id", "confidence"],
-    },
-    "country_exposure": {
-        "table": "us_iran_war_country_exposures",
-        "primary_key": "country_id",
-        "columns": ["country_id", "iso3", "country_name", "exposure_type", "exposure_level", "impact_summary", "key_metric", "source_id", "confidence"],
-    },
-    "recommendedaction": {
-        "table": "us_iran_war_recommended_actions",
-        "primary_key": "action_id",
-        "columns": ["action_id", "action_name", "owner_role", "trigger", "recommended_action", "source_id", "confidence"],
-    },
-    "recommended_action": {
-        "table": "us_iran_war_recommended_actions",
-        "primary_key": "action_id",
-        "columns": ["action_id", "action_name", "owner_role", "trigger", "recommended_action", "source_id", "confidence"],
-    },
-    "sourcedocument": {
-        "table": "us_iran_war_web_sources",
-        "primary_key": "source_id",
-        "columns": ["source_id", "title", "publisher", "url", "query", "retrieved_at", "license_risk", "robots_risk", "summary", "confidence"],
-    },
-    "source_document": {
-        "table": "us_iran_war_web_sources",
-        "primary_key": "source_id",
-        "columns": ["source_id", "title", "publisher", "url", "query", "retrieved_at", "license_risk", "robots_risk", "summary", "confidence"],
-    },
-    "graphedge": {
-        "table": "us_iran_war_graph_edges",
-        "primary_key": "edge_id",
-        "columns": ["edge_id", "source_node", "relation", "target_node", "source_id", "confidence"],
-    },
-    "graph_edge": {
-        "table": "us_iran_war_graph_edges",
-        "primary_key": "edge_id",
-        "columns": ["edge_id", "source_node", "relation", "target_node", "source_id", "confidence"],
-    },
-}
-
-
-# FALLBACK_SOURCE_LINK_SCHEMAS lives in server.graph_projection_fixtures.
-# These are not production schema->graph decisions; they support explicit
-# demo/bootstrap fallback when reviewed SchemaGraphModelingAgent artifacts are
-# unavailable.
-
-
-FALLBACK_SOURCE_TABLE_HINTS_BY_TABLE = {schema["table"]: schema for schema in FALLBACK_SOURCE_TABLE_SCHEMAS.values()}
-
-
-def _fallback_fields(table_schema):
-    fields = []
-    table = table_schema.get("table")
-    primary_key = table_schema.get("primary_key")
-    for idx, column in enumerate(table_schema.get("columns") or [], start=1):
-        fields.append(
-            {
-                "name": column,
-                "source_table": table,
-                "qualified_name": f"{table}.{column}",
-                "data_type": None,
-                "column_type": None,
-                "nullable": None,
-                "primary_key": column == primary_key,
-                "foreign_key": False,
-                "key_role": "primary_key" if column == primary_key else "attribute",
-                "default": None,
-                "extra": "",
-                "comment": "",
-                "max_length": None,
-                "numeric_precision": None,
-                "numeric_scale": None,
-                "ordinal_position": idx,
-                "maps_to_property": column,
-            }
-        )
-    return fields
-
-
 def _field_by_qualified_name(fields):
     return {f"{field.get('source_table')}.{field.get('name')}": field for field in fields}
 
 
-def _apply_table_hints(table_schema, fields):
-    primary_key = table_schema.get("primary_key") if table_schema else None
-    for field in fields:
-        if field.get("name") == primary_key:
-            field["declared_primary_key_hint"] = True
-            if field.get("key_role") == "unknown":
-                field["key_role_hint"] = "declared_primary_key"
-        elif field.get("key_role") == "unknown" and field.get("foreign_key") is None:
-            field["key_role"] = "unknown"
-    return fields
-
-
-def _ontology_source_schema(
-    artifact,
-    table_fields=None,
-    fallback_link_schemas=None,
-    fallback_table_schemas=None,
-):
-    fallback_link_schemas = fallback_link_schemas if fallback_link_schemas is not None else FALLBACK_SOURCE_LINK_SCHEMAS
-    fallback_table_schemas = fallback_table_schemas if fallback_table_schemas is not None else FALLBACK_SOURCE_TABLE_SCHEMAS
+def _ontology_source_schema(artifact, table_fields=None):
     canonical_key = artifact.get("canonical_key") or ""
     payload = artifact.get("payload") or {}
     artifact_type = artifact.get("artifact_type")
@@ -561,56 +235,7 @@ def _ontology_source_schema(
             value for key, value in schema.items() if key.endswith("_property") and isinstance(value, dict)
         ]
         return schema
-    if canonical_key in fallback_link_schemas:
-        schema = dict(fallback_link_schemas[canonical_key])
-        table_fields = table_fields or {}
-        field_map = _field_by_qualified_name(
-            table_fields.get(schema["source_table"], {}).get("fields", [])
-            + table_fields.get(schema["target_table"], {}).get("fields", [])
-        )
-        schema["kind"] = "relationship_source_schema"
-        source_tables = [table_fields.get(t, {}) for t in (schema["source_table"], schema["target_table"])]
-        schema["schema_source"] = (
-            "live"
-            if all(t.get("schema_source") == "live" for t in source_tables)
-            else "degraded"
-            if any(t.get("schema_source") == "degraded" for t in source_tables)
-            else "fallback"
-        )
-        if schema["schema_source"] != "live":
-            schema["degraded"] = True
-            schema["source_statuses"] = {
-                table: table_fields.get(table, {}).get("schema_source", "missing")
-                for table in (schema["source_table"], schema["target_table"])
-            }
-            errors = {
-                table: table_fields.get(table, {}).get("connection_error")
-                for table in (schema["source_table"], schema["target_table"])
-                if table_fields.get(table, {}).get("connection_error")
-            }
-            if errors:
-                schema["connection_errors"] = errors
-        schema["source_object"] = payload.get("source_object_name")
-        schema["target_object"] = payload.get("target_object_name")
-        schema["link_type"] = payload.get("link_type") or schema.get("cardinality")
-        source_prop = dict(field_map.get(schema["source_field"], {}))
-        target_prop = dict(field_map.get(schema["target_field"], {}))
-        if source_prop:
-            source_prop["relationship_role"] = "source_identity_field"
-        if target_prop:
-            target_prop["relationship_role"] = "target_reference_field"
-            if target_prop.get("foreign_key") is None:
-                target_prop["foreign_key"] = "unknown"
-            if target_prop.get("key_role") == "unknown":
-                target_prop["key_role"] = "relationship_reference"
-        schema["source_field_property"] = source_prop
-        schema["target_field_property"] = target_prop
-        schema["field_properties"] = [
-            f for f in [schema["source_field_property"], schema["target_field_property"]] if f
-        ]
-        return schema
     if artifact_type == "object":
-        object_name = str(payload.get("object_name") or artifact.get("name") or canonical_key.removeprefix("object:")).lower().replace(" ", "_")
         mapped_tables = payload.get("mapped_table_names") or payload.get("mapped_tables") or []
         primary_key = payload.get("primary_key")
         if mapped_tables:
@@ -620,17 +245,7 @@ def _ontology_source_schema(
                 "table": table,
                 "primary_key": primary_key,
                 "columns": live.get("columns") if live else list(payload.get("properties") or []),
-                "fields": (
-                    _apply_table_hints({"primary_key": primary_key}, live.get("fields"))
-                    if live
-                    else _fallback_fields(
-                        {
-                            "table": table,
-                            "primary_key": primary_key,
-                            "columns": list(payload.get("properties") or []),
-                        }
-                    )
-                ),
+                "fields": live.get("fields", []) if live else [],
                 "schema_source": live.get("schema_source") if live else "artifact_payload",
                 "kind": "object_source_schema",
                 "object_name": artifact.get("name"),
@@ -640,20 +255,6 @@ def _ontology_source_schema(
                 schema["degraded"] = True
                 schema["degraded_reason"] = live.get("degraded_reason")
                 schema["connection_error"] = live.get("connection_error")
-            return schema
-        table_schema = fallback_table_schemas.get(object_name)
-        if table_schema:
-            schema = dict(table_schema)
-            live = (table_fields or {}).get(schema["table"])
-            schema["columns"] = live.get("columns") if live else schema.get("columns", [])
-            schema["fields"] = _apply_table_hints(schema, live.get("fields")) if live else _fallback_fields(schema)
-            schema["schema_source"] = live.get("schema_source") if live else "fallback"
-            if live and live.get("schema_source") != "live":
-                schema["degraded"] = True
-                schema["degraded_reason"] = live.get("degraded_reason")
-                schema["connection_error"] = live.get("connection_error")
-            schema["kind"] = "object_source_schema"
-            schema["object_name"] = artifact.get("name")
             return schema
     return {"kind": "unmapped", "source_refs": artifact.get("source_refs", [])}
 
@@ -724,33 +325,16 @@ class ReviewRepository:
         canonical_key = artifact.get("canonical_key") or ""
         payload = artifact.get("payload") or {}
         artifact_type = artifact.get("artifact_type")
-        fallback_link_schemas = _tenant_fallback_source_link_schemas(tenant.tenant_id)
-        fallback_table_schemas = _tenant_fallback_source_table_schemas(tenant.tenant_id)
         table_names = set()
         if artifact_type == "link" and payload.get("source_table") and payload.get("target_table"):
             table_names.add(payload["source_table"])
             table_names.add(payload["target_table"])
-        elif canonical_key in fallback_link_schemas:
-            link_schema = fallback_link_schemas[canonical_key]
-            table_names.add(link_schema["source_table"])
-            table_names.add(link_schema["target_table"])
         elif artifact_type == "object":
-            object_name = str(payload.get("object_name") or artifact.get("name") or canonical_key.removeprefix("object:")).lower().replace(" ", "_")
             mapped_tables = payload.get("mapped_table_names") or payload.get("mapped_tables") or []
             table_names.update(table for table in mapped_tables if table)
-            if not mapped_tables and object_name in fallback_table_schemas:
-                table_names.add(fallback_table_schemas[object_name]["table"])
         schemas = {}
-        object_hint = None
-        if artifact_type == "object":
-            object_name = str(payload.get("object_name") or artifact.get("name") or canonical_key.removeprefix("object:")).lower().replace(" ", "_")
-            object_hint = fallback_table_schemas.get(object_name)
         for table in table_names:
-            schema = self.source_table_schema(tenant, table)
-            hint = object_hint if object_hint and object_hint.get("table") == table else FALLBACK_SOURCE_TABLE_HINTS_BY_TABLE.get(table)
-            if hint and schema.get("fields"):
-                schema["fields"] = _apply_table_hints(hint, schema["fields"])
-            schemas[table] = schema
+            schemas[table] = self.source_table_schema(tenant, table)
         return schemas
 
     def list_artifacts(self, tenant, filters):
@@ -917,8 +501,6 @@ class ReviewRepository:
         result["source_schema"] = _ontology_source_schema(
             result,
             self.source_schemas_for_artifact(tenant, result),
-            fallback_link_schemas=_tenant_fallback_source_link_schemas(tenant.tenant_id),
-            fallback_table_schemas=_tenant_fallback_source_table_schemas(tenant.tenant_id),
         )
         result["canonical"] = {
             "status": result["status"],
@@ -1178,23 +760,8 @@ class InstanceRepository:
             self.source_engines[tenant.source_db_url] = engine
         return engine
 
-    def _fallback_entity_config(self, tenant):
-        allowed = FALLBACK_ENTITY_KEYS_BY_TENANT.get(tenant.tenant_id, frozenset())
-        return {key: cfg for key, cfg in self.ENTITY_CONFIG.items() if key in allowed}
-
-    def _fallback_link_config(self, tenant):
-        entity_config = self._fallback_entity_config(tenant)
-        allowed = FALLBACK_LINK_KEYS_BY_TENANT.get(tenant.tenant_id, frozenset())
-        return [
-            link
-            for link in self.LINK_CONFIG
-            if link["link"] in allowed
-            and link.get("from") in entity_config
-            and link.get("to") in entity_config
-        ]
-
     def _cfg_key(self, object_type, entity_config=None):
-        entity_config = entity_config or self.ENTITY_CONFIG
+        entity_config = entity_config or {}
         raw = str(object_type or "").strip()
         if not raw:
             return ""
@@ -1227,83 +794,22 @@ class InstanceRepository:
         schema_types = self._schema_graph_types(tenant)
         if schema_types:
             return {"tenant": tenant.public_dict(), "types": schema_types}
-        if tenant.tenant_id not in EXPLICIT_DEMO_FALLBACK_TENANTS:
-            return {"tenant": tenant.public_dict(), "types": []}
-        entity_config = self._fallback_entity_config(tenant)
-        all_keys = [cfg["artifact"] for cfg in entity_config.values()]
-        artifacts = self._artifact_statuses(tenant, all_keys) if include_draft else self._approved_artifacts(tenant, all_keys)
-        types = []
-        for type_key, cfg in entity_config.items():
-            if cfg["artifact"] in artifacts:
-                artifact = artifacts[cfg["artifact"]]
-                type_name = self._cfg_type(cfg, type_key)
-                types.append({
-                    "type": type_name,
-                    "label": cfg.get("label") or type_name,
-                    "table": cfg["table"],
-                    "ontology_artifact": cfg["artifact"],
-                    "artifact_status": artifact.get("status"),
-                    "approved": artifact.get("status") == "approved",
-                    "tenant_id": tenant.tenant_id,
-                })
-        return {"tenant": tenant.public_dict(), "types": types}
+        return {
+            "tenant": tenant.public_dict(),
+            "types": [],
+            "approved": False,
+            "reason": "No reviewed SchemaGraphModelingAgent projection. Import data and run schema-to-graph modeling first.",
+        }
 
     def search(self, tenant, object_type, query, limit=25, include_draft=False):
         schema_search = self._schema_graph_search(tenant, object_type, query, limit=limit)
         if schema_search is not None:
             return schema_search
-        if tenant.tenant_id not in EXPLICIT_DEMO_FALLBACK_TENANTS:
-            return {
-                "tenant": tenant.public_dict(),
-                "instances": [],
-                "approved": False,
-                "reason": f"No approved SchemaGraphModelingAgent projection for type {object_type}",
-            }
-        entity_config = self._fallback_entity_config(tenant)
-        cfg_key = self._cfg_key(object_type, entity_config)
-        cfg = entity_config.get(cfg_key)
-        if not cfg:
-            return {
-                "tenant": tenant.public_dict(),
-                "instances": [],
-                "approved": False,
-                "reason": f"Type {object_type} is not available in tenant-scoped fallback projection for {tenant.tenant_id}",
-            }
-        canonical_key = cfg["artifact"]
-        artifacts = self._artifact_statuses(tenant, [canonical_key]) if include_draft else self._approved_artifacts(tenant, [canonical_key])
-        if canonical_key not in artifacts:
-            return {
-                "tenant": tenant.public_dict(),
-                "instances": [],
-                "approved": False,
-                "reason": f"{canonical_key} is not approved for tenant {tenant.tenant_id}",
-            }
-        conditions = [f"CAST({cfg['pk']} AS CHAR) = :query"]
-        for col in cfg["label_cols"]:
-            conditions.append(f"{col} LIKE :like_query")
-        where = " OR ".join(conditions)
-        if cfg.get("distinct"):
-            select_cols = list(dict.fromkeys([cfg["pk"], *cfg["label_cols"]]))
-            sql = (
-                f"SELECT DISTINCT {', '.join(select_cols)} FROM {cfg['table']} "
-                f"WHERE (:query = '' OR {where}) ORDER BY {cfg['pk']} LIMIT :limit"
-            )
-        else:
-            sql = f"SELECT * FROM {cfg['table']} WHERE (:query = '' OR {where}) ORDER BY {cfg['pk']} LIMIT :limit"
-        with self.source_engine_for(tenant).connect() as conn:
-            rows = conn.execute(
-                text(sql),
-                {"query": query, "like_query": f"%{query}%", "limit": limit},
-            ).mappings().all()
-        type_cap = self._cfg_type(cfg, cfg_key)
         return {
-            "instances": [
-                self._entity_node(tenant, type_cap, dict(row), entity_config)
-                for row in rows
-            ],
-            "approved": artifacts[canonical_key].get("status") == "approved",
-            "artifact_status": artifacts[canonical_key].get("status"),
             "tenant": tenant.public_dict(),
+            "instances": [],
+            "approved": False,
+            "reason": f"No reviewed SchemaGraphModelingAgent projection for type {object_type}",
         }
 
     def default_center(self, tenant, include_draft=False):
@@ -1326,84 +832,7 @@ class InstanceRepository:
         schema_detail = self._schema_graph_detail(tenant, object_type, instance_id)
         if schema_detail is not None:
             return schema_detail
-        if tenant.tenant_id not in EXPLICIT_DEMO_FALLBACK_TENANTS:
-            return None
-        entity_config = self._fallback_entity_config(tenant)
-        cfg_key = self._cfg_key(object_type, entity_config)
-        cfg = entity_config.get(cfg_key)
-        if not cfg:
-            return None
-        canonical_key = cfg["artifact"]
-        artifacts = self._approved_artifacts(tenant, [canonical_key])
-        if canonical_key not in artifacts:
-            return None
-        row = self._fetch_entity(tenant, object_type, instance_id, entity_config)
-        if cfg and row:
-            node = self._entity_node(tenant, self._cfg_type(cfg, cfg_key), row, entity_config)
-            if not node:
-                return None
-            graph = self.neighborhood(tenant, object_type, instance_id, depth=1, limit=300)
-            by_relation = {}
-            if graph and graph.get("approved"):
-                for edge in graph.get("edges", []):
-                    relation = edge.get("link_key") or edge.get("ontology_link") or edge.get("label") or "edge"
-                    by_relation[relation] = by_relation.get(relation, 0) + 1
-            return {
-                **node,
-                "source_row": self._row(row),
-                "key_properties": {
-                    key: _jsonable(row.get(key))
-                    for key in dict.fromkeys([cfg["pk"], *cfg.get("label_cols", [])])
-                    if key in row
-                },
-                "relations_summary": {
-                    "nodes": len(graph.get("nodes", [])) if graph and graph.get("approved") else 1,
-                    "edges": len(graph.get("edges", [])) if graph and graph.get("approved") else 0,
-                    "by_relation": by_relation,
-                    "projection_source": (graph.get("scope") or {}).get("projection_source") if graph else None,
-                },
-            }
         return None
-
-    # ---- generic entity config ----
-    ENTITY_CONFIG = FALLBACK_GRAPH_ENTITY_CONFIG
-    LINK_CONFIG = FALLBACK_GRAPH_LINK_CONFIG
-
-    def _fetch_entity(self, tenant, object_type, instance_id, entity_config=None):
-        entity_config = entity_config or self.ENTITY_CONFIG
-        cfg = entity_config.get(self._cfg_key(object_type, entity_config))
-        if not cfg:
-            return None
-        with self.source_engine_for(tenant).connect() as conn:
-            row = conn.execute(
-                text(f"SELECT * FROM {cfg['table']} WHERE {cfg['pk']} = :pk"),
-                {"pk": instance_id},
-            ).mappings().first()
-        return dict(row) if row else None
-
-    def _entity_node(self, tenant, object_type, row, entity_config=None):
-        entity_config = entity_config or self.ENTITY_CONFIG
-        cfg = entity_config.get(self._cfg_key(object_type, entity_config))
-        if not cfg:
-            return None
-        pk_val = row[cfg["pk"]]
-        if "label_fmt" in cfg:
-            label = cfg["label_fmt"].format(pk_val)
-        else:
-            parts = [str(row.get(c, "")) for c in cfg["label_cols"]]
-            label = cfg.get("label_join", " ").join(parts).strip()
-        return {
-            "id": f"{object_type}:{pk_val}",
-            "tenant_id": tenant.tenant_id,
-            "namespace": tenant.namespace,
-            "graph_database": tenant.graph_database,
-            "type": object_type,
-            "label": label or f"{object_type} #{pk_val}",
-            "source_table": cfg["table"],
-            "source_pk": f"{cfg['pk']}={pk_val}",
-            "ontology_artifact": cfg["artifact"],
-            "status": "approved",
-        }
 
     def _schema_graph_artifacts(self, tenant):
         with self.metadata_engine_for(tenant).connect() as conn:
@@ -1665,15 +1094,11 @@ class InstanceRepository:
 
     def reasoning_entity_config(self, tenant):
         entity_config, _ = self._schema_graph_reasoning_configs(tenant)
-        if entity_config:
-            return entity_config
-        return self._fallback_entity_config(tenant) if tenant.tenant_id in EXPLICIT_DEMO_FALLBACK_TENANTS else {}
+        return entity_config or {}
 
     def reasoning_link_config(self, tenant):
         _, link_config = self._schema_graph_reasoning_configs(tenant)
-        if link_config:
-            return link_config
-        return self._fallback_link_config(tenant) if tenant.tenant_id in EXPLICIT_DEMO_FALLBACK_TENANTS else []
+        return link_config or []
 
     def _schema_graph_neighborhood(self, tenant, object_type, instance_id, depth=1, limit=200):
         objects, links = self._schema_graph_artifacts(tenant)
@@ -1911,377 +1336,13 @@ class InstanceRepository:
         schema_graph = self._schema_graph_neighborhood(tenant, object_type, instance_id, depth=depth, limit=limit)
         if schema_graph is not None:
             return schema_graph
-        if tenant.tenant_id not in EXPLICIT_DEMO_FALLBACK_TENANTS:
-            return None
-        entity_config = self._fallback_entity_config(tenant)
-        link_config = self._fallback_link_config(tenant)
-        cfg_key = self._cfg_key(object_type, entity_config)
-        cfg = entity_config.get(cfg_key)
-        if not cfg:
-            return None
-        depth = max(1, min(int(depth), 2))
-        requested_limit = int(limit)
-        limit = max(1, min(requested_limit, 300))
-        object_artifact = cfg["artifact"]
-        artifacts = self._approved_artifacts(tenant, [object_artifact])
-        if object_artifact not in artifacts:
-            return {
-                "approved": False,
-                "tenant": tenant.public_dict(),
-                "missing_approved_artifacts": [object_artifact],
-                "center": None, "nodes": [], "edges": [],
-            }
-        center_row = self._fetch_entity(tenant, object_type, instance_id, entity_config)
-        if not center_row:
-            return None
-        center_type = self._cfg_type(cfg, cfg_key)
-        center = self._entity_node(tenant, center_type, center_row, entity_config)
-        nodes = [center]
-        edges = []
-        allowed_node_types = {center_type}
-        allowed_link_keys = []
-        for lc in link_config:
-            is_from = lc["from"] == cfg_key
-            is_to = lc["to"] == cfg_key and lc.get("reverse")
-            if not is_from and not is_to:
-                continue
-            link_artifacts = self._approved_artifacts(tenant, [lc["link"]])
-            if lc["link"] not in link_artifacts:
-                continue
-            allowed_link_keys.append(lc["link"])
-            target_type_key = lc["to"] if is_from else lc["from"]
-            target_cfg = entity_config.get(target_type_key)
-            if not target_cfg:
-                continue
-            neighbor_type = self._cfg_type(target_cfg, target_type_key)
-            allowed_node_types.add(neighbor_type)
-            with self.source_engine_for(tenant).connect() as conn:
-                if is_from and lc.get("target_fk"):
-                    # n:m via join table
-                    rows = conn.execute(
-                        text(f"SELECT t.* FROM {target_cfg['table']} t JOIN {lc['fk_table']} j ON j.{lc['target_fk']} = t.{target_cfg['pk']} WHERE j.{lc['fk_col']} = :pk ORDER BY t.{target_cfg['pk']} LIMIT :lim"),
-                        {"pk": instance_id, "lim": limit},
-                    ).mappings().all()
-                elif is_from:
-                    rows = conn.execute(
-                        text(f"SELECT * FROM {lc['fk_table']} WHERE {lc['fk_col']} = :pk ORDER BY 1 LIMIT :lim"),
-                        {"pk": instance_id, "lim": limit},
-                    ).mappings().all()
-                elif is_to:
-                    rows = conn.execute(
-                        text(f"SELECT * FROM {target_cfg['table']} WHERE {target_cfg['pk']} IN (SELECT {lc['fk_col']} FROM {lc['fk_table']} WHERE {target_cfg['pk']} = :pk) LIMIT :lim"),
-                        {"pk": instance_id, "lim": limit},
-                    ).mappings().all()
-                else:
-                    rows = []
-            for row in rows:
-                row = dict(row)
-                n = self._entity_node(tenant, neighbor_type, row, entity_config)
-                if n:
-                    nodes.append(n)
-                    edges.append({
-                        "id": f"{center['id']}->{n['id']}",
-                        "tenant_id": tenant.tenant_id,
-                        "source": center["id"],
-                        "target": n["id"],
-                        "link_key": lc["link"],
-                        "status": "approved",
-                    })
-        return {
-            "approved": True,
-            "tenant": tenant.public_dict(),
-            "graph_database": tenant.graph_database,
-            "depth": depth,
-            "limit": limit,
-            "limits": {"requested_limit": requested_limit, "applied_limit": limit, "hard_limit": 300, "truncated": requested_limit > limit},
-            "center": center,
-            "nodes": nodes,
-            "edges": edges,
-            "scope": {
-                "tenant_id": tenant.tenant_id,
-                "center_node": center["id"],
-                "type": center_type,
-                "id": str(instance_id),
-                "depth": depth,
-                "node_limit": limit,
-                "edge_limit": limit,
-                "allowed_node_types": sorted(allowed_node_types),
-                "allowed_link_keys": allowed_link_keys,
-                "approved_only": True,
-                "projection_source": "fallback_fixture",
-            },
-        }
+        return None
 
     def full_graph(self, tenant, object_type=None, instance_id=None, limit=200):
         schema_graph = self._schema_graph_full_graph(tenant, object_type=object_type, instance_id=instance_id, limit=limit)
         if schema_graph is not None:
             return schema_graph
-        if tenant.tenant_id not in EXPLICIT_DEMO_FALLBACK_TENANTS:
-            return None
-        requested_limit = int(limit)
-        limit = max(1, min(requested_limit, 300))
-        entity_config = self._fallback_entity_config(tenant)
-        link_config = self._fallback_link_config(tenant)
-        cfg_items = list(entity_config.items())
-        artifact_keys = [cfg["artifact"] for _, cfg in cfg_items]
-        artifacts = self._approved_artifacts(tenant, artifact_keys)
-        approved_cfgs = [(key, cfg) for key, cfg in cfg_items if cfg["artifact"] in artifacts]
-        if not approved_cfgs:
-            return {
-                "approved": False,
-                "tenant": tenant.public_dict(),
-                "graph_database": tenant.graph_database,
-                "center": None,
-                "nodes": [],
-                "edges": [],
-                "missing_approved_artifacts": artifact_keys,
-            }
-        per_type_limit = max(1, min(40, limit // max(len(approved_cfgs), 1) + 1))
-        nodes = []
-        seen_nodes = set()
-
-        def remember_node(node):
-            if node and node["id"] not in seen_nodes:
-                nodes.append(node)
-                seen_nodes.add(node["id"])
-                return True
-            return False
-
-        with self.source_engine_for(tenant).connect() as conn:
-            for cfg_key, cfg in approved_cfgs:
-                type_name = self._cfg_type(cfg, cfg_key)
-                if cfg.get("distinct"):
-                    select_cols = list(dict.fromkeys([cfg["pk"], *cfg["label_cols"]]))
-                    sql = f"SELECT DISTINCT {', '.join(select_cols)} FROM {cfg['table']} ORDER BY {cfg['pk']} LIMIT :lim"
-                else:
-                    sql = f"SELECT * FROM {cfg['table']} ORDER BY {cfg['pk']} LIMIT :lim"
-                rows = conn.execute(text(sql), {"lim": per_type_limit}).mappings().all()
-                for row in rows:
-                    node = self._entity_node(tenant, type_name, dict(row), entity_config)
-                    if node:
-                        remember_node(node)
-                    if len(nodes) >= limit:
-                        break
-                if len(nodes) >= limit:
-                    break
-
-        center = None
-        if object_type and instance_id:
-            center_row = self._fetch_entity(tenant, object_type, instance_id, entity_config)
-            cfg_key = self._cfg_key(object_type, entity_config)
-            cfg = entity_config.get(cfg_key)
-            if center_row and cfg:
-                center_type = self._cfg_type(cfg, cfg_key)
-                center = self._entity_node(tenant, center_type, center_row, entity_config)
-                if center:
-                    center["center"] = True
-                    if not remember_node(center):
-                        for idx, node in enumerate(nodes):
-                            if node["id"] == center["id"]:
-                                nodes[idx] = {**node, "center": True}
-                                break
-
-        def remember_maritime_chokepoint(canal):
-            if not canal:
-                return
-            remember_node({
-                "id": f"Chokepoint:{canal}",
-                "tenant_id": tenant.tenant_id,
-                "namespace": tenant.namespace,
-                "graph_database": tenant.graph_database,
-                "type": "Chokepoint",
-                "label": str(canal),
-                "source_table": "maritime_chokepoint_risk_indicators",
-                "source_pk": f"canal={canal}",
-                "ontology_artifact": "object:chokepoint",
-                "status": "approved",
-            })
-
-        def remember_entity_node(type_name, row):
-            node = self._entity_node(tenant, type_name, dict(row), entity_config)
-            if node:
-                remember_node(node)
-
-        center_maritime_dep_rows = []
-        center_maritime_result_rows = []
-        center_maritime_risk_rows = []
-        if tenant.tenant_id == "maritime-risk" and center and object_type and instance_id:
-            center_type_key = self._cfg_key(object_type)
-            related_limit = max(8, min(48, limit))
-            with self.source_engine_for(tenant).connect() as conn:
-                dep_rows = []
-                result_rows = []
-                risk_rows = []
-                if center_type_key == "country":
-                    dep_rows = conn.execute(
-                        text(
-                            "SELECT * FROM maritime_chokepoint_country_dependencies "
-                            "WHERE iso3 = :iso3 ORDER BY v_canal DESC LIMIT :lim"
-                        ),
-                        {"iso3": instance_id, "lim": related_limit},
-                    ).mappings().all()
-                    result_rows = conn.execute(
-                        text(
-                            "SELECT * FROM maritime_chokepoint_systemic_risk_results "
-                            "WHERE iso3 = :iso3 ORDER BY trade_at_risk_v DESC LIMIT :lim"
-                        ),
-                        {"iso3": instance_id, "lim": related_limit},
-                    ).mappings().all()
-                elif center_type_key == "chokepoint":
-                    dep_rows = conn.execute(
-                        text(
-                            "SELECT * FROM maritime_chokepoint_country_dependencies "
-                            "WHERE canal = :canal ORDER BY v_canal DESC LIMIT :lim"
-                        ),
-                        {"canal": instance_id, "lim": related_limit},
-                    ).mappings().all()
-                    result_rows = conn.execute(
-                        text(
-                            "SELECT * FROM maritime_chokepoint_systemic_risk_results "
-                            "WHERE canal = :canal ORDER BY trade_at_risk_v DESC LIMIT :lim"
-                        ),
-                        {"canal": instance_id, "lim": related_limit},
-                    ).mappings().all()
-                    risk_rows = conn.execute(
-                        text(
-                            "SELECT * FROM maritime_chokepoint_risk_indicators "
-                            "WHERE canal = :canal OR risk_indicator_id = :risk_id "
-                            "ORDER BY risk_indicator_id LIMIT :lim"
-                        ),
-                        {"canal": instance_id, "risk_id": instance_id, "lim": related_limit},
-                    ).mappings().all()
-
-                canals = sorted({str(row["canal"]) for row in [*dep_rows, *result_rows] if row.get("canal")})
-                if center_type_key == "country":
-                    for canal in canals[:related_limit]:
-                        risk_rows.extend(conn.execute(
-                            text(
-                                "SELECT * FROM maritime_chokepoint_risk_indicators "
-                                "WHERE canal = :canal ORDER BY risk_indicator_id LIMIT 1"
-                            ),
-                            {"canal": canal},
-                        ).mappings().all())
-
-            for row in dep_rows:
-                remember_entity_node("TradeDependency", row)
-                remember_maritime_chokepoint(row.get("canal"))
-            for row in result_rows:
-                remember_entity_node("SystemicRiskResult", row)
-                remember_entity_node("RiskFinding", row)
-                remember_entity_node("MitigationAction", row)
-                remember_maritime_chokepoint(row.get("canal"))
-            for row in risk_rows:
-                remember_entity_node("Hazard", row)
-                remember_entity_node("RiskIndicator", row)
-                remember_maritime_chokepoint(row.get("canal"))
-            center_maritime_dep_rows = [dict(row) for row in dep_rows]
-            center_maritime_result_rows = [dict(row) for row in result_rows]
-            center_maritime_risk_rows = [dict(row) for row in risk_rows]
-        node_ids = {node["id"] for node in nodes}
-        edges = []
-        seen_edges = set()
-
-        def add_edge(source, target, link_key, label=None, row_id=None):
-            if source not in node_ids or target not in node_ids or source == target:
-                return
-            edge_id = f"{source}->{target}:{link_key}"
-            if edge_id in seen_edges:
-                return
-            seen_edges.add(edge_id)
-            edges.append({
-                "id": edge_id,
-                "tenant_id": tenant.tenant_id,
-                "source": source,
-                "target": target,
-                "link_key": link_key,
-                "label": label or link_key,
-                "source_row": row_id,
-                "status": "approved",
-            })
-
-        link_artifacts = self._approved_artifacts(tenant, [lc["link"] for lc in link_config])
-        with self.source_engine_for(tenant).connect() as conn:
-            for lc in link_config:
-                if lc["link"] not in link_artifacts:
-                    continue
-                from_cfg = entity_config.get(lc["from"])
-                to_cfg = entity_config.get(lc["to"])
-                if not from_cfg or not to_cfg:
-                    continue
-                from_type = self._cfg_type(from_cfg, lc["from"])
-                to_type = self._cfg_type(to_cfg, lc["to"])
-                try:
-                    if lc.get("target_fk"):
-                        rows = conn.execute(
-                            text(f"SELECT {lc['fk_col']} AS source_pk, {lc['target_fk']} AS target_pk FROM {lc['fk_table']} LIMIT :lim"),
-                            {"lim": limit * 2},
-                        ).mappings().all()
-                    elif lc.get("reverse"):
-                        rows = conn.execute(
-                            text(f"SELECT {lc['fk_col']} AS source_pk, {from_cfg['pk']} AS target_pk FROM {lc['fk_table']} WHERE {lc['fk_col']} IS NOT NULL LIMIT :lim"),
-                            {"lim": limit * 2},
-                        ).mappings().all()
-                    else:
-                        rows = conn.execute(
-                            text(f"SELECT {lc['fk_col']} AS source_pk, {to_cfg['pk']} AS target_pk FROM {lc['fk_table']} WHERE {lc['fk_col']} IS NOT NULL LIMIT :lim"),
-                            {"lim": limit * 2},
-                        ).mappings().all()
-                except Exception:
-                    rows = []
-                for row in rows:
-                    add_edge(f"{from_type}:{row['source_pk']}", f"{to_type}:{row['target_pk']}", lc["link"])
-
-        if tenant.tenant_id == "maritime-risk":
-            with self.source_engine_for(tenant).connect() as conn:
-                risk_rows = conn.execute(text("SELECT risk_indicator_id, canal FROM maritime_chokepoint_risk_indicators LIMIT :lim"), {"lim": limit}).mappings().all()
-                dep_rows = conn.execute(text("SELECT dependency_id, iso3, canal FROM maritime_chokepoint_country_dependencies LIMIT :lim"), {"lim": limit}).mappings().all()
-                result_rows = conn.execute(text("SELECT risk_result_id, iso3, canal FROM maritime_chokepoint_systemic_risk_results LIMIT :lim"), {"lim": limit}).mappings().all()
-            for row in risk_rows:
-                chokepoint = f"Chokepoint:{row['canal']}"
-                add_edge(f"Hazard:{row['risk_indicator_id']}", chokepoint, "hazard_at_chokepoint", "hazard at")
-                add_edge(f"RiskIndicator:{row['risk_indicator_id']}", chokepoint, "risk_indicator_for_chokepoint", "risk indicator")
-            for row in dep_rows:
-                dep = f"TradeDependency:{row['dependency_id']}"
-                add_edge(dep, f"Country:{row['iso3']}", "dependency_country", "country")
-                add_edge(dep, f"Chokepoint:{row['canal']}", "dependency_chokepoint", "chokepoint")
-            for row in result_rows:
-                for source_type in ("SystemicRiskResult", "RiskFinding", "MitigationAction"):
-                    source = f"{source_type}:{row['risk_result_id']}"
-                    add_edge(source, f"Country:{row['iso3']}", "risk_country", "country")
-                    add_edge(source, f"Chokepoint:{row['canal']}", "risk_chokepoint", "chokepoint")
-            for row in center_maritime_risk_rows:
-                chokepoint = f"Chokepoint:{row['canal']}"
-                add_edge(f"Hazard:{row['risk_indicator_id']}", chokepoint, "hazard_at_chokepoint", "hazard at")
-                add_edge(f"RiskIndicator:{row['risk_indicator_id']}", chokepoint, "risk_indicator_for_chokepoint", "risk indicator")
-            for row in center_maritime_dep_rows:
-                dep = f"TradeDependency:{row['dependency_id']}"
-                add_edge(dep, f"Country:{row['iso3']}", "dependency_country", "country")
-                add_edge(dep, f"Chokepoint:{row['canal']}", "dependency_chokepoint", "chokepoint")
-            for row in center_maritime_result_rows:
-                for source_type in ("SystemicRiskResult", "RiskFinding", "MitigationAction"):
-                    source = f"{source_type}:{row['risk_result_id']}"
-                    add_edge(source, f"Country:{row['iso3']}", "risk_country", "country")
-                    add_edge(source, f"Chokepoint:{row['canal']}", "risk_chokepoint", "chokepoint")
-
-        return {
-            "approved": True,
-            "tenant": tenant.public_dict(),
-            "graph_database": tenant.graph_database,
-            "depth": 0,
-            "limit": limit,
-            "limits": {"requested_limit": requested_limit, "applied_limit": limit, "hard_limit": 300, "truncated": requested_limit > limit or len(nodes) >= limit},
-            "center": center,
-            "nodes": nodes,
-            "edges": edges[: limit * 3],
-            "scope": {
-                "tenant_id": tenant.tenant_id,
-                "view": "all",
-                "node_limit": limit,
-                "edge_limit": limit * 3,
-                "approved_only": True,
-                "projection_source": "fallback_fixture",
-            },
-        }
+        return None
 
     def edge_detail(self, tenant, source, target):
         if ":" not in source or ":" not in target:
@@ -2334,12 +1395,6 @@ class InstanceRepository:
                 {"tenant_id": tenant.tenant_id, "keys": list(keys)},
             ).mappings().all()
         return {row["canonical_key"]: dict(row) for row in rows}
-
-    def _object_key(self, object_type):
-        cfg = self.ENTITY_CONFIG.get(self._cfg_key(object_type))
-        if cfg:
-            return cfg["artifact"]
-        return f"object:{object_type}".lower()
 
     def _ensure_continuous_enrichment_schema(self, tenant):
         with self.metadata_engine_for(tenant).begin() as conn:
@@ -3929,10 +2984,6 @@ class InstanceRepository:
 
 
 class ReasoningRepository:
-    DEMO_TASK_KEY = "reasoning:employee-4-workload-analysis"
-    DEMO_QUESTION = "Why did Employee #4 handle so many orders? Is there abnormal workload or customer concentration risk?"
-    DEMO_REQUIRED_ARTIFACTS = ["object:employee", "object:order", "link:employee:1:n:order"]
-
     def __init__(self, tenant_registry, instance_repository, ensure_schema=False):
         self.tenant_registry = tenant_registry
         self.instance_repository = instance_repository
@@ -3941,9 +2992,6 @@ class ReasoningRepository:
         self.source_engines = {}
         self._autopilot_schema_ready = set()
         self._finding_experience_schema_ready = set()
-
-    def _is_explicit_demo_fallback(self, tenant):
-        return tenant.tenant_id in EXPLICIT_DEMO_FALLBACK_TENANTS
 
     def tenant(self, tenant_id=None):
         return self.tenant_registry.get(tenant_id)
@@ -6023,328 +5071,13 @@ class ReasoningRepository:
         return {"closed_count": result.rowcount}
 
     def ensure_default_task(self, tenant):
-        if not self._is_explicit_demo_fallback(tenant):
-            return None
-        scope = {
-            "object_type": "Employee",
-            "instance_id": "4",
-            "depth": 1,
-            "required_artifacts": self.DEMO_REQUIRED_ARTIFACTS,
-            "graph_database": tenant.graph_database,
-            "demo_boundary": "explicit Northwind fixture fallback only; production tasks use scoped graph metadata",
-            "projection_source": "fallback_fixture",
-            "demo_only": True,
-        }
-        allowed_tools = ["graph_query", "instance_lookup", "artifact_lookup", "propose_finding", "propose_action"]
-        with self.metadata_engine_for(tenant).begin() as conn:
-            conn.execute(
-                text(
-                    """
-                    INSERT INTO aletheia_reasoning_tasks
-                    (project_id, canonical_key, question, scope_json, allowed_tools_json, status, created_at, updated_at)
-                    VALUES (:tenant_id, :canonical_key, :question, :scope_json, :allowed_tools_json, 'active', NOW(), NOW())
-                    ON CONFLICT (project_id, canonical_key) DO UPDATE SET
-                      question = EXCLUDED.question,
-                      scope_json = EXCLUDED.scope_json,
-                      allowed_tools_json = EXCLUDED.allowed_tools_json,
-                      status = aletheia_reasoning_tasks.status,
-                      updated_at = NOW()
-                    """
-                ),
-                {
-                    "tenant_id": tenant.tenant_id,
-                    "canonical_key": self.DEMO_TASK_KEY,
-                    "question": self.DEMO_QUESTION,
-                    "scope_json": _json_dump(scope),
-                    "allowed_tools_json": _json_dump(allowed_tools),
-                },
-            )
-            row = conn.execute(
-                text(
-                    """
-                    SELECT id, project_id, canonical_key, question, scope_json, allowed_tools_json,
-                           status, created_at, updated_at
-                    FROM aletheia_reasoning_tasks
-                    WHERE project_id = :tenant_id AND canonical_key = :canonical_key
-                    """
-                ),
-                {"tenant_id": tenant.tenant_id, "canonical_key": self.DEMO_TASK_KEY},
-            ).mappings().first()
-        return self._task_to_dict(row)
+        return None
 
     def run_task(self, tenant, task_key):
-        if task_key != self.DEMO_TASK_KEY or not self._is_explicit_demo_fallback(tenant):
-            return self.run_scoped_graph_task(tenant, task_key)
-        started = time.monotonic()
-        task = self._get_task_row(tenant, self.DEMO_TASK_KEY)
-        if task is None:
-            raise ValueError("Default task not found — it may have been deleted")
-        if task.get("status") == "closed":
-            raise ValueError("Cannot run a closed task")
-        if task.get("status") == "completed":
-            self.update_task_status(tenant, self.DEMO_TASK_KEY, "active")
-            task["status"] = "active"
-        graph = self.graph_query(tenant, "Employee", "4")
-        query_plan = [
-            "Validate current tenant and approved-only artifact gate.",
-            "Read Employee #4 1-hop Employee -> Order graph.",
-            "Inspect Employee #4 source row and representative Order evidence.",
-            "Aggregate workload and customer concentration from tenant source rows.",
-            "Propose draft finding and action proposal with evidence paths.",
-        ]
-        tool_calls = [
-            {
-                "tool": "graph_query",
-                "tenant_id": tenant.tenant_id,
-                "approved_only": True,
-                "projection_source": "fallback_fixture",
-                "demo_only": True,
-                "status": "completed" if graph.get("approved") else "blocked",
-            },
-        ]
-        if not graph.get("approved"):
-            output = {
-                "summary": "Reasoning blocked by tenant-scoped approved-only gate.",
-                "missing_approved_artifacts": graph.get("missing_approved_artifacts", []),
-                "unsupported_claims": [],
-            }
-            eval_result = {
-                "passed": False,
-                "reason": "missing approved artifacts",
-                "unsupported_claims": [],
-                "evidence_path_count": 0,
-            }
-            run = self._record_run(
-                tenant,
-                task,
-                query_plan,
-                tool_calls,
-                [],
-                output,
-                eval_result,
-                "blocked",
-                started,
-            )
-            return {"tenant": tenant.public_dict(), "task": task, "run": run, "findings": [], "approved": False}
-
-        employee = self.instance_lookup(tenant, "Employee", "4")
-        edge = self.edge_lookup(tenant, "Employee:4", "Order:10250")
-        artifact = self.artifact_lookup(tenant, "link:employee:1:n:order")
-        workload = self._workload_stats(tenant, "4")
-        profile = self._employee_profile_summary(tenant, "4")
-        evidence_paths = self._evidence_paths(tenant, employee, edge, artifact, workload)
-        tool_calls.extend(
-            [
-                {"tool": "instance_lookup", "tenant_id": tenant.tenant_id, "object_type": "Employee", "id": "4", "status": "completed"},
-                {"tool": "instance_lookup", "tenant_id": tenant.tenant_id, "object_type": "Order", "id": "10250", "status": "completed"},
-                {"tool": "artifact_lookup", "tenant_id": tenant.tenant_id, "canonical_key": "link:employee:1:n:order", "status": "completed"},
-                {"tool": "propose_finding", "tenant_id": tenant.tenant_id, "write_scope": "draft_reasoning_artifact", "status": "completed"},
-                {"tool": "propose_action", "tenant_id": tenant.tenant_id, "write_scope": "draft_action_proposal", "status": "completed"},
-            ]
-        )
-        conclusion = profile["profile_summary"]
-        recommended_action = {
-            "type": "review_workload",
-            "title": "Review Employee #4 workload distribution",
-            "description": "Validate whether this order volume reflects role specialization, historical assignment rules, or a workload imbalance before changing operations.",
-            "execution_boundary": "proposal_only",
-            "structured_answer": profile,
-        }
-        finding_suffix = f"run-{int(time.time() * 1000)}"
-        workload_finding = {
-            "canonical_key": f"finding:employee-4-workload-concentration:{finding_suffix}",
-            "title": profile["title"],
-            "conclusion": conclusion,
-            "confidence": 0.82,
-            "supporting_evidence": evidence_paths,
-            "counter_evidence": [
-                {
-                    "kind": "limitation",
-                    "summary": "MVP uses 1-hop Employee -> Order evidence only; it does not yet inspect product, revenue, or time-window seasonality.",
-                }
-            ],
-            "recommended_action": recommended_action,
-        }
-        follow_up_finding = {
-            "canonical_key": f"finding:employee-4-follow-up-risk-review:{finding_suffix}",
-            "title": "Employee #4 workload needs time, customer, and freight follow-up before action",
-            "conclusion": (
-                "The approved 1-hop graph supports the workload concentration claim, but it is not enough "
-                "to classify operational risk as abnormal. A reviewer should inspect orderDate, customer mix, "
-                "and freight distribution before changing assignment rules."
-            ),
-            "confidence": 0.74,
-            "supporting_evidence": [
-                evidence_paths[0],
-                evidence_paths[1],
-                evidence_paths[3],
-            ],
-            "counter_evidence": [
-                {
-                    "kind": "scope_limit",
-                    "summary": "No product, category, or revenue 2-hop evidence is used in this MVP run.",
-                },
-                {
-                    "kind": "review_required",
-                    "summary": "The recommended action is a review proposal, not an automated operational change.",
-                },
-            ],
-            "recommended_action": {
-                "type": "inspect_distribution",
-                "title": "Inspect time, customer, and freight distribution for Employee #4",
-                "description": "Run a bounded follow-up analysis before deciding whether the workload is normal specialization or a risk.",
-                "execution_boundary": "proposal_only",
-            },
-        }
-        findings = [workload_finding, follow_up_finding]
-        output = {
-            "summary": conclusion,
-            "finding_keys": [finding["canonical_key"] for finding in findings],
-            "unsupported_claims": [],
-        }
-        eval_result = {
-            "passed": len(findings) >= 2 and all(len(finding["supporting_evidence"]) >= 2 for finding in findings),
-            "unsupported_claims": [],
-            "evidence_path_count": len(evidence_paths),
-            "finding_count": len(findings),
-            "tenant_id": tenant.tenant_id,
-            "approved_only": True,
-        }
-        run = self._record_run(
-            tenant,
-            task,
-            query_plan,
-            tool_calls,
-            evidence_paths,
-            output,
-            eval_result,
-            "completed",
-            started,
-        )
-        finding_rows = [self._record_finding(tenant, run, finding) for finding in findings]
-        return {
-            "tenant": tenant.public_dict(),
-            "task": task,
-            "run": run,
-            "findings": finding_rows,
-            "approved": True,
-        }
+        return self.run_scoped_graph_task(tenant, task_key)
 
     def run_task_streaming(self, tenant, task_key):
-        if task_key != self.DEMO_TASK_KEY or not self._is_explicit_demo_fallback(tenant):
-            yield from self.run_scoped_graph_task_streaming(tenant, task_key)
-            return
-        started = time.monotonic()
-        task = self._get_task_row(tenant, self.DEMO_TASK_KEY)
-        if task is None:
-            yield {"event": "error", "data": {"message": "Default task not found — it may have been deleted"}}
-            return
-        if task.get("status") == "closed":
-            yield {"event": "error", "data": {"message": "Cannot run a closed task"}}
-            return
-        if task.get("status") == "completed":
-            self.update_task_status(tenant, self.DEMO_TASK_KEY, "active")
-            task["status"] = "active"
-        query_plan = [
-            "Validate current tenant and approved-only artifact gate.",
-            "Read Employee #4 1-hop Employee -> Order graph.",
-            "Inspect Employee #4 source row and representative Order evidence.",
-            "Aggregate workload and customer concentration from tenant source rows.",
-            "Propose draft finding and action proposal with evidence paths.",
-        ]
-        yield {"event": "plan", "data": {"query_plan": query_plan, "task": task}}
-        graph = self.graph_query(tenant, "Employee", "4")
-        tool_calls = [
-            {
-                "tool": "graph_query",
-                "tenant_id": tenant.tenant_id,
-                "approved_only": True,
-                "projection_source": "fallback_fixture",
-                "demo_only": True,
-                "status": "completed" if graph.get("approved") else "blocked",
-            },
-        ]
-        yield {"event": "step", "data": {"tool": "graph_query", "status": tool_calls[0]["status"], "step": 1, "total": 5}}
-        if not graph.get("approved"):
-            output = {
-                "summary": "Reasoning blocked by tenant-scoped approved-only gate.",
-                "missing_approved_artifacts": graph.get("missing_approved_artifacts", []),
-                "unsupported_claims": [],
-            }
-            eval_result = {"passed": False, "reason": "missing approved artifacts", "unsupported_claims": [], "evidence_path_count": 0}
-            run = self._record_run(tenant, task, query_plan, tool_calls, [], output, eval_result, "blocked", started)
-            yield {"event": "run_complete", "data": {"tenant": tenant.public_dict(), "task": task, "run": run, "findings": [], "approved": False}}
-            return
-        employee = self.instance_lookup(tenant, "Employee", "4")
-        yield {"event": "step", "data": {"tool": "instance_lookup", "object_type": "Employee", "id": "4", "status": "completed", "step": 2, "total": 5}}
-        edge = self.edge_lookup(tenant, "Employee:4", "Order:10250")
-        yield {"event": "step", "data": {"tool": "edge_lookup", "edge": "Employee:4 → Order:10250", "status": "completed", "step": 3, "total": 5}}
-        artifact = self.artifact_lookup(tenant, "link:employee:1:n:order")
-        workload = self._workload_stats(tenant, "4")
-        profile = self._employee_profile_summary(tenant, "4")
-        yield {"event": "step", "data": {"tool": "workload_aggregate", "status": "completed", "step": 4, "total": 5}}
-        evidence_paths = self._evidence_paths(tenant, employee, edge, artifact, workload)
-        tool_calls.extend([
-            {"tool": "instance_lookup", "tenant_id": tenant.tenant_id, "object_type": "Employee", "id": "4", "status": "completed"},
-            {"tool": "instance_lookup", "tenant_id": tenant.tenant_id, "object_type": "Order", "id": "10250", "status": "completed"},
-            {"tool": "artifact_lookup", "tenant_id": tenant.tenant_id, "canonical_key": "link:employee:1:n:order", "status": "completed"},
-            {"tool": "propose_finding", "tenant_id": tenant.tenant_id, "write_scope": "draft_reasoning_artifact", "status": "completed"},
-            {"tool": "propose_action", "tenant_id": tenant.tenant_id, "write_scope": "draft_action_proposal", "status": "completed"},
-        ])
-        yield {"event": "evidence", "data": {"evidence_paths": evidence_paths}}
-        conclusion = profile["profile_summary"]
-        recommended_action = {
-            "type": "review_workload",
-            "title": "Review Employee #4 workload distribution",
-            "description": "Validate whether this order volume reflects role specialization, historical assignment rules, or a workload imbalance before changing operations.",
-            "execution_boundary": "proposal_only",
-            "structured_answer": profile,
-        }
-        finding_suffix = f"run-{int(time.time() * 1000)}"
-        workload_finding = {
-            "canonical_key": f"finding:employee-4-workload-concentration:{finding_suffix}",
-            "title": profile["title"],
-            "conclusion": conclusion,
-            "confidence": 0.82,
-            "supporting_evidence": evidence_paths,
-            "counter_evidence": [{"kind": "limitation", "summary": "MVP uses 1-hop Employee -> Order evidence only; it does not yet inspect product, revenue, or time-window seasonality."}],
-            "recommended_action": recommended_action,
-        }
-        follow_up_finding = {
-            "canonical_key": f"finding:employee-4-follow-up-risk-review:{finding_suffix}",
-            "title": "Employee #4 workload needs time, customer, and freight follow-up before action",
-            "conclusion": "The approved 1-hop graph supports the workload concentration claim, but it is not enough to classify operational risk as abnormal. A reviewer should inspect orderDate, customer mix, and freight distribution before changing assignment rules.",
-            "confidence": 0.74,
-            "supporting_evidence": [evidence_paths[0], evidence_paths[1], evidence_paths[3]],
-            "counter_evidence": [
-                {"kind": "scope_limit", "summary": "No product, category, or revenue 2-hop evidence is used in this MVP run."},
-                {"kind": "review_required", "summary": "The recommended action is a review proposal, not an automated operational change."},
-            ],
-            "recommended_action": {
-                "type": "inspect_distribution",
-                "title": "Inspect time, customer, and freight distribution for Employee #4",
-                "description": "Run a bounded follow-up analysis before deciding whether the workload is normal specialization or a risk.",
-                "execution_boundary": "proposal_only",
-            },
-        }
-        findings = [workload_finding, follow_up_finding]
-        output = {"summary": conclusion, "finding_keys": [f["canonical_key"] for f in findings], "unsupported_claims": []}
-        eval_result = {
-            "passed": len(findings) >= 2 and all(len(f["supporting_evidence"]) >= 2 for f in findings),
-            "unsupported_claims": [],
-            "evidence_path_count": len(evidence_paths),
-            "finding_count": len(findings),
-            "tenant_id": tenant.tenant_id,
-            "approved_only": True,
-        }
-        run = self._record_run(tenant, task, query_plan, tool_calls, evidence_paths, output, eval_result, "completed", started)
-        yield {"event": "step", "data": {"tool": "propose_finding", "status": "completed", "step": 5, "total": 5}}
-        finding_rows = []
-        for f in findings:
-            row = self._record_finding(tenant, run, f)
-            finding_rows.append(row)
-            yield {"event": "finding", "data": {"finding": row}}
-        yield {"event": "run_complete", "data": {"tenant": tenant.public_dict(), "task": task, "run": run, "findings": finding_rows, "approved": True}}
+        yield from self.run_scoped_graph_task_streaming(tenant, task_key)
 
     def run_scoped_graph_task_streaming(self, tenant, task_key):
         started = time.monotonic()
@@ -6476,7 +5209,7 @@ class ReasoningRepository:
             title = structured_response["answer"]["title"]
             conclusion = structured_response["answer"]["conclusion"]
         else:
-            title, conclusion = self._edge_or_fallback_finding_text(tenant, task, scope)
+            title, conclusion = self._edge_or_scoped_finding_text(tenant, task, scope)
         yield {"event": "evidence", "data": {"evidence_paths": evidence_paths}}
         finding = {
             "canonical_key": f"finding:graph-scope:{task_key}:run-{int(time.time() * 1000)}",
@@ -6902,10 +5635,7 @@ class ReasoningRepository:
         source_key_profile = None
         try:
             cfg_key = self.instance_repository._cfg_key(object_type)
-            if hasattr(self.instance_repository, "reasoning_entity_config"):
-                cfg = self.instance_repository.reasoning_entity_config(tenant).get(cfg_key)
-            else:
-                cfg = self.instance_repository.ENTITY_CONFIG.get(cfg_key)
+            cfg = self.instance_repository.reasoning_entity_config(tenant).get(cfg_key)
             if cfg:
                 source_key_profile = ReasoningEngine(self.instance_repository)._source_key_profile(
                     tenant,
@@ -7093,7 +5823,7 @@ class ReasoningRepository:
             title = structured_response["answer"]["title"]
             conclusion = structured_response["answer"]["conclusion"]
         else:
-            title, conclusion = self._edge_or_fallback_finding_text(tenant, task, scope)
+            title, conclusion = self._edge_or_scoped_finding_text(tenant, task, scope)
         finding = {
             "canonical_key": f"finding:graph-scope:{task_key}:run-{int(time.time() * 1000)}",
             "title": title,
@@ -7137,7 +5867,7 @@ class ReasoningRepository:
         finding_row = self._record_finding(tenant, run, finding)
         return {"tenant": tenant.public_dict(), "task": task, "run": run, "findings": [finding_row], "approved": True}
 
-    def _edge_or_fallback_finding_text(self, tenant, task, scope):
+    def _edge_or_scoped_finding_text(self, tenant, task, scope):
         center_edge = scope.get("center_edge") or {}
         question = task.get("question") or "the scoped graph question"
         if center_edge.get("source") and center_edge.get("target"):
@@ -7277,7 +6007,7 @@ class ReasoningRepository:
                 )
                 finding["supporting_evidence"] = evidence_paths
         else:
-            title, conclusion = self._edge_or_fallback_finding_text(tenant, task, scope)
+            title, conclusion = self._edge_or_scoped_finding_text(tenant, task, scope)
         finding["raw_title"] = raw_title
         finding["raw_conclusion"] = raw_conclusion
         finding["title"] = title
@@ -7809,326 +6539,10 @@ class ReasoningRepository:
             "canonical_boundary": self._finding_canonical_boundary(),
         }
 
-    def _employee_label(self, row):
-        return f"{row.get('firstName', '')} {row.get('lastName', '')}".strip()
-
-    def _workload_stats(self, tenant, employee_id):
-        with self.source_engine_for(tenant).connect() as conn:
-            order_count = conn.execute(
-                text("SELECT COUNT(*) FROM orders WHERE employeeID = :employee_id"),
-                {"employee_id": employee_id},
-            ).scalar()
-            total_orders = conn.execute(text("SELECT COUNT(*) FROM orders")).scalar()
-            top_customer = conn.execute(
-                text(
-                    """
-                    SELECT customerID, COUNT(*) AS order_count
-                    FROM orders
-                    WHERE employeeID = :employee_id
-                    GROUP BY customerID
-                    ORDER BY order_count DESC, customerID
-                    LIMIT 1
-                    """
-                ),
-                {"employee_id": employee_id},
-            ).mappings().first()
-        top_customer_orders = int(top_customer["order_count"]) if top_customer else 0
-        top_customer_share = top_customer_orders / order_count if order_count else 0
-        employee_share = order_count / total_orders if total_orders else 0
-        return {
-            "order_count": int(order_count or 0),
-            "total_orders": int(total_orders or 0),
-            "employee_share": employee_share,
-            "employee_share_percent": employee_share * 100,
-            "top_customer_id": top_customer["customerID"] if top_customer else None,
-            "top_customer_orders": top_customer_orders,
-            "top_customer_share": top_customer_share,
-            "top_customer_share_percent": top_customer_share * 100,
-        }
-
-    def _employee_profile_summary(self, tenant, employee_id):
-        with self.source_engine_for(tenant).connect() as conn:
-            employee = conn.execute(
-                text(
-                    """
-                    SELECT e.employeeID, e.firstName, e.lastName, e.title, e.city, e.region,
-                           e.country, e.reportsTo, m.firstName AS managerFirstName,
-                           m.lastName AS managerLastName, m.title AS managerTitle
-                    FROM employees e
-                    LEFT JOIN employees m ON e.reportsTo = m.employeeID
-                    WHERE e.employeeID = :employee_id
-                    """
-                ),
-                {"employee_id": employee_id},
-            ).mappings().first()
-            if not employee:
-                return {
-                    "title": f"Employee:{employee_id} 画像无法生成",
-                    "profile_summary": f"Employee:{employee_id} 不在当前受控数据源中，无法形成员工画像。",
-                    "key_facts": [],
-                    "business_interpretation": ["当前缺少员工基础记录，不能进行业务判断。"],
-                    "evidence_limits": ["缺少 employees 源表记录。"],
-                    "next_questions": ["确认员工 ID 是否存在于当前租户的数据源。"],
-                }
-            order_stats = conn.execute(
-                text(
-                    """
-                    SELECT COUNT(*) AS order_count,
-                           COUNT(DISTINCT customerID) AS customer_count,
-                           MIN(orderDate) AS first_order,
-                           MAX(orderDate) AS last_order,
-                           COALESCE(SUM(freight), 0) AS freight_sum,
-                           COALESCE(AVG(freight), 0) AS avg_freight
-                    FROM orders
-                    WHERE employeeID = :employee_id
-                    """
-                ),
-                {"employee_id": employee_id},
-            ).mappings().first()
-            total_orders = conn.execute(text("SELECT COUNT(*) FROM orders")).scalar()
-            total_revenue = conn.execute(
-                text(
-                    """
-                    SELECT COALESCE(SUM(od.unitPrice * od.quantity * (1 - od.discount)), 0)
-                    FROM order_details od
-                    """
-                )
-            ).scalar()
-            revenue = conn.execute(
-                text(
-                    """
-                    SELECT COALESCE(SUM(od.unitPrice * od.quantity * (1 - od.discount)), 0)
-                    FROM orders o
-                    JOIN order_details od ON od.orderID = o.orderID
-                    WHERE o.employeeID = :employee_id
-                    """
-                ),
-                {"employee_id": employee_id},
-            ).scalar()
-            rank_rows = conn.execute(
-                text(
-                    """
-                    SELECT employeeID, COUNT(*) AS order_count
-                    FROM orders
-                    GROUP BY employeeID
-                    ORDER BY order_count DESC, employeeID
-                    """
-                )
-            ).mappings().all()
-            top_customers = conn.execute(
-                text(
-                    """
-                    SELECT o.customerID, c.companyName, COUNT(DISTINCT o.orderID) AS order_count,
-                           COALESCE(SUM(od.unitPrice * od.quantity * (1 - od.discount)), 0) AS revenue
-                    FROM orders o
-                    LEFT JOIN customers c ON c.customerID = o.customerID
-                    LEFT JOIN order_details od ON od.orderID = o.orderID
-                    WHERE o.employeeID = :employee_id
-                    GROUP BY o.customerID, c.companyName
-                    ORDER BY order_count DESC, o.customerID
-                    LIMIT 5
-                    """
-                ),
-                {"employee_id": employee_id},
-            ).mappings().all()
-            yearly = conn.execute(
-                text(
-                    """
-                    SELECT YEAR(orderDate) AS year, COUNT(*) AS order_count
-                    FROM orders
-                    WHERE employeeID = :employee_id
-                    GROUP BY YEAR(orderDate)
-                    ORDER BY year
-                    """
-                ),
-                {"employee_id": employee_id},
-            ).mappings().all()
-            categories = conn.execute(
-                text(
-                    """
-                    SELECT c.categoryName, COUNT(DISTINCT o.orderID) AS order_count,
-                           COALESCE(SUM(od.unitPrice * od.quantity * (1 - od.discount)), 0) AS revenue
-                    FROM orders o
-                    JOIN order_details od ON od.orderID = o.orderID
-                    JOIN products p ON p.productID = od.productID
-                    JOIN categories c ON c.categoryID = p.categoryID
-                    WHERE o.employeeID = :employee_id
-                    GROUP BY c.categoryName
-                    ORDER BY revenue DESC, c.categoryName
-                    LIMIT 3
-                    """
-                ),
-                {"employee_id": employee_id},
-            ).mappings().all()
-        name = self._employee_label(employee)
-        order_count = int(order_stats["order_count"] or 0)
-        total_orders = int(total_orders or 0)
-        customer_count = int(order_stats["customer_count"] or 0)
-        revenue = float(revenue or 0)
-        total_revenue = float(total_revenue or 0)
-        freight_sum = float(order_stats["freight_sum"] or 0)
-        avg_freight = float(order_stats["avg_freight"] or 0)
-        order_share = order_count / total_orders if total_orders else 0
-        revenue_share = revenue / total_revenue if total_revenue else 0
-        rank = next((index + 1 for index, row in enumerate(rank_rows) if str(row["employeeID"]) == str(employee_id)), None)
-        employee_total = len(rank_rows)
-        rank_label = f"{rank}/{employee_total}" if rank else "-"
-        percentile = None
-        if rank and employee_total > 1:
-            percentile = 1 - ((rank - 1) / (employee_total - 1))
-        top_customer = dict(top_customers[0]) if top_customers else {}
-        top_customer_count = int(top_customer.get("order_count") or 0)
-        top_customer_share = top_customer_count / order_count if order_count else 0
-        concentration = "较分散"
-        if top_customer_share >= 0.25:
-            concentration = "偏集中"
-        elif top_customer_share >= 0.15:
-            concentration = "中等集中"
-        load_label = "低订单负载"
-        if percentile is not None and percentile >= 0.75:
-            load_label = "高订单负载"
-        elif percentile is not None and percentile >= 0.4:
-            load_label = "中等订单负载"
-        manager_name = " ".join(
-            part for part in [employee.get("managerFirstName"), employee.get("managerLastName")] if part
-        ) or None
-        location = ", ".join(part for part in [employee.get("city"), employee.get("region"), employee.get("country")] if part)
-        years = [
-            {"year": int(row["year"]), "order_count": int(row["order_count"])}
-            for row in yearly
-            if row.get("year") is not None
-        ]
-        peak_year = max(years, key=lambda item: item["order_count"]) if years else None
-        top_customer_text = (
-            f"{top_customer.get('companyName') or top_customer.get('customerID')}（{top_customer_count} 单，占该员工订单 {top_customer_share * 100:.1f}%）"
-            if top_customer
-            else "无客户订单记录"
-        )
-        profile_summary = (
-            f"{name} 是 {employee.get('title') or '未标注职位'}，位于 {location or '未知地区'}。"
-            f"在当前已批准 Northwind 图谱和受控聚合中，他呈现为{load_label}、客户覆盖{concentration}的员工："
-            f"共处理 {order_count} 单，占全体订单 {order_share * 100:.1f}%，订单量排名 {rank_label}；"
-            f"覆盖 {customer_count} 个客户，最大客户为 {top_customer_text}。"
-        )
-        if load_label == "低订单负载":
-            profile_summary += " 因此当前证据不支持把他判断为订单负载异常偏高。"
-        else:
-            profile_summary += " 是否异常仍需结合目标、工时、利润率和客户质量继续验证。"
-        key_facts = [
-            {"label": "员工基础信息", "value": f"{name} / {employee.get('title') or '-'} / {location or '-'}", "source_ref": f"employees.employeeID={employee_id}"},
-            {"label": "直属关系", "value": f"reportsTo={employee.get('reportsTo') or '-'}" + (f" / manager={manager_name}" if manager_name else ""), "source_ref": "employees.reportsTo"},
-            {"label": "订单负载", "value": f"{order_count} / {total_orders} 单，占比 {order_share * 100:.1f}%，排名 {rank_label}", "source_ref": "orders.employeeID"},
-            {"label": "时间范围", "value": f"{_jsonable(order_stats['first_order']) or '-'} 至 {_jsonable(order_stats['last_order']) or '-'}" + (f"，峰值年份 {peak_year['year']}（{peak_year['order_count']} 单）" if peak_year else ""), "source_ref": "orders.orderDate"},
-            {"label": "客户覆盖", "value": f"{customer_count} 个客户；Top 客户 {top_customer_text}", "source_ref": "orders.customerID"},
-            {"label": "订单规模", "value": f"订单明细金额 {revenue:.2f}（占全体 {revenue_share * 100:.1f}%）；运费合计 {freight_sum:.2f}，平均运费 {avg_freight:.2f}", "source_ref": "order_details + orders.freight"},
-        ]
-        if categories:
-            key_facts.append(
-                {
-                    "label": "主要品类",
-                    "value": "；".join(f"{row['categoryName']} {float(row['revenue'] or 0):.2f}" for row in categories),
-                    "source_ref": "order_details.productID -> products.categoryID",
-                }
-            )
-        business_interpretation = [
-            f"订单量排名 {rank_label}，说明该员工在样本内不是最高负载承接者；当前更像稳定覆盖型员工，而不是明显异常高负载员工。",
-            f"客户覆盖 {customer_count} 个客户，最大客户占比 {top_customer_share * 100:.1f}%，未显示单一客户强依赖；需要进一步按金额而非订单数复核集中度。",
-            f"职位为 {employee.get('title') or '-'}，因此订单承接量需要结合岗位职责解释；仅凭订单数不能判断绩效好坏或管理风险。",
-        ]
-        evidence_limits = [
-            "当前画像只使用已批准图谱范围、employees/orders/order_details/customers/products/categories 的受控聚合。",
-            "缺少绩效目标、工时、利润率、客户满意度和内部职责分工，不能直接判断绩效优劣或异常责任。",
-            "当前图谱主关系仍以 Employee-Order 为核心；Customer、OrderDetail、Product/Category 属于受控 SQL 聚合证据，不自动写入正式知识图谱。",
-        ]
-        next_questions = [
-            "按同职位或同地区员工对比订单量、金额和客户覆盖，判断 Steven Buchanan 是否真的偏离基线。",
-            "按月份查看订单波动，确认是否存在阶段性峰值或交接导致的集中承接。",
-            "按客户金额而非订单数计算 Top 客户依赖，识别是否存在大客户集中风险。",
-            "补充工时、销售目标、利润率或客户满意度后，再判断绩效或风险。",
-        ]
-        return {
-            "title": f"{name} 员工画像：{load_label}、客户覆盖{concentration}",
-            "profile_summary": profile_summary,
-            "key_facts": key_facts,
-            "business_interpretation": business_interpretation,
-            "evidence_limits": evidence_limits,
-            "next_questions": next_questions,
-            "metrics": {
-                "employee_id": int(employee_id),
-                "name": name,
-                "title": employee.get("title"),
-                "location": location,
-                "order_count": order_count,
-                "total_orders": total_orders,
-                "order_share_percent": order_share * 100,
-                "order_rank": rank,
-                "employee_count": employee_total,
-                "customer_count": customer_count,
-                "top_customer_id": top_customer.get("customerID"),
-                "top_customer_name": top_customer.get("companyName"),
-                "top_customer_order_count": top_customer_count,
-                "top_customer_share_percent": top_customer_share * 100,
-                "revenue": revenue,
-                "revenue_share_percent": revenue_share * 100,
-                "freight_sum": freight_sum,
-                "avg_freight": avg_freight,
-                "yearly_orders": years,
-                "top_customers": [
-                    {
-                        "customer_id": row["customerID"],
-                        "company_name": row["companyName"],
-                        "order_count": int(row["order_count"] or 0),
-                        "revenue": float(row["revenue"] or 0),
-                    }
-                    for row in top_customers
-                ],
-            },
-        }
-
-    def _evidence_paths(self, tenant, employee, edge, artifact, workload):
-        return [
-            {
-                "kind": "instance_node",
-                "label": "Employee #4 source row",
-                "summary": f"{employee['label']} is the center of the workload analysis.",
-                "url": f"/instances.html?tenant={tenant.tenant_id}&type=Employee&id=4&node=Employee%3A4",
-                "source_ref": "employees.employeeID=4",
-                "payload": {"node_id": "Employee:4", "ontology_artifact": "object:employee"},
-            },
-            {
-                "kind": "instance_edge",
-                "label": "Employee #4 -> Order #10250 edge",
-                "summary": "Representative approved Employee-Order edge with source row provenance.",
-                "url": f"/instances.html?tenant={tenant.tenant_id}&type=Employee&id=4&edgeSource=Employee%3A4&edgeTarget=Order%3A10250",
-                "source_ref": "orders.employeeID",
-                "payload": {"edge_id": edge["id"] if edge else None, "ontology_link": "link:employee:1:n:order"},
-            },
-            {
-                "kind": "ontology_artifact",
-                "label": "Approved Employee-Order ontology link",
-                "summary": artifact["description"] if artifact else "Approved link artifact required for graph evidence.",
-                "url": f"/?tenant={tenant.tenant_id}&artifact=link%3Aemployee%3A1%3An%3Aorder",
-                "source_ref": "artifact:link:employee:1:n:order",
-                "payload": {"status": artifact["status"] if artifact else None},
-            },
-            {
-                "kind": "aggregate",
-                "label": "Tenant source-row workload aggregate",
-                "summary": f"Employee #4 handled {workload['order_count']} of {workload['total_orders']} orders.",
-                "url": f"/reasoning.html?tenant={tenant.tenant_id}&task={self.DEMO_TASK_KEY}",
-                "source_ref": "orders.employeeID=4",
-                "payload": workload,
-            },
-        ]
-
     def _record_run(self, tenant, task, query_plan, tool_calls, evidence_paths, output, eval_result, status, started):
         run_key = f"{task['canonical_key']}:run:{int(time.time() * 1000)}"
         latency_ms = int((time.monotonic() - started) * 1000)
-        prompt_version = (
-            "graph-scope-reasoning-v1"
-            if str(task.get("canonical_key") or "").startswith("reasoning:graph-scope:")
-            else "fallback-fixture-northwind-workload-v1"
-        )
+        prompt_version = "graph-scope-reasoning-v1"
         with self.metadata_engine_for(tenant).begin() as conn:
             row = conn.execute(
                 text(
@@ -9338,7 +7752,27 @@ class ReviewWorkbenchHandler(BaseHTTPRequestHandler):
                 else self.instance_repository.neighborhood(tenant, object_type, instance_id, depth=depth, limit=limit)
             )
             if graph is None:
-                self._send_error(HTTPStatus.NOT_FOUND, "Graph context not found")
+                self._send_json(
+                    {
+                        "approved": False,
+                        "tenant": tenant.public_dict(),
+                        "graph_database": tenant.graph_database,
+                        "depth": depth,
+                        "limit": limit,
+                        "center": None,
+                        "nodes": [],
+                        "edges": [],
+                        "scope": {
+                            "tenant_id": tenant.tenant_id,
+                            "view": view,
+                            "type": object_type or None,
+                            "id": instance_id or None,
+                            "approved_only": True,
+                            "projection_source": "none",
+                            "reason": "No reviewed SchemaGraphModelingAgent projection. Import data and run schema-to-graph modeling first.",
+                        },
+                    }
+                )
                 return
             if graph.get("approved"):
                 if view == "all":
@@ -9961,19 +8395,6 @@ class ReviewWorkbenchHandler(BaseHTTPRequestHandler):
             if default_center
             else self.instance_repository.full_graph(tenant, limit=200)
         )
-        sandbox_graph = None
-        try:
-            sandbox_tenant = self.repository.tenant_registry.get("northwind-sandbox")
-            sandbox_center = self.instance_repository.default_center(sandbox_tenant)
-            sandbox_graph = (
-                self.instance_repository.neighborhood(
-                    sandbox_tenant, sandbox_center["type"], sandbox_center["id"], depth=1, limit=200
-                )
-                if sandbox_center
-                else None
-            )
-        except Exception:
-            sandbox_graph = None
         approved_artifacts = [artifact for artifact in artifacts if artifact.get("status") == "approved"]
         draft_findings = [finding for finding in findings if finding.get("status") == "draft"]
         low_confidence = [finding for finding in findings if float(finding.get("confidence") or 0) < 0.75]
@@ -10014,16 +8435,6 @@ class ReviewWorkbenchHandler(BaseHTTPRequestHandler):
                     "href": f"/questions.html?tenant={quote(tenant.tenant_id)}&task={quote(run.get('task_key'))}",
                 }
             )
-        if sandbox_graph and sandbox_graph.get("approved") is False:
-            attention_items.append(
-                {
-                    "kind": "missing_approved_artifacts",
-                    "severity": "high",
-                    "title": "Sandbox approved-only gate blocks graph reasoning",
-                    "summary": ", ".join(sandbox_graph.get("missing_approved_artifacts") or []),
-                    "href": f"/quality.html?tenant={quote(tenant.tenant_id)}",
-                }
-            )
         for run in blocked_agent_runs[:4]:
             attention_items.append(
                 {
@@ -10062,8 +8473,6 @@ class ReviewWorkbenchHandler(BaseHTTPRequestHandler):
                 "low_confidence_findings": len(low_confidence),
                 "blocked_reasoning_runs": len(blocked_runs),
                 "blocked_agent_runs": len(blocked_agent_runs),
-                "sandbox_missing_artifacts": sandbox_graph.get("missing_approved_artifacts", []) if sandbox_graph else [],
-                "sandbox_approved": sandbox_graph.get("approved") if sandbox_graph else None,
             },
             "recent_changes": {
                 "tasks": tasks[:8],

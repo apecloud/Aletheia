@@ -88,32 +88,13 @@ class ContinuousEnrichmentFrontierTest(unittest.TestCase):
         self.assertIn("new proposed graph edge", additions[0]["reason"])
         self.assertEqual(next_frontier[0]["payload"]["relation"], "depends_on")
 
-    def test_demo_fallback_configs_are_tenant_scoped(self):
+    def test_runtime_reasoning_configs_do_not_fallback_to_demo_fixtures(self):
         repo = object.__new__(InstanceRepository)
         repo._schema_graph_reasoning_configs = lambda tenant: (None, None)
-        fraud_tenant = type("Tenant", (), {"tenant_id": "creditcardfraud"})()
-        default_tenant = type("Tenant", (), {"tenant_id": "default"})()
-        maritime_tenant = type("Tenant", (), {"tenant_id": "maritime-risk"})()
-
-        fraud_entities = repo.reasoning_entity_config(fraud_tenant)
-        fraud_links = repo.reasoning_link_config(fraud_tenant)
-        self.assertEqual(
-            set(fraud_entities),
-            {"credit_card_transaction", "account", "card", "merchant"},
-        )
-        self.assertEqual(
-            {link["link"] for link in fraud_links},
-            {
-                "link:account:1:n:credit_card_transaction",
-                "link:card:1:n:credit_card_transaction",
-                "link:merchant:1:n:credit_card_transaction",
-            },
-        )
-        self.assertNotIn("employee", fraud_entities)
-        self.assertFalse(any("employee" in link["link"] for link in fraud_links))
-
-        self.assertIn("employee", repo.reasoning_entity_config(default_tenant))
-        self.assertEqual(repo.reasoning_entity_config(maritime_tenant), {})
+        for tenant_id in ("default", "northwind-sandbox", "creditcardfraud", "maritime-risk"):
+            tenant = type("Tenant", (), {"tenant_id": tenant_id})()
+            self.assertEqual(repo.reasoning_entity_config(tenant), {})
+            self.assertEqual(repo.reasoning_link_config(tenant), [])
 
 
 if __name__ == "__main__":
