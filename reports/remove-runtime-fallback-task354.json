@@ -4,7 +4,10 @@
   "scope": "Remove workbench_server runtime graph/reasoning fallback fixtures",
   "changed_files": [
     "server/workbench_server.py",
-    "tests/test_continuous_enrichment_frontier.py"
+    "tests/test_continuous_enrichment_frontier.py",
+    "web/app/workbench.jsx",
+    "README.md",
+    "docs/schema-graph-hardcode-boundary.md"
   ],
   "removed_runtime_fallbacks": [
     "server.graph_projection_fixtures import",
@@ -13,8 +16,15 @@
     "fallback source table schemas",
     "InstanceRepository fallback graph projection",
     "ReasoningRepository Employee #4 demo task",
-    "portal northwind-sandbox probe"
+    "portal northwind-sandbox probe",
+    "Workbench Employee/Order FALLBACK_CASES mock data"
   ],
+  "docs_boundary": "Northwind is example/import/bootstrap data only; tenants without imported data and reviewed SchemaGraphModelingAgent projection must return empty/degraded state.",
+  "frontend_rerun": {
+    "workbench_runtime_mock_fallback_removed": true,
+    "static_scan_workbench_employee_northwind": "pass",
+    "default_workbench_html_contains_employee_or_northwind": false
+  },
   "api_smoke": {
     "creditcardfraud_full_graph": {
       "approved": false,
@@ -52,6 +62,7 @@
   ],
   "unrelated_dirty_files_left_unstaged": [
     "agents/iterative_graph_enrichment_agent.py",
+    "agents/ontology_artifacts.py",
     "tests/test_iterative_graph_enrichment.py"
   ]
 }

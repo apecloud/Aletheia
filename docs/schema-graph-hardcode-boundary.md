@@ -21,7 +21,7 @@ or descriptions from hardcoded domain terms alone.
 
 | Location | Current status | Allowed use |
 | --- | --- | --- |
-| `server/graph_projection_fixtures.py` | Isolated legacy graph projection fixtures | Demo/bootstrap fallback and reviewed-artifact projection support only |
+| `server/graph_projection_fixtures.py` | Historical fixture module | Example/import/bootstrap data source only; not a runtime graph or reasoning fallback |
 | `scripts/import_maritime_risk_dataset.py` `OBJECT_SPECS` / `LINK_SPECS` | Curated maritime demo fixture | Repeatable demo seed only; production rebuild uses `scripts/rebuild_maritime_schema_graph.py` |
 | `scripts/import_us_iran_war_dataset.py` `OBJECT_SPECS` / `LINK_SPECS` | Curated web-research snapshot fixture | Demo snapshot seed only |
 | `scripts/bootstrap_demo_environment.py` seed specs | Demo/test environment fixture | Local bootstrap and tests only |
@@ -33,6 +33,9 @@ or descriptions from hardcoded domain terms alone.
 
 - Keep demo fixtures explicit and named as fixtures; do not hide them behind
   production-sounding APIs.
+- Do not use demo fixtures as runtime fallback. A tenant without imported data
+  and reviewed `SchemaGraphModelingAgent` projection must return empty/degraded
+  state and ask for import/model/review, not Employee/Northwind data.
 - Prefer reviewed SchemaGraphModelingAgent artifacts over static configs when
   both are available.
 - Any new import script must default to raw-table import. Ontology seeding is

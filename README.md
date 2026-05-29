@@ -13,9 +13,14 @@ graph facts, and reviewable reasoning findings. The product loop is:
 
 The current demo has three main tenants:
 
-- `default`: Northwind demo data
+- `default`: Northwind example data
 - `creditcardfraud`: fraud discovery and finding approval workflow
 - `maritime-risk`: chokepoint, country dependency, enrichment, and multi-hop graph reasoning
+
+Northwind is example/import/bootstrap data only. It is not a runtime fallback:
+if a tenant has no imported data and no reviewed `SchemaGraphModelingAgent`
+projection, the server and UI should show an empty/degraded state instead of
+injecting Employee/Order demo objects.
 
 ## What Is In This Repo
 

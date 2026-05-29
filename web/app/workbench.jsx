@@ -124,48 +124,9 @@ function reviewLinkLabelWB(label, language) {
   return map[label] || label;
 }
 
-const FALLBACK_CASES = [
-  {
-    canonical_key: "case:employee-order-basis",
-    question: "Confirm the Employee 1:N Order basis used by active reasoning cases",
-    status: "active",
-    source: "reasoning",
-    scope: {
-      center_node: "Employee:4",
-      allowed_link_keys: ["link:employee:1:n:order"],
-      allowed_node_types: ["Employee", "Order"],
-      review_gate: "draft_only",
-    },
-    updated_at: "2026-05-21 15:57",
-  },
-  {
-    canonical_key: "case:employee-profile-answer",
-    question: "Validate Employee profile answer quality before broader rollout",
-    status: "completed",
-    source: "manual",
-    scope: {
-      center_node: "Employee:5",
-      allowed_link_keys: ["link:employee:1:n:order"],
-      allowed_node_types: ["Employee", "Order"],
-    },
-    updated_at: "2026-05-21 14:20",
-  },
-  {
-    canonical_key: "case:workspace-boundary",
-    question: "Keep Workspace as a lightweight Work Queue while Ontology owns governance detail",
-    status: "active",
-    source: "product",
-    scope: {
-      allowed_link_keys: ["link:employee:1:n:order"],
-      allowed_node_types: ["Employee", "Order"],
-    },
-    updated_at: "2026-05-21 16:03",
-  },
-];
-
 function Workbench({ data, tenant, language }) {
   const tenantId = tenant ? tenant.id : "default";
-  const tasksQ = useApiData("reasoningTasks", [tenantId], { fallback: FALLBACK_CASES });
+  const tasksQ = useApiData("reasoningTasks", [tenantId]);
   const agentRunsQ = useApiData("agentRunsConsole", [tenantId, { limit: 20 }], { fallback: { sessions: [], runs: [] } });
   const artifactsQ = useApiData("artifacts", [tenantId, {}], { fallback: [] });
   const graphProposedQ = useApiData("graphProposedElements", [tenantId, { limit: 100 }], { fallback: { runs: [], elements: [] } });
@@ -1426,12 +1387,10 @@ function firstBasisKey(scope) {
 }
 
 function ontologyBasisLabelWB(key) {
-  const labels = {
-    "link:employee:1:n:order": "Employee 1:N Order",
-    "object:employee": "Employee",
-    "object:order": "Order",
-  };
-  return labels[key] || key;
+  const value = String(key || "");
+  if (value.startsWith("object:")) return value.slice("object:".length).replace(/[_:-]+/g, " ");
+  if (value.startsWith("link:")) return value.slice("link:".length).replace(/[_:-]+/g, " ");
+  return value;
 }
 
 function caseTone(status) {
