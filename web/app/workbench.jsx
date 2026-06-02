@@ -549,6 +549,7 @@ function AgentRunsWorkspace({ tenantId, query, artifacts = [], graphElements = [
   const [selectedRunKey, setSelectedRunKey] = useStateWB(initialRunKey);
   const [busy, setBusy] = useStateWB(false);
   const [message, setMessage] = useStateWB(null);
+  const [settingsOpen, setSettingsOpen] = useStateWB(false);
   const [agentParams, setAgentParams] = useStateWB({
     scope: defaultAgentScopeWB(tenantId),
     budget: "3",
@@ -571,6 +572,15 @@ function AgentRunsWorkspace({ tenantId, query, artifacts = [], graphElements = [
   const selected = filteredRuns.find(run => run.run_key === selectedRunKey) || filteredRuns[0] || null;
   const session = sessions[0] || null;
   const latestRun = session?.latest?.run || null;
+  const headerRun = selected || latestRun || null;
+  const agentDisplayName = agentTab === "autopilot"
+    ? tWB(language, "Autopilot reasoning agent", "自动推理 Agent")
+    : tWB(language, "Auto enriching agent", "自动信息增益 Agent");
+  const agentDisplayId = agentTab === "autopilot"
+    ? (headerRun?.run_key || "autopilot")
+    : (session?.session_key || headerRun?.run_key || "—");
+  const agentStartedAt = headerRun?.started_at || session?.created_at || "";
+  const agentFinishedAt = headerRun?.finished_at || session?.updated_at || "";
   const latestExtractionBlockers = Number(latestRun?.proposed_count || 0) === 0 ? latestRun?.extraction_blockers || null : null;
   const latestBlockerParts = latestExtractionBlockers ? [
     ...Object.entries(latestExtractionBlockers.extraction_engine_status_counts || {}).map(([key, count]) => `${key}:${count}`),
@@ -817,6 +827,24 @@ function AgentRunsWorkspace({ tenantId, query, artifacts = [], graphElements = [
             : tWB(language, "Keep the graph enrichment loop visible and bounded while generated objects route to review.", "持续展示并约束图谱信息增益循环，生成对象进入审核流程。")}</p>
           <div className="row">
             <div className="stat">
+              <span className="label">{tWB(language, "Name", "名称")}</span>
+              <span className="val">{agentDisplayName}</span>
+            </div>
+            <div className="stat lg">
+              <span className="label">{tWB(language, "ID", "ID")}</span>
+              <span className="val mono">{compactTextWB(agentDisplayId, 56)}</span>
+            </div>
+            <div className="stat">
+              <span className="label">{tWB(language, "Started", "启动时间")}</span>
+              <span className="val mono">{agentStartedAt ? String(agentStartedAt).slice(0, 19) : "—"}</span>
+            </div>
+            <div className="stat">
+              <span className="label">{tWB(language, "Finished", "结束时间")}</span>
+              <span className="val mono">{agentFinishedAt ? String(agentFinishedAt).slice(0, 19) : "—"}</span>
+            </div>
+          </div>
+          <div className="row">
+            <div className="stat">
               <span className="label">{tWB(language, "Scope", "范围")}</span>
               <span className="val mono">{compactTextWB(agentParams.scope, 42)}</span>
             </div>
@@ -832,38 +860,48 @@ function AgentRunsWorkspace({ tenantId, query, artifacts = [], graphElements = [
         </div>
 
         <div style={{ flex: 1, overflow: "auto", padding: "var(--pad-4) var(--pad-5)" }}>
-          <Panel eyebrow={tWB(language, "Parameters", "参数")} title={tWB(language, "Agent settings", "Agent 设置")}>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 120px", gap: 10 }}>
-              <label>
-                <div className="eyebrow" style={{ marginBottom: 4 }}>{tWB(language, "Scope", "范围")}</div>
-                <input className="input" value={agentParams.scope} onChange={e => updateAgentParam("scope", e.target.value)} />
-              </label>
-              <label>
-                <div className="eyebrow" style={{ marginBottom: 4 }}>{tWB(language, "Budget", "预算")}</div>
-                <input className="input" value={agentParams.budget} onChange={e => updateAgentParam("budget", e.target.value)} />
-              </label>
-              <label>
-                <div className="eyebrow" style={{ marginBottom: 4 }}>{tWB(language, "Allowlist / safety", "允许域名 / 安全")}</div>
-                <input className="input" value={agentParams.allowlist} onChange={e => updateAgentParam("allowlist", e.target.value)} />
-              </label>
-              <label>
-                <div className="eyebrow" style={{ marginBottom: 4 }}>{tWB(language, "Cadence", "频率")}</div>
-                <select className="select" value={agentParams.cadence} onChange={e => updateAgentParam("cadence", e.target.value)}>
-                  <option value="manual">{tWB(language, "Manual", "手动")}</option>
-                  <option value="hourly">{tWB(language, "Hourly", "每小时")}</option>
-                  <option value="daily">{tWB(language, "Daily", "每天")}</option>
-                  <option value="custom">{tWB(language, "Custom interval", "自定义间隔")}</option>
-                </select>
-              </label>
-              <label>
-                <div className="eyebrow" style={{ marginBottom: 4 }}>{tWB(language, "Custom minutes", "自定义分钟数")}</div>
-                <input className="input" value={agentParams.customInterval} onChange={e => updateAgentParam("customInterval", e.target.value)} />
-              </label>
-              <label>
-                <div className="eyebrow" style={{ marginBottom: 4 }}>{tWB(language, "Stop condition", "停止条件")}</div>
-                <input className="input" value={agentParams.stopCondition} onChange={e => updateAgentParam("stopCondition", e.target.value)} />
-              </label>
-            </div>
+          <Panel
+            eyebrow={tWB(language, "Parameters", "参数")}
+            title={tWB(language, "Agent settings", "Agent 设置")}
+            actions={<button className="btn ghost" onClick={() => setSettingsOpen(open => !open)}>{settingsOpen ? tWB(language, "Collapse", "折叠") : tWB(language, "Expand", "展开")}</button>}
+          >
+            {settingsOpen ? (
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 120px", gap: 10 }}>
+                <label>
+                  <div className="eyebrow" style={{ marginBottom: 4 }}>{tWB(language, "Scope", "范围")}</div>
+                  <input className="input" value={agentParams.scope} onChange={e => updateAgentParam("scope", e.target.value)} />
+                </label>
+                <label>
+                  <div className="eyebrow" style={{ marginBottom: 4 }}>{tWB(language, "Budget", "预算")}</div>
+                  <input className="input" value={agentParams.budget} onChange={e => updateAgentParam("budget", e.target.value)} />
+                </label>
+                <label>
+                  <div className="eyebrow" style={{ marginBottom: 4 }}>{tWB(language, "Allowlist / safety", "允许域名 / 安全")}</div>
+                  <input className="input" value={agentParams.allowlist} onChange={e => updateAgentParam("allowlist", e.target.value)} />
+                </label>
+                <label>
+                  <div className="eyebrow" style={{ marginBottom: 4 }}>{tWB(language, "Cadence", "频率")}</div>
+                  <select className="select" value={agentParams.cadence} onChange={e => updateAgentParam("cadence", e.target.value)}>
+                    <option value="manual">{tWB(language, "Manual", "手动")}</option>
+                    <option value="hourly">{tWB(language, "Hourly", "每小时")}</option>
+                    <option value="daily">{tWB(language, "Daily", "每天")}</option>
+                    <option value="custom">{tWB(language, "Custom interval", "自定义间隔")}</option>
+                  </select>
+                </label>
+                <label>
+                  <div className="eyebrow" style={{ marginBottom: 4 }}>{tWB(language, "Custom minutes", "自定义分钟数")}</div>
+                  <input className="input" value={agentParams.customInterval} onChange={e => updateAgentParam("customInterval", e.target.value)} />
+                </label>
+                <label>
+                  <div className="eyebrow" style={{ marginBottom: 4 }}>{tWB(language, "Stop condition", "停止条件")}</div>
+                  <input className="input" value={agentParams.stopCondition} onChange={e => updateAgentParam("stopCondition", e.target.value)} />
+                </label>
+              </div>
+            ) : (
+              <div style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--muted)", overflowWrap: "anywhere" }}>
+                {tWB(language, "Settings collapsed", "设置已折叠")} · {tWB(language, "scope", "范围")} {compactTextWB(agentParams.scope, 70)} · {tWB(language, "budget", "预算")} {agentParams.budget} · {tWB(language, "cadence", "频率")} {agentParams.cadence}
+              </div>
+            )}
             <div style={{ marginTop: 10, fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--muted)" }}>
               {agentParams.safety} · {tWB(language, "next run", "下次运行")} {session?.config?.next_run_at || tWB(language, "manual", "手动")}
             </div>
