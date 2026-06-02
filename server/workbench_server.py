@@ -119,6 +119,86 @@ DEDUP_AUDIT_FIELDS = (
 )
 
 
+GRAPH_DUPLICATE_DEDUP_DECISIONS = {
+    "duplicate_existing_proposal",
+    "duplicate_current_run",
+    "merge_existing",
+}
+
+
+def _graph_identity_text(value):
+    text_value = str(value or "").strip().lower()
+    return re.sub(r"\s+", " ", re.sub(r"[^a-z0-9]+", " ", text_value)).strip()
+
+
+def _graph_identity_digest(value):
+    return hashlib.sha256(json.dumps(value, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()[:16]
+
+
+def _graph_edge_metric_identity(payload, properties):
+    metrics = payload.get("metrics") or properties.get("metrics") or []
+    if not isinstance(metrics, list):
+        metrics = [metrics] if metrics else []
+    normalized = []
+    for metric in metrics:
+        if isinstance(metric, dict):
+            metric_key = (
+                metric.get("canonical_key")
+                or metric.get("key")
+                or metric.get("metric_key")
+                or metric.get("name")
+                or metric.get("label")
+            )
+            metric_value = metric.get("value") or metric.get("amount") or metric.get("score")
+            if metric_key:
+                normalized.append(
+                    json.dumps(
+                        {"key": str(metric_key), "value": metric_value},
+                        ensure_ascii=False,
+                        sort_keys=True,
+                    )
+                )
+        elif metric not in (None, ""):
+            normalized.append(str(metric))
+    return "|".join(sorted(set(normalized)))
+
+
+def _graph_edge_fact_key(payload):
+    payload = payload or {}
+    properties = payload.get("properties") if isinstance(payload.get("properties"), dict) else {}
+    relation = _graph_identity_text(payload.get("relation") or payload.get("link_type") or payload.get("graph_edge_name"))
+    source_label = _graph_identity_text(
+        payload.get("source_label") or payload.get("source_node_key") or payload.get("source_object_key")
+    )
+    target_label = _graph_identity_text(
+        payload.get("target_label") or payload.get("target_node_key") or payload.get("target_object_key")
+    )
+    if not relation or not source_label or not target_label:
+        return None
+    source_type = _graph_identity_text(payload.get("source_type"))
+    target_type = _graph_identity_text(payload.get("target_type"))
+    stable_source = (
+        properties.get("canonical_id_hint")
+        or properties.get("fact_node_hint")
+        or payload.get("canonical_id_hint")
+        or payload.get("fact_node_hint")
+        or payload.get("schema_edge_key")
+        or properties.get("schema_edge_key")
+    )
+    metric_identity = _graph_edge_metric_identity(payload, properties)
+    return _graph_identity_digest(
+        {
+            "source_type": source_type,
+            "source_label": source_label,
+            "relation": relation,
+            "target_type": target_type,
+            "target_label": target_label,
+            "stable_source": str(stable_source or ""),
+            "metric_identity": metric_identity,
+        }
+    )
+
+
 def _dedup_audit_from_payload(payload):
     payload = payload or {}
     audit = {}
@@ -134,6 +214,14 @@ def _dedup_audit_from_payload(payload):
     elif audit:
         audit["llm_merge_decision_allowed"] = False
     return audit
+
+
+def _is_current_graph_proposal(row_status, payload):
+    status = str(row_status or "").replace("-", "_").lower()
+    if status not in {"draft", "needs_review", "needs_more_evidence"}:
+        return False
+    decision = str((payload or {}).get("dedup_decision") or "").replace("-", "_").lower()
+    return decision not in GRAPH_DUPLICATE_DEDUP_DECISIONS
 
 
 def _fmt_number(value):
@@ -3330,7 +3418,26 @@ class InstanceRepository:
             pass
         else:
             raise ValueError("Unsupported proposed graph status filter")
+        pending_like_filter = status_filter in {"pending", "active", "draft"}
         with self.metadata_engine_for(tenant).connect() as conn:
+            approved_edge_fact_keys = set()
+            if pending_like_filter:
+                existing_edge_rows = conn.execute(
+                    text(
+                        """
+                        SELECT payload_json
+                        FROM aletheia_proposed_graph_elements
+                        WHERE project_id = :tenant_id
+                          AND element_type = 'edge'
+                          AND status = 'approved'
+                        """
+                    ),
+                    {"tenant_id": tenant.tenant_id},
+                ).mappings().all()
+                for existing_row in existing_edge_rows:
+                    fact_key = _graph_edge_fact_key(_load_json(existing_row["payload_json"], {}))
+                    if fact_key:
+                        approved_edge_fact_keys.add(fact_key)
             summary = conn.execute(
                 text(
                     f"""
@@ -3370,12 +3477,22 @@ class InstanceRepository:
                     LIMIT :limit
                     """
                 ),
-                params,
+                {**params, "limit": 200 if pending_like_filter else limit},
             ).mappings().all()
         elements = []
         runs = {}
+        filtered_type_counts = {}
+        pending_edge_fact_keys = set()
         for row in rows:
             payload = _load_json(row["payload_json"], {})
+            if pending_like_filter and not _is_current_graph_proposal(row["status"], payload):
+                continue
+            if pending_like_filter and row["element_type"] == "edge":
+                edge_fact_key = _graph_edge_fact_key(payload)
+                if edge_fact_key:
+                    if edge_fact_key in approved_edge_fact_keys or edge_fact_key in pending_edge_fact_keys:
+                        continue
+                    pending_edge_fact_keys.add(edge_fact_key)
             run = runs.setdefault(
                 row["run_key"],
                 {
@@ -3392,28 +3509,30 @@ class InstanceRepository:
                     "finished_at": _jsonable(row["finished_at"]),
                 },
             )
-            elements.append(
-                {
-                    "element_key": row["element_key"],
-                    "element_type": row["element_type"],
-                    "name": row["name"],
-                    "payload": payload,
-                    "dedup_audit": _dedup_audit_from_payload(payload),
-                    "evidence_refs": _load_json(row["evidence_refs_json"], []),
-                    "source_url": row["source_url"],
-                    "confidence": row["confidence"],
-                    "status": row["status"],
-                    "iteration": row["iteration"],
-                    "created_at": _jsonable(row["created_at"]),
-                    "run_key": run["run_key"],
-                }
-            )
+            filtered_type_counts[row["element_type"]] = filtered_type_counts.get(row["element_type"], 0) + 1
+            if len(elements) < limit:
+                elements.append(
+                    {
+                        "element_key": row["element_key"],
+                        "element_type": row["element_type"],
+                        "name": row["name"],
+                        "payload": payload,
+                        "dedup_audit": _dedup_audit_from_payload(payload),
+                        "evidence_refs": _load_json(row["evidence_refs_json"], []),
+                        "source_url": row["source_url"],
+                        "confidence": row["confidence"],
+                        "status": row["status"],
+                        "iteration": row["iteration"],
+                        "created_at": _jsonable(row["created_at"]),
+                        "run_key": run["run_key"],
+                    }
+                )
         return {
             "tenant": tenant.public_dict(),
             "runs": list(runs.values()),
             "elements": elements,
-            "total_count": int(summary["total_count"] or 0) if summary else len(elements),
-            "element_type_counts": {row["element_type"]: int(row["count"] or 0) for row in type_rows},
+            "total_count": sum(filtered_type_counts.values()) if pending_like_filter else int(summary["total_count"] or 0) if summary else len(elements),
+            "element_type_counts": filtered_type_counts if pending_like_filter else {row["element_type"]: int(row["count"] or 0) for row in type_rows},
             "status_filter": status_filter,
         }
 

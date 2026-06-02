@@ -307,7 +307,7 @@ def _stable_identity_values(values: Any) -> list[str]:
 
 
 def _source_identity(value: dict[str, Any]) -> str | None:
-    for key in ("canonical_id_hint", "source_pk", "source_id", "source_ref", "source_url", "metric_key"):
+    for key in ("canonical_id_hint", "fact_node_hint", "source_pk", "source_id", "source_ref", "metric_key", "source_url"):
         raw = value.get(key)
         if raw not in (None, "", []):
             stable_values = _stable_identity_values(raw)
@@ -360,12 +360,16 @@ def _edge_identity_payload(item: dict[str, Any]) -> dict[str, Any]:
     metrics = payload.get("metrics") or properties.get("metrics") or []
     if not isinstance(metrics, list):
         metrics = [metrics] if metrics else []
+    metric_identity = "|".join(sorted(str(metric) for metric in metrics if metric))
     source_identity = (
         _source_identity(properties)
         or _source_identity(payload)
-        or "|".join(sorted(str(metric) for metric in metrics if metric))
-        or (item.get("source_url") if item.get("source_url") else None)
+        or payload.get("schema_edge_key")
+        or properties.get("schema_edge_key")
+        or metric_identity
     )
+    if source_identity and metric_identity and metric_identity not in str(source_identity):
+        source_identity = f"{source_identity}|{metric_identity}"
     relation = _normalize_identity_text(payload.get("relation"))
     source_node = _normalize_identity_text(payload.get("source_label"))
     target_node = _normalize_identity_text(payload.get("target_label"))
@@ -2033,7 +2037,7 @@ class IterativeGraphEnrichmentAgent:
         for row in rows:
             payload = _json_load(row.payload_json, {})
             identity = payload.get("identity")
-            if not isinstance(identity, dict):
+            if row.element_type == "edge" or not isinstance(identity, dict):
                 identity = _candidate_identity_payload(
                     {
                         "element_type": row.element_type,
@@ -2190,6 +2194,12 @@ class IterativeGraphEnrichmentAgent:
     def _identity_index(self, session) -> list[dict[str, Any]]:
         index = self._persistent_identity_index(session)
         if index:
+            if any(
+                entry.get("identity", {}).get("kind") == "edge"
+                and "://" in str(entry.get("identity_key") or "")
+                for entry in index
+            ):
+                return self._rebuild_persistent_identity_index(session)
             return index
         return self._rebuild_persistent_identity_index(session)
 

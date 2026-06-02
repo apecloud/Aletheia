@@ -1563,7 +1563,10 @@ class IterativeGraphEnrichmentTest(unittest.TestCase):
                     "target_type": "Chokepoint",
                     "target_label": "Bab el-Mandeb Strait",
                     "description": "Initial edge",
-                    "properties": {"metrics": ["trade_at_risk_v"]},
+                    "properties": {
+                        "fact_node_hint": "trade_dependency:CHN::Bab el-Mandeb Strait",
+                        "metrics": ["trade_at_risk_v"],
+                    },
                     "metrics": ["trade_at_risk_v"],
                     "evidence_quote": "first quote",
                 },
@@ -1597,6 +1600,60 @@ class IterativeGraphEnrichmentTest(unittest.TestCase):
             )
 
             self.assertEqual(first["payload"]["candidate_id"], second["payload"]["candidate_id"])
+            source_url_variant = {
+                **base_edge,
+                "source_url": "https://zenodo.org/records/2",
+                "evidence_refs": ["source:c"],
+            }
+            third = agent._annotate_candidate_identity(
+                source_url_variant,
+                task_id="task-c",
+                run_id="run-c",
+                frontier_id="frontier-c",
+                candidate_seq=3,
+                identity_index=[],
+            )
+
+            self.assertEqual(first["payload"]["candidate_id"], third["payload"]["candidate_id"])
+
+            no_stable_fact_source_a = {
+                "element_type": "edge",
+                "name": "KOR has country dependency Hormuz Strait",
+                "payload": {
+                    "source_type": "Country",
+                    "source_label": "KOR",
+                    "relation": "has_country_dependency",
+                    "target_type": "Maritime Chokepoint",
+                    "target_label": "Hormuz Strait",
+                    "properties": {},
+                },
+                "source_url": "https://zenodo.org/records/a",
+                "evidence_refs": ["https://zenodo.org/records/a"],
+            }
+            no_stable_fact_source_b = {
+                **no_stable_fact_source_a,
+                "source_url": "https://zenodo.org/records/b",
+                "evidence_refs": ["https://zenodo.org/records/b"],
+            }
+            no_stable_a = agent._annotate_candidate_identity(
+                no_stable_fact_source_a,
+                task_id="task-a",
+                run_id="run-a",
+                frontier_id="frontier-a",
+                candidate_seq=4,
+                identity_index=[],
+            )
+            no_stable_b = agent._annotate_candidate_identity(
+                no_stable_fact_source_b,
+                task_id="task-b",
+                run_id="run-b",
+                frontier_id="frontier-b",
+                candidate_seq=5,
+                identity_index=[],
+            )
+
+            self.assertEqual(no_stable_a["payload"]["candidate_id"], no_stable_b["payload"]["candidate_id"])
+            self.assertEqual(no_stable_a["payload"]["identity_key"], no_stable_b["payload"]["identity_key"])
 
             for changed_payload in (
                 {"source_label": "IND"},
