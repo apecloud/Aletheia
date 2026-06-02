@@ -80,6 +80,42 @@ function dedupDecisionLabelWB(decision, language) {
   return labels[key] || key || "—";
 }
 
+function dedupAuditSummaryWB(item, language) {
+  const audit = dedupAuditWB(item);
+  const decision = String(audit.dedup_decision || "").toLowerCase();
+  const title = agentOutputTitle(item);
+  const matchedKey = audit.matched_node_key || audit.matched_edge_key || audit.matched_element_key || "";
+  if (decision.includes("duplicate")) {
+    return tWB(
+      language,
+      `${title} matches an existing proposal; duplicate creation was blocked.`,
+      `${textWB(title, language)} 与已有候选重复，已阻止重复创建。`
+    );
+  }
+  if (decision === "merge_existing") {
+    return tWB(
+      language,
+      `${title} matches an approved graph object; no new proposal is required.`,
+      `${textWB(title, language)} 命中已批准图对象，不需要新增候选。`
+    );
+  }
+  if (["rejected", "filtered", "blocked"].includes(String(item?.status || item?.rawStatus || "").toLowerCase())) {
+    return tWB(
+      language,
+      `${title} is not in the active review queue.`,
+      `${textWB(title, language)} 不在当前待审核队列中。`
+    );
+  }
+  return matchedKey
+    ? tWB(language, `${title} has audit evidence linked to ${matchedKey}.`, `${textWB(title, language)} 有可追溯审计证据。`)
+    : tWB(language, `${title} has dedup/filter audit evidence.`, `${textWB(title, language)} 有去重或过滤审计证据。`);
+}
+
+function llmMergePolicyLabelWB(value, language) {
+  if (value === true) return tWB(language, "LLM auto-merge enabled", "LLM 自动合并已启用");
+  return tWB(language, "LLM does not auto-merge; review required", "LLM 不参与自动合并 / 合并需审核");
+}
+
 function auditValueWB(value) {
   if (value === false) return "false";
   if (value === true) return "true";
@@ -137,7 +173,11 @@ function Workbench({ data, tenant, language }) {
     catch { return "workqueue"; }
   })();
   const [workspaceTab, setWorkspaceTab] = useStateWB(initialWorkspaceTab);
-  const [selectedKey, setSelectedKey] = useStateWB(null);
+  const initialWorkspaceItem = (() => {
+    try { return new URLSearchParams(location.search).get("workspace_item") || null; }
+    catch { return null; }
+  })();
+  const [selectedKey, setSelectedKey] = useStateWB(initialWorkspaceItem);
   const [statusView, setStatusView] = useStateWB("active");
   const [search, setSearch] = useStateWB("");
   const [reviewNote, setReviewNote] = useStateWB("");
@@ -184,10 +224,28 @@ function Workbench({ data, tenant, language }) {
     setWorkspaceTab(tab);
     try {
       const url = new URL(location.href);
+      url.searchParams.set("screen", "workbench");
+      url.searchParams.set("tenant", tenantId);
       url.searchParams.set("workspace_tab", tab);
       history.replaceState(null, "", url.toString());
     } catch {}
   }
+
+  function selectWorkQueueItem(key) {
+    setSelectedKey(key);
+  }
+
+  useEffectWB(() => {
+    try {
+      const url = new URL(location.href);
+      url.searchParams.set("screen", "workbench");
+      url.searchParams.set("tenant", tenantId);
+      url.searchParams.set("workspace_tab", workspaceTab);
+      if (workspaceTab === "workqueue" && selectedKey) url.searchParams.set("workspace_item", selectedKey);
+      else url.searchParams.delete("workspace_item");
+      history.replaceState(null, "", url.toString());
+    } catch {}
+  }, [tenantId, workspaceTab, selectedKey]);
 
   useEffectWB(() => {
     setReviewNote("");
@@ -323,7 +381,7 @@ function Workbench({ data, tenant, language }) {
               {filtered.map(c => (
                 <div key={c.id}
                      className={`artifact-row ${caseTone(c.status)}` + (c.id === selectedKey ? " selected" : "")}
-                     onClick={() => setSelectedKey(c.id)}>
+                     onClick={() => selectWorkQueueItem(c.id)}>
                   <div className="ar-bar" />
                   <div className="ar-main">
                     <div className="ar-top">
@@ -484,7 +542,11 @@ function AgentRunsWorkspace({ tenantId, query, artifacts = [], graphElements = [
     catch { return "enrichment"; }
   })();
   const [agentTab, setAgentTab] = useStateWB(initialAgentTab);
-  const [selectedRunKey, setSelectedRunKey] = useStateWB("");
+  const initialRunKey = (() => {
+    try { return new URLSearchParams(location.search).get("run_key") || ""; }
+    catch { return ""; }
+  })();
+  const [selectedRunKey, setSelectedRunKey] = useStateWB(initialRunKey);
   const [busy, setBusy] = useStateWB(false);
   const [message, setMessage] = useStateWB(null);
   const [agentParams, setAgentParams] = useStateWB({
@@ -508,6 +570,26 @@ function AgentRunsWorkspace({ tenantId, query, artifacts = [], graphElements = [
   }), [agentTab, tenantId, filteredRuns.map(run => run.run_key).join("|"), JSON.stringify(artifacts.map(a => [a.canonical_key, a.status, a.confidence])), JSON.stringify(graphElements.map(e => [e.element_key, e.element_type, e.status, e.confidence]))]);
   const selected = filteredRuns.find(run => run.run_key === selectedRunKey) || filteredRuns[0] || null;
   const session = sessions[0] || null;
+  const latestRun = session?.latest?.run || null;
+  const latestExtractionBlockers = Number(latestRun?.proposed_count || 0) === 0 ? latestRun?.extraction_blockers || null : null;
+  const latestBlockerParts = latestExtractionBlockers ? [
+    ...Object.entries(latestExtractionBlockers.extraction_engine_status_counts || {}).map(([key, count]) => `${key}:${count}`),
+    ...Object.entries(latestExtractionBlockers.rejected_candidate_reason_counts || {}).map(([key, count]) => `${key}:${count}`),
+    ...Object.entries(latestExtractionBlockers.pruned_reason_counts || {}).map(([key, count]) => `${key}:${count}`),
+  ] : [];
+  const liveTraceRows = useMemoWB(() => buildAgentLiveTraceRowsWB({
+    run: selected,
+    session,
+    latestExtractionBlockers,
+  }), [
+    selected?.run_key,
+    JSON.stringify(selected?.trace || []),
+    JSON.stringify(selected?.frontier || []),
+    JSON.stringify(selected?.skipped_sources || []),
+    JSON.stringify(selected?.counts || {}),
+    JSON.stringify(session?.config?.latest_events || []),
+    JSON.stringify(latestExtractionBlockers || {}),
+  ]);
 
   useEffectWB(() => {
     setAgentParams(prev => {
@@ -551,10 +633,26 @@ function AgentRunsWorkspace({ tenantId, query, artifacts = [], graphElements = [
     setAgentTab(tab);
     try {
       const url = new URL(location.href);
+      url.searchParams.set("screen", "workbench");
+      url.searchParams.set("tenant", tenantId);
+      url.searchParams.set("workspace_tab", "agents");
       url.searchParams.set("agent_tab", tab);
       history.replaceState(null, "", url.toString());
     } catch {}
   }
+
+  useEffectWB(() => {
+    try {
+      const url = new URL(location.href);
+      url.searchParams.set("screen", "workbench");
+      url.searchParams.set("tenant", tenantId);
+      url.searchParams.set("workspace_tab", "agents");
+      url.searchParams.set("agent_tab", agentTab);
+      if (selectedRunKey) url.searchParams.set("run_key", selectedRunKey);
+      else url.searchParams.delete("run_key");
+      history.replaceState(null, "", url.toString());
+    } catch {}
+  }, [tenantId, agentTab, selectedRunKey]);
 
   async function runOnce() {
     if (agentTab === "autopilot") {
@@ -793,6 +891,19 @@ function AgentRunsWorkspace({ tenantId, query, artifacts = [], graphElements = [
 
           <AgentOutputsPanel groups={outputGroups} agentTab={agentTab} language={language} />
 
+          {agentTab !== "autopilot" && latestBlockerParts.length > 0 && (
+            <Panel eyebrow={tWB(language, "Extraction blockers", "抽取阻塞原因")} title={tWB(language, "Why the latest cycle produced no proposals", "最近一次运行为何没有候选")} style={{ marginTop: 16 }}>
+              <div style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--changes)", overflowWrap: "anywhere" }}>
+                {latestBlockerParts.join(" · ")}
+              </div>
+              {latestExtractionBlockers?.source_urls?.length > 0 && (
+                <div style={{ marginTop: 6, fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--muted)", overflowWrap: "anywhere" }}>
+                  {compactTextWB(latestExtractionBlockers.source_urls.join(" · "), 180)}
+                </div>
+              )}
+            </Panel>
+          )}
+
           {agentTab !== "autopilot" && session?.config?.latest_events?.length > 0 && (
             <Panel eyebrow={tWB(language, "Agent chain", "Agent 链路")} title={tWB(language, "Latest enrichment events", "最近信息增益事件")} style={{ marginTop: 16 }}>
               <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
@@ -804,6 +915,15 @@ function AgentRunsWorkspace({ tenantId, query, artifacts = [], graphElements = [
                     <div style={{ marginTop: 4, fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--muted)" }}>
                       {compactTextWB(event.autopilot_session_key || event.run_key || event.reason || tWB(language, "event recorded", "事件已记录"), 130)}
                     </div>
+                    {event.extraction_blockers && (
+                      <div style={{ marginTop: 4, fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--changes)", overflowWrap: "anywhere" }}>
+                        {[
+                          ...Object.entries(event.extraction_blockers.extraction_engine_status_counts || {}).map(([key, count]) => `${key}:${count}`),
+                          ...Object.entries(event.extraction_blockers.rejected_candidate_reason_counts || {}).map(([key, count]) => `${key}:${count}`),
+                          ...Object.entries(event.extraction_blockers.pruned_reason_counts || {}).map(([key, count]) => `${key}:${count}`),
+                        ].join(" · ")}
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>
@@ -844,32 +964,29 @@ function AgentRunsWorkspace({ tenantId, query, artifacts = [], graphElements = [
           </Panel>
 
           {selected && (
-            <Panel eyebrow={tWB(language, "Agent run log", "Agent 运行日志")} title={tWB(language, "Timeline and trace", "时间线与 trace")} style={{ marginTop: 16 }}>
+            <Panel eyebrow={tWB(language, "Live trace", "Live trace")} title={tWB(language, "Step-by-step enrichment detail", "逐步信息增益详情")} count={`${liveTraceRows.length} ${tWB(language, "steps", "步")}`} style={{ marginTop: 16 }}>
               <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                {(selected.trace || []).slice(0, 5).map((step, index) => (
+                {liveTraceRows.map((step, index) => (
                   <div key={index} style={{ border: "1px solid var(--line-soft)", background: "var(--bg-2)", padding: "8px 10px" }}>
-                    <div style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--accent)" }}>
-                      {compactTextWB(step.query || step.title || step.hypothesis_key || `step ${index + 1}`, 120)}
+                    <div style={{ display: "flex", gap: 8, alignItems: "flex-start", justifyContent: "space-between" }}>
+                      <div style={{ minWidth: 0 }}>
+                        <div className="eyebrow" style={{ marginBottom: 3 }}>{step.phase}</div>
+                        <div style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--accent)", overflowWrap: "anywhere" }}>
+                          {compactTextWB(step.title || `step ${index + 1}`, 150)}
+                        </div>
+                      </div>
+                      <Pill kind={agentTraceToneWB(step.status)}>{compactTextWB(step.status || "recorded", 32)}</Pill>
                     </div>
-                    <div style={{ marginTop: 4, fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--muted)" }}>
-                      {tWB(language, "results", "结果")} {step.result_count ?? "—"} · {tWB(language, "extracted", "抽取")} {(step.extracted_candidates || []).length || (step.reasoning_task_keys || []).length || 0}
-                    </div>
-                    {(step.query_terms || step.graph_context_used || step.path_context_used) && (
-                      <div style={{ marginTop: 6, display: "grid", gap: 4, fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--muted)" }}>
-                        {step.query_terms && (
-                          <div>{tWB(language, "query terms", "查询词")} · {compactTextWB(flatQueryTermsWB(step.query_terms), 150)}</div>
-                        )}
-                        {step.graph_context_used && (
-                          <div>{tWB(language, "graph context", "图谱上下文")} · {compactTextWB(textWB(graphContextLabelWB(step.graph_context_used), language), 150)}</div>
-                        )}
-                        {step.path_context_used && (
-                          <div>{tWB(language, "path context", "路径上下文")} · {compactTextWB(textWB(pathContextLabelWB(step.path_context_used), language), 150)}</div>
-                        )}
+                    {step.details?.length > 0 && (
+                      <div style={{ marginTop: 7, display: "grid", gap: 4, fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--muted)" }}>
+                        {step.details.map((line, detailIndex) => (
+                          <div key={detailIndex} style={{ overflowWrap: "anywhere" }}>{line}</div>
+                        ))}
                       </div>
                     )}
                   </div>
                 ))}
-                {!(selected.trace || []).length && (
+                {!liveTraceRows.length && (
                   <div style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--muted)" }}>{tWB(language, "No trace rows recorded.", "未记录 trace 行。")}</div>
                 )}
               </div>
@@ -1057,7 +1174,7 @@ function InlineReviewDetails({ item, language }) {
             <CaseField label={tWB(language, "Score", "分数")} value={dedupAudit.match_score === undefined ? "—" : String(dedupAudit.match_score)} />
             <CaseField label={tWB(language, "Task / run / frontier", "任务 / 运行 / frontier")} value={[dedupAudit.task_id, dedupAudit.run_id, dedupAudit.frontier_id].filter(Boolean).join(" · ") || "—"} />
             <CaseField label={tWB(language, "Fingerprints", "指纹")} value={[dedupAudit.source_fingerprint, dedupAudit.evidence_fingerprint].filter(Boolean).join(" · ") || "—"} />
-            <CaseField label={tWB(language, "LLM merge", "LLM 合并")} value={`${auditValueWB(dedupAudit.llm_merge_decision_allowed)} · ${tWB(language, "deterministic review boundary", "确定性审核边界")}`} />
+            <CaseField label={tWB(language, "LLM auto-merge", "LLM 自动合并")} value={llmMergePolicyLabelWB(dedupAudit.llm_merge_decision_allowed, language)} />
           </div>
           {dedupAudit.decision_reason && (
             <div style={{ marginTop: 8, fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-dim)", overflowWrap: "anywhere" }}>
@@ -1170,6 +1287,155 @@ function inlineActionLabel(action, language) {
   return labels[action] || action;
 }
 
+function buildAgentLiveTraceRowsWB({ run, session, latestExtractionBlockers }) {
+  const rows = [];
+  const events = session?.config?.latest_events || [];
+  events.slice(-8).forEach(event => {
+    const blockers = blockerSummaryPartsWB(event.extraction_blockers);
+    const details = [
+      event.created_at ? `time: ${String(event.created_at).slice(0, 19)}` : "",
+      event.run_key ? `run: ${event.run_key}` : "",
+      event.autopilot_session_key ? `autopilot: ${event.autopilot_session_key}` : "",
+      event.frontier_used_count != null ? `frontier used: ${event.frontier_used_count}` : "",
+      event.trusted_source_count != null ? `trusted sources: ${event.trusted_source_count}` : "",
+      event.skipped_source_count != null ? `skipped sources: ${event.skipped_source_count}` : "",
+      event.proposed_count != null ? `proposed: ${event.proposed_count}` : "",
+      blockers.length ? `blockers: ${blockers.join(" · ")}` : "",
+    ].filter(Boolean);
+    rows.push({
+      phase: "session event",
+      title: event.type || "event",
+      status: event.status || event.reason || event.type || "recorded",
+      details,
+    });
+  });
+
+  if (!run) return rows;
+
+  const counts = run.counts || {};
+  rows.push({
+    phase: "run",
+    title: run.run_key || run.objective || "selected run",
+    status: run.status || "recorded",
+    details: [
+      run.started_at ? `started: ${String(run.started_at).slice(0, 19)}` : "",
+      run.finished_at ? `finished: ${String(run.finished_at).slice(0, 19)}` : "",
+      `outputs: proposed ${counts.proposed ?? 0} · pruned ${counts.pruned ?? 0} · findings ${counts.findings ?? 0}`,
+      run.error ? `error: ${run.error}` : "",
+    ].filter(Boolean),
+  });
+
+  if ((run.frontier || []).length) {
+    rows.push({
+      phase: "frontier selection",
+      title: `${run.frontier.length} frontier seeds selected`,
+      status: "selected",
+      details: (run.frontier || []).slice(0, 8).map(item =>
+        compactTextWB(`${item.source_kind || item.kind || "frontier"} · ${item.name || item.target_key || item.key || ""}`, 180)
+      ),
+    });
+  }
+
+  (run.skipped_sources || []).slice(0, 12).forEach(source => {
+    rows.push({
+      phase: "source trust",
+      title: source.url || source.source_url || source.domain || "skipped source",
+      status: source.reason || "skipped",
+      details: [
+        source.domain ? `domain: ${source.domain}` : "",
+        source.reason ? `reason: ${source.reason}` : "",
+        source.frontier_key ? `frontier: ${source.frontier_key}` : "",
+      ].filter(Boolean),
+    });
+  });
+
+  (run.trace || []).forEach((step, index) => {
+    const profile = step.last_extraction_profile || {};
+    const quality = profile.quality || {};
+    const rejected = profile.rejected_or_ambiguous_candidates || [];
+    const pruned = step.pruned || [];
+    const prunedParts = countObjectPartsWB(countByFieldWB(pruned, "reason"));
+    const rejectedParts = countObjectPartsWB(countByFieldWB(rejected, "reason"));
+    const sourceUrls = uniqueCompactWB([
+      ...(pruned || []).map(item => item.url || item.source_url),
+      ...(rejected || []).map(item => item.source_ref || item.source_url || item.url),
+    ]);
+    const frontier = step.frontier || {};
+    const schemaEdgeCount = profile.schema_context?.edge_types?.length;
+    const extractedCount = (step.extracted_candidates || []).length;
+    rows.push({
+      phase: `trace step ${index + 1}`,
+      title: step.query || frontier.name || frontier.key || `trace step ${index + 1}`,
+      status: profile.extraction_engine_status || profile.extraction_engine || "trace",
+      details: [
+        frontier.key ? `frontier: ${frontier.key}` : "",
+        frontier.name ? `frontier name: ${frontier.name}` : "",
+        step.result_count != null ? `source results: ${step.result_count}` : "",
+        `extracted: candidates ${extractedCount} · nodes ${quality.node_count ?? profile.nodes?.length ?? 0} · edges ${quality.edge_count ?? profile.edges?.length ?? 0} · findings ${quality.finding_count ?? profile.findings?.length ?? 0}`,
+        profile.extraction_engine ? `engine: ${profile.extraction_engine}` : "",
+        profile.extraction_source ? `source: ${profile.extraction_source}` : "",
+        profile.prompt_version || step.extraction_prompt_version ? `prompt: ${profile.prompt_version || step.extraction_prompt_version}` : "",
+        schemaEdgeCount != null ? `schema edge types: ${schemaEdgeCount}` : "",
+        step.graph_context_used ? `graph context: ${compactTextWB(textWB(graphContextLabelWB(step.graph_context_used), "en"), 150)}` : "",
+        step.path_context_used ? `path context: ${compactTextWB(textWB(pathContextLabelWB(step.path_context_used), "en"), 150)}` : "",
+        step.query_terms ? `query terms: ${compactTextWB(flatQueryTermsWB(step.query_terms), 180)}` : "",
+        prunedParts.length ? `pruned: ${prunedParts.join(" · ")}` : "",
+        rejectedParts.length ? `review/blocked: ${rejectedParts.join(" · ")}` : "",
+        sourceUrls.length ? `source urls: ${compactTextWB(sourceUrls.join(" · "), 220)}` : "",
+      ].filter(Boolean),
+    });
+  });
+
+  const latestBlockers = blockerSummaryPartsWB(latestExtractionBlockers);
+  if (latestBlockers.length) {
+    rows.push({
+      phase: "cycle summary",
+      title: "latest cycle produced no proposals",
+      status: "blocked",
+      details: [
+        `blockers: ${latestBlockers.join(" · ")}`,
+        latestExtractionBlockers?.frontier_keys?.length ? `frontier keys: ${compactTextWB(latestExtractionBlockers.frontier_keys.join(" · "), 220)}` : "",
+        latestExtractionBlockers?.source_urls?.length ? `source urls: ${compactTextWB(latestExtractionBlockers.source_urls.join(" · "), 220)}` : "",
+      ].filter(Boolean),
+    });
+  }
+
+  return rows;
+}
+
+function countByFieldWB(items, field) {
+  return (items || []).reduce((acc, item) => {
+    const key = item?.[field] || "unknown";
+    acc[key] = (acc[key] || 0) + 1;
+    return acc;
+  }, {});
+}
+
+function countObjectPartsWB(counts) {
+  return Object.entries(counts || {}).map(([key, count]) => `${key}:${count}`);
+}
+
+function blockerSummaryPartsWB(blockers) {
+  if (!blockers) return [];
+  return [
+    ...countObjectPartsWB(blockers.extraction_engine_status_counts),
+    ...countObjectPartsWB(blockers.rejected_candidate_reason_counts),
+    ...countObjectPartsWB(blockers.pruned_reason_counts),
+  ];
+}
+
+function uniqueCompactWB(values) {
+  return Array.from(new Set((values || []).map(value => value == null ? "" : String(value)).filter(Boolean)));
+}
+
+function agentTraceToneWB(status) {
+  const value = String(status || "").toLowerCase();
+  if (value.includes("missing") || value.includes("blocked") || value.includes("error") || value.includes("fail") || value.includes("conflict")) return "changes";
+  if (value.includes("skip") || value.includes("pruned") || value.includes("no_")) return "proposed";
+  if (value.includes("complete") || value.includes("selected") || value.includes("recorded")) return "approved";
+  return "accent";
+}
+
 function buildAgentOutputGroups({ agentTab, tenantId, runs, artifacts, graphElements }) {
   const runElements = (runs || []).flatMap(run =>
     (run.elements || []).map(element => ({ ...element, source_run_key: run.run_key, source_kind: run.kind }))
@@ -1198,7 +1464,9 @@ function buildAgentOutputGroups({ agentTab, tenantId, runs, artifacts, graphElem
       },
     ];
   }
-  const proposedGraphItems = [...runElements, ...(graphElements || [])];
+  const activeGraphItems = dedupeAgentOutputs((graphElements || []).filter(agentOutputIsActiveGraphProposalWB));
+  const duplicateGraphItems = dedupeAgentOutputs((graphElements || []).filter(agentOutputIsDuplicateCandidateWB));
+  const historyGraphItems = dedupeAgentOutputs((graphElements || []).filter(agentOutputIsHistoryGraphOutputWB));
   return [
     {
       key: "proposed_ontologies",
@@ -1213,18 +1481,66 @@ function buildAgentOutputGroups({ agentTab, tenantId, runs, artifacts, graphElem
     {
       key: "nodes",
       title: "Proposed nodes",
-      description: "Graph node proposals generated by enrichment runs.",
-      items: dedupeAgentOutputs(proposedGraphItems.filter(item => String(item.element_type || item.type || "").toLowerCase().includes("node"))),
+      description: "Current graph node proposals visible in Graph Proposed review.",
+      items: activeGraphItems.filter(item => String(item.element_type || item.type || "").toLowerCase().includes("node")),
       href: item => `/?screen=graph&tenant=${encodeURIComponent(tenantId)}&graph_tab=proposed&proposed_key=${encodeURIComponent(item.element_key || "")}`,
     },
     {
       key: "edges",
       title: "Proposed edges",
-      description: "Graph edge proposals generated by enrichment runs.",
-      items: dedupeAgentOutputs(proposedGraphItems.filter(item => String(item.element_type || item.type || "").toLowerCase().includes("edge"))),
+      description: "Current graph edge proposals visible in Graph Proposed review.",
+      items: activeGraphItems.filter(item => String(item.element_type || item.type || "").toLowerCase().includes("edge")),
+      href: item => `/?screen=graph&tenant=${encodeURIComponent(tenantId)}&graph_tab=proposed&proposed_key=${encodeURIComponent(item.element_key || "")}`,
+    },
+    {
+      key: "graph_findings",
+      title: "Proposed graph findings",
+      description: "Current graph findings visible in Graph Proposed review.",
+      items: activeGraphItems.filter(item => String(item.element_type || item.type || "").toLowerCase().includes("finding")),
+      href: item => `/?screen=graph&tenant=${encodeURIComponent(tenantId)}&graph_tab=proposed&proposed_key=${encodeURIComponent(item.element_key || "")}`,
+    },
+    {
+      key: "duplicate_outputs",
+      title: "Duplicate candidates",
+      description: "Candidates that match existing graph proposals and still need review handling.",
+      items: duplicateGraphItems,
+      duplicateOnly: true,
+      href: item => `/?screen=graph&tenant=${encodeURIComponent(tenantId)}&graph_tab=proposed&proposed_key=${encodeURIComponent(item.element_key || "")}`,
+    },
+    {
+      key: "history_outputs",
+      title: "Rejected / filtered history",
+      description: "Rejected, blocked, or filtered outputs kept for audit history.",
+      items: historyGraphItems,
+      historyOnly: true,
       href: item => `/?screen=graph&tenant=${encodeURIComponent(tenantId)}&graph_tab=proposed&proposed_key=${encodeURIComponent(item.element_key || "")}`,
     },
   ];
+}
+
+function agentOutputIsActionableStatusWB(item) {
+  const status = String(item?.status || item?.rawStatus || "draft").toLowerCase();
+  const actionable = ["", "draft", "proposed", "candidate", "new", "new_proposal", "needs_review", "needs_more_evidence", "needs_evidence"];
+  return actionable.includes(status);
+}
+
+function agentOutputIsActiveGraphProposalWB(item) {
+  const decision = String(dedupAuditWB(item).dedup_decision || "").toLowerCase();
+  if (["merge_existing", "duplicate_existing_proposal", "duplicate_current_run"].includes(decision)) return false;
+  if (agentOutputIsHistoryGraphOutputWB(item)) return false;
+  return agentOutputIsActionableStatusWB(item) || decision === "new_proposal" || decision === "needs_review";
+}
+
+function agentOutputIsDuplicateCandidateWB(item) {
+  if (agentOutputIsHistoryGraphOutputWB(item)) return false;
+  const decision = String(dedupAuditWB(item).dedup_decision || "").toLowerCase();
+  return agentOutputIsActionableStatusWB(item)
+    && ["merge_existing", "duplicate_existing_proposal", "duplicate_current_run"].includes(decision);
+}
+
+function agentOutputIsHistoryGraphOutputWB(item) {
+  const status = String(item?.status || item?.rawStatus || "draft").toLowerCase();
+  return ["rejected", "filtered", "blocked", "closed", "archived"].includes(status);
 }
 
 function dedupeAgentOutputs(items) {
@@ -1265,10 +1581,15 @@ function agentOutputDetailScore(item) {
 }
 
 function AgentOutputsPanel({ groups, agentTab, language }) {
+  const visibleGroups = (groups || []).filter(group => !group.duplicateOnly && !group.historyOnly);
+  const duplicateGroups = (groups || []).filter(group => group.duplicateOnly && group.items.length > 0);
+  const historyGroups = (groups || []).filter(group => group.historyOnly && group.items.length > 0);
+  const duplicateCount = duplicateGroups.reduce((sum, group) => sum + group.items.length, 0);
+  const historyCount = historyGroups.reduce((sum, group) => sum + group.items.length, 0);
   return (
     <Panel eyebrow={tWB(language, "Agent outputs", "Agent 输出")} title={agentTab === "autopilot" ? tWB(language, "Findings ranked by confidence and detail", "按置信度和详情排序的 findings") : tWB(language, "Enrichment proposals by type", "按类型分组的信息增益候选")} style={{ marginTop: 16 }}>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 12 }}>
-        {(groups || []).map(group => (
+        {visibleGroups.map(group => (
           <div key={group.key} style={{ border: "1px solid var(--line-soft)", background: "var(--bg-2)", padding: "10px 12px" }}>
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
               <div className="eyebrow accent" style={{ flex: 1 }}>{agentOutputGroupTitleWB(group.title, language)}</div>
@@ -1295,6 +1616,58 @@ function AgentOutputsPanel({ groups, agentTab, language }) {
           </div>
         ))}
       </div>
+      {duplicateCount > 0 && (
+        <details style={{ marginTop: 12, border: "1px solid var(--line-soft)", background: "var(--bg-2)", padding: "10px 12px" }}>
+          <summary style={{ cursor: "pointer", color: "var(--text)", fontSize: 12, fontWeight: 650 }}>
+            {tWB(language, "Duplicate candidates", "去重命中候选")} · {duplicateCount}
+            <span style={{ marginLeft: 8, color: "var(--muted)", fontWeight: 400 }}>
+              {tWB(language, "matched existing proposals; expand to review handling evidence", "命中已有候选，展开查看审核处理证据")}
+            </span>
+          </summary>
+          <div style={{ marginTop: 10, display: "grid", gap: 8 }}>
+            {duplicateGroups.flatMap(group => group.items.map(item => ({ group, item }))).slice(0, 12).map(({ group, item }) => {
+              const audit = dedupAuditWB(item);
+              return (
+                <a key={item.element_key || item.canonical_key || item.id || item.name}
+                   href={group.href(item)}
+                   style={{ display: "block", border: "1px solid var(--line-soft)", padding: "8px 9px", background: "var(--bg-1)", textDecoration: "none" }}>
+                  <div style={{ color: "var(--text)", fontSize: 12, fontWeight: 600 }}>{compactTextWB(textWB(agentOutputTitle(item), language), 74)}</div>
+                  <div style={{ marginTop: 4, color: "var(--muted)", fontSize: 11, lineHeight: 1.4 }}>{compactTextWB(dedupAuditSummaryWB(item, language), 150)}</div>
+                  <div style={{ marginTop: 5, fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--muted)", display: "flex", gap: 8, flexWrap: "wrap" }}>
+                    <span>{dedupDecisionLabelWB(audit.dedup_decision, language)}</span>
+                    <span>{statusLabelWB(item.status || item.rawStatus || "draft", language)}</span>
+                    {audit.match_score !== undefined && <span>{tWB(language, "score", "分数")} {audit.match_score}</span>}
+                    <span>{llmMergePolicyLabelWB(audit.llm_merge_decision_allowed, language)}</span>
+                  </div>
+                </a>
+              );
+            })}
+          </div>
+        </details>
+      )}
+      {historyCount > 0 && (
+        <details style={{ marginTop: 12, border: "1px solid var(--line-soft)", background: "var(--bg-2)", padding: "10px 12px" }}>
+          <summary style={{ cursor: "pointer", color: "var(--text)", fontSize: 12, fontWeight: 650 }}>
+            {tWB(language, "Rejected / filtered history", "已拒绝 / 已过滤历史")} · {historyCount}
+            <span style={{ marginLeft: 8, color: "var(--muted)", fontWeight: 400 }}>
+              {tWB(language, "hidden from active review counts", "不计入当前待处理主数")}
+            </span>
+          </summary>
+          <div style={{ marginTop: 10, display: "grid", gap: 8 }}>
+            {historyGroups.flatMap(group => group.items.map(item => ({ group, item }))).slice(0, 12).map(({ group, item }) => (
+              <a key={item.element_key || item.canonical_key || item.id || item.name}
+                 href={group.href(item)}
+                 style={{ display: "block", border: "1px solid var(--line-soft)", padding: "8px 9px", background: "var(--bg-1)", textDecoration: "none" }}>
+                <div style={{ color: "var(--text)", fontSize: 12, fontWeight: 600 }}>{compactTextWB(textWB(agentOutputTitle(item), language), 74)}</div>
+                <div style={{ marginTop: 4, color: "var(--muted)", fontSize: 11, lineHeight: 1.4 }}>{compactTextWB(dedupAuditSummaryWB(item, language), 150)}</div>
+                <div style={{ marginTop: 5, fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--muted)" }}>
+                  {statusLabelWB(item.status || item.rawStatus || "draft", language)}
+                </div>
+              </a>
+            ))}
+          </div>
+        </details>
+      )}
     </Panel>
   );
 }
@@ -1307,6 +1680,9 @@ function agentOutputGroupTitleWB(title, language) {
     "Proposed ontologies": "候选本体",
     "Proposed nodes": "候选节点",
     "Proposed edges": "候选边",
+    "Proposed graph findings": "候选图发现",
+    "Duplicate candidates": "去重命中候选",
+    "Rejected / filtered history": "已拒绝 / 已过滤历史",
   };
   return map[title] || title;
 }
@@ -1319,6 +1695,11 @@ function agentOutputGroupDescriptionWB(description, language) {
     "Ontology candidates and web enrichment proposals that still require ontology review.": "仍需本体审核的本体候选和网页信息增益候选。",
     "Graph node proposals generated by enrichment runs.": "信息增益运行生成的候选图节点。",
     "Graph edge proposals generated by enrichment runs.": "信息增益运行生成的候选图边。",
+    "Current graph node proposals visible in Graph Proposed review.": "当前 Graph 候选审核页可见的候选图节点。",
+    "Current graph edge proposals visible in Graph Proposed review.": "当前 Graph 候选审核页可见的候选图边。",
+    "Current graph findings visible in Graph Proposed review.": "当前 Graph 候选审核页可见的候选图发现。",
+    "Candidates that match existing graph proposals and still need review handling.": "命中已有图候选、仍需审核处理的候选。",
+    "Rejected, blocked, or filtered outputs kept for audit history.": "已拒绝、已阻塞或已过滤输出，仅保留为审计历史。",
   };
   return map[description] || description;
 }

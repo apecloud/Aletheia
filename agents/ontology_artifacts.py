@@ -4,7 +4,7 @@ import os
 from datetime import datetime
 from typing import Any, Iterable
 
-from sqlalchemy import Boolean, Column, DateTime, Float, ForeignKey, Integer, String, Text, text
+from sqlalchemy import Boolean, Column, DateTime, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint, text
 from sqlalchemy.orm import declarative_base, relationship
 
 
@@ -312,6 +312,10 @@ class IterativeGraphEnrichmentRun(Base):
 
 class ProposedGraphElement(Base):
     __tablename__ = "aletheia_proposed_graph_elements"
+    __table_args__ = (
+        UniqueConstraint("project_id", "element_key", name="uq_aletheia_proposed_graph_elements_project_key"),
+        Index("ix_aletheia_proposed_graph_run", "project_id", "run_id", "iteration"),
+    )
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     run_id = Column(Integer, ForeignKey("aletheia_iterative_graph_enrichment_runs.id"), nullable=False)
@@ -326,6 +330,36 @@ class ProposedGraphElement(Base):
     status = Column(String(50), nullable=False, default="draft")
     iteration = Column(Integer, nullable=False, default=1)
     created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class GraphIdentityIndex(Base):
+    __tablename__ = "aletheia_graph_identity_index"
+    __table_args__ = (
+        UniqueConstraint("project_id", "source_space", "source_key", name="uq_aletheia_graph_identity_project_source_key"),
+        UniqueConstraint("project_id", "source_space", "identity_key", name="uq_aletheia_graph_identity_project_space_identity"),
+        Index("ix_aletheia_graph_identity_lookup", "project_id", "element_kind", "identity_key"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    project_id = Column(String(255), nullable=False, default="default")
+    identity_key = Column(String(1000), nullable=False)
+    element_kind = Column(String(50), nullable=False)
+    candidate_id = Column(String(255), nullable=False)
+    source_space = Column(String(100), nullable=False)
+    source_key = Column(String(1000), nullable=False)
+    source_status = Column(String(50), nullable=False, default="draft")
+    match_label = Column(String(500))
+    match_relation = Column(String(255))
+    identity_json = Column(Text, nullable=False, default="{}")
+    evidence_refs_json = Column(Text, nullable=False, default="[]")
+    dedup_text = Column(Text)
+    embedding_model = Column(String(255))
+    embedding_dim = Column(Integer)
+    embedding_json = Column(Text)
+    vector_fingerprint = Column(String(128))
+    payload_fingerprint = Column(String(128), nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
 class GraphDeepResearchBenchmarkRun(Base):
@@ -581,6 +615,22 @@ def ensure_artifact_schema(engine) -> None:
     _rename_legacy_schema_modeling_tables(engine)
     Base.metadata.create_all(engine)
     if engine.dialect.name == "sqlite":
+        with engine.begin() as conn:
+            rows = conn.execute(text("PRAGMA table_info(aletheia_graph_identity_index)")).fetchall()
+            columns = {row[1] for row in rows}
+            sqlite_columns = {
+                "dedup_text": "TEXT",
+                "embedding_model": "VARCHAR(255)",
+                "embedding_dim": "INTEGER",
+                "embedding_json": "TEXT",
+                "vector_fingerprint": "VARCHAR(128)",
+            }
+            for column, column_type in sqlite_columns.items():
+                if column not in columns:
+                    conn.execute(text(f"ALTER TABLE aletheia_graph_identity_index ADD COLUMN {column} {column_type}"))
+            conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_aletheia_graph_identity_project_source_key ON aletheia_graph_identity_index (project_id, source_space, source_key)"))
+            conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_aletheia_graph_identity_project_space_identity ON aletheia_graph_identity_index (project_id, source_space, identity_key)"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_aletheia_graph_identity_lookup ON aletheia_graph_identity_index (project_id, element_kind, identity_key)"))
         return
     with engine.begin() as conn:
         conn.execute(text("ALTER TABLE aletheia_artifact_reviews ADD COLUMN IF NOT EXISTS project_id VARCHAR(255) DEFAULT 'default'"))
@@ -612,6 +662,14 @@ def ensure_artifact_schema(engine) -> None:
         conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_aletheia_iterative_graph_runs_project_key ON aletheia_iterative_graph_enrichment_runs (project_id, run_key)"))
         conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_aletheia_proposed_graph_elements_project_key ON aletheia_proposed_graph_elements (project_id, element_key)"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_aletheia_proposed_graph_run ON aletheia_proposed_graph_elements (project_id, run_id, iteration)"))
+        conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_aletheia_graph_identity_project_source_key ON aletheia_graph_identity_index (project_id, source_space, source_key)"))
+        conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_aletheia_graph_identity_project_space_identity ON aletheia_graph_identity_index (project_id, source_space, identity_key)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_aletheia_graph_identity_lookup ON aletheia_graph_identity_index (project_id, element_kind, identity_key)"))
+        conn.execute(text("ALTER TABLE aletheia_graph_identity_index ADD COLUMN IF NOT EXISTS dedup_text TEXT"))
+        conn.execute(text("ALTER TABLE aletheia_graph_identity_index ADD COLUMN IF NOT EXISTS embedding_model VARCHAR(255)"))
+        conn.execute(text("ALTER TABLE aletheia_graph_identity_index ADD COLUMN IF NOT EXISTS embedding_dim INTEGER"))
+        conn.execute(text("ALTER TABLE aletheia_graph_identity_index ADD COLUMN IF NOT EXISTS embedding_json TEXT"))
+        conn.execute(text("ALTER TABLE aletheia_graph_identity_index ADD COLUMN IF NOT EXISTS vector_fingerprint VARCHAR(128)"))
         conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_aletheia_graph_benchmarks_project_key ON aletheia_graph_deep_research_benchmarks (project_id, benchmark_key)"))
 
 

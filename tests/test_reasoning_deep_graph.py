@@ -1,9 +1,13 @@
 import unittest
 
-from server.workbench_server import ReasoningRepository
+from server.workbench_server import InstanceRepository, ReasoningRepository
 
 
 class DeepGraphReasoningTest(unittest.TestCase):
+    def test_instance_repository_exposes_schema_reasoning_entity_adapters(self):
+        self.assertTrue(callable(getattr(InstanceRepository, "_fetch_entity", None)))
+        self.assertTrue(callable(getattr(InstanceRepository, "_entity_node", None)))
+
     def test_complete_hazard_to_action_chain_is_deep_graph_finding(self):
         repo = object.__new__(ReasoningRepository)
         profile = repo._deep_graph_profile(

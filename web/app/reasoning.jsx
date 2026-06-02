@@ -826,8 +826,13 @@ function suggestedQuestionsForTenantRX({ tenantId, type, centerNode, label, ques
 }
 
 function Reasoning({ tenant, language }) {
-  const [selectedKey, setSelectedKey] = useStateRX(null);
-  const [activeTab, setActiveTab] = useStateRX("mine");  // mine | all | graph | autopilot
+  const initialReasoningParams = (() => {
+    try { return new URLSearchParams(location.search); }
+    catch { return new URLSearchParams(); }
+  })();
+  const normalizeReasoningTab = tab => ["mine", "all", "graph", "autopilot"].includes(tab) ? tab : "mine";
+  const [selectedKey, setSelectedKey] = useStateRX(initialReasoningParams.get("task") || null);
+  const [activeTab, setActiveTab] = useStateRX(normalizeReasoningTab(initialReasoningParams.get("reasoning_tab")));  // mine | all | graph | autopilot
   const [question, setQuestion] = useStateRX("");
   const [centerNode, setCenterNode] = useStateRX("");
   const [depth, setDepth] = useStateRX(1);
@@ -842,7 +847,7 @@ function Reasoning({ tenant, language }) {
   const [autopilotMaxHypotheses, setAutopilotMaxHypotheses] = useStateRX(8);
   const [autopilotMaxRuns, setAutopilotMaxRuns] = useStateRX(5);
   const [autopilotMaxToolCalls, setAutopilotMaxToolCalls] = useStateRX(20);
-  const [autopilotSelectedKey, setAutopilotSelectedKey] = useStateRX(null);
+  const [autopilotSelectedKey, setAutopilotSelectedKey] = useStateRX(initialReasoningParams.get("autopilot_session") || null);
   const [autopilotStarting, setAutopilotStarting] = useStateRX(false);
   const [autopilotPlaybookRunning, setAutopilotPlaybookRunning] = useStateRX(false);
   const [registryFilters, setRegistryFilters] = useStateRX({
@@ -899,6 +904,30 @@ function Reasoning({ tenant, language }) {
     { enabled: activeTab === "autopilot" && !!autopilotSelectedKey }
   );
   const autopilotDetail = autopilotDetailQ.data || null;
+  function selectReasoningTab(tab) {
+    setActiveTab(normalizeReasoningTab(tab));
+  }
+  function selectReasoningTask(key) {
+    setSelectedKey(key || null);
+  }
+  useEffectRX(() => {
+    try {
+      const url = new URL(location.href);
+      url.searchParams.set("screen", "reasoning");
+      url.searchParams.set("tenant", tenant ? tenant.id : "default");
+      url.searchParams.set("reasoning_tab", activeTab);
+      if (activeTab === "autopilot") {
+        if (autopilotSelectedKey) url.searchParams.set("autopilot_session", autopilotSelectedKey);
+        else url.searchParams.delete("autopilot_session");
+        url.searchParams.delete("task");
+      } else {
+        if (selectedKey) url.searchParams.set("task", selectedKey);
+        else url.searchParams.delete("task");
+        url.searchParams.delete("autopilot_session");
+      }
+      history.replaceState(null, "", url.toString());
+    } catch {}
+  }, [tenant ? tenant.id : "default", activeTab, selectedKey, autopilotSelectedKey]);
   useEffectRX(() => {
     const tid = tenant ? tenant.id : "default";
     setAutopilotObjective(autopilotObjectiveForTenantRX(tid, language));
@@ -1188,7 +1217,7 @@ function Reasoning({ tenant, language }) {
         };
         setLocalTasks(prev => [optimisticTask, ...prev.filter(t => t.canonical_key !== newKey)]);
         pendingKeyRef.current = newKey;
-        setSelectedKey(newKey);
+        selectReasoningTask(newKey);
         setActionMsg({ kind: "ok", msg: `New task created · ${newKey}` });
         setTimeout(() => {
           window.dispatchEvent(new CustomEvent("aletheia:retry"));
@@ -1314,7 +1343,7 @@ function Reasoning({ tenant, language }) {
       window.dispatchEvent(new CustomEvent("aletheia:retry"));
       if (res.canonical_key) {
         pendingKeyRef.current = res.canonical_key;
-        setSelectedKey(res.canonical_key);
+        selectReasoningTask(res.canonical_key);
         setActiveTab("mine");
         setAskMode(false);
       }
@@ -1496,7 +1525,7 @@ function Reasoning({ tenant, language }) {
         return next;
       });
       setLocalTasks(prev => prev.filter(t => t.canonical_key !== taskKey));
-      if (selectedKey === taskKey) setSelectedKey(null);
+      if (selectedKey === taskKey) selectReasoningTask(null);
       setActionMsg({ kind: "ok", msg: tRX(language, "Task deleted.", "任务已删除。") });
       window.dispatchEvent(new CustomEvent("aletheia:retry"));
     } catch (e) {
@@ -1510,10 +1539,10 @@ function Reasoning({ tenant, language }) {
     <div className="canvas">
       <div className="subbar">
         <div className="tabs">
-          <div className={"tab" + (activeTab === "mine"    ? " active" : "")} onClick={() => setActiveTab("mine")}>{tRX(language, "My Questions", "我的问题")} <span className="ct">{counts.mine}</span></div>
-          <div className={"tab" + (activeTab === "all"     ? " active" : "")} onClick={() => setActiveTab("all")}>{tRX(language, "Reasoning Process", "推理流程")} <span className="ct">{counts.all}</span></div>
-          <div className={"tab" + (activeTab === "graph"   ? " active" : "")} onClick={() => setActiveTab("graph")}>{tRX(language, "From Graph", "来自图谱")} <span className="ct">{counts.graph}</span></div>
-          <div className={"tab" + (activeTab === "autopilot" ? " active" : "")} onClick={() => setActiveTab("autopilot")}>{tRX(language, "Autopilot", "自动推理")} <span className="ct">{counts.autopilot}</span></div>
+          <div className={"tab" + (activeTab === "mine"    ? " active" : "")} onClick={() => selectReasoningTab("mine")}>{tRX(language, "My Questions", "我的问题")} <span className="ct">{counts.mine}</span></div>
+          <div className={"tab" + (activeTab === "all"     ? " active" : "")} onClick={() => selectReasoningTab("all")}>{tRX(language, "Reasoning Process", "推理流程")} <span className="ct">{counts.all}</span></div>
+          <div className={"tab" + (activeTab === "graph"   ? " active" : "")} onClick={() => selectReasoningTab("graph")}>{tRX(language, "From Graph", "来自图谱")} <span className="ct">{counts.graph}</span></div>
+          <div className={"tab" + (activeTab === "autopilot" ? " active" : "")} onClick={() => selectReasoningTab("autopilot")}>{tRX(language, "Autopilot", "自动推理")} <span className="ct">{counts.autopilot}</span></div>
         </div>
         <div className="spacer" />
         <button className="tool" onClick={() => setCleanupModal(true)}>{tRX(language, "Clean up", "清理")}</button>
@@ -1601,7 +1630,7 @@ function Reasoning({ tenant, language }) {
                 return (
                 <div key={t.canonical_key}
                      className={`artifact-row ${statusToPill[t.status] || "proposed"}` + (t.canonical_key === selectedKey ? " selected" : "")}
-                     onClick={() => setSelectedKey(t.canonical_key)}>
+                     onClick={() => selectReasoningTask(t.canonical_key)}>
                   <div className="ar-bar" />
                   <div className="ar-main">
                     <div className="ar-top">
@@ -1631,7 +1660,7 @@ function Reasoning({ tenant, language }) {
                     <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
                       {ts.isRunning && !ts.isStale && (
                         <button className="btn xs ghost" title={tRX(language, "Stop task", "停止任务")}
-                                onClick={e => { e.stopPropagation(); setSelectedKey(t.canonical_key); stopAndClose(); }}
+                                onClick={e => { e.stopPropagation(); selectReasoningTask(t.canonical_key); stopAndClose(); }}
                                 style={{ padding: "4px 7px", fontSize: 12, color: "var(--rejected)", border: "1px solid oklch(0.66 0.18 25 / 0.3)", lineHeight: 1, borderRadius: 4 }}>
                           ■
                         </button>
@@ -1639,7 +1668,7 @@ function Reasoning({ tenant, language }) {
                       {!ts.isRunning && (
                         <React.Fragment>
                           <button className="btn xs ghost" title={tRX(language, "Rerun (new task)", "重新运行（新任务）")}
-                                  onClick={e => { e.stopPropagation(); setSelectedKey(t.canonical_key); setTimeout(runTask, 50); }}
+                                  onClick={e => { e.stopPropagation(); selectReasoningTask(t.canonical_key); setTimeout(runTask, 50); }}
                                   style={{ padding: "4px 7px", color: "var(--accent)", border: "1px solid var(--line)", lineHeight: 1, borderRadius: 4 }}>
                             <span style={{ display: "inline-flex", width: 16, height: 16 }} dangerouslySetInnerHTML={{ __html: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 8a5.5 5.5 0 0 1 9.3-4"/><path d="M13.5 8a5.5 5.5 0 0 1-9.3 4"/><path d="M11.8 1.5V4h-2.5"/><path d="M4.2 14.5V12h2.5"/></svg>' }} />
                           </button>
@@ -2147,7 +2176,7 @@ function Reasoning({ tenant, language }) {
                         setLocalTasks(prev => prev.filter(t => !deletedKeys.includes(t.canonical_key)));
                       }
                       window.dispatchEvent(new CustomEvent("aletheia:retry"));
-                      setSelectedKey(null);
+                      selectReasoningTask(null);
                     }} />
     </div>
   );

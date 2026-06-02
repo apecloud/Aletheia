@@ -1073,6 +1073,36 @@ class InstanceRepository:
             },
         }
 
+    def _fetch_entity(self, tenant, object_type, instance_id):
+        """Fetch an entity row from the reviewed SchemaGraph projection.
+
+        ReasoningEngine historically called repository-level `_fetch_entity`
+        and `_entity_node` helpers. Keep that narrow adapter, but source it only
+        from approved SchemaGraphModelingAgent artifacts so tenants without a
+        reviewed projection do not fall back to example fixture schemas.
+        """
+        _, artifact = self._schema_graph_object_artifact(tenant, object_type)
+        if not artifact:
+            return None
+        table, pk = self._schema_graph_table_and_pk(tenant, artifact)
+        if not table or not pk:
+            return None
+        with self.source_engine_for(tenant).connect() as conn:
+            row = conn.execute(
+                text(f"SELECT * FROM {table} WHERE {pk} = :pk LIMIT 1"),
+                {"pk": instance_id},
+            ).mappings().first()
+        return dict(row) if row else None
+
+    def _entity_node(self, tenant, object_type, row):
+        _, artifact = self._schema_graph_object_artifact(tenant, object_type)
+        if not artifact or not row:
+            return None
+        table, pk = self._schema_graph_table_and_pk(tenant, artifact)
+        if not table or not pk or pk not in row:
+            return None
+        return self._schema_graph_node(tenant, artifact, table, row[pk])
+
     def _schema_graph_reasoning_configs(self, tenant):
         objects, links = self._schema_graph_artifacts(tenant)
         if not objects:
@@ -1482,6 +1512,29 @@ class InstanceRepository:
             "max_iterations": 1,
             "max_frontier": 4,
             "max_results_per_query": 4,
+            "budget": {
+                "max_frontier_per_cycle": 4,
+                "max_results_per_query": 4,
+                "max_iterations_per_cycle": 1,
+                "max_cycles": None,
+            },
+            "backoff": {
+                "failure_count": 0,
+                "base_seconds": 60,
+                "max_seconds": 3600,
+                "backoff_until": None,
+                "last_error": None,
+            },
+            "source_trust": {
+                "allowed_domains": ["zenodo.org"],
+                "reject_unlisted_domains": True,
+                "rejected_domains": [],
+            },
+            "stop_policy": {
+                "pause_on_no_frontier": True,
+                "pause_on_budget_exhausted": True,
+                "pause_on_no_trusted_sources": True,
+            },
             "visited_frontier_keys": [],
             "frontier_cooldown_minutes": 360,
             "frontier_priority_policy": [
@@ -1579,8 +1632,33 @@ class InstanceRepository:
             if not domains:
                 raise ValueError("allowlist must include at least one public domain")
             config["allowed_domains"] = list(dict.fromkeys(domains))
+            trust = dict(config.get("source_trust") or {})
+            trust["allowed_domains"] = config["allowed_domains"]
+            config["source_trust"] = trust
         if "budget" in body:
-            budget = int(body.get("budget") or config.get("max_frontier") or 4)
+            raw_budget = body.get("budget") or config.get("max_frontier") or 4
+            budget_config = dict(config.get("budget") or {})
+            if isinstance(raw_budget, dict):
+                if "max_cycles" in raw_budget:
+                    if raw_budget.get("max_cycles") in (None, "", 0):
+                        budget_config["max_cycles"] = None
+                    else:
+                        budget_config["max_cycles"] = max(1, min(int(raw_budget.get("max_cycles") or 1), 1000))
+                for source_key, target_key in (
+                    ("max_frontier_per_cycle", "max_frontier_per_cycle"),
+                    ("max_frontier", "max_frontier_per_cycle"),
+                    ("max_results_per_query", "max_results_per_query"),
+                    ("max_iterations_per_cycle", "max_iterations_per_cycle"),
+                    ("max_iterations", "max_iterations_per_cycle"),
+                ):
+                    if source_key in raw_budget:
+                        budget_config[target_key] = max(1, min(int(raw_budget.get(source_key) or 1), 50))
+            else:
+                budget_value = max(1, min(int(raw_budget or config.get("max_frontier") or 4), 25))
+                budget_config["max_frontier_per_cycle"] = budget_value
+                budget_config["max_results_per_query"] = max(1, min(int(config.get("max_results_per_query") or budget_value), budget_value))
+            config["budget"] = budget_config
+            budget = int(budget_config.get("max_frontier_per_cycle") or config.get("max_frontier") or 4)
             config["max_frontier"] = max(1, min(budget, 25))
             config["rate_limit_per_cycle"] = max(1, min(budget, 25))
         for key in ("max_iterations", "max_frontier", "max_results_per_query", "rate_limit_per_cycle"):
@@ -1590,6 +1668,137 @@ class InstanceRepository:
             config["frontier_cooldown_minutes"] = max(0, min(int(body.get("frontier_cooldown_minutes") or 0), 10080))
         if "stop_condition" in body:
             config["stop_condition"] = (body.get("stop_condition") or "").strip() or config.get("stop_condition")
+        if "stop_policy" in body and isinstance(body.get("stop_policy"), dict):
+            config["stop_policy"] = {**dict(config.get("stop_policy") or {}), **body["stop_policy"]}
+        if "source_trust" in body and isinstance(body.get("source_trust"), dict):
+            trust = {**dict(config.get("source_trust") or {}), **body["source_trust"]}
+            if "allowed_domains" in trust:
+                trust["allowed_domains"] = self._continuous_normalize_domains(trust.get("allowed_domains"))
+            if "rejected_domains" in trust:
+                trust["rejected_domains"] = self._continuous_normalize_domains(trust.get("rejected_domains"))
+            config["source_trust"] = trust
+        if "backoff" in body and isinstance(body.get("backoff"), dict):
+            backoff = {**dict(config.get("backoff") or {}), **body["backoff"]}
+            backoff["base_seconds"] = max(1, min(int(backoff.get("base_seconds") or 60), 86400))
+            backoff["max_seconds"] = max(backoff["base_seconds"], min(int(backoff.get("max_seconds") or 3600), 604800))
+            config["backoff"] = backoff
+        return config
+
+    def _continuous_normalize_domains(self, raw_domains):
+        if isinstance(raw_domains, str):
+            raw_domains = re.split(r"[,\\s]+", raw_domains)
+        return list(
+            dict.fromkeys(
+                part.lower().removeprefix("www.")
+                for part in (str(value).strip() for value in (raw_domains or []))
+                if part
+            )
+        )
+
+    def _continuous_budget(self, config):
+        budget = dict((config or {}).get("budget") or {})
+        max_frontier = int(budget.get("max_frontier_per_cycle") or (config or {}).get("max_frontier") or (config or {}).get("rate_limit_per_cycle") or 4)
+        max_results = int(budget.get("max_results_per_query") or (config or {}).get("max_results_per_query") or max_frontier)
+        max_iterations = int(budget.get("max_iterations_per_cycle") or (config or {}).get("max_iterations") or 1)
+        max_cycles = budget.get("max_cycles")
+        return {
+            "max_frontier_per_cycle": max(0, min(max_frontier, 50)),
+            "max_results_per_query": max(0, min(max_results, 50)),
+            "max_iterations_per_cycle": max(0, min(max_iterations, 50)),
+            "max_cycles": None if max_cycles in (None, "", 0) else max(1, min(int(max_cycles), 1000)),
+        }
+
+    def _continuous_source_trust_policy(self, config):
+        trust = dict((config or {}).get("source_trust") or {})
+        allowed = self._continuous_normalize_domains(trust.get("allowed_domains") or (config or {}).get("allowed_domains") or [])
+        rejected = set(self._continuous_normalize_domains(trust.get("rejected_domains") or []))
+        return {
+            "allowed_domains": allowed,
+            "rejected_domains": rejected,
+            "reject_unlisted_domains": trust.get("reject_unlisted_domains", True) is not False,
+        }
+
+    def _continuous_source_trust_decision(self, source, config):
+        policy = self._continuous_source_trust_policy(config)
+        url = str((source or {}).get("url") or "").strip()
+        domain = urlparse(url).netloc.lower().removeprefix("www.")
+        if not domain:
+            return {"trusted": False, "domain": "", "reason": "missing source URL"}
+        if domain in policy["rejected_domains"]:
+            return {"trusted": False, "domain": domain, "reason": "domain explicitly rejected by source trust policy"}
+        allowed = policy["allowed_domains"]
+        if allowed and not any(domain == allowed_domain or domain.endswith(f".{allowed_domain}") for allowed_domain in allowed):
+            reason = "domain not in allowed source trust policy" if policy["reject_unlisted_domains"] else "domain outside allowlist but accepted by policy"
+            return {"trusted": not policy["reject_unlisted_domains"], "domain": domain, "reason": reason}
+        return {"trusted": True, "domain": domain, "reason": "domain accepted by source trust policy"}
+
+    def _continuous_trusted_search_results(self, search_results, config):
+        trusted = []
+        skipped = []
+        events = []
+        for index, source in enumerate(search_results or []):
+            decision = self._continuous_source_trust_decision(source, config)
+            if decision["trusted"]:
+                enriched = dict(source or {})
+                enriched["source_trust"] = {"domain": decision["domain"], "reason": decision["reason"]}
+                trusted.append(enriched)
+            else:
+                skipped_item = {
+                    "type": "source_trust_rejected",
+                    "source_url": (source or {}).get("url"),
+                    "source_title": (source or {}).get("title"),
+                    "domain": decision["domain"],
+                    "reason": decision["reason"],
+                    "index": index,
+                    "created_at": datetime.utcnow().isoformat(),
+                }
+                skipped.append(skipped_item)
+                events.append(skipped_item)
+        return trusted, skipped, events
+
+    def _continuous_backoff_state(self, config):
+        backoff = dict((config or {}).get("backoff") or {})
+        backoff.setdefault("failure_count", 0)
+        backoff.setdefault("base_seconds", 60)
+        backoff.setdefault("max_seconds", 3600)
+        backoff.setdefault("backoff_until", None)
+        backoff.setdefault("last_error", None)
+        return backoff
+
+    def _continuous_backoff_active(self, config, now_ts=None):
+        backoff = self._continuous_backoff_state(config)
+        until_ts = self._continuous_parse_iso_ts(backoff.get("backoff_until"))
+        if until_ts is None:
+            return None
+        now_ts = time.time() if now_ts is None else now_ts
+        if now_ts >= until_ts:
+            return None
+        return {"backoff_until": backoff.get("backoff_until"), "remaining_seconds": int(until_ts - now_ts)}
+
+    def _continuous_schedule_backoff(self, config, error):
+        config = dict(config or {})
+        backoff = self._continuous_backoff_state(config)
+        failure_count = int(backoff.get("failure_count") or 0) + 1
+        base_seconds = max(1, int(backoff.get("base_seconds") or 60))
+        max_seconds = max(base_seconds, int(backoff.get("max_seconds") or 3600))
+        delay_seconds = min(base_seconds * (2 ** (failure_count - 1)), max_seconds)
+        backoff.update(
+            {
+                "failure_count": failure_count,
+                "last_error": _safe_error_message(error),
+                "last_failed_at": datetime.utcnow().isoformat(),
+                "backoff_until": datetime.utcfromtimestamp(time.time() + delay_seconds).isoformat(),
+                "delay_seconds": delay_seconds,
+            }
+        )
+        config["backoff"] = backoff
+        return config, backoff
+
+    def _continuous_clear_backoff(self, config):
+        config = dict(config or {})
+        backoff = self._continuous_backoff_state(config)
+        backoff.update({"failure_count": 0, "backoff_until": None, "last_error": None, "delay_seconds": 0})
+        config["backoff"] = backoff
         return config
 
     def _continuous_cadence_seconds(self, config):
@@ -2110,9 +2319,10 @@ class InstanceRepository:
             return None
         latest = None
         if row["last_run_key"]:
-            latest_data = self.proposed_graph_elements(tenant, run_key=row["last_run_key"], limit=120)
+            run_summary = self._continuous_iterative_run_summary(tenant, row["last_run_key"])
+            latest_data = self.proposed_graph_elements(tenant, run_key=row["last_run_key"], limit=120, status_filter="all")
             latest = {
-                "run": (latest_data.get("runs") or [None])[0],
+                "run": run_summary or (latest_data.get("runs") or [None])[0],
                 "element_count": len(latest_data.get("elements") or []),
                 "finding_count": len([e for e in latest_data.get("elements") or [] if e.get("element_type") == "finding"]),
                 "findings": [
@@ -2147,6 +2357,81 @@ class InstanceRepository:
                 "canonical_write": False,
                 "formal_graph_write": False,
             },
+        }
+
+    def _continuous_iterative_run_summary(self, tenant, run_key):
+        try:
+            with self.metadata_engine_for(tenant).connect() as conn:
+                row = conn.execute(
+                    text(
+                        """
+                        SELECT run_key, status, objective, frontier_json, expansion_trace_json,
+                               safety_profile_json, budget_json, skipped_sources_json,
+                               proposed_count, pruned_count, finding_count, error,
+                               started_at, finished_at
+                        FROM aletheia_iterative_graph_enrichment_runs
+                        WHERE project_id = :tenant_id AND run_key = :run_key
+                        """
+                    ),
+                    {"tenant_id": tenant.tenant_id, "run_key": run_key},
+                ).mappings().first()
+        except Exception:
+            return None
+        if row is None:
+            return None
+        expansion_trace = _load_json(row["expansion_trace_json"], [])
+        return {
+            "run_key": row["run_key"],
+            "objective": row["objective"],
+            "status": row["status"],
+            "proposed_count": row["proposed_count"],
+            "finding_count": row["finding_count"],
+            "pruned_count": row["pruned_count"],
+            "frontier": _load_json(row["frontier_json"], []),
+            "safety_profile": _load_json(row["safety_profile_json"], {}),
+            "budget": _load_json(row["budget_json"], {}),
+            "skipped_sources": _load_json(row["skipped_sources_json"], []),
+            "extraction_blockers": self._continuous_no_proposal_summary({"expansion_trace": expansion_trace}),
+            "error": row["error"],
+            "started_at": _jsonable(row["started_at"]),
+            "finished_at": _jsonable(row["finished_at"]),
+        }
+
+    def _continuous_no_proposal_summary(self, run_payload):
+        trace = (run_payload or {}).get("expansion_trace") or []
+        reason_counts = {}
+        engine_status_counts = {}
+        rejected_reason_counts = {}
+        frontier_keys = []
+        source_urls = []
+        for step in trace:
+            frontier = step.get("frontier") if isinstance(step, dict) else {}
+            frontier_key = (frontier or {}).get("key")
+            if frontier_key and frontier_key not in frontier_keys:
+                frontier_keys.append(frontier_key)
+            extraction = step.get("last_extraction_profile") if isinstance(step, dict) else {}
+            if isinstance(extraction, dict):
+                status = extraction.get("extraction_engine_status")
+                if status:
+                    engine_status_counts[status] = engine_status_counts.get(status, 0) + 1
+                source = extraction.get("source") if isinstance(extraction.get("source"), dict) else {}
+                source_url = source.get("url")
+                if source_url and source_url not in source_urls:
+                    source_urls.append(source_url)
+                for item in extraction.get("rejected_or_ambiguous_candidates") or []:
+                    reason = item.get("reason") if isinstance(item, dict) else None
+                    if reason:
+                        rejected_reason_counts[reason] = rejected_reason_counts.get(reason, 0) + 1
+            for item in step.get("pruned") or []:
+                reason = item.get("reason") if isinstance(item, dict) else None
+                if reason:
+                    reason_counts[reason] = reason_counts.get(reason, 0) + 1
+        return {
+            "pruned_reason_counts": reason_counts,
+            "extraction_engine_status_counts": engine_status_counts,
+            "rejected_candidate_reason_counts": rejected_reason_counts,
+            "frontier_keys": frontier_keys[:10],
+            "source_urls": source_urls[:10],
         }
 
     def continuous_enrichment_sessions(self, tenant):
@@ -2202,12 +2487,248 @@ class InstanceRepository:
         if row["status"] == "paused" and not body.get("force"):
             raise ValueError("Continuous enrichment session is paused")
         config = self._continuous_update_config(_load_json(row["config_json"], {}), body)
-        allowed_domains = config.get("allowed_domains") or ["zenodo.org"]
-        max_frontier = int(config.get("max_frontier") or config.get("rate_limit_per_cycle") or 4)
+        events = []
+        active_backoff = self._continuous_backoff_active(config)
+        if active_backoff and not body.get("force"):
+            events.append(
+                {
+                    "type": "backoff_active",
+                    "backoff_until": active_backoff["backoff_until"],
+                    "remaining_seconds": active_backoff["remaining_seconds"],
+                    "reason": self._continuous_backoff_state(config).get("last_error"),
+                    "created_at": datetime.utcnow().isoformat(),
+                }
+            )
+            self._continuous_append_events(config, events)
+            with self.metadata_engine_for(tenant).begin() as conn:
+                conn.execute(
+                    text(
+                        """
+                        UPDATE aletheia_continuous_enrichment_sessions
+                        SET status = 'idle',
+                            config_json = :config_json,
+                            updated_at = CURRENT_TIMESTAMP
+                        WHERE project_id = :tenant_id AND session_key = :session_key
+                        """
+                    ),
+                    {"tenant_id": tenant.tenant_id, "session_key": session_key, "config_json": _json_dump(config)},
+                )
+            raise ValueError(f"Continuous enrichment session is in backoff until {active_backoff['backoff_until']}")
+        budget = self._continuous_budget(config)
+        if budget["max_cycles"] is not None and int(row["cycle_count"] or 0) >= budget["max_cycles"]:
+            event = {
+                "type": "budget_exhausted",
+                "reason": "max_cycles reached",
+                "max_cycles": budget["max_cycles"],
+                "cycle_count": int(row["cycle_count"] or 0),
+                "created_at": datetime.utcnow().isoformat(),
+            }
+            events.append(event)
+            config["stop_reason"] = event["reason"]
+            config["next_run_at"] = None
+            self._continuous_append_events(config, events)
+            next_status = "paused" if (config.get("stop_policy") or {}).get("pause_on_budget_exhausted", True) else "idle"
+            with self.metadata_engine_for(tenant).begin() as conn:
+                conn.execute(
+                    text(
+                        """
+                        UPDATE aletheia_continuous_enrichment_sessions
+                        SET status = :status,
+                            config_json = :config_json,
+                            updated_at = CURRENT_TIMESTAMP
+                        WHERE project_id = :tenant_id AND session_key = :session_key
+                        """
+                    ),
+                    {
+                        "tenant_id": tenant.tenant_id,
+                        "session_key": session_key,
+                        "status": next_status,
+                        "config_json": _json_dump(config),
+                    },
+                )
+            return {
+                "tenant": tenant.public_dict(),
+                "session": self.continuous_enrichment_session(tenant, session_key)["session"],
+                "cycle": {"status": "budget_exhausted", "events": events, "budget": budget},
+                "write_boundary": {
+                    "canonical_write": False,
+                    "formal_graph_write": False,
+                    "target": "proposed_graph_space",
+                    "findings": "candidate_only",
+                    "autopilot_auto_approve": False,
+                },
+            }
+        max_frontier = min(
+            int(config.get("max_frontier") or config.get("rate_limit_per_cycle") or 4),
+            int(budget["max_frontier_per_cycle"] or 0),
+        )
+        max_results_per_query = min(
+            int(config.get("max_results_per_query") or 4),
+            int(budget["max_results_per_query"] or 0),
+        )
+        max_iterations = min(
+            int(config.get("max_iterations") or 1),
+            int(budget["max_iterations_per_cycle"] or 0),
+        )
+        if max_frontier <= 0 or max_results_per_query <= 0 or max_iterations <= 0:
+            events.append(
+                {
+                    "type": "budget_exhausted",
+                    "reason": "per-cycle budget is zero",
+                    "budget": budget,
+                    "created_at": datetime.utcnow().isoformat(),
+                }
+            )
+            config["stop_reason"] = "per-cycle budget is zero"
+            config["next_run_at"] = None
+            self._continuous_append_events(config, events)
+            next_status = "paused" if (config.get("stop_policy") or {}).get("pause_on_budget_exhausted", True) else "idle"
+            with self.metadata_engine_for(tenant).begin() as conn:
+                conn.execute(
+                    text(
+                        """
+                        UPDATE aletheia_continuous_enrichment_sessions
+                        SET status = :status,
+                            config_json = :config_json,
+                            updated_at = CURRENT_TIMESTAMP
+                        WHERE project_id = :tenant_id AND session_key = :session_key
+                        """
+                    ),
+                    {
+                        "tenant_id": tenant.tenant_id,
+                        "session_key": session_key,
+                        "status": next_status,
+                        "config_json": _json_dump(config),
+                    },
+                )
+            return {
+                "tenant": tenant.public_dict(),
+                "session": self.continuous_enrichment_session(tenant, session_key)["session"],
+                "cycle": {"status": "budget_exhausted", "events": events, "budget": budget},
+                "write_boundary": {
+                    "canonical_write": False,
+                    "formal_graph_write": False,
+                    "target": "proposed_graph_space",
+                    "findings": "candidate_only",
+                    "autopilot_auto_approve": False,
+                },
+            }
+        allowed_domains = self._continuous_source_trust_policy(config)["allowed_domains"] or ["zenodo.org"]
         stored_frontier = _load_json(row["frontier_json"], [])
         frontier_items = self._continuous_frontier_for_cycle(tenant, stored_frontier, config, max_frontier)
+        events.append(
+            {
+                "type": "budget_applied",
+                "budget": {
+                    **budget,
+                    "effective_max_frontier": max_frontier,
+                    "effective_max_results_per_query": max_results_per_query,
+                    "effective_max_iterations": max_iterations,
+                },
+                "created_at": datetime.utcnow().isoformat(),
+            }
+        )
+        events.append(
+            {
+                "type": "frontier_selected",
+                "selected_count": len(frontier_items),
+                "selected_keys": [self._continuous_frontier_key(item) for item in frontier_items],
+                "created_at": datetime.utcnow().isoformat(),
+            }
+        )
+        if not frontier_items:
+            event = {
+                "type": "no_frontier_stop",
+                "reason": "no available frontier after cooldown and coverage fallback",
+                "created_at": datetime.utcnow().isoformat(),
+            }
+            events.append(event)
+            config["stop_reason"] = event["reason"]
+            config["next_run_at"] = None
+            self._continuous_append_events(config, events)
+            next_status = "paused" if (config.get("stop_policy") or {}).get("pause_on_no_frontier", True) else "idle"
+            with self.metadata_engine_for(tenant).begin() as conn:
+                conn.execute(
+                    text(
+                        """
+                        UPDATE aletheia_continuous_enrichment_sessions
+                        SET status = :status,
+                            config_json = :config_json,
+                            updated_at = CURRENT_TIMESTAMP
+                        WHERE project_id = :tenant_id AND session_key = :session_key
+                        """
+                    ),
+                    {
+                        "tenant_id": tenant.tenant_id,
+                        "session_key": session_key,
+                        "status": next_status,
+                        "config_json": _json_dump(config),
+                    },
+                )
+            return {
+                "tenant": tenant.public_dict(),
+                "session": self.continuous_enrichment_session(tenant, session_key)["session"],
+                "cycle": {"status": "stopped", "stop_reason": event["reason"], "events": events, "frontier_used": []},
+                "write_boundary": {
+                    "canonical_write": False,
+                    "formal_graph_write": False,
+                    "target": "proposed_graph_space",
+                    "findings": "candidate_only",
+                    "autopilot_auto_approve": False,
+                },
+            }
+        raw_search_results = body.get("search_results") if "search_results" in body else self._continuous_source_fixture(session_key)
+        trusted_search_results, trust_skipped, trust_events = self._continuous_trusted_search_results(raw_search_results, config)
+        events.extend(trust_events)
+        if not trusted_search_results:
+            event = {
+                "type": "no_trusted_sources_stop",
+                "reason": "all available sources failed source trust policy",
+                "skipped_sources": trust_skipped,
+                "created_at": datetime.utcnow().isoformat(),
+            }
+            events.append(event)
+            config["stop_reason"] = event["reason"]
+            config["next_run_at"] = None
+            self._continuous_append_events(config, events)
+            next_status = "paused" if (config.get("stop_policy") or {}).get("pause_on_no_trusted_sources", True) else "idle"
+            with self.metadata_engine_for(tenant).begin() as conn:
+                conn.execute(
+                    text(
+                        """
+                        UPDATE aletheia_continuous_enrichment_sessions
+                        SET status = :status,
+                            config_json = :config_json,
+                            updated_at = CURRENT_TIMESTAMP
+                        WHERE project_id = :tenant_id AND session_key = :session_key
+                        """
+                    ),
+                    {
+                        "tenant_id": tenant.tenant_id,
+                        "session_key": session_key,
+                        "status": next_status,
+                        "config_json": _json_dump(config),
+                    },
+                )
+            return {
+                "tenant": tenant.public_dict(),
+                "session": self.continuous_enrichment_session(tenant, session_key)["session"],
+                "cycle": {
+                    "status": "stopped",
+                    "stop_reason": event["reason"],
+                    "events": events,
+                    "source_trust": {"accepted": 0, "skipped": len(trust_skipped), "skipped_sources": trust_skipped},
+                },
+                "write_boundary": {
+                    "canonical_write": False,
+                    "formal_graph_write": False,
+                    "target": "proposed_graph_space",
+                    "findings": "candidate_only",
+                    "autopilot_auto_approve": False,
+                },
+            }
         fixture_path = Path("/tmp") / f"aletheia-continuous-{_slug(session_key)}-{int(time.time())}.json"
-        fixture_path.write_text(_json_dump(body.get("search_results") or self._continuous_source_fixture(session_key)), encoding="utf-8")
+        fixture_path.write_text(_json_dump(trusted_search_results), encoding="utf-8")
         objective = body.get("objective") or row["objective"]
         with self.metadata_engine_for(tenant).begin() as conn:
             conn.execute(
@@ -2223,15 +2744,51 @@ class InstanceRepository:
                 {"tenant_id": tenant.tenant_id, "session_key": session_key, "config_json": _json_dump(config)},
             )
         try:
-            result = IterativeGraphEnrichmentAgent(
-                tenant.metadata_db_url,
-                tenant=tenant.tenant_id,
-                search_results_json=str(fixture_path),
-                allowed_domains=allowed_domains,
-                max_iterations=int(config.get("max_iterations") or 1),
-                max_frontier=max_frontier,
-                max_results_per_query=int(config.get("max_results_per_query") or 4),
-            ).run(objective, artifact_keys=body.get("artifact_keys") or None, frontier_items=frontier_items or None)
+            try:
+                result = IterativeGraphEnrichmentAgent(
+                    tenant.metadata_db_url,
+                    tenant=tenant.tenant_id,
+                    search_results_json=str(fixture_path),
+                    allowed_domains=allowed_domains,
+                    max_iterations=max_iterations,
+                    max_frontier=max_frontier,
+                    max_results_per_query=max_results_per_query,
+                ).run(objective, artifact_keys=body.get("artifact_keys") or None, frontier_items=frontier_items or None)
+                config = self._continuous_clear_backoff(config)
+            except Exception as exc:
+                config, backoff = self._continuous_schedule_backoff(config, exc)
+                events.append(
+                    {
+                        "type": "cycle_failed",
+                        "reason": _safe_error_message(exc),
+                        "created_at": datetime.utcnow().isoformat(),
+                    }
+                )
+                events.append(
+                    {
+                        "type": "backoff_scheduled",
+                        "failure_count": backoff.get("failure_count"),
+                        "delay_seconds": backoff.get("delay_seconds"),
+                        "backoff_until": backoff.get("backoff_until"),
+                        "created_at": datetime.utcnow().isoformat(),
+                    }
+                )
+                config["next_run_at"] = backoff.get("backoff_until")
+                self._continuous_append_events(config, events)
+                with self.metadata_engine_for(tenant).begin() as conn:
+                    conn.execute(
+                        text(
+                            """
+                            UPDATE aletheia_continuous_enrichment_sessions
+                            SET status = 'idle',
+                                config_json = :config_json,
+                                updated_at = CURRENT_TIMESTAMP
+                            WHERE project_id = :tenant_id AND session_key = :session_key
+                            """
+                        ),
+                        {"tenant_id": tenant.tenant_id, "session_key": session_key, "config_json": _json_dump(config)},
+                    )
+                raise
         finally:
             try:
                 fixture_path.unlink()
@@ -2252,7 +2809,6 @@ class InstanceRepository:
             frontier_state["selected_count"][key] = int(frontier_state["selected_count"].get(key) or 0) + 1
         frontier_state["coverage_cursor"] = int(frontier_state.get("coverage_cursor") or 0) + len(frontier_items)
         config["frontier_state"] = frontier_state
-        events = []
         graph_changed = bool(proposed_graph)
         if graph_changed:
             config["last_graph_changed_at"] = datetime.utcnow().isoformat()
@@ -2278,6 +2834,32 @@ class InstanceRepository:
                     "review_boundary": "proposed_graph_review_gate",
                 }
             )
+        else:
+            events.append(
+                {
+                    "type": "no_new_proposals",
+                    "run_key": run_key,
+                    "reason": "all trusted sources produced no new reviewable graph proposals",
+                    "extraction_blockers": self._continuous_no_proposal_summary(result.get("run") or {}),
+                    "created_at": datetime.utcnow().isoformat(),
+                    "canonical_write": False,
+                    "formal_graph_write": False,
+                    "target": "proposed_graph_space",
+                }
+            )
+        events.append(
+            {
+                "type": "cycle_completed",
+                "run_key": run_key,
+                "status": result["run"]["status"],
+                "proposed_count": result["run"].get("proposed_count"),
+                "extraction_blockers": self._continuous_no_proposal_summary(result.get("run") or {}) if not graph_changed else {},
+                "frontier_used_count": len(frontier_items),
+                "trusted_source_count": len(trusted_search_results),
+                "skipped_source_count": len(trust_skipped),
+                "created_at": datetime.utcnow().isoformat(),
+            }
+        )
         autopilot_result = None
         if graph_changed and body.get("trigger_autopilot", True) and self.reasoning_repository is not None:
             autopilot_payload = {
@@ -2368,6 +2950,18 @@ class InstanceRepository:
                 "frontier_used": frontier_items,
                 "next_frontier_count": len(next_frontier),
                 "new_frontier": frontier_additions,
+                "budget": {
+                    **budget,
+                    "effective_max_frontier": max_frontier,
+                    "effective_max_results_per_query": max_results_per_query,
+                    "effective_max_iterations": max_iterations,
+                },
+                "source_trust": {
+                    "accepted": len(trusted_search_results),
+                    "skipped": len(trust_skipped),
+                    "skipped_sources": trust_skipped,
+                    "allowed_domains": allowed_domains,
+                },
                 "events": events,
                 "autopilot_session_key": config.get("last_autopilot_session_key"),
                 "frontier_priority_summary": {

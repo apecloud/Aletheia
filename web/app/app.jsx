@@ -16,11 +16,32 @@ class ErrorBoundary extends React.Component {
 const { useState: useStateApp, useEffect: useEffectApp } = React;
 
 const EMPTY_TENANT = { id: "—", name: "no tenant", namespace: "—", graph: "—" };
+const APP_SCREENS = new Set(["workbench", "reasoning", "ontology", "graph", "quality", "runtime"]);
+
+function initialAppParam(name) {
+  try { return new URLSearchParams(location.search).get(name); }
+  catch { return null; }
+}
+
+function initialAppScreen() {
+  const requested = initialAppParam("screen");
+  return APP_SCREENS.has(requested) ? requested : "workbench";
+}
+
+function initialAppTenant() {
+  return initialAppParam("tenant") || localStorage.getItem("aletheia.tenant") || "default";
+}
+
+function initialAppLanguage() {
+  const requested = initialAppParam("lang");
+  if (requested === "zh" || requested === "en") return requested;
+  return localStorage.getItem("aletheia.language") || "en";
+}
 
 function App() {
-  const [screen, setScreen] = useStateApp("workbench");
-  const [tenantId, setTenantId] = useStateApp(localStorage.getItem("aletheia.tenant") || "default");
-  const [language, setLanguage] = useStateApp(localStorage.getItem("aletheia.language") || "en");
+  const [screen, setScreen] = useStateApp(initialAppScreen);
+  const [tenantId, setTenantId] = useStateApp(initialAppTenant);
+  const [language, setLanguage] = useStateApp(initialAppLanguage);
   const [role, setRole] = useStateApp("Analyst");
   const [connOpen, setConnOpen] = useStateApp(false);
 
@@ -68,7 +89,12 @@ function App() {
   // Fetch tenants from real API — no mock fallback
   const tenantsQ = useApiData("tenants", []);
   const tenants = (tenantsQ.data && tenantsQ.data.length) ? tenantsQ.data : [EMPTY_TENANT];
-  const tenant = tenants.find(t => t.id === tenantId) || tenants[0];
+  const resolvedTenant = tenants.find(t => t.id === tenantId);
+  const tenant = resolvedTenant || (
+    tenantId && tenantId !== EMPTY_TENANT.id
+      ? { id: tenantId, name: tenantId, namespace: tenantId, graph: tenantId }
+      : tenants[0]
+  );
 
   useEffectApp(() => { try { localStorage.setItem("aletheia.tenant", tenant.id); } catch {} }, [tenant.id]);
   useEffectApp(() => {
@@ -99,6 +125,17 @@ function App() {
       history.replaceState(null, "", url.toString());
     } catch {}
   }
+  function selectScreen(nextScreen) {
+    const next = APP_SCREENS.has(nextScreen) ? nextScreen : "workbench";
+    setScreen(next);
+    try {
+      const url = new URL(location.href);
+      url.searchParams.set("screen", next);
+      url.searchParams.set("tenant", tenant.id);
+      url.searchParams.set("lang", language);
+      history.replaceState(null, "", url.toString());
+    } catch {}
+  }
   function cycleRole() {
     const roles = ["Developer", "Analyst", "CXO"];
     const idx = roles.indexOf(role);
@@ -117,7 +154,7 @@ function App() {
               onConn={() => setConnOpen(true)} />
       <MockBanner onClick={() => setConnOpen(true)} />
       <div className="body">
-        <Rail screen={screen} onNav={setScreen} language={language} />
+        <Rail screen={screen} onNav={selectScreen} language={language} />
         {screen === "workbench" && <ErrorBoundary><Workbench data={data} tenant={tenant} language={language} /></ErrorBoundary>}
         {screen === "reasoning" && <ErrorBoundary><Reasoning tenant={tenant} language={language} /></ErrorBoundary>}
         {screen === "ontology"  && <ErrorBoundary><Ontology data={data} tenant={tenant} language={language} /></ErrorBoundary>}
@@ -144,7 +181,7 @@ function App() {
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
             {["workbench","reasoning","ontology","graph","quality","runtime"].map(s => (
               <button key={s}
-                      onClick={() => setScreen(s)}
+                      onClick={() => selectScreen(s)}
                       style={{
                         padding: "6px 8px",
                         border: "1px solid " + (screen === s ? tweaks.accent : "#2a323e"),

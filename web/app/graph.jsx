@@ -100,6 +100,13 @@ function auditValueGX(value) {
   return String(value);
 }
 
+function endpointDedupEvidenceGX(item) {
+  const payload = item?.payload || {};
+  const evidence = payload.endpoint_dedup_evidence || payload.endpoint_dedup || {};
+  if (!evidence || typeof evidence !== "object") return [];
+  return ["source", "target"].map(role => ({ role, data: evidence[role] })).filter(entry => entry.data && typeof entry.data === "object");
+}
+
 function rawEdgeKindGX(edge) {
   return edge?.link_key || edge?.kind || edge?.ontology_link || edge?.label || "";
 }
@@ -416,6 +423,8 @@ function GraphExplorer({ data, tenant, language }) {
   const requestedTenantId = initialParams.get("tenant") || "";
   const requestedCenterType = initialParams.get("type") || "";
   const requestedCenterNodeId = initialParams.get("id") || "";
+  const requestedSelectedNodeId = initialParams.get("selected_node") || "";
+  const requestedSelectedEdgeKey = initialParams.get("selected_edge") || "";
   const [centerType, setCenterType] = useStateGX(initialParams.get("type") || "");
   const [centerNodeId, setCenterNodeId] = useStateGX(initialParams.get("id") || "");
   const [depth, setDepth] = useStateGX(Math.max(1, Math.min(Number(initialParams.get("depth") || 1), 3)));
@@ -553,15 +562,17 @@ function GraphExplorer({ data, tenant, language }) {
   const [selected, setSelected] = useStateGX(null);
   const [trailNodeIds, setTrailNodeIds] = useStateGX([]);
   const [trailEdgeKeys, setTrailEdgeKeys] = useStateGX([]);
-  const [selectedEdgeKey, setSelectedEdgeKey] = useStateGX("");
+  const [selectedEdgeKey, setSelectedEdgeKey] = useStateGX(requestedSelectedEdgeKey);
   const [edgeSearch, setEdgeSearch] = useStateGX("");
   const [edgeSort, setEdgeSort] = useStateGX("rank");
   const [showNearbyCandidates, setShowNearbyCandidates] = useStateGX(true);
   const [nodePositions, setNodePositions] = useStateGX({});
+  const [edgeOffsets, setEdgeOffsets] = useStateGX({});
   const [hideUnrelated, setHideUnrelated] = useStateGX(false);
   const [collapseOffTrailEdges, setCollapseOffTrailEdges] = useStateGX(true);
   const [pendingCenterFocus, setPendingCenterFocus] = useStateGX("");
   const [focusMessage, setFocusMessage] = useStateGX("");
+  const [initialGraphSelectionApplied, setInitialGraphSelectionApplied] = useStateGX(false);
   useEffectGX(() => {
     setSelected(null);
     setTrailNodeIds([]);
@@ -573,6 +584,7 @@ function GraphExplorer({ data, tenant, language }) {
     setPendingCenterFocus("");
     setFocusMessage("");
     setNodePositions({});
+    setEdgeOffsets({});
     setHideUnrelated(false);
   }, [tenantId]);
   const graphWithPositions = useMemoGX(() => {
@@ -600,10 +612,67 @@ function GraphExplorer({ data, tenant, language }) {
       return next.length === prev.length ? prev : next;
     });
     setSelectedEdgeKey(prev => !prev || edgeKeys.has(prev) ? prev : "");
+    setEdgeOffsets(prev => {
+      const next = {};
+      Object.entries(prev || {}).forEach(([key, value]) => {
+        if (edgeKeys.has(key)) next[key] = value;
+      });
+      return Object.keys(next).length === Object.keys(prev || {}).length ? prev : next;
+    });
   }, [graphWithPositions]);
   useEffectGX(() => {
     if (!selected && hideUnrelated) setHideUnrelated(false);
   }, [selected, hideUnrelated]);
+
+  useEffectGX(() => {
+    if (initialGraphSelectionApplied || !graphWithPositions.nodes.length) return;
+    if (!requestedSelectedNodeId && !requestedSelectedEdgeKey) {
+      setInitialGraphSelectionApplied(true);
+      return;
+    }
+    const initialNode = requestedSelectedNodeId
+      ? graphWithPositions.nodes.find(node => node.id === requestedSelectedNodeId)
+      : null;
+    if (initialNode) {
+      setSelected(initialNode);
+      setTrailNodeIds([initialNode.id]);
+    }
+    if (requestedSelectedEdgeKey) {
+      const edge = graphWithPositions.edges.find(item => graphEdgeKeyGX(item) === requestedSelectedEdgeKey);
+      if (edge) {
+        setSelectedEdgeKey(requestedSelectedEdgeKey);
+        setTrailEdgeKeys([requestedSelectedEdgeKey]);
+        const nodeId = initialNode?.id || edge.s || edge.t;
+        const node = graphWithPositions.nodes.find(item => item.id === nodeId);
+        if (node) {
+          setSelected(node);
+          setTrailNodeIds(prev => prev.includes(node.id) ? prev : [...prev, node.id]);
+        }
+      }
+    }
+    setInitialGraphSelectionApplied(true);
+  }, [
+    initialGraphSelectionApplied,
+    requestedSelectedNodeId,
+    requestedSelectedEdgeKey,
+    graphWithPositions.nodes.map(node => node.id).join("|"),
+    graphWithPositions.edges.map(graphEdgeKeyGX).join("|"),
+  ]);
+
+  useEffectGX(() => {
+    try {
+      const url = new URL(location.href);
+      url.searchParams.set("screen", "graph");
+      url.searchParams.set("tenant", tenantId);
+      if (selected?.id) url.searchParams.set("selected_node", selected.id);
+      else url.searchParams.delete("selected_node");
+      if (selectedEdgeKey) url.searchParams.set("selected_edge", selectedEdgeKey);
+      else url.searchParams.delete("selected_edge");
+      if (hideUnrelated) url.searchParams.set("trail_focus", "1");
+      else url.searchParams.delete("trail_focus");
+      history.replaceState(null, "", url.toString());
+    } catch {}
+  }, [tenantId, selected?.id, selectedEdgeKey, hideUnrelated]);
 
   const map = Object.fromEntries(graphWithPositions.nodes.map(n => [n.id, n]));
   const connectedEdgesAll = selected
@@ -756,6 +825,16 @@ function GraphExplorer({ data, tenant, language }) {
       if (!prev || prev.id !== nodeId) return prev;
       return { ...prev, x, y };
     });
+  };
+  const updateEdgeOffset = (edge, point) => {
+    const s = map[edge.s], t = map[edge.t];
+    if (!s || !t || !point) return;
+    const edgeKey = graphEdgeKeyGX(edge);
+    const midX = (s.x + t.x) / 2;
+    const midY = (s.y + t.y) / 2;
+    const dx = Math.max(-260, Math.min(260, point.x - midX));
+    const dy = Math.max(-180, Math.min(180, point.y - midY));
+    setEdgeOffsets(prev => ({ ...prev, [edgeKey]: { dx, dy } }));
   };
 
   return (
@@ -960,6 +1039,9 @@ function GraphExplorer({ data, tenant, language }) {
               candidateEdgeLimit={connectedEdgeLimit}
               showNearbyCandidates={showNearbyCandidates}
               onNodePositionChange={updateNodePosition}
+              edgeOffsets={edgeOffsets}
+              onEdgeOffsetChange={updateEdgeOffset}
+              onSelectEdge={rememberTrailEdge}
               language={language}
             />
             )}
@@ -1195,11 +1277,12 @@ function ProposedGraphPanel({ tenantId, proposed, loading, source, focusElementK
   const findings = filteredElements.filter(item => item.element_type === "finding");
   const selectedSet = new Set(selectedKeys);
   const selectedInFilter = filteredElements.filter(item => selectedSet.has(item.element_key));
+  const selectedIsReviewed = ["approved", "rejected"].includes(String(selectedElement?.status || "").toLowerCase());
   useEffectGX(() => {
     if (!selectedElement) return;
     const latest = elements.find(item => item.element_key === selectedElement.element_key);
     if (latest && latest !== selectedElement) setSelectedElement(latest);
-    if (!latest) setSelectedElement(filteredElements[0] || null);
+    if (!latest && !selectedIsReviewed) setSelectedElement(filteredElements[0] || null);
   }, [JSON.stringify(elements.map(item => `${item.element_key}:${item.status}`))]);
   useEffectGX(() => {
     const valid = new Set(elements.map(item => item.element_key));
@@ -1294,9 +1377,10 @@ function ProposedGraphPanel({ tenantId, proposed, loading, source, focusElementK
       });
       if (result?.element) setSelectedElement(result.element);
       setReviewReason("");
+      const status = result?.element?.status || action;
       setReviewMessage({
         kind: "ok",
-        text: tGX(language, `${action} recorded · canonical/formal graph unchanged`, `已记录 ${action} · canonical/formal graph 未改变`),
+        text: tGX(language, `${status} recorded · selected proposal kept here for confirmation · canonical/formal graph unchanged`, `已记录 ${statusLabelGraphGX(status, language)} · 当前候选已保留在详情中便于确认 · canonical/formal graph 未改变`),
       });
       window.dispatchEvent(new CustomEvent("aletheia:retry"));
     } catch (err) {
@@ -1331,10 +1415,24 @@ function ProposedGraphPanel({ tenantId, proposed, loading, source, focusElementK
             <button className="btn xs reject" disabled={!selectedKeys.length || reviewBusy} onClick={() => reviewSelected("reject")}>{tGX(language, "Reject", "拒绝")}</button>
             <button className="btn xs ghost" disabled={!selectedKeys.length || reviewBusy} onClick={() => reviewSelected("comment")}>{tGX(language, "Comment", "评论")}</button>
           </div>
+          {selectedKeys.length > 0 && (
+            <textarea
+              className="input"
+              value={reviewReason}
+              onChange={e => setReviewReason(e.target.value)}
+              placeholder={tGX(language, "Batch review note; required for reject / needs evidence", "批量审核说明；拒绝或要求补证据时必填")}
+              style={{ minHeight: 44, resize: "vertical", marginTop: 8 }}
+            />
+          )}
           <div style={{ marginTop: 6, fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--muted)" }}>
             {tGX(language, "Scope: selected proposed graph elements only · review decision only · formal graph write disabled.", "范围：仅所选候选图元素 · 只记录审核决定 · formal graph 写入禁用。")}
             {selectedInFilter.length > 0 ? tGX(language, ` Current filter selected: ${selectedInFilter.length}.`, ` 当前过滤结果已选择：${selectedInFilter.length}。`) : ""}
           </div>
+          {reviewMessage && (
+            <div style={{ marginTop: 8, fontFamily: "var(--font-mono)", fontSize: 10, color: reviewMessage.kind === "error" ? "var(--rejected)" : "var(--approved)", overflowWrap: "anywhere" }}>
+              {reviewMessage.text}
+            </div>
+          )}
         </div>
         {latestRun ? (
           <dl className="kv" style={{ marginBottom: 12 }}>
@@ -1434,6 +1532,7 @@ function ProposedGraphDetail({ item, reason, setReason, busy, message, onReview,
   const matchedKey = dedupAudit.matched_node_key || dedupAudit.matched_edge_key || dedupAudit.matched_element_key || "";
   const matchEvidence = Array.isArray(dedupAudit.match_evidence) ? dedupAudit.match_evidence : [];
   const conflictFields = Array.isArray(dedupAudit.conflict_fields) ? dedupAudit.conflict_fields : [];
+  const endpointEvidence = endpointDedupEvidenceGX(item);
   return (
     <div style={{ marginTop: 14, borderTop: "1px solid var(--line)", paddingTop: 12 }}>
       <div className="eyebrow accent">{tGX(language, "Review selected", "审核选中的")} {tGX(language, item.element_type, item.element_type === "node" ? "节点" : item.element_type === "edge" ? "边" : item.element_type === "finding" ? "发现" : item.element_type)}</div>
@@ -1475,6 +1574,36 @@ function ProposedGraphDetail({ item, reason, setReason, busy, message, onReview,
               {matchEvidence.slice(0, 4).map((evidence, index) => (
                 <div key={index} style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--muted)", borderTop: "1px solid var(--line-soft)", paddingTop: 4, marginTop: 4, overflowWrap: "anywhere" }}>
                   {auditValueGX(evidence)}
+                </div>
+              ))}
+            </div>
+          )}
+          {endpointEvidence.length > 0 && (
+            <div style={{ marginTop: 10 }}>
+              <div className="eyebrow" style={{ marginBottom: 5 }}>{tGX(language, "Endpoint dedup evidence", "端点去重证据")}</div>
+              {endpointEvidence.map(({ role, data }) => (
+                <div key={role} style={{ borderTop: "1px solid var(--line-soft)", paddingTop: 6, marginTop: 6 }}>
+                  <div style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: data.review_required ? "var(--changes)" : "var(--accent)", marginBottom: 4 }}>
+                    {tGX(language, role === "source" ? "Source endpoint" : "Target endpoint", role === "source" ? "源端点" : "目标端点")} · {dedupDecisionLabelGX(data.dedup_decision, language)}
+                    {data.review_required ? ` · ${tGX(language, "needs review", "需要审核")}` : ""}
+                  </div>
+                  <dl className="kv" style={{ marginTop: 0 }}>
+                    <dt>{tGX(language, "Node", "节点")}</dt><dd>{[data.label, data.type].filter(Boolean).join(" · ") || "—"}</dd>
+                    <dt>{tGX(language, "Matched", "命中")}</dt><dd>{data.matched_node_key || data.candidate_key || "—"}</dd>
+                    <dt>{tGX(language, "Space", "空间")}</dt><dd>{data.matched_space || data.matched_source || "—"}</dd>
+                    <dt>{tGX(language, "Score", "分数")}</dt><dd>{data.match_score === undefined ? "—" : data.match_score}</dd>
+                    <dt>{tGX(language, "Node proposal", "节点候选")}</dt><dd>{data.proposed_node_created ? tGX(language, "created", "已创建") : tGX(language, "not created", "未创建")}</dd>
+                  </dl>
+                  {Array.isArray(data.match_evidence) && data.match_evidence.length > 0 && (
+                    <div style={{ marginTop: 4, fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--muted)", overflowWrap: "anywhere" }}>
+                      {data.match_evidence.slice(0, 3).map(auditValueGX).join(" · ")}
+                    </div>
+                  )}
+                  {Array.isArray(data.conflict_fields) && data.conflict_fields.length > 0 && (
+                    <div style={{ marginTop: 4, fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--changes)", overflowWrap: "anywhere" }}>
+                      {tGX(language, "Conflicts", "冲突")}: {data.conflict_fields.join(", ")}
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
@@ -1546,10 +1675,14 @@ function BigGraph({
   candidateEdgeLimit = 20,
   showNearbyCandidates = true,
   onNodePositionChange,
+  edgeOffsets = {},
+  onEdgeOffsetChange,
+  onSelectEdge,
   language,
 }) {
   const svgRef = useRefGX(null);
   const [dragging, setDragging] = useStateGX(null);
+  const [draggingEdge, setDraggingEdge] = useStateGX(null);
   const [expandedEdgeGroupNodeIds, setExpandedEdgeGroupNodeIds] = useStateGX([]);
   const map = Object.fromEntries(data.nodes.map(n => [n.id, n]));
   const palette = ["var(--accent)", "var(--changes)", "var(--proposed)", "var(--approved)", "var(--dim)"];
@@ -1671,6 +1804,46 @@ function BigGraph({
       setDragging(null);
     }
   };
+  const edgeGeometry = (edge) => {
+    const s = map[edge.s], t = map[edge.t];
+    if (!s || !t) return null;
+    const edgeKey = graphEdgeKeyGX(edge);
+    const offset = edgeOffsets[edgeKey] || {};
+    const midX = (s.x + t.x) / 2;
+    const midY = (s.y + t.y) / 2;
+    const cx = Math.max(18, Math.min(982, midX + (offset.dx || 0)));
+    const cy = Math.max(18, Math.min(582, midY + (offset.dy || 0)));
+    const dragged = !!(offset.dx || offset.dy);
+    return {
+      edgeKey,
+      s,
+      t,
+      cx,
+      cy,
+      dragged,
+      path: dragged ? `M ${s.x} ${s.y} Q ${cx} ${cy} ${t.x} ${t.y}` : `M ${s.x} ${s.y} L ${t.x} ${t.y}`,
+    };
+  };
+  const startEdgeDrag = (event, edge) => {
+    if (!onEdgeOffsetChange) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const edgeKey = graphEdgeKeyGX(edge);
+    onSelectEdge?.(edge);
+    setDraggingEdge({ key: edgeKey, edge, pointerId: event.pointerId });
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+  };
+  const moveEdgeDrag = (event) => {
+    if (!draggingEdge || draggingEdge.pointerId !== event.pointerId) return;
+    const point = eventPoint(event);
+    if (point) onEdgeOffsetChange?.(draggingEdge.edge, point);
+  };
+  const endEdgeDrag = (event) => {
+    if (draggingEdge && draggingEdge.pointerId === event.pointerId) {
+      event.currentTarget.releasePointerCapture?.(event.pointerId);
+      setDraggingEdge(null);
+    }
+  };
 
   return (
     <svg ref={svgRef} viewBox="0 0 1000 600" preserveAspectRatio="xMidYMid meet"
@@ -1686,9 +1859,9 @@ function BigGraph({
 
       {/* edges */}
       {data.edges.map((e, i) => {
-        const s = map[e.s], t = map[e.t];
-        if (!s || !t) return null;
-        const edgeKey = graphEdgeKeyGX(e);
+        const geometry = edgeGeometry(e);
+        if (!geometry) return null;
+        const { edgeKey, s, t, cx, cy, path, dragged } = geometry;
         const involved = e.s === sel || e.t === sel;
         const inTrail = trailEdgeKeySet.has(edgeKey);
         const inCandidate = showNearbyCandidates && candidateEdgeKeySet.has(edgeKey);
@@ -1700,20 +1873,43 @@ function BigGraph({
         const dimmed = focusActive && !involved && !inTrail && !inCandidate && !(activeNeighborIds.has(e.s) || activeNeighborIds.has(e.t));
         const emphasized = involved || inTrail || isSelectedEdge;
         const showEdgeLabel = emphasized || inVisibleOffTrail;
+        const edgeColor = e.flag ? "oklch(0.66 0.18 25 / 0.7)" : (emphasized ? "var(--accent)" : inCandidate ? "var(--approved)" : e.muted ? "var(--faint)" : "var(--line-strong)");
+        const labelColor = e.flag ? "var(--rejected)" : (emphasized ? "var(--accent)" : "var(--approved)");
+        const edgeCursor = draggingEdge?.key === edgeKey ? "grabbing" : "grab";
         return (
           <g key={edgeKey || i} opacity={dimmed ? 0.16 : (hideUnrelated && inCandidate && !emphasized ? 0.78 : 1)}>
-            <line x1={s.x} y1={s.y} x2={t.x} y2={t.y}
-                  stroke={e.flag ? "oklch(0.66 0.18 25 / 0.7)" : (emphasized ? "var(--accent)" : inCandidate ? "var(--approved)" : e.muted ? "var(--faint)" : "var(--line-strong)")}
+            <path d={path}
+                  fill="none"
+                  stroke={edgeColor}
                   strokeWidth={emphasized ? 2.2 : inCandidate ? 1.35 : 1}
                   strokeDasharray={inTrail && !involved ? "2 2" : e.muted ? "4 3" : ""}
                   markerEnd={emphasized ? "url(#arrow-accent)" : "url(#arrow)"} />
+            <path d={path}
+                  fill="none"
+                  stroke="transparent"
+                  strokeWidth={Math.max(12, emphasized ? 16 : 14)}
+                  style={{ cursor: edgeCursor }}
+                  onPointerDown={(event) => startEdgeDrag(event, e)}
+                  onPointerMove={moveEdgeDrag}
+                  onPointerUp={endEdgeDrag}
+                  onPointerCancel={endEdgeDrag} />
             {showEdgeLabel && (
-              <text x={(s.x + t.x) / 2} y={(s.y + t.y) / 2 - 6}
+              <g
+                onPointerDown={(event) => startEdgeDrag(event, e)}
+                onPointerMove={moveEdgeDrag}
+                onPointerUp={endEdgeDrag}
+                onPointerCancel={endEdgeDrag}
+                style={{ cursor: edgeCursor }}>
+              {(dragged || isSelectedEdge) && (
+                <circle cx={cx} cy={cy} r="5" fill="var(--bg-1)" stroke={labelColor} strokeWidth="1.4" opacity="0.96" />
+              )}
+              <text x={cx} y={cy - 6}
                     textAnchor="middle" fontSize="10" fontFamily="var(--font-mono)"
-                    fill={e.flag ? "var(--rejected)" : (emphasized ? "var(--accent)" : "var(--approved)")}
+                    fill={labelColor}
                     style={{ textTransform: "uppercase", letterSpacing: "0.08em" }}>
                 {edgeKindLabelGX(e.kind, language)}
               </text>
+              </g>
             )}
           </g>
         );
