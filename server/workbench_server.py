@@ -9,7 +9,9 @@ import shutil
 import ssl
 import subprocess
 import sys
+import threading
 import time
+from difflib import SequenceMatcher
 from datetime import datetime
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -22,11 +24,13 @@ sys.path.append(str(ROOT))
 sys.path.append(str(ROOT / "agents"))
 
 from sqlalchemy import create_engine, inspect, text
+from sqlalchemy.exc import SQLAlchemyError
 
 from reasoning_engine import ReasoningEngine
-from iterative_graph_enrichment_agent import IterativeGraphEnrichmentAgent  # noqa: E402
+from iterative_graph_enrichment_agent import IterativeGraphEnrichmentAgent, _graph_context_query_plan  # noqa: E402
 from ontology_artifacts import ensure_artifact_schema  # noqa: E402
 from tenant_registry import TenantRegistry  # noqa: E402
+from web_enrichment_agent import DuckDuckGoHTMLSearchProvider  # noqa: E402
 
 
 DB_URL = os.environ.get(
@@ -111,8 +115,11 @@ DEDUP_AUDIT_FIELDS = (
     "matched_source",
     "match_score",
     "match_evidence",
+    "match_method",
     "conflict_fields",
     "decision_reason",
+    "possible_duplicate",
+    "possible_duplicate_candidates",
     "source_fingerprint",
     "evidence_fingerprint",
     "llm_merge_decision_allowed",
@@ -214,6 +221,193 @@ def _dedup_audit_from_payload(payload):
     elif audit:
         audit["llm_merge_decision_allowed"] = False
     return audit
+
+
+def _graph_identity_terms(value):
+    return {token for token in _graph_identity_text(value).split() if token}
+
+
+def _graph_node_identity_from_payload(name, payload):
+    payload = payload or {}
+    properties = payload.get("properties") if isinstance(payload.get("properties"), dict) else {}
+    identity = payload.get("identity")
+    if isinstance(identity, dict) and (identity.get("kind") or "node") == "node":
+        return {
+            "kind": "node",
+            "entity_type": str(identity.get("entity_type") or payload.get("ontology_type") or payload.get("type") or "").strip(),
+            "label": str(identity.get("label") or payload.get("label") or name or "").strip(),
+            "normalized_label": _graph_identity_text(identity.get("normalized_label") or identity.get("label") or payload.get("label") or name),
+            "aliases": [
+                _graph_identity_text(alias)
+                for alias in (identity.get("aliases") or payload.get("aliases") or properties.get("aliases") or [])
+                if _graph_identity_text(alias)
+            ],
+            "source_identity": identity.get("source_identity")
+            or properties.get("canonical_id_hint")
+            or properties.get("source_id")
+            or payload.get("canonical_id_hint")
+            or payload.get("source_id"),
+        }
+    return {
+        "kind": "node",
+        "entity_type": str(payload.get("ontology_type") or payload.get("type") or "").strip(),
+        "label": str(payload.get("label") or name or "").strip(),
+        "normalized_label": _graph_identity_text(payload.get("label") or name),
+        "aliases": [
+            _graph_identity_text(alias)
+            for alias in (payload.get("aliases") or properties.get("aliases") or [])
+            if _graph_identity_text(alias)
+        ],
+        "source_identity": properties.get("canonical_id_hint")
+        or properties.get("source_id")
+        or payload.get("canonical_id_hint")
+        or payload.get("source_id"),
+    }
+
+
+def _graph_alias_surface_tokens(identity, dedup_text=None):
+    surfaces = [
+        identity.get("label"),
+        identity.get("normalized_label"),
+        identity.get("source_identity"),
+        dedup_text,
+        *(identity.get("aliases") or []),
+    ]
+    tokens = set()
+    for surface in surfaces:
+        normalized = _graph_identity_text(surface)
+        if not normalized:
+            continue
+        tokens.add(normalized)
+        parts = [part for part in normalized.split() if part]
+        tokens.update(parts)
+        long_parts = [part for part in parts if len(part) > 4]
+        if len(long_parts) >= 2:
+            tokens.add("".join(part[0] for part in long_parts))
+    return tokens
+
+
+def _graph_short_alias_possible_duplicates(candidate_identity, identity_rows, *, candidate_dedup_text, current_element_key=None, limit=5):
+    candidate_type = _graph_identity_text(candidate_identity.get("entity_type"))
+    candidate_terms = _graph_identity_terms(candidate_identity.get("normalized_label") or candidate_identity.get("label"))
+    if not candidate_type or len(candidate_terms) != 1:
+        return []
+    candidate_token = next(iter(candidate_terms))
+    if not (2 <= len(candidate_token) <= 4):
+        return []
+    candidates = []
+    for row in identity_rows:
+        if current_element_key and row.get("source_key") == current_element_key:
+            continue
+        identity = row.get("identity") or {}
+        if identity.get("kind") != "node":
+            continue
+        existing_type = _graph_identity_text(identity.get("entity_type"))
+        if existing_type and existing_type != candidate_type:
+            continue
+        tokens = _graph_alias_surface_tokens(identity, row.get("dedup_text"))
+        evidence = []
+        score = 0.0
+        if candidate_token in tokens:
+            evidence.append("same short label/alias token from identity index")
+            score = 0.86
+        else:
+            prefixed = sorted(
+                token
+                for token in tokens
+                if token.startswith(candidate_token)
+                and len(token) > len(candidate_token)
+                and len(token) <= len(candidate_token) + 2
+            )
+            if prefixed:
+                evidence.append(f"short label prefixes existing alias token: {prefixed[0]}")
+                score = 0.8
+        if score <= 0:
+            continue
+        if existing_type:
+            evidence.append("same entity type")
+        candidates.append(
+            {
+                "node_key": row.get("source_key"),
+                "status": "approved" if row.get("source_status") == "approved" else "proposed",
+                "source": row.get("source_space"),
+                "identity_key": row.get("identity_key"),
+                "score": round(score, 4),
+                "text_similarity": round(
+                    SequenceMatcher(None, str(candidate_dedup_text or "").lower(), str(row.get("dedup_text") or "").lower()).ratio(),
+                    4,
+                )
+                if row.get("dedup_text")
+                else 0.0,
+                "match_method": "embedding_degraded_alias_scan",
+                "evidence": evidence,
+            }
+        )
+    return sorted(candidates, key=lambda item: (-float(item.get("score") or 0.0), item.get("node_key") or ""))[:limit]
+
+
+def _apply_possible_duplicate_presentation_guard(element, identity_rows):
+    payload = {**(element.get("payload") or {})}
+    if element.get("element_type") != "node":
+        return element
+    if str(element.get("status") or "").replace("-", "_").lower() not in {"draft", "needs_review", "needs_more_evidence"}:
+        return element
+    if str(payload.get("dedup_decision") or "").replace("-", "_").lower() != "new_proposal":
+        return element
+    if str(payload.get("match_method") or "").replace("-", "_").lower() != "embedding_degraded":
+        return element
+    candidate_identity = _graph_node_identity_from_payload(element.get("name"), payload)
+    candidate_dedup_text = " | ".join(
+        str(value)
+        for value in [
+            "node",
+            candidate_identity.get("entity_type"),
+            candidate_identity.get("label"),
+            candidate_identity.get("normalized_label"),
+            candidate_identity.get("source_identity"),
+            payload.get("description"),
+            payload.get("evidence_quote"),
+        ]
+        if value
+    )
+    possible = _graph_short_alias_possible_duplicates(
+        candidate_identity,
+        identity_rows,
+        candidate_dedup_text=candidate_dedup_text,
+        current_element_key=element.get("element_key"),
+    )
+    if not possible:
+        return element
+    best = possible[0]
+    payload.update(
+        {
+            "dedup_decision": "needs_review",
+            "review_required": True,
+            "possible_duplicate": True,
+            "possible_duplicate_candidates": possible,
+            "matched_node_key": best.get("node_key"),
+            "matched_status": best.get("status"),
+            "matched_source": best.get("source"),
+            "matched_element_key": best.get("node_key"),
+            "match_score": best.get("score"),
+            "match_method": "embedding_degraded_alias_scan",
+            "match_evidence": [
+                "presentation guard: embedding unavailable; exact identity missed",
+                "short label/alias conflict found in existing identity index",
+                *(best.get("evidence") or []),
+            ],
+            "decision_reason": "possible_duplicate_alias_conflict_embedding_degraded",
+            "llm_merge_decision_allowed": False,
+        }
+    )
+    guarded = {**element, "payload": payload, "status": "needs_more_evidence"}
+    guarded["dedup_audit"] = _dedup_audit_from_payload(payload)
+    guarded["presentation_guard"] = {
+        "applied": True,
+        "reason": "embedding_degraded_short_alias_possible_duplicate",
+        "writes_persisted": False,
+    }
+    return guarded
 
 
 def _is_current_graph_proposal(row_status, payload):
@@ -866,6 +1060,9 @@ class InstanceRepository:
         self.metadata_engines = {}
         self.source_engines = {}
         self.reasoning_repository = None
+        self._continuous_scheduler_lock = threading.Lock()
+        self._continuous_scheduler_thread = None
+        self._continuous_scheduler_stop = None
 
     def tenant(self, tenant_id=None):
         return self.tenant_registry.get(tenant_id)
@@ -993,17 +1190,27 @@ class InstanceRepository:
         return re.sub(r"[^0-9A-Za-z]", "", artifact["name"]) or artifact["canonical_key"].split(":", 1)[-1]
 
     def _source_columns(self, tenant, table):
-        inspector = inspect(self.source_engine_for(tenant))
-        if table not in inspector.get_table_names():
+        try:
+            inspector = inspect(self.source_engine_for(tenant))
+            table_names = inspector.get_table_names()
+        except (SQLAlchemyError, OSError):
             return set()
-        return {column["name"] for column in inspector.get_columns(table)}
+        if table not in table_names:
+            return set()
+        try:
+            return {column["name"] for column in inspector.get_columns(table)}
+        except (SQLAlchemyError, OSError):
+            return set()
 
     def _schema_graph_safe_join_condition(self, tenant, join_condition):
         match = re.fullmatch(r"\s*([A-Za-z_][A-Za-z0-9_]*)\.([A-Za-z_][A-Za-z0-9_]*)\s*=\s*([A-Za-z_][A-Za-z0-9_]*)\.([A-Za-z_][A-Za-z0-9_]*)\s*", str(join_condition or ""))
         if not match:
             return None
         left_table, left_col, right_table, right_col = match.groups()
-        source_tables = set(inspect(self.source_engine_for(tenant)).get_table_names())
+        try:
+            source_tables = set(inspect(self.source_engine_for(tenant)).get_table_names())
+        except (SQLAlchemyError, OSError):
+            return None
         if left_table not in source_tables or right_table not in source_tables:
             return None
         if left_col not in self._source_columns(tenant, left_table) or right_col not in self._source_columns(tenant, right_table):
@@ -1038,7 +1245,10 @@ class InstanceRepository:
         return None, None
 
     def _schema_graph_table_and_pk(self, tenant, artifact):
-        source_tables = set(inspect(self.source_engine_for(tenant)).get_table_names())
+        try:
+            source_tables = set(inspect(self.source_engine_for(tenant)).get_table_names())
+        except (SQLAlchemyError, OSError):
+            return None, None
         table = next((item for item in artifact["payload"].get("mapped_table_names") or [] if item in source_tables), None)
         pk = artifact["payload"].get("primary_key")
         if not table or not pk or pk not in self._source_columns(tenant, table):
@@ -1389,76 +1599,94 @@ class InstanceRepository:
                 seen_nodes.add(node["id"])
             return node
 
-        source_engine = self.source_engine_for(tenant)
-        inspector = inspect(source_engine)
-        source_tables = set(inspector.get_table_names())
+        try:
+            source_engine = self.source_engine_for(tenant)
+            inspector = inspect(source_engine)
+            source_tables = set(inspector.get_table_names())
+        except (SQLAlchemyError, OSError) as exc:
+            return self._schema_graph_source_unavailable_graph(
+                tenant,
+                object_type=object_type,
+                instance_id=instance_id,
+                limit=requested_limit,
+                reason=exc,
+            )
         per_type_limit = max(1, min(40, limit // max(len(objects), 1) + 1))
 
-        with source_engine.connect() as conn:
-            for artifact in objects.values():
-                payload = artifact["payload"]
-                pk = payload.get("primary_key")
-                table = next((item for item in payload.get("mapped_table_names") or [] if item in source_tables), None)
-                if not table or not pk or pk not in self._source_columns(tenant, table):
-                    continue
-                rows = conn.execute(
-                    text(f"SELECT DISTINCT {table}.{pk} AS node_pk FROM {table} WHERE {table}.{pk} IS NOT NULL ORDER BY {table}.{pk} LIMIT :limit"),
-                    {"limit": per_type_limit},
-                ).mappings().all()
-                for row in rows:
-                    remember_node(self._schema_graph_node(tenant, artifact, table, row["node_pk"]))
+        try:
+            with source_engine.connect() as conn:
+                for artifact in objects.values():
+                    payload = artifact["payload"]
+                    pk = payload.get("primary_key")
+                    table = next((item for item in payload.get("mapped_table_names") or [] if item in source_tables), None)
+                    if not table or not pk or pk not in self._source_columns(tenant, table):
+                        continue
+                    rows = conn.execute(
+                        text(f"SELECT DISTINCT {table}.{pk} AS node_pk FROM {table} WHERE {table}.{pk} IS NOT NULL ORDER BY {table}.{pk} LIMIT :limit"),
+                        {"limit": per_type_limit},
+                    ).mappings().all()
+                    for row in rows:
+                        remember_node(self._schema_graph_node(tenant, artifact, table, row["node_pk"]))
+                        if len(nodes) >= limit:
+                            break
                     if len(nodes) >= limit:
                         break
-                if len(nodes) >= limit:
-                    break
 
-            for link in links:
-                payload = link["payload"]
-                source_artifact = objects.get(payload.get("source_object_key"))
-                target_artifact = objects.get(payload.get("target_object_key"))
-                source_table = payload.get("source_table")
-                target_table = payload.get("target_table")
-                join_condition = self._schema_graph_safe_join_condition(tenant, payload.get("join_condition"))
-                if not source_artifact or not target_artifact or not source_table or not target_table or not join_condition:
-                    continue
-                if source_table not in source_tables or target_table not in source_tables:
-                    continue
-                source_pk = source_artifact["payload"].get("primary_key")
-                target_pk = target_artifact["payload"].get("primary_key")
-                if source_pk not in self._source_columns(tenant, source_table) or target_pk not in self._source_columns(tenant, target_table):
-                    continue
-                try:
-                    rows = conn.execute(
-                        text(
-                            f"SELECT DISTINCT {source_table}.{source_pk} AS source_pk, "
-                            f"{target_table}.{target_pk} AS target_pk "
-                            f"FROM {source_table} JOIN {target_table} ON {join_condition} "
-                            f"WHERE {source_table}.{source_pk} IS NOT NULL AND {target_table}.{target_pk} IS NOT NULL "
-                            "LIMIT :limit"
-                        ),
-                        {"limit": limit * 3},
-                    ).mappings().all()
-                except Exception:
-                    continue
-                for row in rows:
-                    source_node = remember_node(self._schema_graph_node(tenant, source_artifact, source_table, row["source_pk"]))
-                    target_node = remember_node(self._schema_graph_node(tenant, target_artifact, target_table, row["target_pk"]))
-                    edge_id = f"{source_node['id']}->{target_node['id']}:{link['canonical_key']}"
-                    if edge_id in seen_edges:
+                for link in links:
+                    payload = link["payload"]
+                    source_artifact = objects.get(payload.get("source_object_key"))
+                    target_artifact = objects.get(payload.get("target_object_key"))
+                    source_table = payload.get("source_table")
+                    target_table = payload.get("target_table")
+                    join_condition = self._schema_graph_safe_join_condition(tenant, payload.get("join_condition"))
+                    if not source_artifact or not target_artifact or not source_table or not target_table or not join_condition:
                         continue
-                    seen_edges.add(edge_id)
-                    edges.append({
-                        "id": edge_id,
-                        "tenant_id": tenant.tenant_id,
-                        "source": source_node["id"],
-                        "target": target_node["id"],
-                        "link_key": link["canonical_key"],
-                        "label": link["name"],
-                        "status": "approved",
-                        "projection_source": "SchemaGraphModelingAgent",
-                    })
-                    if len(edges) >= limit * 3:
-                        break
+                    if source_table not in source_tables or target_table not in source_tables:
+                        continue
+                    source_pk = source_artifact["payload"].get("primary_key")
+                    target_pk = target_artifact["payload"].get("primary_key")
+                    if source_pk not in self._source_columns(tenant, source_table) or target_pk not in self._source_columns(tenant, target_table):
+                        continue
+                    try:
+                        rows = conn.execute(
+                            text(
+                                f"SELECT DISTINCT {source_table}.{source_pk} AS source_pk, "
+                                f"{target_table}.{target_pk} AS target_pk "
+                                f"FROM {source_table} JOIN {target_table} ON {join_condition} "
+                                f"WHERE {source_table}.{source_pk} IS NOT NULL AND {target_table}.{target_pk} IS NOT NULL "
+                                "LIMIT :limit"
+                            ),
+                            {"limit": limit * 3},
+                        ).mappings().all()
+                    except Exception:
+                        continue
+                    for row in rows:
+                        source_node = remember_node(self._schema_graph_node(tenant, source_artifact, source_table, row["source_pk"]))
+                        target_node = remember_node(self._schema_graph_node(tenant, target_artifact, target_table, row["target_pk"]))
+                        edge_id = f"{source_node['id']}->{target_node['id']}:{link['canonical_key']}"
+                        if edge_id in seen_edges:
+                            continue
+                        seen_edges.add(edge_id)
+                        edges.append({
+                            "id": edge_id,
+                            "tenant_id": tenant.tenant_id,
+                            "source": source_node["id"],
+                            "target": target_node["id"],
+                            "link_key": link["canonical_key"],
+                            "label": link["name"],
+                            "status": "approved",
+                            "projection_source": "SchemaGraphModelingAgent",
+                        })
+                        if len(edges) >= limit * 3:
+                            break
+        except (SQLAlchemyError, OSError) as exc:
+            return self._schema_graph_source_unavailable_graph(
+                tenant,
+                object_type=object_type,
+                instance_id=instance_id,
+                limit=requested_limit,
+                reason=exc,
+            )
         center = None
         if object_type and instance_id:
             compact_type = re.sub(r"[^0-9A-Za-z]", "", str(object_type)).lower()
@@ -1485,6 +1713,40 @@ class InstanceRepository:
                 "edge_limit": limit * 3,
                 "approved_only": True,
                 "projection_source": "SchemaGraphModelingAgent",
+            },
+        }
+
+    def _schema_graph_source_unavailable_graph(self, tenant, object_type=None, instance_id=None, limit=200, reason=None):
+        requested_limit = int(limit)
+        limit = max(1, min(requested_limit, 300))
+        return {
+            "approved": False,
+            "tenant": tenant.public_dict(),
+            "graph_database": tenant.graph_database,
+            "depth": 0,
+            "limit": limit,
+            "limits": {
+                "requested_limit": requested_limit,
+                "applied_limit": limit,
+                "hard_limit": 300,
+                "truncated": False,
+            },
+            "center": None,
+            "nodes": [],
+            "edges": [],
+            "scope": {
+                "tenant_id": tenant.tenant_id,
+                "view": "all",
+                "type": object_type or None,
+                "id": instance_id or None,
+                "node_limit": limit,
+                "edge_limit": limit * 3,
+                "approved_only": True,
+                "projection_source": "SchemaGraphModelingAgent",
+                "source_db_status": "unavailable",
+                "degraded": True,
+                "reason": "Source database unavailable; approved SchemaGraph projection exists, but instance graph rows cannot be loaded.",
+                "connection_error": str(reason)[:500] if reason else None,
             },
         }
 
@@ -1640,10 +1902,13 @@ class InstanceRepository:
             "finding_target": "candidate_findings",
         }
         frontier = [
-            {"kind": "event", "target_key": "Event:US-Iran escalation", "priority": 1.0, "depth": 0},
-            {"kind": "chokepoint", "target_key": "Chokepoint:Hormuz Strait", "priority": 0.95, "depth": 0},
-            {"kind": "commodity", "target_key": "Commodity:Crude Oil", "priority": 0.85, "depth": 0},
-            {"kind": "country_cluster", "target_key": "Country:JPN/KOR/CHN/USA", "priority": 0.8, "depth": 0},
+            {
+                "kind": "objective_seed",
+                "target_key": f"Objective:{_slug(objective)[:96]}",
+                "name": objective,
+                "priority": 1.0,
+                "depth": 0,
+            }
         ]
         self._ensure_continuous_enrichment_schema(tenant)
         with self.metadata_engine_for(tenant).begin() as conn:
@@ -1668,38 +1933,163 @@ class InstanceRepository:
         return session_key
 
     def _continuous_source_fixture(self, session_key):
-        suffix = _slug(f"{session_key}-{int(time.time())}")
-        return [
-            {
-                "title": "US-Iran escalation raises Hormuz shipping disruption risk for JPN KOR energy imports",
-                "url": f"https://zenodo.org/records/13841882/{suffix}-hormuz-energy",
-                "snippet": (
-                    "shipping disruption and sanctions around Hormuz Strait create import exposure for JPN KOR "
-                    "with trade_at_risk_v and dependency_share metrics; analyst review action required."
-                ),
-            },
-            {
-                "title": "US-Iran conflict risk affects Bab el-Mandeb trade routes for CHN IND USA",
-                "url": f"https://zenodo.org/records/13841882/{suffix}-bab-el-mandeb",
-                "snippet": (
-                    "likelihood_conflict and severity_conflict around Bab el-Mandeb Strait expose CHN IND USA "
-                    "to trade_at_risk_v and trade_impacted; analyst review action required."
-                ),
-            },
-            {
-                "title": "Malacca Strait geopolitical spillover affects CHN JPN KOR trade flows",
-                "url": f"https://zenodo.org/records/13841882/{suffix}-malacca",
-                "snippet": (
-                    "likelihood_geopolitical hazard at Malacca Strait affects CHN JPN KOR dependency_share "
-                    "and trade_impacted; analyst review action required."
-                ),
-            },
-            {
-                "title": "Untrusted US-Iran impact claim",
-                "url": f"https://example.org/{suffix}-untrusted",
-                "snippet": "conflict at Suez Canal affects USA trade_at_risk_v",
-            },
-        ]
+        return []
+
+    def _continuous_search_provider(self, config):
+        provider_name = str((config or {}).get("search_provider") or "duckduckgo_html").strip().lower()
+        if provider_name in {"", "none", "disabled", "off"}:
+            return None
+        if provider_name != "duckduckgo_html":
+            raise ValueError(f"Unsupported continuous enrichment search_provider: {provider_name}")
+        timeout_seconds = float((config or {}).get("search_timeout_seconds") or 8.0)
+        return DuckDuckGoHTMLSearchProvider(timeout_seconds=timeout_seconds)
+
+    def _continuous_query_search_results(self, tenant, objective, frontier_items, max_results_per_query, config, provider=None):
+        provider = provider if provider is not None else self._continuous_search_provider(config)
+        events = []
+        if provider is None:
+            events.append(
+                {
+                    "type": "query_search_disabled",
+                    "reason": "continuous search provider disabled",
+                    "created_at": datetime.utcnow().isoformat(),
+                }
+            )
+            return [], events
+        results = []
+        seen_urls = set()
+        ladder_state = config.setdefault("query_ladder_state", {})
+        max_plans_per_frontier = int(config.get("max_query_plans_per_frontier") or 5)
+        for item in frontier_items or []:
+            frontier_key = self._continuous_frontier_key(item)
+            query_plan = _graph_context_query_plan(item, objective, tenant.tenant_id)
+            plans = [plan for plan in query_plan.get("plans") or [] if str(plan.get("query") or "").strip()]
+            if not plans:
+                events.append(
+                    {
+                        "type": "query_search_skipped",
+                        "reason": "empty query plan",
+                        "frontier_key": frontier_key,
+                        "created_at": datetime.utcnow().isoformat(),
+                    }
+                )
+                continue
+            frontier_state = ladder_state.setdefault(frontier_key, {})
+            start_index = max(0, min(int(frontier_state.get("next_plan_index") or 0), len(plans) - 1))
+            attempts = plans[start_index : min(len(plans), start_index + max(1, max_plans_per_frontier))]
+            if not attempts:
+                attempts = [plans[-1]]
+            accepted_for_frontier = 0
+            last_attempt_index = start_index
+            for offset, selected_plan in enumerate(attempts):
+                plan_index = start_index + offset
+                last_attempt_index = plan_index
+                query = str(selected_plan.get("query") or query_plan.get("query") or "").strip()
+                if not query:
+                    continue
+                try:
+                    found = provider.search(query, max_results_per_query)
+                except Exception as exc:
+                    events.append(
+                        {
+                            "type": "query_search_failed",
+                            "frontier_key": frontier_key,
+                            "query": query,
+                            "provider": provider.__class__.__name__,
+                            "selected_intent": selected_plan.get("intent"),
+                            "granularity": selected_plan.get("granularity"),
+                            "coarse_level": selected_plan.get("coarse_level"),
+                            "error": str(exc),
+                            "created_at": datetime.utcnow().isoformat(),
+                        }
+                    )
+                    continue
+                added = 0
+                for rank, result in enumerate(found or [], 1):
+                    raw_url = getattr(result, "url", None) if not isinstance(result, dict) else result.get("url")
+                    url = str(raw_url or "").strip()
+                    if not url or url in seen_urls:
+                        continue
+                    seen_urls.add(url)
+                    source = {
+                        "query": getattr(result, "query", query) if not isinstance(result, dict) else result.get("query", query),
+                        "title": getattr(result, "title", url) if not isinstance(result, dict) else result.get("title", url),
+                        "url": url,
+                        "snippet": getattr(result, "snippet", "") if not isinstance(result, dict) else result.get("snippet", ""),
+                        "rank": getattr(result, "rank", rank) if not isinstance(result, dict) else result.get("rank", rank),
+                        "provider": getattr(result, "provider", provider.__class__.__name__) if not isinstance(result, dict) else result.get("provider", provider.__class__.__name__),
+                        "frontier_key": frontier_key,
+                        "query_plan": {
+                            "selected_intent": selected_plan.get("intent"),
+                            "granularity": selected_plan.get("granularity"),
+                            "coarse_level": selected_plan.get("coarse_level"),
+                            "degree": selected_plan.get("degree"),
+                            "radius": selected_plan.get("radius"),
+                            "plan_index": plan_index,
+                        },
+                    }
+                    results.append(source)
+                    added += 1
+                accepted_for_frontier += added
+                events.append(
+                    {
+                        "type": "query_search_executed",
+                        "frontier_key": frontier_key,
+                        "query": query,
+                        "provider": provider.__class__.__name__,
+                        "selected_intent": selected_plan.get("intent"),
+                        "granularity": selected_plan.get("granularity"),
+                        "coarse_level": selected_plan.get("coarse_level"),
+                        "degree": selected_plan.get("degree"),
+                        "plan_index": plan_index,
+                        "source_terms": selected_plan.get("source_terms") or [],
+                        "result_count": len(found or []),
+                        "accepted_for_trust_filter_count": added,
+                        "created_at": datetime.utcnow().isoformat(),
+                    }
+                )
+                if added > 0:
+                    break
+            frontier_state["last_attempted_plan_index"] = last_attempt_index
+            frontier_state["last_attempted_granularity"] = (plans[last_attempt_index] or {}).get("granularity")
+            frontier_state["last_attempted_at"] = datetime.utcnow().isoformat()
+            if accepted_for_frontier:
+                frontier_state["last_search_signal"] = "search_results_found"
+            else:
+                frontier_state["last_search_signal"] = "no_search_results"
+                frontier_state["next_plan_index"] = min(last_attempt_index + 1, len(plans) - 1)
+                events.append(
+                    {
+                        "type": "query_ladder_coarsened",
+                        "frontier_key": frontier_key,
+                        "reason": "no_search_results",
+                        "next_plan_index": frontier_state["next_plan_index"],
+                        "next_granularity": plans[frontier_state["next_plan_index"]].get("granularity"),
+                        "created_at": datetime.utcnow().isoformat(),
+                    }
+                )
+        return results, events
+
+    def _continuous_search_results_for_cycle(self, tenant, session_key, objective, body, frontier_items, max_results_per_query, config, provider=None):
+        if "search_results" in body:
+            raw_results = body.get("search_results") or []
+            return raw_results, [
+                {
+                    "type": "provided_search_results_used",
+                    "result_count": len(raw_results),
+                    "created_at": datetime.utcnow().isoformat(),
+                }
+            ]
+        fixture_results = self._continuous_source_fixture(session_key)
+        if fixture_results:
+            return fixture_results, [
+                {
+                    "type": "source_fixture_used",
+                    "result_count": len(fixture_results),
+                    "created_at": datetime.utcnow().isoformat(),
+                }
+            ]
+        return self._continuous_query_search_results(tenant, objective, frontier_items, max_results_per_query, config, provider=provider)
 
     def _continuous_update_config(self, config, body):
         config = dict(config or {})
@@ -1754,11 +2144,26 @@ class InstanceRepository:
                 config[key] = max(1, min(int(body.get(key) or config.get(key) or 1), 50))
         if "frontier_cooldown_minutes" in body:
             config["frontier_cooldown_minutes"] = max(0, min(int(body.get("frontier_cooldown_minutes") or 0), 10080))
+        if body.get("reset_frontier_visit_state"):
+            config["visited_frontier_keys"] = []
+            config["query_ladder_state"] = {}
+            frontier_state = dict(config.get("frontier_state") or {})
+            frontier_state["last_enriched_at"] = {}
+            frontier_state["selected_count"] = {}
+            frontier_state["coverage_cursor"] = 0
+            config["frontier_state"] = frontier_state
+            config["stop_reason"] = None
         if "stop_condition" in body:
             config["stop_condition"] = (body.get("stop_condition") or "").strip() or config.get("stop_condition")
         if "stop_policy" in body and isinstance(body.get("stop_policy"), dict):
             config["stop_policy"] = {**dict(config.get("stop_policy") or {}), **body["stop_policy"]}
-        if "source_trust" in body and isinstance(body.get("source_trust"), dict):
+        if body.get("source_trust") == "*":
+            trust = {**dict(config.get("source_trust") or {})}
+            trust["allowed_domains"] = ["*"]
+            trust["reject_unlisted_domains"] = False
+            config["source_trust"] = trust
+            config["allowed_domains"] = ["*"]
+        elif "source_trust" in body and isinstance(body.get("source_trust"), dict):
             trust = {**dict(config.get("source_trust") or {}), **body["source_trust"]}
             if "allowed_domains" in trust:
                 trust["allowed_domains"] = self._continuous_normalize_domains(trust.get("allowed_domains"))
@@ -1774,7 +2179,11 @@ class InstanceRepository:
 
     def _continuous_normalize_domains(self, raw_domains):
         if isinstance(raw_domains, str):
+            if raw_domains.strip() == "*":
+                return ["*"]
             raw_domains = re.split(r"[,\\s]+", raw_domains)
+        if any(str(value).strip() == "*" for value in (raw_domains or [])):
+            return ["*"]
         return list(
             dict.fromkeys(
                 part.lower().removeprefix("www.")
@@ -1800,10 +2209,20 @@ class InstanceRepository:
         trust = dict((config or {}).get("source_trust") or {})
         allowed = self._continuous_normalize_domains(trust.get("allowed_domains") or (config or {}).get("allowed_domains") or [])
         rejected = set(self._continuous_normalize_domains(trust.get("rejected_domains") or []))
+        allow_all = "*" in allowed
         return {
-            "allowed_domains": allowed,
+            "allowed_domains": [] if allow_all else allowed,
             "rejected_domains": rejected,
-            "reject_unlisted_domains": trust.get("reject_unlisted_domains", True) is not False,
+            "reject_unlisted_domains": False if allow_all else trust.get("reject_unlisted_domains", True) is not False,
+            "allow_all_public_sources": allow_all,
+        }
+
+    def _continuous_agent_crawl_policy(self, config):
+        source_policy = self._continuous_source_trust_policy(config)
+        allow_discovered = not source_policy["reject_unlisted_domains"]
+        return {
+            "allowed_domains": [] if allow_discovered else source_policy["allowed_domains"],
+            "allow_discovered_domains": allow_discovered,
         }
 
     def _continuous_source_trust_decision(self, source, config):
@@ -1905,6 +2324,22 @@ class InstanceRepository:
             return None
         return datetime.utcfromtimestamp(time.time() + seconds).isoformat()
 
+    def _continuous_session_auto_due(self, status, config, now_ts=None):
+        now_ts = time.time() if now_ts is None else now_ts
+        if status != "idle":
+            return False, f"status_{status or 'unknown'}"
+        if not self._continuous_cadence_seconds(config):
+            return False, "manual_cadence"
+        active_backoff = self._continuous_backoff_active(config, now_ts=now_ts)
+        if active_backoff:
+            return False, "backoff_active"
+        next_ts = self._continuous_parse_iso_ts((config or {}).get("next_run_at"))
+        if next_ts is None:
+            return True, "cadence_without_next_run_at"
+        if now_ts >= next_ts:
+            return True, "next_run_due"
+        return False, "next_run_pending"
+
     def _continuous_frontier_state(self, config):
         state = config.get("frontier_state") if isinstance(config.get("frontier_state"), dict) else {}
         state.setdefault("last_enriched_at", {})
@@ -1929,6 +2364,65 @@ class InstanceRepository:
 
     def _continuous_frontier_key(self, item):
         return str(item.get("key") or item.get("target_key") or item.get("name") or "").strip()
+
+    def _continuous_frontier_identity(self, item):
+        key = self._continuous_frontier_key(item)
+        payload = item.get("payload") if isinstance(item.get("payload"), dict) else {}
+        kind = str(item.get("kind") or item.get("artifact_type") or item.get("source_kind") or "").lower()
+        if "edge" in kind or item.get("source_kind") == "new_graph_edge":
+            endpoint_evidence = payload.get("endpoint_dedup_evidence") if isinstance(payload.get("endpoint_dedup_evidence"), dict) else {}
+
+            def _endpoint_identity(role):
+                evidence = endpoint_evidence.get(role) if isinstance(endpoint_evidence.get(role), dict) else {}
+                return str(
+                    evidence.get("identity_key")
+                    or evidence.get("matched_node_key")
+                    or payload.get(f"{role}_identity_key")
+                    or payload.get(f"{role}_key")
+                    or payload.get(f"{role}_label")
+                    or payload.get(role)
+                    or ""
+                ).strip().lower()
+
+            relation_candidate = (
+                payload.get("relation_ontology_candidate")
+                if isinstance(payload.get("relation_ontology_candidate"), dict)
+                else {}
+            )
+            relation = str(
+                relation_candidate.get("canonical_key")
+                or relation_candidate.get("key")
+                or payload.get("link_key")
+                or payload.get("relation_key")
+                or payload.get("relation")
+                or ""
+            ).strip().lower()
+            stable_fact = payload.get("stable_fact_identity") or payload.get("fact_identity") or payload.get("metric_identity")
+            if stable_fact is None:
+                stable_fact = payload.get("metric") or payload.get("metrics") or ""
+            if isinstance(stable_fact, (list, tuple, set)):
+                stable_fact = "|".join(sorted(str(value).strip().lower() for value in stable_fact if str(value).strip()))
+            else:
+                stable_fact = str(stable_fact or "").strip().lower()
+            source = _endpoint_identity("source")
+            target = _endpoint_identity("target")
+            if source and relation and target:
+                tenant_id = payload.get("tenant") or payload.get("tenant_id") or (key.split(":")[1] if key.startswith("proposed-graph:") and len(key.split(":")) > 2 else "")
+                return f"edge-fact:{tenant_id}:{source}:{relation}:{target}:{stable_fact}"
+        if "node" in kind or item.get("source_kind") == "new_graph_node":
+            identity = (
+                payload.get("identity_key")
+                or payload.get("graph_identity")
+                or payload.get("node_identity")
+                or payload.get("matched_node_key")
+            )
+            if identity:
+                return f"node:{str(identity).strip().lower()}"
+            label = str(payload.get("label") or payload.get("name") or item.get("name") or "").strip().lower()
+            ontology_type = str(payload.get("ontology_type") or payload.get("type") or item.get("ontology_type") or "").strip().lower()
+            if label:
+                return f"node:{ontology_type}:{label}"
+        return key
 
     def _continuous_frontier_name(self, item):
         return str(item.get("name") or item.get("target_key") or item.get("key") or "frontier").strip()
@@ -2094,6 +2588,89 @@ class InstanceRepository:
                 source_kind = "graph_coverage"
             items.append(self._continuous_row_to_frontier_item(row, source_kind))
         return items
+
+    def _continuous_graph_coverage_frontier(self, tenant, limit=50):
+        items = []
+        try:
+            graph = self.full_graph(tenant, limit=max(50, min(int(limit) * 4, 200))) or {}
+        except Exception:
+            graph = {}
+        nodes = graph.get("nodes") or []
+        edges = graph.get("edges") or []
+        degree = {}
+        for edge in edges:
+            source = edge.get("source")
+            target = edge.get("target")
+            if source:
+                degree[source] = degree.get(source, 0) + 1
+            if target:
+                degree[target] = degree.get(target, 0) + 1
+        for node in sorted(nodes, key=lambda item: (-degree.get(item.get("id"), 0), str(item.get("label") or item.get("id") or ""))):
+            node_id = node.get("id")
+            if not node_id:
+                continue
+            node_type = node.get("type") or node.get("label_type") or node.get("tag")
+            label = node.get("label") or node.get("name") or node_id
+            items.append(
+                self._continuous_normalize_frontier_item(
+                    {
+                        "key": f"graph-coverage:{node_id}",
+                        "name": label,
+                        "artifact_type": "graph_node_coverage",
+                        "kind": "graph_node_coverage",
+                        "source": "approved_graph",
+                        "source_kind": "graph_coverage",
+                        "priority": 20 + min(degree.get(node_id, 0), 50) / 10,
+                        "reason": "approved graph node selected by degree-based coverage fallback",
+                        "depth": 0,
+                        "ontology_type": node_type,
+                        "payload": {
+                            "label": label,
+                            "ontology_type": node_type,
+                            "identity_key": node_id,
+                            "degree": degree.get(node_id, 0),
+                            "selection_policy": "degree_coverage",
+                        },
+                    },
+                    source_kind="graph_coverage",
+                )
+            )
+            if len(items) >= limit:
+                break
+        remaining = max(0, int(limit) - len(items))
+        if remaining <= 0:
+            return items
+        try:
+            with self.metadata_engine_for(tenant).connect() as conn:
+                rows = conn.execute(
+                    text(
+                        """
+                        SELECT e.element_key, e.element_type, e.name, e.payload_json,
+                               e.evidence_refs_json, e.source_url, e.confidence,
+                               e.status, e.iteration, r.run_key
+                        FROM aletheia_proposed_graph_elements e
+                        LEFT JOIN aletheia_iterative_graph_enrichment_runs r
+                          ON e.run_id = r.id AND e.project_id = r.project_id
+                        WHERE e.project_id = :tenant_id
+                          AND e.element_type = 'node'
+                          AND e.status IN ('draft', 'needs_more_evidence', 'approved')
+                        ORDER BY e.updated_at DESC, e.created_at DESC, e.id DESC
+                        LIMIT :limit
+                        """
+                    ),
+                    {"tenant_id": tenant.tenant_id, "limit": remaining},
+                ).mappings().all()
+        except Exception:
+            rows = []
+        for row in rows:
+            item = self._continuous_row_to_frontier_item(row, "graph_coverage")
+            item["source"] = "proposed_graph_recent_node"
+            item["reason"] = "recent graph node selected by coverage fallback"
+            payload = item.get("payload") if isinstance(item.get("payload"), dict) else {}
+            payload["selection_policy"] = "recent_node_coverage"
+            item["payload"] = payload
+            items.append(item)
+        return items[:limit]
 
     def _continuous_question_scope_frontier(self, tenant, limit=10):
         try:
@@ -2263,31 +2840,63 @@ class InstanceRepository:
         candidates.extend(self._continuous_proposed_graph_frontier(tenant, config, limit=75))
         candidates.extend(self._continuous_question_scope_frontier(tenant, limit=10))
         candidates.extend(self._continuous_reasoning_finding_frontier(tenant, limit=20))
+        candidates.extend(self._continuous_graph_coverage_frontier(tenant, limit=50))
         deduped = {}
+        identities = {}
         for item in candidates:
             normalized = self._continuous_normalize_frontier_item(item)
             key = self._continuous_frontier_key(normalized)
             if not key:
                 continue
-            existing = deduped.get(key)
+            identity = self._continuous_frontier_identity(normalized) or key
+            existing_key = identities.get(identity)
+            existing = deduped.get(existing_key or key)
             if existing is None or normalized.get("priority", 0) > existing.get("priority", 0):
+                if existing_key and existing_key != key:
+                    deduped.pop(existing_key, None)
                 deduped[key] = normalized
+                identities[identity] = key
         return list(deduped.values())
 
     def _continuous_frontier_for_cycle(self, tenant, stored_frontier, config, max_frontier):
         now_ts = time.time()
         selected = []
-        candidates = [self._continuous_normalize_frontier_item(item) for item in self._continuous_frontier_candidates(tenant, stored_frontier, config)]
+        visited = set((config or {}).get("visited_frontier_keys") or [])
+        stored_candidates = []
+        stored_seen = set()
+        for item in stored_frontier or []:
+            normalized = self._continuous_normalize_frontier_item(self._hydrate_continuous_frontier_item(tenant, item))
+            key = self._continuous_frontier_key(normalized)
+            identity = self._continuous_frontier_identity(normalized) or key
+            if not key or key in stored_seen or identity in stored_seen or key in visited or identity in visited:
+                continue
+            stored_seen.add(key)
+            stored_seen.add(identity)
+            if self._continuous_frontier_available(normalized, config, now_ts):
+                stored_candidates.append(normalized)
+        if stored_frontier:
+            candidates = stored_candidates
+        else:
+            candidates = [
+                item
+                for item in (self._continuous_normalize_frontier_item(item) for item in self._continuous_frontier_candidates(tenant, stored_frontier, config))
+                if self._continuous_frontier_key(item) not in visited and self._continuous_frontier_identity(item) not in visited
+            ]
         available_candidates = [item for item in candidates if self._continuous_frontier_available(item, config, now_ts)]
-        if not available_candidates:
+        if not available_candidates and not stored_frontier:
             available_candidates = [item for item in candidates if item.get("source_kind") == "graph_coverage"]
-        available_candidates.sort(key=lambda item: (-float(item.get("priority") or 0), int(item.get("depth") or 0), self._continuous_frontier_key(item)))
+        if not stored_frontier:
+            available_candidates.sort(key=lambda item: (-float(item.get("priority") or 0), int(item.get("depth") or 0), self._continuous_frontier_key(item)))
         for hydrated in available_candidates:
             key = self._continuous_frontier_key(hydrated)
             if not key:
                 continue
+            identity = self._continuous_frontier_identity(hydrated) or key
+            if identity in {self._continuous_frontier_identity(item) or self._continuous_frontier_key(item) for item in selected}:
+                continue
             selected_item = {
                 "key": key,
+                "frontier_identity": identity,
                 "name": self._continuous_frontier_name(hydrated),
                 "artifact_type": hydrated.get("artifact_type") or hydrated.get("kind") or "frontier_item",
                 "source": hydrated.get("source") or "continuous_frontier",
@@ -2317,16 +2926,33 @@ class InstanceRepository:
                 break
         return selected
 
-    def _continuous_next_frontier(self, previous_frontier, result, config):
+    def _continuous_next_frontier(self, previous_frontier, result, config, consumed_frontier=None):
         visited = set(config.get("visited_frontier_keys") or [])
-        existing = {self._continuous_frontier_key(item) for item in (previous_frontier or [])}
         next_frontier = []
         additions = []
+        existing = set()
+        consumed = {
+            value
+            for item in (consumed_frontier or [])
+            for value in (self._continuous_frontier_key(item), self._continuous_frontier_identity(item))
+            if value
+        }
+        # Preserve the existing queue order and remove frontier items consumed
+        # by this cycle. Newly discovered items are appended below, so repeated
+        # runs walk the queue instead of repeatedly selecting the same high
+        # priority seed.
+        for item in previous_frontier or []:
+            key = self._continuous_frontier_key(item)
+            identity = self._continuous_frontier_identity(item) or key
+            if key and key not in visited and identity not in visited and key not in consumed and identity not in consumed and key not in existing and identity not in existing:
+                next_frontier.append(item)
+                existing.add(key)
+                existing.add(identity)
         for element in result.get("proposed_graph") or []:
             if element.get("element_type") not in {"node", "edge"}:
                 continue
             key = element.get("element_key")
-            if not key or key in existing or key in visited:
+            if not key or key in existing or key in visited or key in consumed:
                 continue
             payload = element.get("payload") or {}
             deep_profile = payload.get("deep_graph_profile") if isinstance(payload.get("deep_graph_profile"), dict) else {}
@@ -2348,23 +2974,107 @@ class InstanceRepository:
                 "relation": payload.get("relation"),
             }
             item = self._continuous_normalize_frontier_item(item, source_kind=item["source_kind"])
+            identity = self._continuous_frontier_identity(item) or key
+            if key in existing or identity in existing or identity in visited or identity in consumed:
+                continue
+            item["frontier_identity"] = identity
             next_frontier.append(item)
             additions.append(item)
             existing.add(key)
-        # Keep untouched frontier items so paused or budget-limited sessions
-        # can continue after the newly discovered nodes/edges.
-        for item in previous_frontier or []:
-            key = self._continuous_frontier_key(item)
-            if key and key not in visited and key not in existing:
-                next_frontier.append(item)
-                existing.add(key)
+            existing.add(identity)
         return next_frontier[:100], additions
+
+    def _continuous_mark_frontier_visited(self, config, frontier_items):
+        visited = list(config.get("visited_frontier_keys") or [])
+        for item in frontier_items or []:
+            for value in (self._continuous_frontier_key(item), self._continuous_frontier_identity(item)):
+                if value and value not in visited:
+                    visited.append(value)
+        config["visited_frontier_keys"] = visited[-500:]
+        frontier_state = self._continuous_frontier_state(config)
+        now_iso = datetime.utcnow().isoformat()
+        for item in frontier_items or []:
+            key = self._continuous_frontier_key(item)
+            if not key:
+                continue
+            frontier_state["last_enriched_at"][key] = now_iso
+            frontier_state["selected_count"][key] = int(frontier_state["selected_count"].get(key) or 0) + 1
+            identity = self._continuous_frontier_identity(item)
+            if identity:
+                frontier_state["last_enriched_at"][identity] = now_iso
+        frontier_state["coverage_cursor"] = int(frontier_state.get("coverage_cursor") or 0) + len(frontier_items or [])
+        config["frontier_state"] = frontier_state
+        return config
 
     def _continuous_append_events(self, config, events):
         merged = list(config.get("latest_events") or [])
         merged.extend(events)
         config["latest_events"] = merged[-50:]
         return config
+
+    def _continuous_session_runtime_state(self, status, config, frontier, now_ts=None):
+        config = config or {}
+        frontier = frontier or []
+        due, due_reason = self._continuous_session_auto_due(status, config, now_ts=now_ts)
+        budget = self._continuous_budget(config)
+        max_cycles = budget.get("max_cycles")
+        backoff = self._continuous_backoff_state(config)
+        active_backoff = self._continuous_backoff_active(config, now_ts=now_ts)
+        frontier_state = self._continuous_frontier_state(config)
+        source_kind_counts = {}
+        for item in frontier:
+            if not isinstance(item, dict):
+                continue
+            source_kind = item.get("source_kind") or item.get("source") or item.get("kind") or "frontier"
+            source_kind_counts[source_kind] = source_kind_counts.get(source_kind, 0) + 1
+        return {
+            "persistent": True,
+            "queue_mode": "fifo_frontier_queue",
+            "frontier_queue_count": len(frontier),
+            "next_frontier_keys": [self._continuous_frontier_key(item) for item in frontier[:10]],
+            "frontier_queue": {
+                "total_count": len(frontier),
+                "source_kind_counts": source_kind_counts,
+                "preview": [
+                    {
+                        "key": self._continuous_frontier_key(item),
+                        "name": item.get("name") or item.get("target_key") or item.get("key"),
+                        "source_kind": item.get("source_kind") or item.get("source") or item.get("kind"),
+                        "priority": item.get("priority"),
+                        "depth": item.get("depth"),
+                        "reason": item.get("reason"),
+                    }
+                    for item in frontier[:10]
+                    if isinstance(item, dict)
+                ],
+            },
+            "cadence": config.get("cadence") or "manual",
+            "custom_interval_minutes": config.get("custom_interval_minutes"),
+            "next_run_at": config.get("next_run_at"),
+            "auto_due": due,
+            "auto_due_reason": due_reason,
+            "budget": {
+                **budget,
+                "completed_cycles": int(config.get("completed_cycles") or 0),
+                "remaining_cycles": None if max_cycles is None else max(0, int(max_cycles) - int(config.get("completed_cycles") or 0)),
+            },
+            "backoff": {
+                "active": active_backoff is not None,
+                "backoff_until": backoff.get("backoff_until"),
+                "remaining_seconds": (active_backoff or {}).get("remaining_seconds"),
+                "failure_count": backoff.get("failure_count"),
+                "last_error": backoff.get("last_error"),
+            },
+            "stop_reason": config.get("stop_reason"),
+            "last_started_at": config.get("last_started_at"),
+            "last_finished_at": config.get("last_finished_at"),
+            "frontier_state": {
+                "visited_count": len(config.get("visited_frontier_keys") or []),
+                "cooldown_minutes": config.get("frontier_cooldown_minutes"),
+                "coverage_cursor": frontier_state.get("coverage_cursor"),
+                "tracked_frontier_count": len((frontier_state.get("last_enriched_at") or {})),
+            },
+        }
 
     def configure_continuous_enrichment_session(self, tenant, session_key, body=None):
         body = body or {}
@@ -2426,17 +3136,24 @@ class InstanceRepository:
                     if e.get("element_type") == "finding"
                 ],
             }
+        config = _load_json(row["config_json"], {})
+        frontier = _load_json(row["frontier_json"], [])
         return {
             "session_key": row["session_key"],
             "tenant_id": row["project_id"],
             "objective": row["objective"],
             "status": row["status"],
-            "config": _load_json(row["config_json"], {}),
-            "frontier": _load_json(row["frontier_json"], []),
+            "config": config,
+            "frontier": frontier,
             "last_run_key": row["last_run_key"],
             "cycle_count": row["cycle_count"],
             "created_at": _jsonable(row["created_at"]),
             "updated_at": _jsonable(row["updated_at"]),
+            "runtime_state": self._continuous_session_runtime_state(
+                row["status"],
+                {**config, "completed_cycles": int(row["cycle_count"] or 0)},
+                frontier,
+            ),
             "latest": latest,
             "write_boundary": {
                 "ontology_candidates_require_review": True,
@@ -2546,22 +3263,137 @@ class InstanceRepository:
             return None
         return {"tenant": tenant.public_dict(), "session": self._continuous_session_to_dict(tenant, row)}
 
+    def run_due_continuous_enrichment_sessions(self, limit=10):
+        if not self._continuous_scheduler_lock.acquire(blocking=False):
+            return {"status": "busy", "ran": [], "skipped": []}
+        ran = []
+        skipped = []
+        try:
+            tenants = [
+                tenant
+                for tenant in getattr(self.tenant_registry, "tenants", {}).values()
+                if getattr(tenant, "status", "active") == "active"
+            ]
+            for tenant in tenants:
+                for session in self.continuous_enrichment_sessions(tenant).get("sessions", []):
+                    config = session.get("config") or {}
+                    due, reason = self._continuous_session_auto_due(session.get("status"), config)
+                    if not due:
+                        skipped.append(
+                            {
+                                "tenant_id": tenant.tenant_id,
+                                "session_key": session.get("session_key"),
+                                "reason": reason,
+                            }
+                        )
+                        continue
+                    try:
+                        result = self.run_continuous_enrichment_cycle(
+                            tenant,
+                            session["session_key"],
+                            {"scheduler_tick": True},
+                        )
+                        ran.append(
+                            {
+                                "tenant_id": tenant.tenant_id,
+                                "session_key": session.get("session_key"),
+                                "status": (result.get("cycle") or {}).get("status"),
+                                "run_key": (result.get("cycle") or {}).get("run_key"),
+                            }
+                        )
+                    except Exception as exc:
+                        ran.append(
+                            {
+                                "tenant_id": tenant.tenant_id,
+                                "session_key": session.get("session_key"),
+                                "status": "failed",
+                                "error": _safe_error_message(exc),
+                            }
+                        )
+                    if limit and len(ran) >= int(limit):
+                        return {"status": "ok", "ran": ran, "skipped": skipped}
+            return {"status": "ok", "ran": ran, "skipped": skipped}
+        finally:
+            self._continuous_scheduler_lock.release()
+
+    def start_continuous_enrichment_scheduler(self, interval_seconds=60):
+        if self._continuous_scheduler_thread and self._continuous_scheduler_thread.is_alive():
+            return self._continuous_scheduler_thread
+        interval_seconds = max(1, int(interval_seconds or 60))
+        stop_event = threading.Event()
+        self._continuous_scheduler_stop = stop_event
+
+        def _loop():
+            while not stop_event.is_set():
+                try:
+                    self.run_due_continuous_enrichment_sessions()
+                except Exception as exc:  # pragma: no cover - background observability only
+                    print(f"continuous enrichment scheduler tick failed: {_safe_error_message(exc)}", file=sys.stderr, flush=True)
+                stop_event.wait(interval_seconds)
+
+        thread = threading.Thread(target=_loop, name="continuous-enrichment-scheduler", daemon=True)
+        thread.start()
+        self._continuous_scheduler_thread = thread
+        return thread
+
+    def stop_continuous_enrichment_scheduler(self):
+        if self._continuous_scheduler_stop is not None:
+            self._continuous_scheduler_stop.set()
+
     def update_continuous_enrichment_session_status(self, tenant, session_key, status):
         if status not in {"idle", "paused", "stopped"}:
             raise ValueError("Unsupported continuous enrichment session status")
         row = self._continuous_session_row(tenant, session_key)
         if row is None:
             return None
+        config = _load_json(row["config_json"], {})
+        now_iso = datetime.utcnow().isoformat()
+        if status == "idle":
+            config["stop_reason"] = None
+            backoff = self._continuous_backoff_active(config)
+            if backoff:
+                config["next_run_at"] = backoff["backoff_until"]
+            elif self._continuous_cadence_seconds(config):
+                config["next_run_at"] = now_iso
+            else:
+                config["next_run_at"] = None
+            event_type = "session_resumed"
+        elif status == "paused":
+            config["next_run_at"] = None
+            event_type = "session_paused"
+        else:
+            config["next_run_at"] = None
+            config["stop_reason"] = "session stopped by operator"
+            event_type = "session_stopped"
+        self._continuous_append_events(
+            config,
+            [
+                {
+                    "type": event_type,
+                    "status": status,
+                    "created_at": now_iso,
+                    "persistent_session": True,
+                    "frontier_queue_count": len(_load_json(row["frontier_json"], [])),
+                }
+            ],
+        )
         with self.metadata_engine_for(tenant).begin() as conn:
             conn.execute(
                 text(
                     """
                     UPDATE aletheia_continuous_enrichment_sessions
-                    SET status = :status, updated_at = CURRENT_TIMESTAMP
+                    SET status = :status,
+                        config_json = :config_json,
+                        updated_at = CURRENT_TIMESTAMP
                     WHERE project_id = :tenant_id AND session_key = :session_key
                     """
                 ),
-                {"tenant_id": tenant.tenant_id, "session_key": session_key, "status": status},
+                {
+                    "tenant_id": tenant.tenant_id,
+                    "session_key": session_key,
+                    "status": status,
+                    "config_json": _json_dump(config),
+                },
             )
         return self.continuous_enrichment_session(tenant, session_key)
 
@@ -2623,6 +3455,7 @@ class InstanceRepository:
                         UPDATE aletheia_continuous_enrichment_sessions
                         SET status = :status,
                             config_json = :config_json,
+                            frontier_json = :frontier_json,
                             updated_at = CURRENT_TIMESTAMP
                         WHERE project_id = :tenant_id AND session_key = :session_key
                         """
@@ -2632,6 +3465,7 @@ class InstanceRepository:
                         "session_key": session_key,
                         "status": next_status,
                         "config_json": _json_dump(config),
+                        "frontier_json": row["frontier_json"] or "[]",
                     },
                 )
             return {
@@ -2678,6 +3512,7 @@ class InstanceRepository:
                         UPDATE aletheia_continuous_enrichment_sessions
                         SET status = :status,
                             config_json = :config_json,
+                            frontier_json = :frontier_json,
                             updated_at = CURRENT_TIMESTAMP
                         WHERE project_id = :tenant_id AND session_key = :session_key
                         """
@@ -2701,7 +3536,8 @@ class InstanceRepository:
                     "autopilot_auto_approve": False,
                 },
             }
-        allowed_domains = self._continuous_source_trust_policy(config)["allowed_domains"] or ["zenodo.org"]
+        source_trust_policy = self._continuous_source_trust_policy(config)
+        crawl_policy = self._continuous_agent_crawl_policy(config)
         stored_frontier = _load_json(row["frontier_json"], [])
         frontier_items = self._continuous_frontier_for_cycle(tenant, stored_frontier, config, max_frontier)
         events.append(
@@ -2765,10 +3601,29 @@ class InstanceRepository:
                     "autopilot_auto_approve": False,
                 },
             }
-        raw_search_results = body.get("search_results") if "search_results" in body else self._continuous_source_fixture(session_key)
+        objective = body.get("objective") or row["objective"]
+        raw_search_results, search_events = self._continuous_search_results_for_cycle(
+            tenant,
+            session_key,
+            objective,
+            body,
+            frontier_items,
+            max_results_per_query,
+            config,
+        )
+        events.extend(search_events)
         trusted_search_results, trust_skipped, trust_events = self._continuous_trusted_search_results(raw_search_results, config)
         events.extend(trust_events)
         if not trusted_search_results:
+            next_frontier, _ = self._continuous_next_frontier(stored_frontier, {"proposed_graph": []}, config, consumed_frontier=frontier_items)
+            config = self._continuous_mark_frontier_visited(config, frontier_items)
+            ladder_state = config.setdefault("query_ladder_state", {})
+            for item in frontier_items or []:
+                frontier_key = self._continuous_frontier_key(item)
+                state = ladder_state.setdefault(frontier_key, {})
+                last_index = int(state.get("last_attempted_plan_index") or state.get("next_plan_index") or 0)
+                state["last_novelty_result"] = "no_trusted_sources"
+                state["next_plan_index"] = min(last_index + 1, 4)
             event = {
                 "type": "no_trusted_sources_stop",
                 "reason": "all available sources failed source trust policy",
@@ -2796,6 +3651,7 @@ class InstanceRepository:
                         "session_key": session_key,
                         "status": next_status,
                         "config_json": _json_dump(config),
+                        "frontier_json": _json_dump(next_frontier),
                     },
                 )
             return {
@@ -2805,6 +3661,8 @@ class InstanceRepository:
                     "status": "stopped",
                     "stop_reason": event["reason"],
                     "events": events,
+                    "frontier_used": frontier_items,
+                    "next_frontier_count": len(next_frontier),
                     "source_trust": {"accepted": 0, "skipped": len(trust_skipped), "skipped_sources": trust_skipped},
                 },
                 "write_boundary": {
@@ -2817,7 +3675,7 @@ class InstanceRepository:
             }
         fixture_path = Path("/tmp") / f"aletheia-continuous-{_slug(session_key)}-{int(time.time())}.json"
         fixture_path.write_text(_json_dump(trusted_search_results), encoding="utf-8")
-        objective = body.get("objective") or row["objective"]
+        config["last_started_at"] = datetime.utcnow().isoformat()
         with self.metadata_engine_for(tenant).begin() as conn:
             conn.execute(
                 text(
@@ -2837,7 +3695,8 @@ class InstanceRepository:
                     tenant.metadata_db_url,
                     tenant=tenant.tenant_id,
                     search_results_json=str(fixture_path),
-                    allowed_domains=allowed_domains,
+                    allowed_domains=crawl_policy["allowed_domains"],
+                    allow_discovered_domains=crawl_policy["allow_discovered_domains"],
                     max_iterations=max_iterations,
                     max_frontier=max_frontier,
                     max_results_per_query=max_results_per_query,
@@ -2862,6 +3721,7 @@ class InstanceRepository:
                     }
                 )
                 config["next_run_at"] = backoff.get("backoff_until")
+                config["last_finished_at"] = datetime.utcnow().isoformat()
                 self._continuous_append_events(config, events)
                 with self.metadata_engine_for(tenant).begin() as conn:
                     conn.execute(
@@ -2884,20 +3744,21 @@ class InstanceRepository:
                 pass
         run_key = result["run"]["run_key"]
         proposed_graph = result.get("proposed_graph") or []
-        next_frontier, frontier_additions = self._continuous_next_frontier(stored_frontier, result, config)
-        visited = list(dict.fromkeys([*(config.get("visited_frontier_keys") or []), *[self._continuous_frontier_key(item) for item in frontier_items if self._continuous_frontier_key(item)]]))
-        config["visited_frontier_keys"] = visited[-500:]
+        next_frontier, frontier_additions = self._continuous_next_frontier(stored_frontier, result, config, consumed_frontier=frontier_items)
+        config = self._continuous_mark_frontier_visited(config, frontier_items)
         frontier_state = self._continuous_frontier_state(config)
-        now_iso = datetime.utcnow().isoformat()
-        for item in frontier_items:
-            key = self._continuous_frontier_key(item)
-            if not key:
-                continue
-            frontier_state["last_enriched_at"][key] = now_iso
-            frontier_state["selected_count"][key] = int(frontier_state["selected_count"].get(key) or 0) + 1
-        frontier_state["coverage_cursor"] = int(frontier_state.get("coverage_cursor") or 0) + len(frontier_items)
-        config["frontier_state"] = frontier_state
         graph_changed = bool(proposed_graph)
+        ladder_state = config.setdefault("query_ladder_state", {})
+        for item in frontier_items or []:
+            frontier_key = self._continuous_frontier_key(item)
+            state = ladder_state.setdefault(frontier_key, {})
+            last_index = int(state.get("last_attempted_plan_index") or state.get("next_plan_index") or 0)
+            if graph_changed:
+                state["last_novelty_result"] = "new_reviewable_candidate"
+                state["next_plan_index"] = max(0, min(last_index, 4))
+            else:
+                state["last_novelty_result"] = "no_new_proposals"
+                state["next_plan_index"] = min(last_index + 1, 4)
         if graph_changed:
             config["last_graph_changed_at"] = datetime.utcnow().isoformat()
             events.append(
@@ -3001,6 +3862,7 @@ class InstanceRepository:
                         "created_at": datetime.utcnow().isoformat(),
                     }
                 )
+        config["last_finished_at"] = datetime.utcnow().isoformat()
         config["next_run_at"] = self._continuous_next_run_at(config)
         self._continuous_append_events(config, events)
         with self.metadata_engine_for(tenant).begin() as conn:
@@ -3048,7 +3910,9 @@ class InstanceRepository:
                     "accepted": len(trusted_search_results),
                     "skipped": len(trust_skipped),
                     "skipped_sources": trust_skipped,
-                    "allowed_domains": allowed_domains,
+                    "allowed_domains": source_trust_policy["allowed_domains"],
+                    "reject_unlisted_domains": source_trust_policy["reject_unlisted_domains"],
+                    "allow_all_public_sources": source_trust_policy["allow_all_public_sources"],
                 },
                 "events": events,
                 "autopilot_session_key": config.get("last_autopilot_session_key"),
@@ -3479,6 +4343,65 @@ class InstanceRepository:
                 ),
                 {**params, "limit": 200 if pending_like_filter else limit},
             ).mappings().all()
+            identity_rows = [
+                {
+                    "source_space": row["source_space"],
+                    "source_key": row["source_key"],
+                    "source_status": row["source_status"],
+                    "identity_key": row["identity_key"],
+                    "identity": _load_json(row["identity_json"], {}),
+                    "dedup_text": row["dedup_text"],
+                }
+                for row in conn.execute(
+                    text(
+                        """
+                        SELECT source_space, source_key, source_status, identity_key,
+                               identity_json, dedup_text
+                        FROM aletheia_graph_identity_index
+                        WHERE project_id = :tenant_id
+                          AND element_kind = 'node'
+                        """
+                    ),
+                    {"tenant_id": tenant.tenant_id},
+                ).mappings().all()
+            ]
+        try:
+            approved_graph = self.full_graph(tenant, limit=1000) or {}
+            for node in approved_graph.get("nodes", []):
+                if not isinstance(node, dict):
+                    continue
+                node_id = node.get("id") or node.get("key")
+                if not node_id:
+                    continue
+                identity_rows.append(
+                    {
+                        "source_space": "approved_graph_projection",
+                        "source_key": node_id,
+                        "source_status": node.get("status") or "approved",
+                        "identity_key": f"approved-graph-node:{tenant.tenant_id}:{node_id}",
+                        "identity": {
+                            "kind": "node",
+                            "entity_type": node.get("type") or node.get("ontology_type"),
+                            "label": node.get("label") or node.get("name") or node_id,
+                            "normalized_label": _graph_identity_text(node.get("label") or node.get("name") or node_id),
+                            "aliases": node.get("aliases") if isinstance(node.get("aliases"), list) else [],
+                            "source_identity": node_id or node.get("source_pk"),
+                        },
+                        "dedup_text": " | ".join(
+                            str(value)
+                            for value in [
+                                "node",
+                                node.get("type") or node.get("ontology_type"),
+                                node.get("label") or node.get("name") or node_id,
+                                node_id,
+                                node.get("source_pk"),
+                            ]
+                            if value
+                        ),
+                    }
+                )
+        except Exception:
+            pass
         elements = []
         runs = {}
         filtered_type_counts = {}
@@ -3511,22 +4434,21 @@ class InstanceRepository:
             )
             filtered_type_counts[row["element_type"]] = filtered_type_counts.get(row["element_type"], 0) + 1
             if len(elements) < limit:
-                elements.append(
-                    {
-                        "element_key": row["element_key"],
-                        "element_type": row["element_type"],
-                        "name": row["name"],
-                        "payload": payload,
-                        "dedup_audit": _dedup_audit_from_payload(payload),
-                        "evidence_refs": _load_json(row["evidence_refs_json"], []),
-                        "source_url": row["source_url"],
-                        "confidence": row["confidence"],
-                        "status": row["status"],
-                        "iteration": row["iteration"],
-                        "created_at": _jsonable(row["created_at"]),
-                        "run_key": run["run_key"],
-                    }
-                )
+                element = {
+                    "element_key": row["element_key"],
+                    "element_type": row["element_type"],
+                    "name": row["name"],
+                    "payload": payload,
+                    "dedup_audit": _dedup_audit_from_payload(payload),
+                    "evidence_refs": _load_json(row["evidence_refs_json"], []),
+                    "source_url": row["source_url"],
+                    "confidence": row["confidence"],
+                    "status": row["status"],
+                    "iteration": row["iteration"],
+                    "created_at": _jsonable(row["created_at"]),
+                    "run_key": run["run_key"],
+                }
+                elements.append(_apply_possible_duplicate_presentation_guard(element, identity_rows))
         return {
             "tenant": tenant.public_dict(),
             "runs": list(runs.values()),
@@ -9361,6 +10283,7 @@ def main():
     )
     ReviewWorkbenchHandler.instance_repository.reasoning_repository = ReviewWorkbenchHandler.reasoning_repository
     ReviewWorkbenchHandler.agent_gateway_repository = AgentGatewayRepository(registry, ensure_schema=args.ensure_schema)
+    ReviewWorkbenchHandler.instance_repository.start_continuous_enrichment_scheduler(interval_seconds=60)
     server = LocalThreadingHTTPServer((args.host, args.port), ReviewWorkbenchHandler)
     scheme = "http"
     if args.tls_cert and args.tls_key:
@@ -9375,6 +10298,8 @@ def main():
         server.serve_forever()
     except KeyboardInterrupt:
         pass
+    finally:
+        ReviewWorkbenchHandler.instance_repository.stop_continuous_enrichment_scheduler()
 
 
 if __name__ == "__main__":

@@ -23,13 +23,20 @@ function statusLabelWB(status, language) {
     candidate: "候选",
     changes: "需修改",
     completed: "已完成",
+    custom: "自定义",
+    daily: "每天",
     done: "已完成",
     draft: "草稿",
     failed: "失败",
+    hourly: "每小时",
+    idle: "空闲",
+    manual: "手动",
     needs_evidence: "需补证据",
+    paused: "已暂停",
     proposed: "待审核",
     rejected: "已拒绝",
     running: "运行中",
+    stopped: "已停止",
   };
   return map[String(status || "").toLowerCase()] || status || "—";
 }
@@ -581,6 +588,24 @@ function AgentRunsWorkspace({ tenantId, query, artifacts = [], graphElements = [
     : (session?.session_key || headerRun?.run_key || "—");
   const agentStartedAt = headerRun?.started_at || session?.created_at || "";
   const agentFinishedAt = headerRun?.finished_at || session?.updated_at || "";
+  const runtimeState = session?.runtime_state || {};
+  const runtimeQueue = runtimeState.frontier_queue || {};
+  const queueCount = runtimeQueue.total_count ?? runtimeState.frontier_queue_count ?? session?.frontier?.length ?? 0;
+  const runtimeBudget = runtimeState.budget || {};
+  const remainingCycles = runtimeBudget.remaining_cycles;
+  const maxCycles = runtimeBudget.max_cycles;
+  const backoffState = runtimeState.backoff || {};
+  const sessionScope = agentTab === "autopilot" ? agentParams.scope : (session?.objective || agentParams.scope);
+  const nextRunAt = runtimeState.next_run_at || session?.config?.next_run_at || "";
+  const schedulerLabel = agentTab === "autopilot"
+    ? tWB(language, "run on demand", "按需运行")
+    : agentSchedulerStateLabelWB(runtimeState, session?.status, language);
+  const budgetRemainingLabel = agentTab === "autopilot"
+    ? agentParams.budget
+    : agentBudgetRemainingLabelWB(remainingCycles, maxCycles, language);
+  const backoffLabel = agentTab === "autopilot"
+    ? "—"
+    : agentBackoffLabelWB(backoffState, runtimeState.stop_reason, language);
   const latestExtractionBlockers = Number(latestRun?.proposed_count || 0) === 0 ? latestRun?.extraction_blockers || null : null;
   const latestBlockerParts = latestExtractionBlockers ? [
     ...Object.entries(latestExtractionBlockers.extraction_engine_status_counts || {}).map(([key, count]) => `${key}:${count}`),
@@ -612,6 +637,7 @@ function AgentRunsWorkspace({ tenantId, query, artifacts = [], graphElements = [
     if (!session?.config) return;
     setAgentParams(prev => ({
       ...prev,
+      scope: session.objective || session.config.scope || prev.scope,
       allowlist: (session.config.allowed_domains || []).join(", ") || prev.allowlist,
       cadence: session.config.cadence || prev.cadence,
       customInterval: String(session.config.custom_interval_minutes || prev.customInterval || "60"),
@@ -846,11 +872,11 @@ function AgentRunsWorkspace({ tenantId, query, artifacts = [], graphElements = [
           <div className="row">
             <div className="stat">
               <span className="label">{tWB(language, "Scope", "范围")}</span>
-              <span className="val mono">{compactTextWB(agentParams.scope, 42)}</span>
+              <span className="val mono">{compactTextWB(sessionScope, 42)}</span>
             </div>
             <div className="stat">
               <span className="label">{tWB(language, "Budget", "预算")}</span>
-              <span className="val mono">{agentParams.budget}</span>
+              <span className="val mono">{budgetRemainingLabel}</span>
             </div>
             <div className="stat lg">
               <span className="label">{tWB(language, "Next action", "下一步")}</span>
@@ -860,10 +886,28 @@ function AgentRunsWorkspace({ tenantId, query, artifacts = [], graphElements = [
         </div>
 
         <div style={{ flex: 1, overflow: "auto", padding: "var(--pad-4) var(--pad-5)" }}>
+          {agentTab !== "autopilot" && (
+            <Panel
+              eyebrow={tWB(language, "Persistent session", "持久会话")}
+              title={tWB(language, "Self enrichment loop", "Self enrichment 循环")}
+              count={statusLabelWB(session?.status || "no session", language)}
+            >
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 10 }}>
+                <CaseField label={tWB(language, "Mode", "模式")} value={runtimeState.persistent ? tWB(language, "persistent", "持久运行") : "—"} />
+                <CaseField label={tWB(language, "Scheduler", "调度")} value={schedulerLabel} />
+                <CaseField label={tWB(language, "Next run", "下次运行")} value={nextRunAt ? String(nextRunAt).slice(0, 19) : tWB(language, "manual", "手动")} />
+                <CaseField label={tWB(language, "Frontier queue", "Frontier 队列")} value={`${queueCount} ${tWB(language, "queued", "排队中")}`} />
+                <CaseField label={tWB(language, "Budget left", "剩余预算")} value={budgetRemainingLabel} />
+                <CaseField label={tWB(language, "Backoff / stop", "退避 / 停止")} value={backoffLabel} />
+              </div>
+            </Panel>
+          )}
+
           <Panel
             eyebrow={tWB(language, "Parameters", "参数")}
             title={tWB(language, "Agent settings", "Agent 设置")}
             actions={<button className="btn ghost" onClick={() => setSettingsOpen(open => !open)}>{settingsOpen ? tWB(language, "Collapse", "折叠") : tWB(language, "Expand", "展开")}</button>}
+            style={{ marginTop: agentTab !== "autopilot" ? 16 : 0 }}
           >
             {settingsOpen ? (
               <div style={{ display: "grid", gridTemplateColumns: "1fr 120px", gap: 10 }}>
@@ -903,7 +947,7 @@ function AgentRunsWorkspace({ tenantId, query, artifacts = [], graphElements = [
               </div>
             )}
             <div style={{ marginTop: 10, fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--muted)" }}>
-              {agentParams.safety} · {tWB(language, "next run", "下次运行")} {session?.config?.next_run_at || tWB(language, "manual", "手动")}
+              {agentParams.safety} · {tWB(language, "next run", "下次运行")} {nextRunAt || tWB(language, "manual", "手动")}
             </div>
           </Panel>
 
@@ -968,10 +1012,10 @@ function AgentRunsWorkspace({ tenantId, query, artifacts = [], graphElements = [
             </Panel>
           )}
 
-          {agentTab !== "autopilot" && session?.frontier?.length > 0 && (
-            <Panel eyebrow={tWB(language, "Frontier priority", "Frontier 优先级")} title={tWB(language, "Next enrichment seeds", "下一批信息增益种子")} count={`${session.frontier.length} ${tWB(language, "queued", "排队中")}`} style={{ marginTop: 16 }}>
+          {agentTab !== "autopilot" && queueCount > 0 && (
+            <Panel eyebrow={tWB(language, "Frontier queue", "Frontier 队列")} title={tWB(language, "Next enrichment seeds", "下一批信息增益种子")} count={`${queueCount} ${tWB(language, "queued", "排队中")}`} style={{ marginTop: 16 }}>
               <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                {session.frontier.slice(0, 8).map((item, index) => (
+                {(runtimeQueue.preview?.length ? runtimeQueue.preview : session.frontier).slice(0, 8).map((item, index) => (
                   <div key={`${item.key || item.target_key || index}`} style={{ border: "1px solid var(--line-soft)", background: "var(--bg-2)", padding: "8px 10px" }}>
                     <div style={{ display: "flex", justifyContent: "space-between", gap: 10 }}>
                       <strong style={{ fontSize: 12 }}>{compactTextWB(item.name || item.target_key || item.key, 80)}</strong>
@@ -1866,6 +1910,39 @@ function runSkippedCountWB(run) {
   return skipped.length || counts.pruned || 0;
 }
 
+function agentSchedulerStateLabelWB(runtimeState, status, language) {
+  const normalizedStatus = String(status || "").toLowerCase();
+  if (normalizedStatus === "paused") return tWB(language, "paused", "已暂停");
+  if (normalizedStatus === "stopped") return tWB(language, "stopped", "已停止");
+  if (runtimeState?.backoff?.active) return tWB(language, "backoff active", "退避中");
+  if (runtimeState?.auto_due) return tWB(language, "due now", "已到期");
+  const cadence = runtimeState?.cadence || "manual";
+  if (cadence === "manual") return tWB(language, "manual", "手动");
+  const cadenceLabel = cadence === "custom"
+    ? `${runtimeState?.custom_interval_minutes || 60}m`
+    : statusLabelWB(cadence, language);
+  return `${cadenceLabel} · ${runtimeState?.auto_due_reason || "scheduled"}`;
+}
+
+function agentBudgetRemainingLabelWB(remainingCycles, maxCycles, language) {
+  if (maxCycles === null || maxCycles === undefined || maxCycles === "") return tWB(language, "open", "未限制");
+  const remaining = remainingCycles === null || remainingCycles === undefined ? "—" : remainingCycles;
+  return `${remaining}/${maxCycles}`;
+}
+
+function agentBackoffLabelWB(backoff, stopReason, language) {
+  if (backoff?.active) {
+    const parts = [
+      tWB(language, "active", "生效中"),
+      backoff.backoff_until ? String(backoff.backoff_until).slice(0, 19) : "",
+      backoff.last_error ? compactTextWB(backoff.last_error, 48) : "",
+    ].filter(Boolean);
+    return parts.join(" · ");
+  }
+  if (stopReason) return compactTextWB(stopReason, 72);
+  return tWB(language, "clear", "无");
+}
+
 function runToneWB(status) {
   const normalized = String(status || "").toLowerCase();
   if (["completed", "done", "approved"].includes(normalized)) return "approved";
@@ -1895,10 +1972,7 @@ function pathContextLabelWB(context) {
 }
 
 function defaultAgentScopeWB(tenantId) {
-  if (tenantId === "maritime-risk") return "maritime-risk chokepoint impact";
-  if (tenantId === "creditcardfraud") return "creditcardfraud fraud risk patterns";
-  if (tenantId === "us-iran-war") return "US-Iran conflict impact network";
-  return tenantId || "tenant graph";
+  return tenantId ? `${tenantId} graph enrichment` : "tenant graph enrichment";
 }
 
 function compactTextWB(value, max = 80) {

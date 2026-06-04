@@ -2,6 +2,29 @@
 
 const { useState: useStateGX, useRef: useRefGX, useEffect: useEffectGX, useMemo: useMemoGX } = React;
 
+const GRAPH_PRIMARY_PALETTE_GX = [
+  "var(--graph-blue)",
+  "var(--graph-red)",
+  "var(--graph-yellow)",
+  "var(--graph-green)",
+];
+
+const GRAPH_ROLE_COLORS_GX = {
+  selected: "var(--graph-blue)",
+  selectedBg: "var(--graph-blue-bg)",
+  selectedLine: "var(--graph-blue-line)",
+  approved: "var(--graph-green)",
+  approvedBg: "var(--graph-green-bg)",
+  approvedLine: "var(--graph-green-line)",
+  candidate: "var(--graph-yellow)",
+  candidateBg: "var(--graph-yellow-bg)",
+  candidateLine: "var(--graph-yellow-line)",
+  conflict: "var(--graph-red)",
+  conflictBg: "var(--graph-red-bg)",
+  conflictLine: "var(--graph-red-line)",
+  edgeDefault: "var(--graph-edge-default)",
+};
+
 function isZhGX(language) {
   return typeof isZhUI === "function" ? isZhUI(language) : String(language || "").startsWith("zh");
 }
@@ -149,6 +172,30 @@ function graphEdgeRankGX(edge, selectedId = "") {
   if (edge?.t === selectedId) score += 2;
   if (edge?.muted) score -= 10;
   return score;
+}
+
+function graphEdgeToneGX(edge) {
+  if (edge?.flag || edge?._raw?.conflict) return GRAPH_ROLE_COLORS_GX.conflict;
+  if (edge?.kind === "risk propagation") return GRAPH_ROLE_COLORS_GX.conflict;
+  if (edge?.kind === "trade dependency" || edge?.aggregateKind === "trade_dependency") return GRAPH_ROLE_COLORS_GX.approved;
+  if (edge?._raw?.status === "proposed" || edge?._raw?.status === "draft") return GRAPH_ROLE_COLORS_GX.candidate;
+  return GRAPH_ROLE_COLORS_GX.edgeDefault;
+}
+
+function graphElementTypeColorGX(type) {
+  const key = String(type || "").toLowerCase();
+  if (key === "node") return GRAPH_ROLE_COLORS_GX.selected;
+  if (key === "edge") return GRAPH_ROLE_COLORS_GX.approved;
+  if (key === "finding") return GRAPH_ROLE_COLORS_GX.candidate;
+  return GRAPH_ROLE_COLORS_GX.conflict;
+}
+
+function graphReviewStatusColorGX(status) {
+  const key = String(status || "").toLowerCase();
+  if (key === "approved" || key === "done") return GRAPH_ROLE_COLORS_GX.approved;
+  if (key === "rejected" || key === "failed" || key === "blocked") return GRAPH_ROLE_COLORS_GX.conflict;
+  if (key === "draft" || key === "proposed" || key === "needs_evidence" || key === "changes") return GRAPH_ROLE_COLORS_GX.candidate;
+  return GRAPH_ROLE_COLORS_GX.selected;
 }
 
 function tradeDependencyAggregatesGX(rawEdges) {
@@ -770,9 +817,8 @@ function GraphExplorer({ data, tenant, language }) {
     setHideUnrelated(v => !v);
   };
   const trailNodes = trailNodeIds.map(id => map[id]).filter(Boolean);
-  const palette = ["var(--accent)", "var(--changes)", "var(--proposed)", "var(--approved)", "var(--dim)"];
   const graphTypes = Array.from(new Set(graphWithPositions.nodes.map(n => n.type).filter(Boolean)));
-  const typeColors = Object.fromEntries(graphTypes.map((t, i) => [t, palette[i % palette.length]]));
+  const typeColors = Object.fromEntries(graphTypes.map((t, i) => [t, GRAPH_PRIMARY_PALETTE_GX[i % GRAPH_PRIMARY_PALETTE_GX.length]]));
   const edgeCounts = graphWithPositions.edges.reduce((acc, e) => {
     const key = e.kind || "edge";
     acc[key] = (acc[key] || 0) + 1;
@@ -1001,7 +1047,7 @@ function GraphExplorer({ data, tenant, language }) {
 
           {leftTab === "proposed" && (
             <div style={{ flex: 1, minHeight: 0, overflow: "auto" }}>
-              <ProposedGraphPanel tenantId={tenantId} proposed={proposed} loading={proposedQ.loading} source={proposedQ.source} focusElementKey={focusElementKey} compact language={language} />
+              <ProposedGraphPanel tenantId={tenantId} proposed={proposed} loading={proposedQ.loading} source={proposedQ.source} focusElementKey={focusElementKey} onReviewed={proposedQ.refetch} compact language={language} />
             </div>
           )}
 
@@ -1055,16 +1101,29 @@ function GraphExplorer({ data, tenant, language }) {
                 <div><span style={{ color: "var(--dim)" }}>{tGX(language, "VISIBLE", "可见")}</span><span className="v">{hideUnrelated && selected ? tGX(language, "TRAIL", "路径") : tGX(language, "ALL", "全部")}</span></div>
                 {hideUnrelated && selected && <div><span style={{ color: "var(--dim)" }}>{tGX(language, "EDGES", "边")}</span><span className="v">{tGX(language, "LIMITED", "已限制")}</span></div>}
                 {hideUnrelated && selected && <div><span style={{ color: "var(--dim)" }}>{tGX(language, "CANVAS", "画布")}</span><span className="v">{canvasCandidateEdges.length}/{connectedEdgesAll.length}</span></div>}
-                <div><span style={{ color: "var(--dim)" }}>SOURCE</span><span className="v" style={{ color: graphQ.source === "live" ? "var(--approved)" : graphQ.source === "live-stale" ? "var(--changes)" : "var(--rejected)" }}>{graphQ.source === "live" ? "LIVE" : graphQ.source === "live-stale" ? "STALE" : graphQ.source === "loading" ? "…" : "NONE"}</span></div>
+                <div><span style={{ color: "var(--dim)" }}>SOURCE</span><span className="v" style={{ color: graphQ.source === "live" ? GRAPH_ROLE_COLORS_GX.approved : graphQ.source === "live-stale" ? GRAPH_ROLE_COLORS_GX.candidate : GRAPH_ROLE_COLORS_GX.conflict }}>{graphQ.source === "live" ? "LIVE" : graphQ.source === "live-stale" ? "STALE" : graphQ.source === "loading" ? "…" : "NONE"}</span></div>
               </div>
             </div>
 
             <div className="graph-overlay-tr">
-              <div style={{ display: "flex", gap: 12 }}>
+              <div style={{ display: "flex", gap: 12, flexWrap: "wrap", justifyContent: "flex-end" }}>
                 {Object.entries(typeColors).map(([k, c]) => (
                   <div key={k} style={{ display: "flex", alignItems: "center", gap: 6 }}>
                     <span style={{ width: 8, height: 8, background: c, borderRadius: "50%", display: "inline-block" }} />
                     <span>{k}</span>
+                  </div>
+                ))}
+              </div>
+              <div style={{ display: "flex", gap: 10, flexWrap: "wrap", justifyContent: "flex-end", marginTop: 7, paddingTop: 7, borderTop: "1px solid var(--line-soft)" }}>
+                {[
+                  [GRAPH_ROLE_COLORS_GX.selected, tGX(language, "selected", "选中")],
+                  [GRAPH_ROLE_COLORS_GX.approved, tGX(language, "approved/path", "已审/路径")],
+                  [GRAPH_ROLE_COLORS_GX.candidate, tGX(language, "candidate", "候选")],
+                  [GRAPH_ROLE_COLORS_GX.conflict, tGX(language, "risk/conflict", "风险/冲突")],
+                ].map(([color, label]) => (
+                  <div key={label} style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                    <span style={{ width: 14, height: 3, background: color, display: "inline-block", borderRadius: 2 }} />
+                    <span>{label}</span>
                   </div>
                 ))}
               </div>
@@ -1256,7 +1315,7 @@ function GraphExplorer({ data, tenant, language }) {
   );
 }
 
-function ProposedGraphPanel({ tenantId, proposed, loading, source, focusElementKey, language }) {
+function ProposedGraphPanel({ tenantId, proposed, loading, source, focusElementKey, onReviewed, language }) {
   const [selectedElement, setSelectedElement] = useStateGX(null);
   const [kindFilter, setKindFilter] = useStateGX("all");
   const [selectedKeys, setSelectedKeys] = useStateGX([]);
@@ -1343,10 +1402,14 @@ function ProposedGraphPanel({ tenantId, proposed, loading, source, focusElementK
       const ok = result?.ok_count || 0;
       const failedItems = (result?.results || []).filter(item => !item.ok);
       const selectedResult = (result?.results || []).find(item => item.ok && item.element?.element_key === selectedElement?.element_key);
-      if (selectedResult?.element) setSelectedElement(selectedResult.element);
+      if (selectedResult?.element && !["approved", "rejected"].includes(String(selectedResult.element.status || "").toLowerCase())) setSelectedElement(selectedResult.element);
       if (!failed) {
         setSelectedKeys([]);
         setReviewReason("");
+        if (selectedResult?.element) {
+          const reviewedKey = selectedResult.element.element_key;
+          setSelectedElement(filteredElements.find(item => item.element_key !== reviewedKey && !selectedKeys.includes(item.element_key)) || null);
+        }
       }
       setReviewMessage({
         kind: failed ? "error" : "ok",
@@ -1354,6 +1417,7 @@ function ProposedGraphPanel({ tenantId, proposed, loading, source, focusElementK
           ? tGX(language, `${ok} recorded, ${failed} failed · ${failedItems.map(item => item.element_key || item.error).slice(0, 2).join(", ")}`, `已记录 ${ok} 条，失败 ${failed} 条 · ${failedItems.map(item => item.element_key || item.error).slice(0, 2).join(", ")}`)
           : tGX(language, `${ok} graph proposal review decisions recorded · formal graph unchanged`, `已记录 ${ok} 条图候选审核决定 · formal graph 未改变`),
       });
+      if (onReviewed) await onReviewed();
       window.dispatchEvent(new CustomEvent("aletheia:retry"));
     } catch (err) {
       setReviewMessage({ kind: "error", text: err.message || String(err) });
@@ -1375,13 +1439,23 @@ function ProposedGraphPanel({ tenantId, proposed, loading, source, focusElementK
         reason,
         reviewer: "Saskue",
       });
-      if (result?.element) setSelectedElement(result.element);
+      const reviewedKey = selectedElement.element_key;
+      const reviewedStatus = String(result?.element?.status || action || "").toLowerCase();
+      if (["approved", "rejected"].includes(reviewedStatus)) {
+        setSelectedElement(filteredElements.find(item => item.element_key !== reviewedKey) || null);
+      } else if (result?.element) {
+        setSelectedElement(result.element);
+      }
       setReviewReason("");
       const status = result?.element?.status || action;
+      const reviewedClosed = ["approved", "rejected"].includes(reviewedStatus);
       setReviewMessage({
         kind: "ok",
-        text: tGX(language, `${status} recorded · selected proposal kept here for confirmation · canonical/formal graph unchanged`, `已记录 ${statusLabelGraphGX(status, language)} · 当前候选已保留在详情中便于确认 · canonical/formal graph 未改变`),
+        text: reviewedClosed
+          ? tGX(language, `${status} recorded · removed from current pending review · canonical/formal graph unchanged`, `已记录 ${statusLabelGraphGX(status, language)} · 已从当前待审列表移出 · canonical/formal graph 未改变`)
+          : tGX(language, `${status} recorded · selected proposal updated · canonical/formal graph unchanged`, `已记录 ${statusLabelGraphGX(status, language)} · 当前候选状态已更新 · canonical/formal graph 未改变`),
       });
+      if (onReviewed) await onReviewed();
       window.dispatchEvent(new CustomEvent("aletheia:retry"));
     } catch (err) {
       setReviewMessage({ kind: "error", text: err.message || String(err) });
@@ -1429,7 +1503,7 @@ function ProposedGraphPanel({ tenantId, proposed, loading, source, focusElementK
             {selectedInFilter.length > 0 ? tGX(language, ` Current filter selected: ${selectedInFilter.length}.`, ` 当前过滤结果已选择：${selectedInFilter.length}。`) : ""}
           </div>
           {reviewMessage && (
-            <div style={{ marginTop: 8, fontFamily: "var(--font-mono)", fontSize: 10, color: reviewMessage.kind === "error" ? "var(--rejected)" : "var(--approved)", overflowWrap: "anywhere" }}>
+            <div style={{ marginTop: 8, fontFamily: "var(--font-mono)", fontSize: 10, color: reviewMessage.kind === "error" ? GRAPH_ROLE_COLORS_GX.conflict : GRAPH_ROLE_COLORS_GX.approved, overflowWrap: "anywhere" }}>
               {reviewMessage.text}
             </div>
           )}
@@ -1449,8 +1523,8 @@ function ProposedGraphPanel({ tenantId, proposed, loading, source, focusElementK
           const profile = item.payload?.deep_graph_profile || {};
           return (
             <button key={item.element_key} type="button" onClick={() => { setSelectedElement(item); setReviewMessage(null); }}
-                    style={{ border: selectedElement?.element_key === item.element_key ? "1px solid var(--accent)" : "1px solid var(--line)", padding: 10, marginBottom: 10, background: "var(--bg-2)", width: "100%", textAlign: "left", cursor: "pointer" }}>
-              <div className="eyebrow accent">{tGX(language, "deep graph finding · draft", "深度图推理发现 · 草稿")}</div>
+                    style={{ border: selectedElement?.element_key === item.element_key ? `1px solid ${GRAPH_ROLE_COLORS_GX.candidate}` : "1px solid var(--line)", borderLeft: `3px solid ${GRAPH_ROLE_COLORS_GX.candidate}`, padding: 10, marginBottom: 10, background: selectedElement?.element_key === item.element_key ? GRAPH_ROLE_COLORS_GX.candidateBg : "var(--bg-2)", width: "100%", textAlign: "left", cursor: "pointer" }}>
+              <div className="eyebrow" style={{ color: GRAPH_ROLE_COLORS_GX.candidate }}>{tGX(language, "deep graph finding · draft", "深度图推理发现 · 草稿")}</div>
               <div style={{ color: "var(--text)", fontWeight: 600, marginTop: 4 }}>{labelGX(item.name, language)}</div>
               <div style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--muted)", marginTop: 6 }}>
                 {labelGX(profile.path_label || compactText(item.payload?.conclusion, 140), language)}
@@ -1466,11 +1540,15 @@ function ProposedGraphPanel({ tenantId, proposed, loading, source, focusElementK
           {tGX(language, "Showing", "显示")} {kindFilter === "all" ? tGX(language, "all proposed graph elements", "全部候选图元素") : `${kindFilter} ${tGX(language, "proposals", "候选")}`} · {tGX(language, "click an item to review.", "点击条目进行审核。")}
         </div>
         <div style={{ maxHeight: 220, overflow: "auto", display: "flex", flexDirection: "column", gap: 6 }}>
-          {filteredElements.map(item => (
+          {filteredElements.map(item => {
+            const itemColor = graphElementTypeColorGX(item.element_type);
+            const statusColor = graphReviewStatusColorGX(item.status);
+            const selectedItem = selectedElement?.element_key === item.element_key;
+            return (
             <div key={item.element_key} role="button" tabIndex={0}
                  onClick={() => { setSelectedElement(item); setReviewMessage(null); }}
                  onKeyDown={e => { if (e.key === "Enter" || e.key === " ") setSelectedElement(item); }}
-                 style={{ border: selectedElement?.element_key === item.element_key ? "1px solid var(--accent)" : "1px solid var(--line-soft)", borderLeft: selectedElement?.element_key === item.element_key ? "3px solid var(--accent)" : "1px solid var(--line-soft)", padding: 8, background: selectedElement?.element_key === item.element_key ? "var(--accent-bg)" : "transparent", textAlign: "left", cursor: "pointer" }}>
+                 style={{ border: selectedItem ? `1px solid ${itemColor}` : "1px solid var(--line-soft)", borderLeft: `3px solid ${itemColor}`, padding: 8, background: selectedItem ? GRAPH_ROLE_COLORS_GX.selectedBg : "transparent", textAlign: "left", cursor: "pointer" }}>
               <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
                 <span style={{ color: "var(--text)", fontSize: 12, display: "flex", gap: 6, alignItems: "center" }}>
                   <input
@@ -1481,18 +1559,19 @@ function ProposedGraphPanel({ tenantId, proposed, loading, source, focusElementK
                   />
                   {labelGX(item.name, language)}
                 </span>
-                <span className="ct">{item.element_type}</span>
+                <span className="ct" style={{ color: itemColor }}>{item.element_type}</span>
               </div>
               <div style={{ fontFamily: "var(--font-mono)", color: "var(--muted)", fontSize: 10 }}>
-                {statusLabelGraphGX(item.status, language)} · {item.source_url || tGX(language, "source unknown", "来源未知")}
+                <span style={{ color: statusColor }}>{statusLabelGraphGX(item.status, language)}</span> · {item.source_url || tGX(language, "source unknown", "来源未知")}
               </div>
               {dedupAuditGX(item).dedup_decision && (
-                <div style={{ fontFamily: "var(--font-mono)", color: "var(--accent)", fontSize: 10, marginTop: 3 }}>
+                <div style={{ fontFamily: "var(--font-mono)", color: GRAPH_ROLE_COLORS_GX.selected, fontSize: 10, marginTop: 3 }}>
                   {tGX(language, "dedup", "去重")} · {dedupDecisionLabelGX(dedupAuditGX(item).dedup_decision, language)}
                 </div>
               )}
             </div>
-          ))}
+            );
+          })}
           {filteredElements.length === 0 && (
             <div style={{ fontFamily: "var(--font-mono)", color: "var(--muted)", fontSize: 10, border: "1px solid var(--line-soft)", padding: 8 }}>
               {tGX(language, "No", "没有")} {kindFilter} {tGX(language, "proposed graph elements.", "候选图元素。")}
@@ -1685,9 +1764,8 @@ function BigGraph({
   const [draggingEdge, setDraggingEdge] = useStateGX(null);
   const [expandedEdgeGroupNodeIds, setExpandedEdgeGroupNodeIds] = useStateGX([]);
   const map = Object.fromEntries(data.nodes.map(n => [n.id, n]));
-  const palette = ["var(--accent)", "var(--changes)", "var(--proposed)", "var(--approved)", "var(--dim)"];
   const graphTypes = Array.from(new Set(data.nodes.map(n => n.type).filter(Boolean)));
-  const typeColors = Object.fromEntries(graphTypes.map((t, i) => [t, palette[i % palette.length]]));
+  const typeColors = Object.fromEntries(graphTypes.map((t, i) => [t, GRAPH_PRIMARY_PALETTE_GX[i % GRAPH_PRIMARY_PALETTE_GX.length]]));
   const sel = selected ? selected.id : null;
   const trailIds = new Set(trailNodeIds || []);
   if (sel) trailIds.add(sel);
@@ -1850,10 +1928,10 @@ function BigGraph({
          style={{ width: "100%", height: "100%", display: "block", touchAction: "none", userSelect: "none" }}>
       <defs>
         <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
-          <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--line-strong)" />
+          <path d="M 0 0 L 10 5 L 0 10 z" fill={GRAPH_ROLE_COLORS_GX.edgeDefault} />
         </marker>
         <marker id="arrow-accent" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
-          <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--accent)" />
+          <path d="M 0 0 L 10 5 L 0 10 z" fill={GRAPH_ROLE_COLORS_GX.selected} />
         </marker>
       </defs>
 
@@ -1873,8 +1951,9 @@ function BigGraph({
         const dimmed = focusActive && !involved && !inTrail && !inCandidate && !(activeNeighborIds.has(e.s) || activeNeighborIds.has(e.t));
         const emphasized = involved || inTrail || isSelectedEdge;
         const showEdgeLabel = emphasized || inVisibleOffTrail;
-        const edgeColor = e.flag ? "oklch(0.66 0.18 25 / 0.7)" : (emphasized ? "var(--accent)" : inCandidate ? "var(--approved)" : e.muted ? "var(--faint)" : "var(--line-strong)");
-        const labelColor = e.flag ? "var(--rejected)" : (emphasized ? "var(--accent)" : "var(--approved)");
+        const semanticEdgeColor = graphEdgeToneGX(e);
+        const edgeColor = e.flag ? GRAPH_ROLE_COLORS_GX.conflict : (emphasized ? GRAPH_ROLE_COLORS_GX.selected : inCandidate ? GRAPH_ROLE_COLORS_GX.candidate : e.muted ? "var(--faint)" : semanticEdgeColor);
+        const labelColor = e.flag ? GRAPH_ROLE_COLORS_GX.conflict : (emphasized ? GRAPH_ROLE_COLORS_GX.selected : inCandidate ? GRAPH_ROLE_COLORS_GX.candidate : semanticEdgeColor);
         const edgeCursor = draggingEdge?.key === edgeKey ? "grabbing" : "grab";
         return (
           <g key={edgeKey || i} opacity={dimmed ? 0.16 : (hideUnrelated && inCandidate && !emphasized ? 0.78 : 1)}>
@@ -1931,8 +2010,8 @@ function BigGraph({
               width={language === "zh" ? 130 : 156}
               height="24"
               rx="7"
-              fill={group.expanded ? "var(--accent-bg)" : "var(--bg-1)"}
-              stroke={group.expanded ? "var(--accent-line)" : "var(--line-strong)"}
+              fill={group.expanded ? GRAPH_ROLE_COLORS_GX.selectedBg : "var(--bg-1)"}
+              stroke={group.expanded ? GRAPH_ROLE_COLORS_GX.selectedLine : GRAPH_ROLE_COLORS_GX.edgeDefault}
               opacity="0.96"
             />
             <text
@@ -1940,7 +2019,7 @@ function BigGraph({
               y={y + 16}
               fontSize="10"
               fontFamily="var(--font-mono)"
-              fill={group.expanded ? "var(--accent)" : "var(--muted)"}>
+              fill={group.expanded ? GRAPH_ROLE_COLORS_GX.selected : "var(--muted)"}>
               {label}
             </text>
           </g>
@@ -1957,7 +2036,7 @@ function BigGraph({
         const isHover = n.id === hoverId;
         const dimmed = focusActive && !isSel && !isTrail && !isActiveNeighbor && !isTrailNeighbor;
         const showLabel = isSel || isTrail || isHover || (hideUnrelated && isTrailNeighbor);
-        const stroke = n.flag ? "var(--rejected)" : (isSel ? "var(--accent)" : isTrail ? "var(--approved)" : isActiveNeighbor ? "var(--accent-dim)" : isTrailNeighbor ? "var(--approved)" : (n.muted ? "var(--faint)" : typeColors[n.type] || "var(--text-dim)"));
+        const stroke = n.flag ? GRAPH_ROLE_COLORS_GX.conflict : (isSel ? GRAPH_ROLE_COLORS_GX.selected : isTrail ? GRAPH_ROLE_COLORS_GX.approved : isActiveNeighbor ? GRAPH_ROLE_COLORS_GX.candidate : isTrailNeighbor ? GRAPH_ROLE_COLORS_GX.approved : (n.muted ? "var(--faint)" : typeColors[n.type] || "var(--text-dim)"));
         return (
           <g key={i} onPointerDown={(event) => startDrag(event, n)}
                  onPointerMove={moveDrag}
@@ -1968,10 +2047,10 @@ function BigGraph({
                  opacity={dimmed ? 0.24 : 1}
                  style={{ cursor: dragging?.id === n.id ? "grabbing" : "grab", transition: "opacity 120ms ease" }}>
             {(isSel || isHover || isTrail) && (
-              <circle cx={n.x} cy={n.y} r={n.r + 10} fill={isTrail && !isSel ? "oklch(0.72 0.10 150 / 0.10)" : "var(--accent-bg)"} stroke={isTrail && !isSel ? "oklch(0.72 0.10 150 / 0.35)" : "var(--accent-line)"} strokeWidth="1" />
+              <circle cx={n.x} cy={n.y} r={n.r + 10} fill={isTrail && !isSel ? GRAPH_ROLE_COLORS_GX.approvedBg : GRAPH_ROLE_COLORS_GX.selectedBg} stroke={isTrail && !isSel ? GRAPH_ROLE_COLORS_GX.approvedLine : GRAPH_ROLE_COLORS_GX.selectedLine} strokeWidth="1" />
             )}
             <circle cx={n.x} cy={n.y} r={n.r}
-                    fill={isSel ? "var(--accent)" : "var(--bg-2)"}
+                    fill={isSel ? GRAPH_ROLE_COLORS_GX.selected : "var(--bg-2)"}
                     stroke={stroke} strokeWidth={isSel ? 2 : isTrail ? 1.8 : 1.4} />
             {isSel && <circle cx={n.x} cy={n.y} r={n.r - 7} fill="var(--bg-1)" />}
             {showLabel && (
@@ -1979,7 +2058,7 @@ function BigGraph({
                 <text x={n.x} y={n.y + n.r + 14}
                       textAnchor="middle"
                       fontSize="11" fontFamily="var(--font-mono)"
-                      fill="var(--accent)"
+                      fill={isSel ? GRAPH_ROLE_COLORS_GX.selected : stroke}
                       style={{ pointerEvents: "none" }}>
                   {labelGX(n.id, language)}
                 </text>

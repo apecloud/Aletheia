@@ -17,6 +17,7 @@ from agents.iterative_graph_enrichment_agent import (  # noqa: E402
     GRAPH_EXTRACTION_PROMPT_VERSION,
     GraphDeepResearchBenchmark,
     IterativeGraphEnrichmentAgent,
+    _graph_context_query_plan,
 )
 from agents.ontology_artifacts import (  # noqa: E402
     GraphIdentityIndex,
@@ -42,9 +43,11 @@ class StaticTestEmbeddingAdapter:
                 "vector": None,
                 "dim": 0,
             }
-        if "edge | country" in normalized and "bab el mandeb strait" in normalized:
+        if "finding |" in normalized and ("hormuz" in normalized or "energy disruption" in normalized):
+            vector = [0.6, 0.6, 0.0, 0.0]
+        elif "edge | country" in normalized and "bab el mandeb strait" in normalized:
             vector = [0.0, 0.0, 0.7, 0.7]
-        if "node | chokepoint" in normalized and "bab el mandeb strait" in normalized:
+        elif "node | chokepoint" in normalized and "bab el mandeb strait" in normalized:
             vector = [0.0, 0.0, 1.0, 0.0]
         elif "node | chokepoint" in normalized and "bab el mandeb" in normalized:
             vector = [0.0, 0.0, 0.82, 0.57]
@@ -76,6 +79,42 @@ class DegradedTestEmbeddingAdapter:
             "model": self.model_name,
             "vector": None,
             "dim": 0,
+        }
+
+
+class OrthogonalShortAliasEmbeddingAdapter:
+    model_name = "test-orthogonal-short-alias-mini"
+
+    def embed(self, text: str):
+        lowered = (text or "").lower()
+        if "node | country | us | us" in lowered:
+            vector = [1.0, 0.0, 0.0, 0.0]
+        else:
+            vector = [0.0, 1.0, 0.0, 0.0]
+        return {
+            "status": "ready",
+            "model": self.model_name,
+            "vector": vector,
+            "dim": len(vector),
+        }
+
+
+class TypeArtifactNearestEmbeddingAdapter:
+    model_name = "test-type-artifact-nearest-mini"
+
+    def embed(self, text: str):
+        lowered = (text or "").lower()
+        if "node | country | us | us" in lowered:
+            vector = [1.0, 0.0, 0.0, 0.0]
+        elif "node | country | country | country" in lowered:
+            vector = [1.0, 0.0, 0.0, 0.0]
+        else:
+            vector = [0.0, 1.0, 0.0, 0.0]
+        return {
+            "status": "ready",
+            "model": self.model_name,
+            "vector": vector,
+            "dim": len(vector),
         }
 
 
@@ -350,7 +389,7 @@ class IterativeGraphEnrichmentTest(unittest.TestCase):
                 "no_approved_schema_graph_projection",
             )
 
-    def test_unmapped_relation_is_preserved_for_review_when_edge_type_missing(self):
+    def test_unmapped_relation_becomes_review_gated_fact_edge_when_edge_type_missing(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             db_url = f"sqlite:///{Path(tmpdir) / 'metadata.db'}"
             engine = create_engine(db_url)
@@ -404,7 +443,21 @@ class IterativeGraphEnrichmentTest(unittest.TestCase):
             extraction = result["run"]["expansion_trace"][0]["last_extraction_profile"]
             rejected = extraction["rejected_or_ambiguous_candidates"]
 
-            self.assertFalse([item for item in result["proposed_graph"] if item["element_type"] == "edge"])
+            fact_edges = [
+                item
+                for item in result["proposed_graph"]
+                if item["element_type"] == "edge" and item["payload"].get("fact_layer")
+            ]
+            self.assertTrue(fact_edges)
+            self.assertFalse(
+                [
+                    item
+                    for item in fact_edges
+                    if item["payload"].get("relation_ontology_candidate")
+                    or item["payload"]["extraction"].get("formal_graph_write")
+                    or item["payload"]["extraction"].get("canonical_ontology_write")
+                ]
+            )
             self.assertTrue(rejected)
             self.assertEqual(rejected[0]["reason"], "unmapped_relation")
             self.assertEqual(rejected[0]["review_status"], "needs_review")
@@ -414,6 +467,8 @@ class IterativeGraphEnrichmentTest(unittest.TestCase):
             self.assertTrue(rejected[0]["relation_label"])
             self.assertTrue(rejected[0]["evidence_quote"])
             self.assertEqual(rejected[0]["source_ref"], "https://zenodo.org/records/13841882")
+            self.assertEqual(fact_edges[0]["payload"]["review_status"], "needs_review")
+            self.assertEqual(fact_edges[0]["payload"]["properties"]["relation_mapping_status"], "unmapped_relation")
 
     def test_langextract_runner_feeds_structured_contract(self):
         def char_interval(start, end):
@@ -528,6 +583,145 @@ class IterativeGraphEnrichmentTest(unittest.TestCase):
             self.assertFalse(extraction["nodes"])
             self.assertFalse(extraction["edges"])
 
+    def test_ambiguous_relation_endpoint_becomes_review_gated_fact_edge(self):
+        def fake_runner(_source_text, _schema_context):
+            return SimpleNamespace(
+                extractions=[
+                    SimpleNamespace(
+                        extraction_class="graph_node",
+                        extraction_text="US",
+                        attributes={"schema_node_key": "country", "node_type": "Country"},
+                        char_interval=SimpleNamespace(start_pos=0, end_pos=2),
+                    ),
+                    SimpleNamespace(
+                        extraction_class="graph_relation",
+                        extraction_text="is exposed through a contested passage",
+                        attributes={
+                            "source_label": "US",
+                            "target_label": "unresolved passage",
+                            "relation_label": "exposed through",
+                        },
+                        char_interval=SimpleNamespace(start_pos=3, end_pos=42),
+                    ),
+                ]
+            )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_url, _ = self._seed_db(tmpdir)
+            agent = IterativeGraphEnrichmentAgent(
+                db_url,
+                tenant="maritime-risk",
+                search_results_json=self._fixture(tmpdir),
+                allowed_domains=["zenodo.org"],
+                max_iterations=1,
+                max_frontier=1,
+                max_results_per_query=1,
+                langextract_runner=fake_runner,
+                embedding_adapter=StaticTestEmbeddingAdapter(),
+            )
+            result = agent.run("preserve unresolved relation facts")
+            extraction = result["run"]["expansion_trace"][0]["last_extraction_profile"]
+            rejected = extraction["rejected_or_ambiguous_candidates"]
+            fact_nodes = [
+                item
+                for item in result["proposed_graph"]
+                if item["element_type"] == "node" and item["payload"].get("fact_layer")
+            ]
+            fact_edges = [
+                item
+                for item in result["proposed_graph"]
+                if item["element_type"] == "edge" and item["payload"].get("fact_layer")
+            ]
+
+            self.assertTrue(any(item.get("reason") == "ambiguous_relation_endpoint" for item in rejected))
+            self.assertTrue(fact_nodes)
+            self.assertTrue(fact_edges)
+            self.assertFalse(
+                [
+                    item
+                    for item in fact_nodes
+                    if item["payload"].get("ontology_type") == "EvidenceFact"
+                    and item["payload"].get("label") == "exposed through"
+                ]
+            )
+            self.assertEqual(fact_edges[0]["payload"]["review_status"], "needs_review")
+            self.assertTrue(fact_edges[0]["payload"]["properties"]["fact_node_hint"])
+            self.assertNotIn("canonical_id_hint", fact_edges[0]["payload"]["properties"])
+            self.assertFalse(fact_edges[0]["payload"]["extraction"]["formal_graph_write"])
+            self.assertFalse(fact_edges[0]["payload"]["extraction"]["canonical_ontology_write"])
+            self.assertIsNone(fact_edges[0]["payload"].get("relation_ontology_candidate"))
+
+    def test_relation_only_ambiguous_endpoint_uses_frontier_edge_not_fact_node(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_url, _ = self._seed_db(tmpdir)
+            agent = IterativeGraphEnrichmentAgent(
+                db_url,
+                tenant="maritime-risk",
+                search_results_json=self._fixture(tmpdir),
+                allowed_domains=["zenodo.org"],
+                max_iterations=1,
+                max_frontier=1,
+                max_results_per_query=1,
+                embedding_adapter=StaticTestEmbeddingAdapter(),
+            )
+            extraction = {
+                "prompt_version": "test",
+                "extraction_source": "structured_llm_contract",
+                "extraction_engine": "google/langextract",
+                "extraction_engine_status": "ok",
+                "schema_context": {"node_types": {}, "edge_types": []},
+                "ontology_candidates": [],
+                "nodes": [],
+                "edges": [],
+                "findings": [],
+                "quality": {"extraction_steps": []},
+                "rejected_or_ambiguous_candidates": [
+                    {
+                        "reason": "ambiguous_relation_endpoint",
+                        "review_required": True,
+                        "review_status": "needs_review",
+                        "relation_label": "has_country_dependency",
+                        "evidence_quote": "South Korea has country dependency through Hormuz.",
+                        "source_ref": "https://hormuztracker.org/",
+                    }
+                ],
+            }
+            frontier = {
+                "key": "proposed-graph:maritime-risk:edge:0029a93a5f44baa6",
+                "name": "South Korea (KOR) has country dependency Hormuz Strait",
+                "artifact_type": "proposed_edge",
+                "source": "proposed_graph",
+                "payload": {
+                    "source_type": "Country",
+                    "source_label": "South Korea (KOR)",
+                    "relation": "has_country_dependency",
+                    "target_type": "Maritime Chokepoint",
+                    "target_label": "Hormuz Strait",
+                },
+            }
+
+            elements = agent._candidate_elements(
+                extraction,
+                frontier,
+                SimpleNamespace(url="https://hormuztracker.org/", title="Hormuz tracker"),
+                "summary",
+                1,
+            )
+            fact_edges = [item for item in elements if item["element_type"] == "edge" and item["payload"].get("fact_layer")]
+            relation_nodes = [
+                item
+                for item in elements
+                if item["element_type"] == "node" and item["name"] == "has_country_dependency"
+            ]
+
+            self.assertTrue(fact_edges)
+            self.assertFalse(relation_nodes)
+            self.assertEqual(fact_edges[0]["payload"]["relation"], "has_country_dependency")
+            self.assertEqual(fact_edges[0]["payload"]["source_label"], "South Korea (KOR)")
+            self.assertEqual(fact_edges[0]["payload"]["target_label"], "Hormuz Strait")
+            self.assertTrue(fact_edges[0]["payload"]["properties"]["unresolved_endpoint_mapping"]["source_label_missing"])
+            self.assertTrue(fact_edges[0]["payload"]["properties"]["unresolved_endpoint_mapping"]["target_label_missing"])
+
     def test_langextract_key_can_be_read_from_configured_env_file(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             env_file = Path(tmpdir) / ".env"
@@ -621,7 +815,7 @@ class IterativeGraphEnrichmentTest(unittest.TestCase):
                 )
             )
 
-    def test_unmapped_relation_with_approved_edge_goes_to_review_not_edge(self):
+    def test_unmapped_relation_with_approved_edge_becomes_review_gated_fact_edge(self):
         def fake_runner(_source_text, _schema_context):
             return SimpleNamespace(
                 extractions=[
@@ -667,12 +861,27 @@ class IterativeGraphEnrichmentTest(unittest.TestCase):
             extraction = result["run"]["expansion_trace"][0]["last_extraction_profile"]
             rejected = extraction["rejected_or_ambiguous_candidates"]
 
-            self.assertFalse([item for item in result["proposed_graph"] if item["element_type"] == "edge"])
+            fact_edges = [
+                item
+                for item in result["proposed_graph"]
+                if item["element_type"] == "edge" and item["payload"].get("fact_layer")
+            ]
+            self.assertTrue(fact_edges)
+            self.assertFalse(
+                [
+                    item
+                    for item in fact_edges
+                    if item["payload"].get("relation_ontology_candidate")
+                    or item["payload"]["extraction"].get("formal_graph_write")
+                    or item["payload"]["extraction"].get("canonical_ontology_write")
+                ]
+            )
             self.assertTrue(any(item.get("reason") == "ambiguous_relation" for item in rejected))
             ambiguous = next(item for item in rejected if item.get("reason") == "ambiguous_relation")
             self.assertEqual(ambiguous["review_status"], "needs_review")
             self.assertTrue(ambiguous["review_required"])
             self.assertEqual(ambiguous["relation_label"], "unapproved blockade relation")
+            self.assertEqual(fact_edges[0]["payload"]["properties"]["relation_mapping_status"], "ambiguous_relation")
 
     def test_benchmark_reads_baseline_as_comparison_only(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -735,7 +944,6 @@ class IterativeGraphEnrichmentTest(unittest.TestCase):
             plan = agent._query_plan_for_frontier(frontier, "discover maritime trade exposure")
             query = plan["query"]
             self.assertIn("CHN", query)
-            self.assertIn("China", query)
             self.assertIn("Bab el-Mandeb Strait", query)
             self.assertIn("maritime chokepoint", query)
             self.assertIn("trade disruption", query)
@@ -743,6 +951,29 @@ class IterativeGraphEnrichmentTest(unittest.TestCase):
             self.assertIn("CHN", plan["graph_context_used"]["neighbor_nodes"])
             self.assertIn("Bab el-Mandeb Strait", plan["path_context_used"]["path_label"])
             self.assertIn("trade_at_risk_v", plan["query_terms"]["metrics"])
+            self.assertEqual(plan["selected_plan"]["intent"], "path_evidence")
+            self.assertEqual(plan["selected_plan"]["granularity"], "L0_path_exact")
+            self.assertEqual(plan["selected_plan"]["radius"], 0)
+            self.assertEqual(plan["selected_plan"]["query"], plan["query"])
+            self.assertEqual(
+                [item["intent"] for item in plan["plans"]],
+                [
+                    "path_evidence",
+                    "single_endpoint_expansion",
+                    "loose_pair_discovery",
+                    "schema_broad_discovery",
+                    "objective_broad_scan",
+                ],
+            )
+            self.assertEqual([item["coarse_level"] for item in plan["plans"]], [0, 1, 2, 3, 4])
+            self.assertEqual(plan["plans"][1]["radius"], 1)
+            self.assertIn("CHN", plan["plans"][1]["query"])
+            self.assertIn("SchemaGraph mapping", plan["plans"][2]["acceptance"])
+            self.assertIn("Chokepoint", plan["plans"][3]["query"])
+            self.assertIn("discover", plan["plans"][4]["query"])
+            self.assertEqual(plan["expansion_policy"]["default_max_radius"], 1)
+            self.assertEqual(plan["expansion_policy"]["query_ladder"][0], "L0_path_exact")
+            self.assertIn("graph_anchor", plan["relevance_gate"])
 
     def test_run_trace_records_graph_aware_query_provenance(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -775,12 +1006,34 @@ class IterativeGraphEnrichmentTest(unittest.TestCase):
             result = agent.run("discover maritime trade exposure", frontier_items=[frontier])
             trace = result["run"]["expansion_trace"][0]
 
-            self.assertIn("China", trace["query"])
             self.assertIn("trade disruption", trace["query"])
             self.assertEqual(trace["graph_context_used"]["relation"], "depends_on")
             self.assertEqual(trace["path_context_used"]["source_label"], "CHN")
+            self.assertEqual(trace["selected_query_plan"]["intent"], "path_evidence")
+            self.assertEqual(trace["selected_query_plan"]["granularity"], "L0_path_exact")
+            self.assertEqual(trace["query_plans"][1]["intent"], "single_endpoint_expansion")
+            self.assertEqual(trace["query_plans"][4]["granularity"], "L4_objective_broad")
+            self.assertIn("schema", trace["relevance_gate"])
             self.assertIn("query_terms", result["run"]["skipped_sources"][0])
             self.assertIn("CHN", result["run"]["skipped_sources"][0]["query_terms"]["countries"])
+            self.assertEqual(result["run"]["skipped_sources"][0]["selected_query_plan"]["intent"], "path_evidence")
+
+    def test_graph_context_query_plan_keeps_node_frontier_label_in_exact_query(self):
+        plan = _graph_context_query_plan(
+            {
+                "key": "proposed-graph:node:hormuz",
+                "name": "Hormuz",
+                "artifact_type": "proposed_node",
+                "ontology_type": "Maritime Chokepoint",
+                "payload": {"ontology_type": "Maritime Chokepoint", "label": "Hormuz"},
+            },
+            "Analyze US-Iran escalation impacts",
+            "maritime-risk",
+        )
+
+        self.assertIn("Hormuz", plan["selected_plan"]["query"])
+        self.assertEqual(plan["selected_plan"]["granularity"], "L0_path_exact")
+        self.assertIn({"term": "Hormuz", "source": "frontier.label"}, plan["selected_plan"]["source_terms"])
 
     def test_rerun_same_frontier_does_not_duplicate_proposed_nodes_or_edges(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -1226,6 +1479,181 @@ class IterativeGraphEnrichmentTest(unittest.TestCase):
             self.assertIn("source_identity", annotated["payload"]["conflict_fields"])
             self.assertNotEqual(annotated["payload"]["dedup_decision"], "duplicate_existing_proposal")
 
+    def test_finding_embedding_dedup_does_not_use_source_url_identity(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_url, _ = self._seed_db(tmpdir)
+            agent = IterativeGraphEnrichmentAgent(
+                db_url,
+                tenant="maritime-risk",
+                embedding_adapter=StaticTestEmbeddingAdapter(),
+            )
+            existing_item = {
+                "element_type": "finding",
+                "name": "Hormuz energy disruption affects import exposure",
+                "payload": {
+                    "finding_type": "deep_graph_finding",
+                    "title": "Hormuz energy disruption affects import exposure",
+                    "conclusion": "Energy disruption near Hormuz Strait affects importer exposure.",
+                    "evidence_chain": [
+                        {"kind": "relation", "metric": "country_dependency", "value": "country dependency", "source_ref": "https://source-a.example/finding"},
+                        {"kind": "risk_metric", "metric": "energy_import_exposure", "value": "energy disruption", "source_ref": "https://source-a.example/finding"},
+                    ],
+                },
+                "evidence_refs": ["https://source-a.example/finding"],
+                "source_url": "https://source-a.example/finding",
+                "confidence": 0.82,
+                "iteration": 1,
+            }
+            existing_identity = iterative_graph_enrichment_agent._candidate_identity_payload(existing_item)
+            session = agent.Session()
+            try:
+                agent._upsert_identity_index_row(
+                    session,
+                    identity=existing_identity,
+                    identity_key=iterative_graph_enrichment_agent._identity_key("maritime-risk", existing_identity),
+                    source_space="proposed_graph",
+                    source_key="proposed-graph:maritime-risk:finding:hormuz-energy-a",
+                    source_status="draft",
+                    evidence_refs=existing_item["evidence_refs"],
+                    payload=existing_item["payload"],
+                )
+                session.commit()
+                identity_index = agent._identity_index(session)
+            finally:
+                session.close()
+
+            candidate = {
+                "element_type": "finding",
+                "name": "Energy import exposure near Hormuz Strait",
+                "payload": {
+                    "finding_type": "deep_graph_finding",
+                    "title": "Energy import exposure near Hormuz Strait",
+                    "conclusion": "Import exposure can rise when energy traffic through Hormuz is disrupted.",
+                    "evidence_chain": [
+                        {"kind": "risk_metric", "metric": "energy_import_exposure", "value": "energy disruption", "source_ref": "https://source-b.example/finding"},
+                        {"kind": "relation", "metric": "country_dependency", "value": "country dependency", "source_ref": "https://source-b.example/finding"},
+                    ],
+                },
+                "evidence_refs": ["https://source-b.example/finding"],
+                "source_url": "https://source-b.example/finding",
+                "confidence": 0.8,
+                "iteration": 1,
+            }
+            annotated = agent._annotate_candidate_identity(
+                candidate,
+                task_id="task-finding",
+                run_id="run-finding",
+                frontier_id="frontier-finding",
+                candidate_seq=1,
+                identity_index=identity_index,
+            )
+
+            self.assertEqual(annotated["payload"]["dedup_decision"], "duplicate_existing_proposal")
+            self.assertEqual(annotated["payload"]["match_method"], "vector_embedding")
+            self.assertEqual(annotated["payload"]["matched_node_key"], "proposed-graph:maritime-risk:finding:hormuz-energy-a")
+            self.assertEqual(annotated["payload"]["embedding_model"], "test-multilingual-mini")
+            self.assertEqual(annotated["payload"]["vector_distance"], 0.0)
+            self.assertNotIn("source-a.example", annotated["payload"]["identity_key"])
+            self.assertNotIn("source-b.example", annotated["payload"]["identity_key"])
+            self.assertFalse(annotated["payload"]["llm_merge_decision_allowed"])
+
+    def test_repeated_finding_is_skipped_from_new_proposed_output(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_url, _ = self._seed_db(tmpdir)
+            first_agent = IterativeGraphEnrichmentAgent(
+                db_url,
+                tenant="maritime-risk",
+                search_results_json=self._fixture(tmpdir),
+                allowed_domains=["zenodo.org"],
+                max_iterations=1,
+                max_frontier=1,
+                max_results_per_query=1,
+                langextract_runner=self._langextract_runner,
+                embedding_adapter=StaticTestEmbeddingAdapter(),
+            )
+            first = first_agent.run("discover hazard chokepoint country trade action paths")
+            self.assertTrue([item for item in first["proposed_graph"] if item["element_type"] == "finding"])
+            first_snapshot = first_agent.identity_index_snapshot()
+            self.assertTrue(any(row["element_kind"] == "finding" for row in first_snapshot["identity_index"]))
+
+            second_agent = IterativeGraphEnrichmentAgent(
+                db_url,
+                tenant="maritime-risk",
+                search_results_json=self._fixture(tmpdir),
+                allowed_domains=["zenodo.org"],
+                max_iterations=1,
+                max_frontier=1,
+                max_results_per_query=1,
+                langextract_runner=self._langextract_runner,
+                embedding_adapter=StaticTestEmbeddingAdapter(),
+            )
+            second = second_agent.run("discover hazard chokepoint country trade action paths")
+            self.assertFalse([item for item in second["proposed_graph"] if item["element_type"] == "finding"])
+            self.assertTrue(
+                any(
+                    item.get("element_type") == "finding"
+                    and item.get("reason") == "duplicate_finding_not_proposed"
+                    and item.get("dedup_decision") == "duplicate_existing_proposal"
+                    for item in second["run"]["skipped_sources"]
+                )
+            )
+            self.assertEqual(second["run"]["finding_count"], 0)
+
+    def test_stale_persistent_index_rebuilds_to_include_existing_findings(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_url, _ = self._seed_db(tmpdir)
+            first_agent = IterativeGraphEnrichmentAgent(
+                db_url,
+                tenant="maritime-risk",
+                search_results_json=self._fixture(tmpdir),
+                allowed_domains=["zenodo.org"],
+                max_iterations=1,
+                max_frontier=1,
+                max_results_per_query=1,
+                langextract_runner=self._langextract_runner,
+                embedding_adapter=StaticTestEmbeddingAdapter(),
+            )
+            first = first_agent.run("discover hazard chokepoint country trade action paths")
+            self.assertTrue([item for item in first["proposed_graph"] if item["element_type"] == "finding"])
+
+            engine = create_engine(db_url)
+            Session = sessionmaker(bind=engine)
+            session = Session()
+            try:
+                deleted = (
+                    session.query(GraphIdentityIndex)
+                    .filter_by(project_id="maritime-risk", element_kind="finding")
+                    .delete(synchronize_session=False)
+                )
+                self.assertGreater(deleted, 0)
+                self.assertGreater(session.query(GraphIdentityIndex).filter_by(project_id="maritime-risk").count(), 0)
+                session.commit()
+            finally:
+                session.close()
+
+            second_agent = IterativeGraphEnrichmentAgent(
+                db_url,
+                tenant="maritime-risk",
+                search_results_json=self._fixture(tmpdir),
+                allowed_domains=["zenodo.org"],
+                max_iterations=1,
+                max_frontier=1,
+                max_results_per_query=1,
+                langextract_runner=self._langextract_runner,
+                embedding_adapter=StaticTestEmbeddingAdapter(),
+            )
+            second = second_agent.run("discover hazard chokepoint country trade action paths")
+            self.assertFalse([item for item in second["proposed_graph"] if item["element_type"] == "finding"])
+            self.assertTrue(
+                any(
+                    item.get("element_type") == "finding"
+                    and item.get("reason") == "duplicate_finding_not_proposed"
+                    for item in second["run"]["skipped_sources"]
+                )
+            )
+            snapshot = second_agent.identity_index_snapshot()
+            self.assertTrue(any(row["element_kind"] == "finding" for row in snapshot["identity_index"]))
+
     def test_embedding_unavailable_degrades_without_lexical_fallback(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             db_url, _ = self._seed_db(tmpdir)
@@ -1290,6 +1718,211 @@ class IterativeGraphEnrichmentTest(unittest.TestCase):
             self.assertEqual(candidate["payload"]["merge_decision_source"], "embedding_unavailable_degraded")
             self.assertFalse(candidate["payload"]["llm_merge_decision_allowed"])
 
+    def test_embedding_unavailable_short_alias_conflict_requires_review(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_url, _ = self._seed_db(tmpdir)
+            agent = IterativeGraphEnrichmentAgent(
+                db_url,
+                tenant="maritime-risk",
+                embedding_adapter=DegradedTestEmbeddingAdapter(),
+            )
+            session = agent.Session()
+            try:
+                agent._upsert_identity_index_row(
+                    session,
+                    identity={
+                        "kind": "node",
+                        "entity_type": "Country",
+                        "label": "United States (USA)",
+                        "normalized_label": "united states usa",
+                        "aliases": [],
+                        "source_identity": "Country:USA",
+                        "property_fingerprint": "usa-country",
+                    },
+                    identity_key="node:maritime-risk:country:united-states:legacy",
+                    source_space="approved_graph",
+                    source_key="Country:USA",
+                    source_status="approved",
+                    payload={"label": "United States (USA)", "properties": {"source_id": "Country:USA"}},
+                )
+                session.commit()
+            finally:
+                session.close()
+
+            session = agent.Session()
+            try:
+                identity_index = agent._identity_index(session)
+            finally:
+                session.close()
+            candidate = agent._annotate_candidate_identity(
+                {
+                    "element_type": "node",
+                    "name": "US",
+                    "payload": {
+                        "ontology_type": "Country",
+                        "label": "US",
+                        "description": "Grounded source mention for a country abbreviation.",
+                        "properties": {"source_id": "Country:US"},
+                    },
+                    "evidence_refs": ["source:us"],
+                    "source_url": "https://example.org/us",
+                    "confidence": 0.82,
+                    "iteration": 1,
+                },
+                task_id="task-a",
+                run_id="run-a",
+                frontier_id="frontier-a",
+                candidate_seq=1,
+                identity_index=identity_index,
+            )
+
+            self.assertEqual(candidate["payload"]["dedup_decision"], "needs_review")
+            self.assertEqual(candidate["status"], "needs_more_evidence")
+            self.assertEqual(candidate["payload"]["match_method"], "embedding_degraded_alias_scan")
+            self.assertEqual(
+                candidate["payload"]["decision_reason"],
+                "possible_duplicate_alias_conflict_embedding_degraded",
+            )
+            self.assertTrue(candidate["payload"]["possible_duplicate"])
+            self.assertEqual(candidate["payload"]["matched_node_key"], "Country:USA")
+            self.assertTrue(candidate["payload"]["possible_duplicate_candidates"])
+            self.assertTrue(candidate["payload"]["embedding_degraded"])
+            self.assertFalse(candidate["payload"]["llm_merge_decision_allowed"])
+
+    def test_embedding_ready_short_alias_conflict_requires_review_when_vector_is_weak(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_url, _ = self._seed_db(tmpdir)
+            agent = IterativeGraphEnrichmentAgent(
+                db_url,
+                tenant="maritime-risk",
+                embedding_adapter=OrthogonalShortAliasEmbeddingAdapter(),
+            )
+            session = agent.Session()
+            try:
+                agent._upsert_identity_index_row(
+                    session,
+                    identity={
+                        "kind": "node",
+                        "entity_type": "Country",
+                        "label": "United States (USA)",
+                        "normalized_label": "united states usa",
+                        "aliases": [],
+                        "source_identity": "Country:USA",
+                        "property_fingerprint": "usa-country",
+                    },
+                    identity_key="node:maritime-risk:country:usa:iso3=USA",
+                    source_space="approved_graph_instance",
+                    source_key="Country:USA",
+                    source_status="approved",
+                    payload={"label": "United States (USA)", "properties": {"source_pk": "USA"}},
+                )
+                session.commit()
+                identity_index = agent._identity_index(session)
+            finally:
+                session.close()
+
+            candidate = agent._annotate_candidate_identity(
+                {
+                    "element_type": "node",
+                    "name": "US",
+                    "payload": {
+                        "ontology_type": "Country",
+                        "label": "US",
+                        "description": "Grounded source mention for a country abbreviation.",
+                        "properties": {},
+                    },
+                    "evidence_refs": ["source:us"],
+                    "source_url": "https://example.org/us",
+                    "confidence": 0.82,
+                    "iteration": 1,
+                },
+                task_id="task-a",
+                run_id="run-a",
+                frontier_id="frontier-a",
+                candidate_seq=1,
+                identity_index=identity_index,
+            )
+
+            self.assertEqual(candidate["payload"]["dedup_decision"], "needs_review")
+            self.assertEqual(candidate["status"], "needs_more_evidence")
+            self.assertEqual(candidate["payload"]["match_method"], "short_alias_review_gate")
+            self.assertEqual(candidate["payload"]["decision_reason"], "possible_duplicate_alias_conflict")
+            self.assertTrue(candidate["payload"]["possible_duplicate"])
+            self.assertEqual(candidate["payload"]["matched_node_key"], "Country:USA")
+            self.assertEqual(candidate["payload"]["matched_source"], "approved_graph_instance")
+            self.assertFalse(candidate["payload"]["embedding_degraded"])
+            self.assertFalse(candidate["payload"]["llm_merge_decision_allowed"])
+
+    def test_node_dedup_does_not_return_type_artifact_as_entity_match(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_url, _ = self._seed_db(tmpdir)
+            agent = IterativeGraphEnrichmentAgent(
+                db_url,
+                tenant="maritime-risk",
+                embedding_adapter=TypeArtifactNearestEmbeddingAdapter(),
+            )
+            session = agent.Session()
+            try:
+                agent._upsert_identity_index_row(
+                    session,
+                    identity={
+                        "kind": "node",
+                        "entity_type": "Country",
+                        "label": "Country",
+                        "normalized_label": "country",
+                        "source_identity": "object:country",
+                        "property_fingerprint": "country-type",
+                    },
+                    identity_key="node:maritime-risk:country:country:type",
+                    source_space="approved_ontology_artifact",
+                    source_key="object:country",
+                    source_status="approved",
+                    payload={"label": "Country"},
+                )
+                agent._upsert_identity_index_row(
+                    session,
+                    identity={
+                        "kind": "node",
+                        "entity_type": "Country",
+                        "label": "USA",
+                        "normalized_label": "usa",
+                        "aliases": [],
+                        "source_identity": "Country:USA",
+                        "property_fingerprint": "usa-country",
+                    },
+                    identity_key="node:maritime-risk:country:usa:iso3=USA",
+                    source_space="approved_graph_instance",
+                    source_key="Country:USA",
+                    source_status="approved",
+                    payload={"label": "USA", "properties": {"source_pk": "USA"}},
+                )
+                session.commit()
+                identity_index = agent._identity_index(session)
+            finally:
+                session.close()
+
+            candidate = agent._annotate_candidate_identity(
+                {
+                    "element_type": "node",
+                    "name": "US",
+                    "payload": {"ontology_type": "Country", "label": "US", "properties": {}},
+                    "evidence_refs": ["source:us"],
+                    "confidence": 0.82,
+                    "iteration": 1,
+                },
+                task_id="task-a",
+                run_id="run-a",
+                frontier_id="frontier-a",
+                candidate_seq=1,
+                identity_index=identity_index,
+            )
+
+            self.assertEqual(candidate["payload"]["dedup_decision"], "needs_review")
+            self.assertEqual(candidate["payload"]["match_method"], "short_alias_review_gate")
+            self.assertEqual(candidate["payload"]["matched_node_key"], "Country:USA")
+            self.assertEqual(candidate["payload"]["matched_source"], "approved_graph_instance")
+            self.assertNotEqual(candidate["payload"]["matched_node_key"], "object:country")
+
     def test_rebuild_identity_index_indexes_existing_approved_and_proposed_sources(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             db_url, _ = self._seed_db(tmpdir)
@@ -1351,6 +1984,76 @@ class IterativeGraphEnrichmentTest(unittest.TestCase):
             self.assertEqual(
                 {row["source_space"] for row in snapshot["identity_index"]},
                 {"approved_ontology_artifact", "proposed_graph"},
+            )
+
+    def test_rebuild_identity_index_includes_approved_schema_graph_instances(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            metadata_db_url = f"sqlite:///{Path(tmpdir) / 'metadata.db'}"
+            metadata_engine = create_engine(metadata_db_url)
+            ensure_artifact_schema(metadata_engine)
+            Session = sessionmaker(bind=metadata_engine)
+            session = Session()
+            upsert_artifact(
+                session,
+                artifact_type="object",
+                natural_key="country",
+                name="Country",
+                description="Country node inferred from reviewed source schema.",
+                payload={
+                    "object_name": "Country",
+                    "mapped_table_names": ["countries"],
+                    "primary_key": "iso3",
+                    "properties": ["iso3"],
+                    "llm_inferred": True,
+                    "prompt_version": "schema_graph_modeling_v1",
+                },
+                source_refs=["table:countries"],
+                source_agent="SchemaGraphModelingAgent",
+                project_id="maritime-risk",
+                status="approved",
+            )
+            session.commit()
+            session.close()
+
+            source_db_url = f"sqlite:///{Path(tmpdir) / 'source.db'}"
+            source_engine = create_engine(source_db_url)
+            with source_engine.begin() as conn:
+                conn.exec_driver_sql("CREATE TABLE countries (iso3 TEXT PRIMARY KEY)")
+                conn.exec_driver_sql("INSERT INTO countries (iso3) VALUES ('USA')")
+
+            agent = IterativeGraphEnrichmentAgent(
+                metadata_db_url,
+                tenant="maritime-risk",
+                source_db_url=source_db_url,
+                embedding_adapter=StaticTestEmbeddingAdapter(),
+            )
+            rebuilt = agent.rebuild_identity_index()
+            instance_rows = [
+                row
+                for row in rebuilt["identity_index"]
+                if row["source"] == "approved_graph_instance" and row["node_key"] == "Country:USA"
+            ]
+            self.assertEqual(len(instance_rows), 1)
+            self.assertEqual(instance_rows[0]["status"], "approved")
+
+            with agent.Session() as session:
+                identity_index = agent._identity_index(session)
+                candidate = {
+                    "element_type": "node",
+                    "name": "US",
+                    "payload": {"ontology_type": "Country", "label": "US", "properties": {}},
+                    "evidence_refs": ["source:us-reference"],
+                }
+                identity = iterative_graph_enrichment_agent._candidate_identity_payload(candidate)
+                match = agent._best_identity_match(identity, identity_index, payload=candidate["payload"])
+
+            self.assertEqual(match["match_method"], "vector_embedding")
+            self.assertEqual(match["matched_source"], "approved_graph_instance")
+            self.assertEqual(match["matched_status"], "approved")
+            self.assertEqual(match["matched_node_key"], "Country:USA")
+            self.assertIn(
+                iterative_graph_enrichment_agent._dedup_decision(match),
+                {"merge_existing", "needs_review"},
             )
 
     def test_approved_node_match_merges_without_new_proposal_row(self):

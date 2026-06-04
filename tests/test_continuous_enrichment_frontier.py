@@ -1,7 +1,11 @@
+import json
 import unittest
-from datetime import datetime
+from datetime import datetime, timedelta
 
-from server.workbench_server import InstanceRepository, _dedup_audit_from_payload
+from sqlalchemy.exc import OperationalError
+
+from server.workbench_server import InstanceRepository, _apply_possible_duplicate_presentation_guard, _dedup_audit_from_payload
+from tenant_registry import TenantConfig
 
 
 class ContinuousEnrichmentFrontierTest(unittest.TestCase):
@@ -30,6 +34,70 @@ class ContinuousEnrichmentFrontierTest(unittest.TestCase):
         ])
         self.assertTrue(all(item.get("reason") for item in selected))
         self.assertTrue(all("priority" in item for item in selected))
+
+    def test_full_graph_degrades_when_source_db_is_unavailable(self):
+        repo = object.__new__(InstanceRepository)
+        repo._schema_graph_artifacts = lambda tenant: (
+            {
+                "country": {
+                    "canonical_key": "object:country",
+                    "artifact_type": "object",
+                    "name": "Country",
+                    "payload": {
+                        "mapped_table_names": ["countries"],
+                        "primary_key": "iso3",
+                    },
+                }
+            },
+            [],
+        )
+
+        def unavailable_source(_tenant):
+            raise OperationalError("SELECT 1", {}, Exception("source db down"))
+
+        repo.source_engine_for = unavailable_source
+        tenant = TenantConfig(
+            tenant_id="maritime-risk",
+            namespace="maritime-risk",
+            display_name="Maritime Risk",
+            graph_database="aletheia",
+            metadata_db_url="sqlite:///:memory:",
+            source_db_url="mysql+pymysql://127.0.0.1:3306/missing",
+        )
+
+        graph = repo.full_graph(tenant, object_type="", instance_id="", limit=200)
+
+        self.assertFalse(graph["approved"])
+        self.assertEqual(graph["nodes"], [])
+        self.assertEqual(graph["edges"], [])
+        self.assertEqual(graph["scope"]["projection_source"], "SchemaGraphModelingAgent")
+        self.assertEqual(graph["scope"]["source_db_status"], "unavailable")
+        self.assertTrue(graph["scope"]["degraded"])
+        self.assertIn("Source database unavailable", graph["scope"]["reason"])
+
+    def test_schema_graph_type_helpers_do_not_raise_when_source_db_is_unavailable(self):
+        repo = object.__new__(InstanceRepository)
+        repo.source_engine_for = lambda _tenant: (_ for _ in ()).throw(
+            OperationalError("SELECT 1", {}, Exception("source db down"))
+        )
+        tenant = TenantConfig(
+            tenant_id="maritime-risk",
+            namespace="maritime-risk",
+            display_name="Maritime Risk",
+            graph_database="aletheia",
+            metadata_db_url="sqlite:///:memory:",
+            source_db_url="mysql+pymysql://127.0.0.1:3306/missing",
+        )
+        artifact = {
+            "payload": {
+                "mapped_table_names": ["countries"],
+                "primary_key": "iso3",
+            }
+        }
+
+        self.assertEqual(repo._source_columns(tenant, "countries"), set())
+        self.assertEqual(repo._schema_graph_table_and_pk(tenant, artifact), (None, None))
+        self.assertIsNone(repo._schema_graph_safe_join_condition(tenant, "countries.iso3 = edges.country_iso3"))
 
     def test_cooldown_falls_back_to_graph_coverage_without_restarting_static_template(self):
         now = datetime.utcnow().isoformat()
@@ -88,6 +156,188 @@ class ContinuousEnrichmentFrontierTest(unittest.TestCase):
         self.assertIn("new proposed graph edge", additions[0]["reason"])
         self.assertEqual(next_frontier[0]["payload"]["relation"], "depends_on")
 
+    def test_stored_frontier_queue_order_takes_precedence_over_dynamic_priority(self):
+        candidates = [
+            {"key": "proposed-graph:node:high", "name": "High priority node", "source_kind": "new_graph_node"},
+        ]
+        repo = self._repo_with_candidates(candidates)
+        stored_frontier = [
+            {"key": "queue:first", "name": "First queued", "source_kind": "graph_coverage", "priority": 10},
+            {"key": "queue:second", "name": "Second queued", "source_kind": "graph_coverage", "priority": 10},
+        ]
+
+        selected = repo._continuous_frontier_for_cycle(None, stored_frontier, {"frontier_state": {}, "frontier_cooldown_minutes": 360}, 2)
+
+        self.assertEqual([item["key"] for item in selected], ["queue:first", "queue:second"])
+
+    def test_dynamic_frontier_does_not_reselect_visited_key_when_cooldown_is_zero(self):
+        candidates = [
+            {"key": "proposed-graph:node:first", "name": "First node", "source_kind": "new_graph_node"},
+            {"key": "proposed-graph:node:second", "name": "Second node", "source_kind": "new_graph_node"},
+        ]
+        repo = self._repo_with_candidates(candidates)
+
+        selected = repo._continuous_frontier_for_cycle(
+            None,
+            [],
+            {"visited_frontier_keys": ["proposed-graph:node:first"], "frontier_state": {}, "frontier_cooldown_minutes": 0},
+            1,
+        )
+
+        self.assertEqual([item["key"] for item in selected], ["proposed-graph:node:second"])
+
+    def test_dynamic_frontier_dedupes_repeated_edge_fact_identity(self):
+        candidates = [
+            {
+                "key": "proposed-graph:maritime-risk:edge:first-source",
+                "name": "KOR has country dependency Hormuz Strait",
+                "source_kind": "new_graph_edge",
+                "kind": "proposed_edge",
+                "payload": {
+                    "source_label": "KOR",
+                    "relation": "has_country_dependency",
+                    "target_label": "Hormuz Strait",
+                    "source_url": "https://zenodo.org/source-a",
+                },
+            },
+            {
+                "key": "proposed-graph:maritime-risk:edge:second-source",
+                "name": "KOR has country dependency Hormuz Strait",
+                "source_kind": "new_graph_edge",
+                "kind": "proposed_edge",
+                "payload": {
+                    "source_label": "KOR",
+                    "relation": "has_country_dependency",
+                    "target_label": "Hormuz Strait",
+                    "source_url": "https://zenodo.org/source-b",
+                },
+            },
+        ]
+        repo = self._repo_with_candidates(candidates)
+
+        selected = repo._continuous_frontier_for_cycle(
+            None,
+            [],
+            {"visited_frontier_keys": [], "frontier_state": {}, "frontier_cooldown_minutes": 0},
+            10,
+        )
+
+        self.assertEqual([item["key"] for item in selected], ["proposed-graph:maritime-risk:edge:first-source"])
+        self.assertTrue(selected[0]["frontier_identity"].startswith("edge-fact:maritime-risk:kor:has_country_dependency:hormuz strait"))
+
+    def test_dynamic_frontier_skips_visited_edge_fact_identity(self):
+        candidates = [
+            {
+                "key": "proposed-graph:maritime-risk:edge:source-b",
+                "name": "KOR has country dependency Hormuz Strait",
+                "source_kind": "new_graph_edge",
+                "kind": "proposed_edge",
+                "payload": {
+                    "source_label": "KOR",
+                    "relation": "has_country_dependency",
+                    "target_label": "Hormuz Strait",
+                    "source_url": "https://zenodo.org/source-b",
+                },
+            },
+            {
+                "key": "proposed-graph:maritime-risk:edge:jpn-source",
+                "name": "JPN has country dependency Hormuz Strait",
+                "source_kind": "new_graph_edge",
+                "kind": "proposed_edge",
+                "payload": {
+                    "source_label": "JPN",
+                    "relation": "has_country_dependency",
+                    "target_label": "Hormuz Strait",
+                },
+            },
+        ]
+        repo = self._repo_with_candidates(candidates)
+
+        selected = repo._continuous_frontier_for_cycle(
+            None,
+            [],
+            {
+                "visited_frontier_keys": [
+                    "edge-fact:maritime-risk:kor:has_country_dependency:hormuz strait:",
+                ],
+                "frontier_state": {},
+                "frontier_cooldown_minutes": 0,
+            },
+            10,
+        )
+
+        self.assertEqual([item["key"] for item in selected], ["proposed-graph:maritime-risk:edge:jpn-source"])
+
+    def test_next_frontier_removes_consumed_items_and_appends_new_nodes_to_tail(self):
+        repo = object.__new__(InstanceRepository)
+        previous = [
+            {"key": "queue:first", "name": "First queued", "source_kind": "graph_coverage"},
+            {"key": "queue:second", "name": "Second queued", "source_kind": "graph_coverage"},
+        ]
+        result = {
+            "run": {"run_key": "iterative-graph:task400"},
+            "proposed_graph": [
+                {
+                    "element_type": "node",
+                    "element_key": "proposed-graph:node:new-tail",
+                    "name": "New tail node",
+                    "confidence": 0.7,
+                    "iteration": 1,
+                    "payload": {"label": "New tail node", "ontology_type": "Country"},
+                }
+            ],
+        }
+
+        next_frontier, additions = repo._continuous_next_frontier(
+            previous,
+            result,
+            {"visited_frontier_keys": []},
+            consumed_frontier=[previous[0]],
+        )
+
+        self.assertEqual([item["key"] for item in next_frontier], ["queue:second", "proposed-graph:node:new-tail"])
+        self.assertEqual([item["key"] for item in additions], ["proposed-graph:node:new-tail"])
+
+    def test_next_frontier_does_not_append_repeated_edge_fact_from_new_source(self):
+        repo = object.__new__(InstanceRepository)
+        previous = [
+            {
+                "key": "proposed-graph:maritime-risk:edge:source-a",
+                "name": "KOR has country dependency Hormuz Strait",
+                "source_kind": "new_graph_edge",
+                "kind": "proposed_edge",
+                "payload": {
+                    "source_label": "KOR",
+                    "relation": "has_country_dependency",
+                    "target_label": "Hormuz Strait",
+                    "source_url": "https://zenodo.org/source-a",
+                },
+            }
+        ]
+        result = {
+            "run": {"run_key": "iterative-graph:task400"},
+            "proposed_graph": [
+                {
+                    "element_type": "edge",
+                    "element_key": "proposed-graph:maritime-risk:edge:source-b",
+                    "name": "KOR has country dependency Hormuz Strait",
+                    "confidence": 0.7,
+                    "iteration": 1,
+                    "payload": {
+                        "source_label": "KOR",
+                        "relation": "has_country_dependency",
+                        "target_label": "Hormuz Strait",
+                        "source_url": "https://zenodo.org/source-b",
+                    },
+                }
+            ],
+        }
+
+        next_frontier, additions = repo._continuous_next_frontier(previous, result, {"visited_frontier_keys": []})
+
+        self.assertEqual([item["key"] for item in next_frontier], ["proposed-graph:maritime-risk:edge:source-a"])
+        self.assertEqual(additions, [])
+
     def test_runtime_reasoning_configs_do_not_fallback_to_demo_fixtures(self):
         repo = object.__new__(InstanceRepository)
         repo._schema_graph_reasoning_configs = lambda tenant: (None, None)
@@ -124,6 +374,56 @@ class ContinuousEnrichmentFrontierTest(unittest.TestCase):
         self.assertIs(audit["llm_merge_decision_allowed"], False)
         self.assertNotIn("empty_field", audit)
 
+    def test_presentation_guard_marks_short_alias_degraded_candidate_possible_duplicate(self):
+        element = {
+            "element_key": "proposed-graph:maritime-risk:node:short-country",
+            "element_type": "node",
+            "name": "XY",
+            "status": "draft",
+            "payload": {
+                "ontology_type": "Country",
+                "label": "XY",
+                "dedup_decision": "new_proposal",
+                "match_method": "embedding_degraded",
+                "embedding_degraded": True,
+                "llm_merge_decision_allowed": False,
+            },
+            "dedup_audit": {
+                "dedup_decision": "new_proposal",
+                "llm_merge_decision_allowed": False,
+            },
+        }
+        guarded = _apply_possible_duplicate_presentation_guard(
+            element,
+            [
+                {
+                    "source_space": "approved_graph",
+                    "source_key": "Country:XYZ",
+                    "source_status": "approved",
+                    "identity_key": "node:tenant:country:example",
+                    "identity": {
+                        "kind": "node",
+                        "entity_type": "Country",
+                        "label": "Example Country (XYZ)",
+                        "normalized_label": "example country xyz",
+                        "aliases": [],
+                        "source_identity": "Country:XYZ",
+                    },
+                    "dedup_text": "node | Country | Example Country (XYZ) | Country:XYZ",
+                }
+            ],
+        )
+
+        self.assertEqual(guarded["status"], "needs_more_evidence")
+        self.assertEqual(guarded["payload"]["dedup_decision"], "needs_review")
+        self.assertTrue(guarded["payload"]["possible_duplicate"])
+        self.assertEqual(guarded["payload"]["matched_node_key"], "Country:XYZ")
+        self.assertTrue(guarded["payload"]["possible_duplicate_candidates"])
+        self.assertEqual(guarded["dedup_audit"]["dedup_decision"], "needs_review")
+        self.assertEqual(guarded["dedup_audit"]["match_method"], "embedding_degraded_alias_scan")
+        self.assertFalse(guarded["payload"]["llm_merge_decision_allowed"])
+        self.assertFalse(guarded["presentation_guard"]["writes_persisted"])
+
     def test_budget_config_caps_effective_cycle_limits(self):
         repo = object.__new__(InstanceRepository)
         config = repo._continuous_update_config(
@@ -146,6 +446,29 @@ class ContinuousEnrichmentFrontierTest(unittest.TestCase):
         self.assertEqual(budget["max_results_per_query"], 1)
         self.assertEqual(budget["max_iterations_per_cycle"], 1)
         self.assertEqual(budget["max_cycles"], 5)
+
+    def test_reset_frontier_visit_state_clears_query_ladder_cursor(self):
+        repo = object.__new__(InstanceRepository)
+        config = repo._continuous_update_config(
+            {
+                "visited_frontier_keys": ["frontier:old"],
+                "query_ladder_state": {"frontier:old": {"next_plan_index": 3}},
+                "frontier_state": {
+                    "last_enriched_at": {"frontier:old": "2026-06-01T00:00:00"},
+                    "selected_count": {"frontier:old": 2},
+                    "coverage_cursor": 12,
+                },
+                "stop_reason": "no available frontier after cooldown and coverage fallback",
+            },
+            {"reset_frontier_visit_state": True},
+        )
+
+        self.assertEqual(config["visited_frontier_keys"], [])
+        self.assertEqual(config["query_ladder_state"], {})
+        self.assertEqual(config["frontier_state"]["last_enriched_at"], {})
+        self.assertEqual(config["frontier_state"]["selected_count"], {})
+        self.assertEqual(config["frontier_state"]["coverage_cursor"], 0)
+        self.assertIsNone(config["stop_reason"])
 
     def test_source_trust_rejects_unlisted_domains_with_event_payload(self):
         repo = object.__new__(InstanceRepository)
@@ -179,6 +502,201 @@ class ContinuousEnrichmentFrontierTest(unittest.TestCase):
 
         self.assertTrue(decision["trusted"])
         self.assertEqual(config["source_trust"]["allowed_domains"], ["example.com"])
+
+    def test_crawl_policy_allows_discovered_domains_when_source_trust_is_not_strict_allowlist(self):
+        repo = object.__new__(InstanceRepository)
+
+        strict = repo._continuous_agent_crawl_policy(
+            {"source_trust": {"allowed_domains": ["zenodo.org"], "reject_unlisted_domains": True}}
+        )
+        permissive = repo._continuous_agent_crawl_policy(
+            {"source_trust": {"allowed_domains": ["zenodo.org"], "reject_unlisted_domains": False}}
+        )
+
+        self.assertEqual(strict["allowed_domains"], ["zenodo.org"])
+        self.assertFalse(strict["allow_discovered_domains"])
+        self.assertEqual(permissive["allowed_domains"], [])
+        self.assertTrue(permissive["allow_discovered_domains"])
+
+    def test_source_trust_star_allows_all_public_sources(self):
+        repo = object.__new__(InstanceRepository)
+        config = repo._continuous_update_config(
+            {"source_trust": {"allowed_domains": ["zenodo.org"], "reject_unlisted_domains": True}},
+            {"source_trust": "*"},
+        )
+        policy = repo._continuous_source_trust_policy(config)
+        decision = repo._continuous_source_trust_decision({"url": "https://example.org/source"}, config)
+        crawl_policy = repo._continuous_agent_crawl_policy(config)
+
+        self.assertEqual(config["source_trust"]["allowed_domains"], ["*"])
+        self.assertTrue(policy["allow_all_public_sources"])
+        self.assertFalse(policy["reject_unlisted_domains"])
+        self.assertTrue(decision["trusted"])
+        self.assertEqual(crawl_policy["allowed_domains"], [])
+        self.assertTrue(crawl_policy["allow_discovered_domains"])
+
+    def test_continuous_source_fixture_does_not_inject_runtime_demo_sources(self):
+        repo = object.__new__(InstanceRepository)
+
+        self.assertEqual(repo._continuous_source_fixture("continuous:maritime-risk:us-iran-impact:mvp"), [])
+
+    def test_continuous_cycle_uses_frontier_query_plan_for_search_when_no_results_provided(self):
+        class FakeSearchProvider:
+            def __init__(self):
+                self.queries = []
+
+            def search(self, query, max_results):
+                self.queries.append((query, max_results))
+                return [
+                    {
+                        "query": query,
+                        "title": "Hormuz dependency source",
+                        "url": "https://zenodo.org/records/query-plan-source",
+                        "snippet": "KOR depends on Hormuz Strait shipping exposure.",
+                        "rank": 1,
+                        "provider": "fake",
+                    }
+                ]
+
+        repo = object.__new__(InstanceRepository)
+        tenant = type("Tenant", (), {"tenant_id": "maritime-risk"})()
+        provider = FakeSearchProvider()
+        frontier = [
+            {
+                "key": "proposed-graph:maritime-risk:edge:kor-hormuz",
+                "name": "KOR has country dependency Hormuz Strait",
+                "payload": {
+                    "source_label": "KOR",
+                    "target_label": "Hormuz Strait",
+                    "relation": "has_country_dependency",
+                },
+            }
+        ]
+
+        results, events = repo._continuous_search_results_for_cycle(
+            tenant,
+            "continuous:maritime-risk:us-iran-impact:mvp",
+            "Analyze maritime dependency risk",
+            {},
+            frontier,
+            2,
+            {"search_provider": "duckduckgo_html"},
+            provider=provider,
+        )
+
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0]["frontier_key"], "proposed-graph:maritime-risk:edge:kor-hormuz")
+        self.assertEqual(results[0]["provider"], "fake")
+        self.assertEqual(provider.queries[0][1], 2)
+        self.assertIn("KOR", provider.queries[0][0])
+        self.assertIn("Hormuz Strait", provider.queries[0][0])
+        self.assertEqual(events[-1]["type"], "query_search_executed")
+        self.assertEqual(events[-1]["accepted_for_trust_filter_count"], 1)
+
+    def test_continuous_query_search_coarsens_ladder_when_exact_query_has_no_results(self):
+        class FakeSearchProvider:
+            def __init__(self):
+                self.queries = []
+
+            def search(self, query, max_results):
+                self.queries.append(query)
+                if len(self.queries) == 1:
+                    return []
+                return [
+                    {
+                        "query": query,
+                        "title": "Broader frontier source",
+                        "url": "https://zenodo.org/records/query-ladder-source",
+                        "snippet": "A broader source mentions KOR and Hormuz Strait exposure.",
+                        "rank": 1,
+                        "provider": "fake",
+                    }
+                ]
+
+        repo = object.__new__(InstanceRepository)
+        tenant = type("Tenant", (), {"tenant_id": "maritime-risk"})()
+        provider = FakeSearchProvider()
+        config = {"search_provider": "duckduckgo_html", "max_query_plans_per_frontier": 5}
+        frontier = [
+            {
+                "key": "proposed-graph:maritime-risk:edge:kor-hormuz",
+                "name": "KOR has country dependency Hormuz Strait",
+                "payload": {
+                    "source_type": "Country",
+                    "target_type": "MaritimeChokepoint",
+                    "source_label": "KOR",
+                    "target_label": "Hormuz Strait",
+                    "relation": "has_country_dependency",
+                },
+            }
+        ]
+
+        results, events = repo._continuous_search_results_for_cycle(
+            tenant,
+            "continuous:maritime-risk:us-iran-impact:mvp",
+            "Analyze maritime dependency risk",
+            {},
+            frontier,
+            2,
+            config,
+            provider=provider,
+        )
+
+        executed = [event for event in events if event["type"] == "query_search_executed"]
+        self.assertEqual(len(provider.queries), 2)
+        self.assertEqual(executed[0]["granularity"], "L0_path_exact")
+        self.assertEqual(executed[0]["accepted_for_trust_filter_count"], 0)
+        self.assertEqual(executed[1]["granularity"], "L1_single_endpoint")
+        self.assertEqual(results[0]["query_plan"]["granularity"], "L1_single_endpoint")
+        self.assertEqual(results[0]["query_plan"]["coarse_level"], 1)
+        self.assertEqual(
+            config["query_ladder_state"]["proposed-graph:maritime-risk:edge:kor-hormuz"]["last_search_signal"],
+            "search_results_found",
+        )
+
+    def test_provided_search_results_bypass_query_search_provider(self):
+        class FailingSearchProvider:
+            def search(self, query, max_results):
+                raise AssertionError("provider should not be called for explicit search_results")
+
+        repo = object.__new__(InstanceRepository)
+        tenant = type("Tenant", (), {"tenant_id": "tenant-a"})()
+        provided = [{"title": "provided", "url": "https://example.com/source"}]
+
+        results, events = repo._continuous_search_results_for_cycle(
+            tenant,
+            "continuous:tenant-a:demo",
+            "objective",
+            {"search_results": provided},
+            [{"key": "frontier:a", "name": "A"}],
+            2,
+            {},
+            provider=FailingSearchProvider(),
+        )
+
+        self.assertEqual(results, provided)
+        self.assertEqual(events[0]["type"], "provided_search_results_used")
+
+    def test_graph_coverage_frontier_prefers_high_degree_nodes_without_hardcoded_seed(self):
+        repo = object.__new__(InstanceRepository)
+        tenant = type("Tenant", (), {"tenant_id": "tenant-a"})()
+        repo.full_graph = lambda tenant, limit=200: {
+            "nodes": [
+                {"id": "Country:LOW", "label": "LOW", "type": "Country"},
+                {"id": "Country:HIGH", "label": "HIGH", "type": "Country"},
+            ],
+            "edges": [
+                {"source": "Country:HIGH", "target": "Chokepoint:A"},
+                {"source": "Country:HIGH", "target": "Chokepoint:B"},
+                {"source": "Country:LOW", "target": "Chokepoint:A"},
+            ],
+        }
+
+        items = repo._continuous_graph_coverage_frontier(tenant, limit=2)
+
+        self.assertEqual([item["key"] for item in items], ["graph-coverage:Country:HIGH", "graph-coverage:Country:LOW"])
+        self.assertEqual(items[0]["payload"]["selection_policy"], "degree_coverage")
+        self.assertGreater(items[0]["payload"]["degree"], items[1]["payload"]["degree"])
 
     def test_backoff_schedules_exponential_delay_and_blocks_until_due(self):
         repo = object.__new__(InstanceRepository)
@@ -225,6 +743,107 @@ class ContinuousEnrichmentFrontierTest(unittest.TestCase):
         self.assertEqual(len(config["latest_events"]), 50)
         self.assertNotEqual(config["latest_events"][0]["type"], "old-0")
         self.assertEqual(config["latest_events"][-1]["type"], "cycle_completed")
+
+    def test_auto_scheduler_due_requires_idle_non_manual_due_session(self):
+        repo = object.__new__(InstanceRepository)
+        due_at = (datetime.utcnow() - timedelta(seconds=5)).isoformat()
+
+        due, reason = repo._continuous_session_auto_due("idle", {"cadence": "custom", "custom_interval_minutes": 1, "next_run_at": due_at})
+        self.assertTrue(due)
+        self.assertEqual(reason, "next_run_due")
+
+        due, reason = repo._continuous_session_auto_due("idle", {"cadence": "manual", "next_run_at": due_at})
+        self.assertFalse(due)
+        self.assertEqual(reason, "manual_cadence")
+
+        due, reason = repo._continuous_session_auto_due("paused", {"cadence": "custom", "custom_interval_minutes": 1, "next_run_at": due_at})
+        self.assertFalse(due)
+        self.assertEqual(reason, "status_paused")
+
+    def test_auto_scheduler_treats_non_manual_missing_next_run_as_due(self):
+        repo = object.__new__(InstanceRepository)
+
+        due, reason = repo._continuous_session_auto_due("idle", {"cadence": "custom", "custom_interval_minutes": 1})
+
+        self.assertTrue(due)
+        self.assertEqual(reason, "cadence_without_next_run_at")
+
+    def test_runtime_state_exposes_persistent_frontier_queue(self):
+        repo = object.__new__(InstanceRepository)
+        due_at = (datetime.utcnow() - timedelta(seconds=5)).isoformat()
+        state = repo._continuous_session_runtime_state(
+            "idle",
+            {
+                "cadence": "custom",
+                "custom_interval_minutes": 1,
+                "next_run_at": due_at,
+                "last_started_at": "2026-06-02T01:00:00",
+                "last_finished_at": "2026-06-02T01:01:00",
+                "completed_cycles": 2,
+                "budget": {"max_cycles": 5, "max_frontier_per_cycle": 4},
+                "visited_frontier_keys": ["queue:visited"],
+                "frontier_state": {"coverage_cursor": 7, "last_enriched_at": {"queue:visited": "2026-06-02T00:00:00"}},
+            },
+            [
+                {"key": "queue:first", "name": "First", "source_kind": "graph_coverage"},
+                {"target_key": "queue:second", "name": "Second", "source_kind": "new_graph_node"},
+            ],
+        )
+
+        self.assertTrue(state["persistent"])
+        self.assertEqual(state["queue_mode"], "fifo_frontier_queue")
+        self.assertEqual(state["frontier_queue_count"], 2)
+        self.assertEqual(state["next_frontier_keys"], ["queue:first", "queue:second"])
+        self.assertEqual(state["frontier_queue"]["total_count"], 2)
+        self.assertEqual(state["frontier_queue"]["source_kind_counts"], {"graph_coverage": 1, "new_graph_node": 1})
+        self.assertEqual(state["budget"]["remaining_cycles"], 3)
+        self.assertEqual(state["frontier_state"]["visited_count"], 1)
+        self.assertEqual(state["frontier_state"]["coverage_cursor"], 7)
+        self.assertTrue(state["auto_due"])
+        self.assertEqual(state["auto_due_reason"], "next_run_due")
+
+    def test_resume_persistent_session_preserves_queue_and_schedules_immediate_tick(self):
+        repo = object.__new__(InstanceRepository)
+        tenant = type("Tenant", (), {"tenant_id": "tenant-a"})()
+        row = {
+            "config_json": json.dumps(
+                {
+                    "cadence": "custom",
+                    "custom_interval_minutes": 1,
+                    "stop_reason": "operator paused",
+                    "latest_events": [],
+                }
+            ),
+            "frontier_json": json.dumps([{"key": "queue:first", "name": "First"}]),
+        }
+        captured = {}
+
+        class CaptureConn:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def execute(self, _query, params):
+                captured.update(params)
+
+        class CaptureEngine:
+            def begin(self):
+                return CaptureConn()
+
+        repo._continuous_session_row = lambda _tenant, _session_key: row
+        repo.metadata_engine_for = lambda _tenant: CaptureEngine()
+        repo.continuous_enrichment_session = lambda _tenant, _session_key: {"session": {"status": captured.get("status")}}
+
+        result = repo.update_continuous_enrichment_session_status(tenant, "continuous:tenant-a", "idle")
+        config = json.loads(captured["config_json"])
+
+        self.assertEqual(result["session"]["status"], "idle")
+        self.assertEqual(config["stop_reason"], None)
+        self.assertIsNotNone(config["next_run_at"])
+        self.assertEqual(config["latest_events"][-1]["type"], "session_resumed")
+        self.assertEqual(config["latest_events"][-1]["frontier_queue_count"], 1)
 
     def test_no_proposal_summary_surfaces_langextract_blocker(self):
         repo = object.__new__(InstanceRepository)

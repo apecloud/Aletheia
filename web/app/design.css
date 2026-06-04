@@ -33,6 +33,21 @@
   --rejected:    oklch(0.66 0.18  25);
   --info:        oklch(0.78 0.10 230);
 
+  /* Graph page primary palette, scoped to graph visuals. */
+  --graph-blue:   #4285f4;
+  --graph-red:    #ea4335;
+  --graph-yellow: #fbbc04;
+  --graph-green:  #34a853;
+  --graph-blue-bg:   color-mix(in srgb, var(--graph-blue) 18%, transparent);
+  --graph-red-bg:    color-mix(in srgb, var(--graph-red) 14%, transparent);
+  --graph-yellow-bg: color-mix(in srgb, var(--graph-yellow) 16%, transparent);
+  --graph-green-bg:  color-mix(in srgb, var(--graph-green) 14%, transparent);
+  --graph-blue-line:   color-mix(in srgb, var(--graph-blue) 55%, transparent);
+  --graph-red-line:    color-mix(in srgb, var(--graph-red) 52%, transparent);
+  --graph-yellow-line: color-mix(in srgb, var(--graph-yellow) 58%, transparent);
+  --graph-green-line:  color-mix(in srgb, var(--graph-green) 52%, transparent);
+  --graph-edge-default: color-mix(in srgb, var(--graph-blue) 26%, var(--line-strong));
+
   /* type scale */
   --fs-eyebrow: 10px;
   --fs-meta:    11px;
@@ -1216,7 +1231,8 @@ a { color: inherit; text-decoration: none; }
   position: relative;
   flex: 1;
   background:
-    radial-gradient(ellipse 80% 50% at center, oklch(0.78 0.12 200 / 0.04), transparent 70%),
+    radial-gradient(ellipse 70% 46% at 48% 50%, color-mix(in srgb, var(--graph-blue) 8%, transparent), transparent 70%),
+    radial-gradient(ellipse 42% 32% at 74% 26%, color-mix(in srgb, var(--graph-yellow) 6%, transparent), transparent 68%),
     linear-gradient(var(--line-soft) 1px, transparent 1px) 0 0/ 32px 32px,
     linear-gradient(90deg, var(--line-soft) 1px, transparent 1px) 0 0/ 32px 32px,
     var(--bg-1);
