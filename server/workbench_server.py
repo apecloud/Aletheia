@@ -27,7 +27,12 @@ from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.exc import SQLAlchemyError
 
 from reasoning_engine import ReasoningEngine
-from iterative_graph_enrichment_agent import IterativeGraphEnrichmentAgent, _graph_context_query_plan  # noqa: E402
+from iterative_graph_enrichment_agent import (  # noqa: E402
+    IterativeGraphEnrichmentAgent,
+    _edge_fact_identity_compatible,
+    _edge_fact_identity_parts,
+    _graph_context_query_plan,
+)
 from ontology_artifacts import ensure_artifact_schema  # noqa: E402
 from tenant_registry import TenantRegistry  # noqa: E402
 from web_enrichment_agent import DuckDuckGoHTMLSearchProvider  # noqa: E402
@@ -405,6 +410,98 @@ def _apply_possible_duplicate_presentation_guard(element, identity_rows):
     guarded["presentation_guard"] = {
         "applied": True,
         "reason": "embedding_degraded_short_alias_possible_duplicate",
+        "writes_persisted": False,
+    }
+    return guarded
+
+
+def _graph_edge_source_identity_from_match(match):
+    identity_key = str((match or {}).get("identity_key") or "")
+    parts = identity_key.split(":")
+    if len(parts) > 5 and parts[0] == "edge":
+        return ":".join(parts[5:])
+    return None
+
+
+def _graph_edge_source_identity_conflict_is_provenance_only(candidate_source_identity, matched_source_identity):
+    candidate_parts = _edge_fact_identity_parts(candidate_source_identity)
+    matched_parts = _edge_fact_identity_parts(matched_source_identity)
+    if candidate_parts and matched_parts:
+        return _edge_fact_identity_compatible(candidate_source_identity, matched_source_identity)
+    return not candidate_parts and not matched_parts
+
+
+def _apply_edge_source_identity_presentation_guard(element):
+    payload = {**(element.get("payload") or {})}
+    if element.get("element_type") != "edge":
+        return element
+    if str(element.get("status") or "").replace("-", "_").lower() not in {"draft", "needs_review", "needs_more_evidence"}:
+        return element
+    if str(payload.get("dedup_decision") or "").replace("-", "_").lower() != "needs_review":
+        return element
+    if str(payload.get("decision_reason") or "").replace("-", "_").lower() != "structural_conflict":
+        return element
+    conflict_fields = [str(field) for field in (payload.get("conflict_fields") or [])]
+    if conflict_fields != ["source_identity"]:
+        return element
+    if str(payload.get("match_method") or "").replace("-", "_").lower() != "vector_embedding":
+        return element
+    match_score = float(payload.get("match_score") or 0.0)
+    vector_distance = payload.get("vector_distance")
+    duplicate_distance = float(payload.get("vector_duplicate_distance_threshold") or 0.12)
+    if vector_distance is not None:
+        try:
+            if float(vector_distance) > duplicate_distance:
+                return element
+        except (TypeError, ValueError):
+            return element
+    elif match_score < (1.0 - duplicate_distance):
+        return element
+    matched_key = payload.get("matched_edge_key") or payload.get("matched_node_key") or payload.get("matched_element_key")
+    top_k = payload.get("vector_top_k") if isinstance(payload.get("vector_top_k"), list) else []
+    matched = next((item for item in top_k if item.get("node_key") == matched_key), top_k[0] if top_k else {})
+    matched_conflicts = [str(field) for field in (matched.get("conflict_fields") or [])]
+    if matched_conflicts != ["source_identity"]:
+        return element
+    structure_evidence = {str(item) for item in (matched.get("structure_evidence") or payload.get("match_evidence") or [])}
+    required_evidence = {"same source_type", "same target_type", "same source_node", "same target_node", "same relation"}
+    if not required_evidence.issubset(structure_evidence):
+        return element
+    candidate_identity = payload.get("identity") if isinstance(payload.get("identity"), dict) else {}
+    candidate_source_identity = candidate_identity.get("source_identity")
+    matched_source_identity = _graph_edge_source_identity_from_match(matched)
+    if not _graph_edge_source_identity_conflict_is_provenance_only(candidate_source_identity, matched_source_identity):
+        return element
+
+    matched_source = str(payload.get("matched_source") or matched.get("source") or "").replace("-", "_").lower()
+    matched_status = str(payload.get("matched_status") or matched.get("status") or "").replace("-", "_").lower()
+    if matched_source == "current_run_candidate":
+        decision = "duplicate_current_run"
+    elif matched_status == "proposed":
+        decision = "duplicate_existing_proposal"
+    else:
+        decision = "merge_existing"
+    match_evidence = [
+        *(payload.get("match_evidence") or []),
+        "presentation guard: source_identity conflict only contains provenance/occurrence tokens",
+        "same stable edge fact after ignoring evidence source identity drift",
+    ]
+    payload.update(
+        {
+            "dedup_decision": decision,
+            "review_required": False,
+            "structure_compatible": True,
+            "conflict_fields": [],
+            "match_evidence": match_evidence,
+            "decision_reason": "source_identity_provenance_drift_ignored",
+            "llm_merge_decision_allowed": False,
+        }
+    )
+    guarded = {**element, "payload": payload}
+    guarded["dedup_audit"] = _dedup_audit_from_payload(payload)
+    guarded["presentation_guard"] = {
+        "applied": True,
+        "reason": "edge_source_identity_provenance_drift",
         "writes_persisted": False,
     }
     return guarded
@@ -1846,11 +1943,7 @@ class InstanceRepository:
 
     def _default_continuous_session(self, tenant):
         session_key = f"continuous:{tenant.tenant_id}:us-iran-impact:mvp"
-        objective = (
-            "Analyze US-Iran escalation impacts across military events, Hormuz and maritime chokepoints, "
-            "energy flows, importing countries, shipping/insurance, financial markets, supply chains, "
-            "and candidate reviewer actions"
-        )
+        objective = ""
         config = {
             "mode": "bounded_autonomous",
             "run_mode": "scheduled_or_manual",
@@ -1862,6 +1955,7 @@ class InstanceRepository:
             "max_iterations": 1,
             "max_frontier": 4,
             "max_results_per_query": 4,
+            "node_similarity_dedup_threshold": 0.6,
             "budget": {
                 "max_frontier_per_cycle": 4,
                 "max_results_per_query": 4,
@@ -1883,7 +1977,7 @@ class InstanceRepository:
             "stop_policy": {
                 "pause_on_no_frontier": True,
                 "pause_on_budget_exhausted": True,
-                "pause_on_no_trusted_sources": True,
+                "pause_on_no_trusted_sources": False,
             },
             "visited_frontier_keys": [],
             "frontier_cooldown_minutes": 360,
@@ -1901,15 +1995,7 @@ class InstanceRepository:
             "fact_graph_target": "proposed_graph_space",
             "finding_target": "candidate_findings",
         }
-        frontier = [
-            {
-                "kind": "objective_seed",
-                "target_key": f"Objective:{_slug(objective)[:96]}",
-                "name": objective,
-                "priority": 1.0,
-                "depth": 0,
-            }
-        ]
+        frontier = []
         self._ensure_continuous_enrichment_schema(tenant)
         with self.metadata_engine_for(tenant).begin() as conn:
             conn.execute(
@@ -1987,6 +2073,8 @@ class InstanceRepository:
                 query = str(selected_plan.get("query") or query_plan.get("query") or "").strip()
                 if not query:
                     continue
+                request_url_fn = getattr(provider, "request_url", None)
+                request_url = request_url_fn(query) if callable(request_url_fn) else None
                 try:
                     found = provider.search(query, max_results_per_query)
                 except Exception as exc:
@@ -1995,6 +2083,7 @@ class InstanceRepository:
                             "type": "query_search_failed",
                             "frontier_key": frontier_key,
                             "query": query,
+                            "request_url": request_url,
                             "provider": provider.__class__.__name__,
                             "selected_intent": selected_plan.get("intent"),
                             "granularity": selected_plan.get("granularity"),
@@ -2018,6 +2107,7 @@ class InstanceRepository:
                         "snippet": getattr(result, "snippet", "") if not isinstance(result, dict) else result.get("snippet", ""),
                         "rank": getattr(result, "rank", rank) if not isinstance(result, dict) else result.get("rank", rank),
                         "provider": getattr(result, "provider", provider.__class__.__name__) if not isinstance(result, dict) else result.get("provider", provider.__class__.__name__),
+                        "request_url": request_url,
                         "frontier_key": frontier_key,
                         "query_plan": {
                             "selected_intent": selected_plan.get("intent"),
@@ -2036,6 +2126,7 @@ class InstanceRepository:
                         "type": "query_search_executed",
                         "frontier_key": frontier_key,
                         "query": query,
+                        "request_url": request_url,
                         "provider": provider.__class__.__name__,
                         "selected_intent": selected_plan.get("intent"),
                         "granularity": selected_plan.get("granularity"),
@@ -2144,6 +2235,12 @@ class InstanceRepository:
                 config[key] = max(1, min(int(body.get(key) or config.get(key) or 1), 50))
         if "frontier_cooldown_minutes" in body:
             config["frontier_cooldown_minutes"] = max(0, min(int(body.get("frontier_cooldown_minutes") or 0), 10080))
+        if "node_similarity_dedup_threshold" in body:
+            try:
+                threshold = float(body.get("node_similarity_dedup_threshold"))
+            except (TypeError, ValueError):
+                raise ValueError("node_similarity_dedup_threshold must be a number between 0 and 1")
+            config["node_similarity_dedup_threshold"] = round(max(0.0, min(threshold, 1.0)), 4)
         if body.get("reset_frontier_visit_state"):
             config["visited_frontier_keys"] = []
             config["query_ladder_state"] = {}
@@ -2589,8 +2686,10 @@ class InstanceRepository:
             items.append(self._continuous_row_to_frontier_item(row, source_kind))
         return items
 
-    def _continuous_graph_coverage_frontier(self, tenant, limit=50):
+    def _continuous_graph_coverage_frontier(self, tenant, config=None, limit=50):
         items = []
+        frontier_state = self._continuous_frontier_state(config or {})
+        coverage_cursor = max(0, int(frontier_state.get("coverage_cursor") or 0))
         try:
             graph = self.full_graph(tenant, limit=max(50, min(int(limit) * 4, 200))) or {}
         except Exception:
@@ -2605,7 +2704,8 @@ class InstanceRepository:
                 degree[source] = degree.get(source, 0) + 1
             if target:
                 degree[target] = degree.get(target, 0) + 1
-        for node in sorted(nodes, key=lambda item: (-degree.get(item.get("id"), 0), str(item.get("label") or item.get("id") or ""))):
+        ranked_nodes = sorted(nodes, key=lambda item: (-degree.get(item.get("id"), 0), str(item.get("label") or item.get("id") or "")))
+        for node in ranked_nodes[coverage_cursor:]:
             node_id = node.get("id")
             if not node_id:
                 continue
@@ -2840,7 +2940,7 @@ class InstanceRepository:
         candidates.extend(self._continuous_proposed_graph_frontier(tenant, config, limit=75))
         candidates.extend(self._continuous_question_scope_frontier(tenant, limit=10))
         candidates.extend(self._continuous_reasoning_finding_frontier(tenant, limit=20))
-        candidates.extend(self._continuous_graph_coverage_frontier(tenant, limit=50))
+        candidates.extend(self._continuous_graph_coverage_frontier(tenant, config=config, limit=50))
         deduped = {}
         identities = {}
         for item in candidates:
@@ -3083,16 +3183,24 @@ class InstanceRepository:
             return None
         config = self._continuous_update_config(_load_json(row["config_json"], {}), body)
         config["next_run_at"] = self._continuous_next_run_at(config)
+        objective = row["objective"]
+        if "objective" in body:
+            objective = str(body.get("objective") or "").strip()
         with self.metadata_engine_for(tenant).begin() as conn:
             conn.execute(
                 text(
                     """
                     UPDATE aletheia_continuous_enrichment_sessions
-                    SET config_json = :config_json, updated_at = CURRENT_TIMESTAMP
+                    SET objective = :objective, config_json = :config_json, updated_at = CURRENT_TIMESTAMP
                     WHERE project_id = :tenant_id AND session_key = :session_key
                     """
                 ),
-                {"tenant_id": tenant.tenant_id, "session_key": session_key, "config_json": _json_dump(config)},
+                {
+                    "tenant_id": tenant.tenant_id,
+                    "session_key": session_key,
+                    "objective": objective,
+                    "config_json": _json_dump(config),
+                },
             )
         return self.continuous_enrichment_session(tenant, session_key)
 
@@ -3137,6 +3245,7 @@ class InstanceRepository:
                 ],
             }
         config = _load_json(row["config_json"], {})
+        config.setdefault("node_similarity_dedup_threshold", 0.6)
         frontier = _load_json(row["frontier_json"], [])
         return {
             "session_key": row["session_key"],
@@ -3631,10 +3740,15 @@ class InstanceRepository:
                 "created_at": datetime.utcnow().isoformat(),
             }
             events.append(event)
-            config["stop_reason"] = event["reason"]
-            config["next_run_at"] = None
+            stop_policy = config.get("stop_policy") or {}
+            next_status = "paused" if stop_policy.get("pause_on_no_trusted_sources", False) else "idle"
+            if next_status == "paused":
+                config["stop_reason"] = event["reason"]
+                config["next_run_at"] = None
+            else:
+                config["stop_reason"] = None
+                config["next_run_at"] = self._continuous_next_run_at(config)
             self._continuous_append_events(config, events)
-            next_status = "paused" if (config.get("stop_policy") or {}).get("pause_on_no_trusted_sources", True) else "idle"
             with self.metadata_engine_for(tenant).begin() as conn:
                 conn.execute(
                     text(
@@ -3642,6 +3756,7 @@ class InstanceRepository:
                         UPDATE aletheia_continuous_enrichment_sessions
                         SET status = :status,
                             config_json = :config_json,
+                            frontier_json = :frontier_json,
                             updated_at = CURRENT_TIMESTAMP
                         WHERE project_id = :tenant_id AND session_key = :session_key
                         """
@@ -3700,6 +3815,7 @@ class InstanceRepository:
                     max_iterations=max_iterations,
                     max_frontier=max_frontier,
                     max_results_per_query=max_results_per_query,
+                    node_similarity_dedup_threshold=float(config.get("node_similarity_dedup_threshold", 0.6)),
                 ).run(objective, artifact_keys=body.get("artifact_keys") or None, frontier_items=frontier_items or None)
                 config = self._continuous_clear_backoff(config)
             except Exception as exc:
@@ -4408,7 +4524,20 @@ class InstanceRepository:
         pending_edge_fact_keys = set()
         for row in rows:
             payload = _load_json(row["payload_json"], {})
-            if pending_like_filter and not _is_current_graph_proposal(row["status"], payload):
+            row_status = row["status"]
+            if pending_like_filter:
+                guarded_for_filter = _apply_edge_source_identity_presentation_guard(
+                    {
+                        "element_key": row["element_key"],
+                        "element_type": row["element_type"],
+                        "name": row["name"],
+                        "payload": payload,
+                        "status": row_status,
+                    }
+                )
+                payload = guarded_for_filter.get("payload") or payload
+                row_status = guarded_for_filter.get("status") or row_status
+            if pending_like_filter and not _is_current_graph_proposal(row_status, payload):
                 continue
             if pending_like_filter and row["element_type"] == "edge":
                 edge_fact_key = _graph_edge_fact_key(payload)
@@ -4443,11 +4572,12 @@ class InstanceRepository:
                     "evidence_refs": _load_json(row["evidence_refs_json"], []),
                     "source_url": row["source_url"],
                     "confidence": row["confidence"],
-                    "status": row["status"],
+                    "status": row_status,
                     "iteration": row["iteration"],
                     "created_at": _jsonable(row["created_at"]),
                     "run_key": run["run_key"],
                 }
+                element = _apply_edge_source_identity_presentation_guard(element)
                 elements.append(_apply_possible_duplicate_presentation_guard(element, identity_rows))
         return {
             "tenant": tenant.public_dict(),

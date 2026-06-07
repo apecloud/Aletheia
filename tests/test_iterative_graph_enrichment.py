@@ -43,7 +43,11 @@ class StaticTestEmbeddingAdapter:
                 "vector": None,
                 "dim": 0,
             }
-        if "finding |" in normalized and ("hormuz" in normalized or "energy disruption" in normalized):
+        if "node | country" in normalized and "similarland alpha" in normalized:
+            vector = [1.0, 0.0, 0.0, 0.0]
+        elif "node | country" in normalized and "similarland beta" in normalized:
+            vector = [0.7, 0.714, 0.0, 0.0]
+        elif "finding |" in normalized and ("hormuz" in normalized or "energy disruption" in normalized):
             vector = [0.6, 0.6, 0.0, 0.0]
         elif "edge | country" in normalized and "bab el mandeb strait" in normalized:
             vector = [0.0, 0.0, 0.7, 0.7]
@@ -962,17 +966,17 @@ class IterativeGraphEnrichmentTest(unittest.TestCase):
                     "single_endpoint_expansion",
                     "loose_pair_discovery",
                     "schema_broad_discovery",
-                    "objective_broad_scan",
                 ],
             )
-            self.assertEqual([item["coarse_level"] for item in plan["plans"]], [0, 1, 2, 3, 4])
+            self.assertEqual([item["coarse_level"] for item in plan["plans"]], [0, 1, 2, 3])
             self.assertEqual(plan["plans"][1]["radius"], 1)
             self.assertIn("CHN", plan["plans"][1]["query"])
             self.assertIn("SchemaGraph mapping", plan["plans"][2]["acceptance"])
             self.assertIn("Chokepoint", plan["plans"][3]["query"])
-            self.assertIn("discover", plan["plans"][4]["query"])
             self.assertEqual(plan["expansion_policy"]["default_max_radius"], 1)
             self.assertEqual(plan["expansion_policy"]["query_ladder"][0], "L0_path_exact")
+            self.assertNotIn("L4_objective_broad", plan["expansion_policy"]["query_ladder"])
+            self.assertNotIn("objective_broad_scan", [item["intent"] for item in plan["plans"]])
             self.assertIn("graph_anchor", plan["relevance_gate"])
 
     def test_run_trace_records_graph_aware_query_provenance(self):
@@ -1012,7 +1016,8 @@ class IterativeGraphEnrichmentTest(unittest.TestCase):
             self.assertEqual(trace["selected_query_plan"]["intent"], "path_evidence")
             self.assertEqual(trace["selected_query_plan"]["granularity"], "L0_path_exact")
             self.assertEqual(trace["query_plans"][1]["intent"], "single_endpoint_expansion")
-            self.assertEqual(trace["query_plans"][4]["granularity"], "L4_objective_broad")
+            self.assertEqual(trace["query_plans"][-1]["granularity"], "L3_schema_broad")
+            self.assertNotIn("L4_objective_broad", [item["granularity"] for item in trace["query_plans"]])
             self.assertIn("schema", trace["relevance_gate"])
             self.assertIn("query_terms", result["run"]["skipped_sources"][0])
             self.assertIn("CHN", result["run"]["skipped_sources"][0]["query_terms"]["countries"])
@@ -1034,6 +1039,9 @@ class IterativeGraphEnrichmentTest(unittest.TestCase):
         self.assertIn("Hormuz", plan["selected_plan"]["query"])
         self.assertEqual(plan["selected_plan"]["granularity"], "L0_path_exact")
         self.assertIn({"term": "Hormuz", "source": "frontier.label"}, plan["selected_plan"]["source_terms"])
+        for query_plan in plan["plans"]:
+            self.assertIn("Hormuz", query_plan["query"])
+        self.assertNotIn("Country Analyze US-Iran", " ".join(item["query"] for item in plan["plans"]))
 
     def test_rerun_same_frontier_does_not_duplicate_proposed_nodes_or_edges(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -1400,6 +1408,130 @@ class IterativeGraphEnrichmentTest(unittest.TestCase):
             self.assertGreater(candidate["payload"]["vector_distance"], 0.24)
             self.assertEqual(candidate["payload"]["merge_decision_source"], "vector_embedding_distance")
 
+    def test_similar_node_with_confidence_above_threshold_dedups_directly(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_url, _ = self._seed_db(tmpdir)
+            agent = IterativeGraphEnrichmentAgent(
+                db_url,
+                tenant="maritime-risk",
+                embedding_adapter=StaticTestEmbeddingAdapter(),
+                node_similarity_dedup_threshold=0.6,
+            )
+            session = agent.Session()
+            try:
+                agent._upsert_identity_index_row(
+                    session,
+                    identity={
+                        "kind": "node",
+                        "entity_type": "Country",
+                        "label": "Similarland Alpha",
+                        "normalized_label": "similarland alpha",
+                        "aliases": [],
+                        "source_identity": None,
+                        "property_fingerprint": "similarland-alpha",
+                    },
+                    identity_key="node:maritime-risk:country:similarland-alpha:legacy",
+                    source_space="proposed_graph",
+                    source_key="proposed-graph:maritime-risk:node:similarland-alpha",
+                    source_status="draft",
+                    payload={"label": "Similarland Alpha"},
+                )
+                session.commit()
+                identity_index = agent._identity_index(session)
+            finally:
+                session.close()
+
+            candidate = agent._annotate_candidate_identity(
+                {
+                    "element_type": "node",
+                    "name": "Similarland Beta",
+                    "payload": {
+                        "ontology_type": "Country",
+                        "label": "Similarland Beta",
+                        "description": "A similar candidate country node.",
+                        "properties": {},
+                    },
+                    "evidence_refs": ["source:similar-beta"],
+                    "source_url": "https://example.org/similar-beta",
+                    "confidence": 0.61,
+                    "iteration": 1,
+                },
+                task_id="task-a",
+                run_id="run-a",
+                frontier_id="frontier-a",
+                candidate_seq=1,
+                identity_index=identity_index,
+            )
+
+            self.assertEqual(candidate["payload"]["dedup_decision"], "duplicate_existing_proposal")
+            self.assertEqual(candidate["payload"]["match_method"], "vector_embedding")
+            self.assertEqual(candidate["payload"]["decision_reason"], "node_similarity_confidence_threshold_met")
+            self.assertGreaterEqual(candidate["payload"]["match_score"], 0.6)
+            self.assertGreater(candidate["payload"]["candidate_confidence"], 0.6)
+            self.assertEqual(candidate["payload"]["node_similarity_dedup_threshold"], 0.6)
+            self.assertEqual(candidate["payload"]["matched_node_key"], "proposed-graph:maritime-risk:node:similarland-alpha")
+
+    def test_similar_node_at_confidence_threshold_does_not_direct_dedup(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_url, _ = self._seed_db(tmpdir)
+            agent = IterativeGraphEnrichmentAgent(
+                db_url,
+                tenant="maritime-risk",
+                embedding_adapter=StaticTestEmbeddingAdapter(),
+                node_similarity_dedup_threshold=0.6,
+            )
+            session = agent.Session()
+            try:
+                agent._upsert_identity_index_row(
+                    session,
+                    identity={
+                        "kind": "node",
+                        "entity_type": "Country",
+                        "label": "Similarland Alpha",
+                        "normalized_label": "similarland alpha",
+                        "aliases": [],
+                        "source_identity": None,
+                        "property_fingerprint": "similarland-alpha",
+                    },
+                    identity_key="node:maritime-risk:country:similarland-alpha:legacy",
+                    source_space="proposed_graph",
+                    source_key="proposed-graph:maritime-risk:node:similarland-alpha",
+                    source_status="draft",
+                    payload={"label": "Similarland Alpha"},
+                )
+                session.commit()
+                identity_index = agent._identity_index(session)
+            finally:
+                session.close()
+
+            candidate = agent._annotate_candidate_identity(
+                {
+                    "element_type": "node",
+                    "name": "Similarland Beta",
+                    "payload": {
+                        "ontology_type": "Country",
+                        "label": "Similarland Beta",
+                        "description": "A similar candidate country node.",
+                        "properties": {},
+                    },
+                    "evidence_refs": ["source:similar-beta"],
+                    "source_url": "https://example.org/similar-beta",
+                    "confidence": 0.6,
+                    "iteration": 1,
+                },
+                task_id="task-a",
+                run_id="run-a",
+                frontier_id="frontier-a",
+                candidate_seq=1,
+                identity_index=identity_index,
+            )
+
+            self.assertEqual(candidate["payload"]["dedup_decision"], "new_proposal")
+            self.assertEqual(candidate["payload"]["match_method"], "vector_embedding")
+            self.assertEqual(candidate["payload"]["decision_reason"], "nearest vector outside dedup threshold")
+            self.assertEqual(candidate["payload"]["candidate_confidence"], 0.6)
+            self.assertGreaterEqual(candidate["payload"]["match_score"], 0.6)
+
     def test_vector_dedup_edge_structural_conflict_requires_review_not_duplicate(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             db_url, _ = self._seed_db(tmpdir)
@@ -1476,6 +1608,157 @@ class IterativeGraphEnrichmentTest(unittest.TestCase):
             self.assertEqual(annotated["payload"]["dedup_decision"], "needs_review")
             self.assertFalse(annotated["payload"]["structure_compatible"])
             self.assertIn("relation", annotated["payload"]["conflict_fields"])
+            self.assertIn("source_identity", annotated["payload"]["conflict_fields"])
+            self.assertNotEqual(annotated["payload"]["dedup_decision"], "duplicate_existing_proposal")
+
+    def test_edge_source_url_difference_does_not_block_vector_dedup(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_url, _ = self._seed_db(tmpdir)
+            agent = IterativeGraphEnrichmentAgent(
+                db_url,
+                tenant="maritime-risk",
+                embedding_adapter=StaticTestEmbeddingAdapter(),
+            )
+            session = agent.Session()
+            try:
+                agent._upsert_identity_index_row(
+                    session,
+                    identity={
+                        "kind": "edge",
+                        "source_type": "Country",
+                        "target_type": "Chokepoint",
+                        "source_node": "south korea kor",
+                        "target_node": "hormuz strait",
+                        "relation": "has country dependency",
+                        "source_identity": "https://source-a.example/hormuz|country_dependency",
+                        "property_fingerprint": "legacy-edge-with-source-url",
+                    },
+                    identity_key="edge:maritime-risk:south-korea:has-country-dependency:hormuz:legacy-source-a",
+                    source_space="proposed_graph",
+                    source_key="proposed-graph:maritime-risk:edge:legacy-source-a",
+                    source_status="draft",
+                    payload={
+                        "source_type": "Country",
+                        "source_label": "South Korea (KOR)",
+                        "relation": "has_country_dependency",
+                        "target_type": "Chokepoint",
+                        "target_label": "Hormuz Strait",
+                        "metrics": ["country_dependency"],
+                        "source_url": "https://source-a.example/hormuz",
+                    },
+                )
+                session.commit()
+                identity_index = agent._identity_index(session)
+            finally:
+                session.close()
+
+            annotated = agent._annotate_candidate_identity(
+                {
+                    "element_type": "edge",
+                    "name": "South Korea (KOR) has country dependency Hormuz Strait",
+                    "payload": {
+                        "source_type": "Country",
+                        "source_label": "South Korea (KOR)",
+                        "relation": "has_country_dependency",
+                        "target_type": "Chokepoint",
+                        "target_label": "Hormuz Strait",
+                        "description": "South Korea has country dependency on Hormuz Strait.",
+                        "properties": {"metric_key": "country_dependency", "source_url": "https://source-b.example/hormuz"},
+                        "metrics": ["country_dependency"],
+                    },
+                    "evidence_refs": ["https://source-b.example/hormuz"],
+                    "source_url": "https://source-b.example/hormuz",
+                    "confidence": 0.82,
+                    "iteration": 1,
+                },
+                task_id="task-edge",
+                run_id="run-edge",
+                frontier_id="frontier-edge",
+                candidate_seq=1,
+                identity_index=identity_index,
+            )
+
+            self.assertEqual(annotated["payload"]["match_method"], "vector_embedding")
+            self.assertEqual(annotated["payload"]["dedup_decision"], "duplicate_existing_proposal")
+            self.assertTrue(annotated["payload"]["structure_compatible"])
+            self.assertNotIn("source_identity", annotated["payload"]["conflict_fields"])
+            self.assertIn("compatible source/metric identity", annotated["payload"]["match_evidence"])
+            self.assertEqual(
+                annotated["payload"]["matched_node_key"],
+                "proposed-graph:maritime-risk:edge:legacy-source-a",
+            )
+            self.assertNotIn("source-b.example", annotated["payload"]["identity_key"])
+
+    def test_edge_metric_identity_conflict_still_requires_review(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_url, _ = self._seed_db(tmpdir)
+            agent = IterativeGraphEnrichmentAgent(
+                db_url,
+                tenant="maritime-risk",
+                embedding_adapter=StaticTestEmbeddingAdapter(),
+            )
+            session = agent.Session()
+            try:
+                agent._upsert_identity_index_row(
+                    session,
+                    identity={
+                        "kind": "edge",
+                        "source_type": "Country",
+                        "target_type": "Chokepoint",
+                        "source_node": "south korea kor",
+                        "target_node": "hormuz strait",
+                        "relation": "has country dependency",
+                        "source_identity": "trade_at_risk_v",
+                        "property_fingerprint": "trade-metric-edge",
+                    },
+                    identity_key="edge:maritime-risk:south-korea:has-country-dependency:hormuz:trade",
+                    source_space="proposed_graph",
+                    source_key="proposed-graph:maritime-risk:edge:trade-metric",
+                    source_status="draft",
+                    payload={
+                        "source_type": "Country",
+                        "source_label": "South Korea (KOR)",
+                        "relation": "has_country_dependency",
+                        "target_type": "Chokepoint",
+                        "target_label": "Hormuz Strait",
+                        "metrics": ["trade_at_risk_v"],
+                    },
+                )
+                session.commit()
+                identity_index = agent._identity_index(session)
+            finally:
+                session.close()
+
+            annotated = agent._annotate_candidate_identity(
+                {
+                    "element_type": "edge",
+                    "name": "South Korea (KOR) has country dependency Hormuz Strait",
+                    "payload": {
+                        "source_type": "Country",
+                        "source_label": "South Korea (KOR)",
+                        "relation": "has_country_dependency",
+                        "target_type": "Chokepoint",
+                        "target_label": "Hormuz Strait",
+                        "description": "South Korea has country dependency on Hormuz Strait.",
+                        "properties": {"metric_key": "military_presence_score"},
+                        "metrics": ["military_presence_score"],
+                    },
+                    "evidence_refs": ["https://source-b.example/hormuz"],
+                    "source_url": "https://source-b.example/hormuz",
+                    "confidence": 0.82,
+                    "iteration": 1,
+                },
+                task_id="task-edge",
+                run_id="run-edge",
+                frontier_id="frontier-edge",
+                candidate_seq=1,
+                identity_index=identity_index,
+            )
+
+            self.assertEqual(annotated["payload"]["match_method"], "vector_embedding")
+            self.assertEqual(annotated["payload"]["decision_reason"], "structural_conflict")
+            self.assertEqual(annotated["payload"]["dedup_decision"], "needs_review")
+            self.assertFalse(annotated["payload"]["structure_compatible"])
             self.assertIn("source_identity", annotated["payload"]["conflict_fields"])
             self.assertNotEqual(annotated["payload"]["dedup_decision"], "duplicate_existing_proposal")
 
@@ -2378,7 +2661,7 @@ class IterativeGraphEnrichmentTest(unittest.TestCase):
                 )
                 self.assertNotEqual(first["payload"]["candidate_id"], changed["payload"]["candidate_id"])
 
-    def test_ambiguous_existing_proposed_node_requires_review(self):
+    def test_similar_existing_proposed_node_above_threshold_is_skipped_as_duplicate(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             db_url, _ = self._seed_db(tmpdir)
             engine = create_engine(db_url)
@@ -2426,23 +2709,31 @@ class IterativeGraphEnrichmentTest(unittest.TestCase):
                 embedding_adapter=StaticTestEmbeddingAdapter(),
             )
             result = agent.run("discover hazard chokepoint country trade action paths")
-            chokepoint = next(
+            chokepoints = [
                 item
                 for item in result["proposed_graph"]
                 if item["element_type"] == "node" and item["payload"].get("label") == "Bab el-Mandeb Strait"
-            )
+            ]
 
-            self.assertEqual(chokepoint["status"], "needs_more_evidence")
-            self.assertEqual(chokepoint["payload"]["dedup_decision"], "needs_review")
-            self.assertTrue(chokepoint["payload"]["review_required"])
-            self.assertEqual(chokepoint["payload"]["matched_node_key"], "proposed-graph:maritime-risk:node:ambiguous-bab")
-            self.assertGreaterEqual(chokepoint["payload"]["match_score"], 0.75)
-            self.assertLess(chokepoint["payload"]["match_score"], 0.92)
+            self.assertFalse(chokepoints)
+            self.assertTrue(
+                any(
+                    item.get("element_type") == "node"
+                    and item.get("name") == "Bab el-Mandeb Strait"
+                    and item.get("dedup_decision") == "duplicate_existing_proposal"
+                    and item.get("reason") == "duplicate_endpoint_node_not_proposed"
+                    for item in result["run"]["skipped_sources"]
+                )
+            )
             edge = next(item for item in result["proposed_graph"] if item["element_type"] == "edge")
-            self.assertEqual(edge["status"], "needs_more_evidence")
-            self.assertTrue(edge["payload"]["endpoint_review_required"])
-            self.assertTrue(edge["payload"]["endpoint_dedup_evidence"]["target"]["review_required"])
-            self.assertEqual(edge["payload"]["endpoint_decision_reason"], "endpoint_identity_needs_review")
+            self.assertEqual(edge["status"], "draft")
+            self.assertFalse(edge["payload"]["endpoint_review_required"])
+            target_evidence = edge["payload"]["endpoint_dedup_evidence"]["target"]
+            self.assertEqual(target_evidence["dedup_decision"], "duplicate_existing_proposal")
+            self.assertEqual(target_evidence["matched_node_key"], "proposed-graph:maritime-risk:node:ambiguous-bab")
+            self.assertEqual(target_evidence["decision_reason"], "node_similarity_confidence_threshold_met")
+            self.assertFalse(target_evidence["review_required"])
+            self.assertFalse(target_evidence["proposed_node_created"])
 
 
 if __name__ == "__main__":

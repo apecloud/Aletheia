@@ -1,11 +1,18 @@
 import json
+import tempfile
 import unittest
 from datetime import datetime, timedelta
 
 from sqlalchemy.exc import OperationalError
 
-from server.workbench_server import InstanceRepository, _apply_possible_duplicate_presentation_guard, _dedup_audit_from_payload
-from tenant_registry import TenantConfig
+from server.workbench_server import (
+    InstanceRepository,
+    _apply_edge_source_identity_presentation_guard,
+    _apply_possible_duplicate_presentation_guard,
+    _dedup_audit_from_payload,
+    _is_current_graph_proposal,
+)
+from tenant_registry import TenantConfig, TenantRegistry
 
 
 class ContinuousEnrichmentFrontierTest(unittest.TestCase):
@@ -13,6 +20,43 @@ class ContinuousEnrichmentFrontierTest(unittest.TestCase):
         repo = object.__new__(InstanceRepository)
         repo._continuous_frontier_candidates = lambda tenant, stored, config: candidates
         return repo
+
+    def _sqlite_tenant_repo(self, tmpdir):
+        tenant = TenantConfig(
+            tenant_id="tenant-a",
+            namespace="tenant-a",
+            display_name="Tenant A",
+            graph_database="tenant_a",
+            metadata_db_url=f"sqlite:///{tmpdir}/metadata.db",
+            source_db_url="sqlite:///:memory:",
+        )
+        repo = InstanceRepository(TenantRegistry([tenant], "tenant-a"))
+        return repo, tenant
+
+    def test_default_continuous_session_objective_is_optional_empty(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo, tenant = self._sqlite_tenant_repo(tmpdir)
+
+            session_key = repo._default_continuous_session(tenant)
+            session = repo.continuous_enrichment_session(tenant, session_key)
+
+            self.assertEqual(session["session"]["objective"], "")
+            self.assertEqual(session["session"]["frontier"], [])
+
+    def test_configure_continuous_session_updates_optional_objective(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo, tenant = self._sqlite_tenant_repo(tmpdir)
+            session_key = repo._default_continuous_session(tenant)
+
+            updated = repo.configure_continuous_enrichment_session(
+                tenant,
+                session_key,
+                {"objective": "maritime chokepoint disruption", "cadence": "manual"},
+            )
+            cleared = repo.configure_continuous_enrichment_session(tenant, session_key, {"objective": ""})
+
+            self.assertEqual(updated["session"]["objective"], "maritime chokepoint disruption")
+            self.assertEqual(cleared["session"]["objective"], "")
 
     def test_priority_order_prefers_new_graph_then_question_then_finding_then_coverage(self):
         candidates = [
@@ -155,6 +199,18 @@ class ContinuousEnrichmentFrontierTest(unittest.TestCase):
         self.assertEqual(additions[0]["priority"], 100.0)
         self.assertIn("new proposed graph edge", additions[0]["reason"])
         self.assertEqual(next_frontier[0]["payload"]["relation"], "depends_on")
+
+    def test_continuous_config_accepts_node_similarity_dedup_threshold(self):
+        repo = object.__new__(InstanceRepository)
+
+        config = repo._continuous_update_config({}, {"node_similarity_dedup_threshold": "0.6"})
+        self.assertEqual(config["node_similarity_dedup_threshold"], 0.6)
+
+        clamped = repo._continuous_update_config({}, {"node_similarity_dedup_threshold": "1.5"})
+        self.assertEqual(clamped["node_similarity_dedup_threshold"], 1.0)
+
+        with self.assertRaises(ValueError):
+            repo._continuous_update_config({}, {"node_similarity_dedup_threshold": "not-a-number"})
 
     def test_stored_frontier_queue_order_takes_precedence_over_dynamic_priority(self):
         candidates = [
@@ -424,6 +480,120 @@ class ContinuousEnrichmentFrontierTest(unittest.TestCase):
         self.assertFalse(guarded["payload"]["llm_merge_decision_allowed"])
         self.assertFalse(guarded["presentation_guard"]["writes_persisted"])
 
+    def test_edge_source_identity_presentation_guard_ignores_fact_occurrence_drift(self):
+        element = {
+            "element_key": "proposed-graph:maritime-risk:edge:new",
+            "element_type": "edge",
+            "name": "JPN has_country_dependency Hormuz Strait",
+            "status": "needs_more_evidence",
+            "payload": {
+                "dedup_decision": "needs_review",
+                "decision_reason": "structural_conflict",
+                "conflict_fields": ["source_identity"],
+                "match_method": "vector_embedding",
+                "match_score": 0.9915,
+                "vector_distance": 0.008549,
+                "vector_duplicate_distance_threshold": 0.12,
+                "matched_node_key": "proposed-graph:maritime-risk:edge:existing",
+                "matched_source": "current_run_candidate",
+                "matched_status": "proposed",
+                "identity": {
+                    "kind": "edge",
+                    "source_type": "EvidenceEntity",
+                    "target_type": "EvidenceEntity",
+                    "source_node": "jpn",
+                    "target_node": "hormuz strait",
+                    "relation": "has country dependency",
+                    "source_identity": "fact:8cf64ca1d1e5aada",
+                },
+                "match_evidence": [
+                    "vector nearest-neighbor search",
+                    "same source_type",
+                    "same target_type",
+                    "same source_node",
+                    "same target_node",
+                    "same relation",
+                ],
+                "vector_top_k": [
+                    {
+                        "node_key": "proposed-graph:maritime-risk:edge:existing",
+                        "identity_key": "edge:maritime-risk:jpn:has country dependency:hormuz strait:fact:3b755651c2118c7c",
+                        "conflict_fields": ["source_identity"],
+                        "structure_evidence": [
+                            "same source_type",
+                            "same target_type",
+                            "same source_node",
+                            "same target_node",
+                            "same relation",
+                        ],
+                    }
+                ],
+                "llm_merge_decision_allowed": False,
+            },
+        }
+
+        guarded = _apply_edge_source_identity_presentation_guard(element)
+
+        self.assertEqual(guarded["payload"]["dedup_decision"], "duplicate_current_run")
+        self.assertTrue(guarded["payload"]["structure_compatible"])
+        self.assertEqual(guarded["payload"]["conflict_fields"], [])
+        self.assertEqual(guarded["payload"]["decision_reason"], "source_identity_provenance_drift_ignored")
+        self.assertFalse(_is_current_graph_proposal(guarded["status"], guarded["payload"]))
+        self.assertEqual(guarded["dedup_audit"]["dedup_decision"], "duplicate_current_run")
+        self.assertEqual(guarded["presentation_guard"]["reason"], "edge_source_identity_provenance_drift")
+        self.assertFalse(guarded["presentation_guard"]["writes_persisted"])
+
+    def test_edge_source_identity_presentation_guard_keeps_metric_conflict_in_review(self):
+        element = {
+            "element_key": "proposed-graph:maritime-risk:edge:new",
+            "element_type": "edge",
+            "name": "JPN has_country_dependency Hormuz Strait",
+            "status": "needs_more_evidence",
+            "payload": {
+                "dedup_decision": "needs_review",
+                "decision_reason": "structural_conflict",
+                "conflict_fields": ["source_identity"],
+                "match_method": "vector_embedding",
+                "match_score": 0.9915,
+                "vector_distance": 0.008549,
+                "vector_duplicate_distance_threshold": 0.12,
+                "matched_node_key": "proposed-graph:maritime-risk:edge:existing",
+                "matched_source": "proposed_graph",
+                "matched_status": "proposed",
+                "identity": {
+                    "kind": "edge",
+                    "source_type": "Country",
+                    "target_type": "Chokepoint",
+                    "source_node": "jpn",
+                    "target_node": "hormuz strait",
+                    "relation": "has country dependency",
+                    "source_identity": "trade_at_risk_v",
+                },
+                "vector_top_k": [
+                    {
+                        "node_key": "proposed-graph:maritime-risk:edge:existing",
+                        "identity_key": "edge:maritime-risk:jpn:has country dependency:hormuz strait:military_presence_score",
+                        "conflict_fields": ["source_identity"],
+                        "structure_evidence": [
+                            "same source_type",
+                            "same target_type",
+                            "same source_node",
+                            "same target_node",
+                            "same relation",
+                        ],
+                    }
+                ],
+                "llm_merge_decision_allowed": False,
+            },
+        }
+
+        guarded = _apply_edge_source_identity_presentation_guard(element)
+
+        self.assertEqual(guarded["payload"]["dedup_decision"], "needs_review")
+        self.assertEqual(guarded["payload"]["decision_reason"], "structural_conflict")
+        self.assertEqual(guarded["payload"]["conflict_fields"], ["source_identity"])
+        self.assertNotIn("presentation_guard", guarded)
+
     def test_budget_config_caps_effective_cycle_limits(self):
         repo = object.__new__(InstanceRepository)
         config = repo._continuous_update_config(
@@ -545,6 +715,9 @@ class ContinuousEnrichmentFrontierTest(unittest.TestCase):
             def __init__(self):
                 self.queries = []
 
+            def request_url(self, query):
+                return f"https://search.test/html/?q={query.replace(' ', '+')}"
+
             def search(self, query, max_results):
                 self.queries.append((query, max_results))
                 return [
@@ -590,8 +763,49 @@ class ContinuousEnrichmentFrontierTest(unittest.TestCase):
         self.assertEqual(provider.queries[0][1], 2)
         self.assertIn("KOR", provider.queries[0][0])
         self.assertIn("Hormuz Strait", provider.queries[0][0])
+        self.assertTrue(results[0]["request_url"].startswith("https://search.test/html/?q="))
         self.assertEqual(events[-1]["type"], "query_search_executed")
+        self.assertTrue(events[-1]["request_url"].startswith("https://search.test/html/?q="))
         self.assertEqual(events[-1]["accepted_for_trust_filter_count"], 1)
+
+    def test_continuous_query_search_failed_records_request_url(self):
+        class FailingSearchProvider:
+            def request_url(self, query):
+                return f"https://search.test/html/?q={query.replace(' ', '+')}"
+
+            def search(self, query, max_results):
+                raise TimeoutError("duckduckgo timeout")
+
+        repo = object.__new__(InstanceRepository)
+        tenant = type("Tenant", (), {"tenant_id": "maritime-risk"})()
+        frontier = [
+            {
+                "key": "proposed-graph:maritime-risk:edge:kor-hormuz",
+                "name": "KOR has country dependency Hormuz Strait",
+                "payload": {
+                    "source_label": "KOR",
+                    "target_label": "Hormuz Strait",
+                    "relation": "has_country_dependency",
+                },
+            }
+        ]
+
+        results, events = repo._continuous_search_results_for_cycle(
+            tenant,
+            "continuous:maritime-risk:us-iran-impact:mvp",
+            "Analyze maritime dependency risk",
+            {},
+            frontier,
+            2,
+            {"search_provider": "duckduckgo_html", "max_query_plans_per_frontier": 1},
+            provider=FailingSearchProvider(),
+        )
+
+        self.assertEqual(results, [])
+        failed = [event for event in events if event["type"] == "query_search_failed"][0]
+        self.assertIn("KOR", failed["query"])
+        self.assertTrue(failed["request_url"].startswith("https://search.test/html/?q="))
+        self.assertIn("duckduckgo timeout", failed["error"])
 
     def test_continuous_query_search_coarsens_ladder_when_exact_query_has_no_results(self):
         class FakeSearchProvider:
@@ -697,6 +911,31 @@ class ContinuousEnrichmentFrontierTest(unittest.TestCase):
         self.assertEqual([item["key"] for item in items], ["graph-coverage:Country:HIGH", "graph-coverage:Country:LOW"])
         self.assertEqual(items[0]["payload"]["selection_policy"], "degree_coverage")
         self.assertGreater(items[0]["payload"]["degree"], items[1]["payload"]["degree"])
+
+    def test_graph_coverage_frontier_advances_after_cursor(self):
+        repo = object.__new__(InstanceRepository)
+        tenant = type("Tenant", (), {"tenant_id": "tenant-a"})()
+        repo.full_graph = lambda tenant, limit=200: {
+            "nodes": [
+                {"id": "Country:A", "label": "A", "type": "Country"},
+                {"id": "Country:B", "label": "B", "type": "Country"},
+                {"id": "Country:C", "label": "C", "type": "Country"},
+                {"id": "Country:D", "label": "D", "type": "Country"},
+            ],
+            "edges": [
+                {"source": "Country:A", "target": "Chokepoint:1"},
+                {"source": "Country:B", "target": "Chokepoint:1"},
+                {"source": "Country:C", "target": "Chokepoint:1"},
+            ],
+        }
+
+        items = repo._continuous_graph_coverage_frontier(
+            tenant,
+            config={"frontier_state": {"coverage_cursor": 2}},
+            limit=2,
+        )
+
+        self.assertEqual([item["key"] for item in items], ["graph-coverage:Country:C", "graph-coverage:Country:D"])
 
     def test_backoff_schedules_exponential_delay_and_blocks_until_due(self):
         repo = object.__new__(InstanceRepository)

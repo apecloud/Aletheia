@@ -12,7 +12,7 @@ from datetime import datetime
 from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any
-from urllib.parse import parse_qs, unquote, urlparse
+from urllib.parse import parse_qs, unquote, urlencode, urlparse
 
 import requests
 from sqlalchemy import create_engine
@@ -197,6 +197,9 @@ class StaticSearchProvider:
 class DuckDuckGoHTMLSearchProvider:
     def __init__(self, timeout_seconds: float = 8.0):
         self.timeout_seconds = timeout_seconds
+
+    def request_url(self, query: str) -> str:
+        return f"https://duckduckgo.com/html/?{urlencode({'q': query})}"
 
     def search(self, query: str, max_results: int) -> list[SearchResult]:
         response = requests.get(

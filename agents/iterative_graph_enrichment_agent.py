@@ -43,6 +43,8 @@ DEFAULT_DEDUP_EMBEDDING_MODEL = os.environ.get(
 VECTOR_DUPLICATE_DISTANCE = 0.12
 VECTOR_REVIEW_DISTANCE = 0.24
 VECTOR_TOP_K = 5
+NODE_SIMILARITY_DIRECT_DEDUP_THRESHOLD = 0.6
+NODE_DIRECT_DEDUP_MIN_CONFIDENCE = 0.6
 _DOTENV_CACHE: dict[str, str] | None = None
 
 DEEP_GRAPH_REQUIRED_STEPS = ("hazard", "chokepoint", "dependent_country", "risk_metric", "recommended_action")
@@ -316,6 +318,72 @@ def _source_identity(value: dict[str, Any]) -> str | None:
     return None
 
 
+def _edge_fact_identity(value: dict[str, Any]) -> str | None:
+    for key in (
+        "fact_identity",
+        "fact_key",
+        "claim_identity",
+        "canonical_id_hint",
+        "fact_node_hint",
+        "metric_key",
+        "schema_edge_key",
+        "source_pk",
+        "source_id",
+    ):
+        raw = value.get(key)
+        if raw not in (None, "", []):
+            stable_values = [
+                item
+                for item in _stable_identity_values(raw)
+                if not _edge_identity_token_is_evidence_source(item)
+            ]
+            if stable_values:
+                return "|".join(stable_values)
+    return None
+
+
+def _edge_identity_token_is_evidence_source(value: Any) -> bool:
+    token = str(value or "").strip().lower()
+    if not token:
+        return True
+    if "://" in token:
+        return True
+    if re.fullmatch(r"fact:[0-9a-f]{8,}", token):
+        return True
+    return token.startswith(
+        (
+            "source_ref:",
+            "source_url:",
+            "evidence_ref:",
+            "url:",
+            "run:",
+            "frontier:",
+            "iterative-graph-run:",
+            "enrich-task:",
+        )
+    )
+
+
+def _edge_fact_identity_parts(value: Any) -> set[str]:
+    parts: set[str] = set()
+    for raw in _stable_identity_values(value):
+        for token in str(raw).split("|"):
+            token = token.strip()
+            if not token or _edge_identity_token_is_evidence_source(token):
+                continue
+            normalized = _normalize_identity_text(token)
+            parts.add(normalized or token.lower())
+    return parts
+
+
+def _edge_fact_identity_compatible(left: Any, right: Any) -> bool:
+    left_parts = _edge_fact_identity_parts(left)
+    right_parts = _edge_fact_identity_parts(right)
+    if not left_parts or not right_parts:
+        return False
+    return bool(left_parts & right_parts)
+
+
 def _stable_task_id(tenant: str, objective: str, frontier: list[dict[str, Any]]) -> str:
     frontier_keys = [str(item.get("key") or item.get("name") or "") for item in frontier]
     return f"enrich-task:{tenant}:{_slug(objective, 48)}:{_digest({'tenant': tenant, 'objective': objective, 'frontier': frontier_keys}, 12)}"
@@ -363,8 +431,8 @@ def _edge_identity_payload(item: dict[str, Any]) -> dict[str, Any]:
         metrics = [metrics] if metrics else []
     metric_identity = "|".join(sorted(str(metric) for metric in metrics if metric))
     source_identity = (
-        _source_identity(properties)
-        or _source_identity(payload)
+        _edge_fact_identity(properties)
+        or _edge_fact_identity(payload)
         or payload.get("schema_edge_key")
         or properties.get("schema_edge_key")
         or metric_identity
@@ -599,6 +667,15 @@ def _vector_score(distance: float | None) -> float:
     return round(max(0.0, min(1.0, 1.0 - distance)), 4)
 
 
+def _float_or_none(value: Any) -> float | None:
+    try:
+        if value in (None, ""):
+            return None
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def _structure_compatibility(candidate: dict[str, Any], existing: dict[str, Any]) -> dict[str, Any]:
     conflict_fields: list[str] = []
     evidence: list[str] = []
@@ -612,6 +689,8 @@ def _structure_compatibility(candidate: dict[str, Any], existing: dict[str, Any]
             if candidate_value and existing_value:
                 if candidate_value == existing_value:
                     evidence.append(f"same {field}")
+                elif field == "source_identity" and _edge_fact_identity_compatible(candidate_value, existing_value):
+                    evidence.append("compatible source/metric identity")
                 else:
                     conflict_fields.append(field)
             elif field in {"source_node", "target_node", "relation"}:
@@ -834,6 +913,16 @@ def _dedup_decision(match: dict[str, Any] | None) -> str:
         distance = match.get("vector_distance")
         if distance is None:
             return "new_proposal"
+        if match.get("candidate_kind") == "node":
+            candidate_confidence = _float_or_none(match.get("candidate_confidence")) or 0.0
+            similarity_score = float(match.get("score") or _vector_score(distance))
+            threshold = float(match.get("node_similarity_dedup_threshold") or NODE_SIMILARITY_DIRECT_DEDUP_THRESHOLD)
+            if candidate_confidence > NODE_DIRECT_DEDUP_MIN_CONFIDENCE and similarity_score >= threshold:
+                if match.get("matched_source") == "current_run_candidate":
+                    return "duplicate_current_run"
+                if match.get("matched_status") == "proposed":
+                    return "duplicate_existing_proposal"
+                return "merge_existing"
         if float(distance) <= VECTOR_DUPLICATE_DISTANCE:
             if match.get("matched_source") == "current_run_candidate":
                 return "duplicate_current_run"
@@ -1252,7 +1341,6 @@ def _graph_context_query_plan(item: dict[str, Any], objective: str, tenant: str)
             "L1_single_endpoint",
             "L2_loose_pair",
             "L3_schema_broad",
-            "L4_objective_broad",
         ],
         "coarsen_on": ["no_search_results", "no_trusted_sources", "duplicate_only", "no_new_proposals"],
         "reset_or_hold_on": ["new_reviewable_candidate", "new_frontier_added"],
@@ -1282,28 +1370,32 @@ def _graph_context_query_plan(item: dict[str, Any], objective: str, tenant: str)
         excluded=excluded_terms,
         limit=14,
     ) or query
-    source_endpoint_query = _query_from_term_groups(
-        [
-            [source_label] if source_label else [],
-            [source_type] if source_type else [],
-            query_terms["relations"][:2],
-            query_terms["metrics"][:2],
-            query_terms["objective"][:4],
-        ],
-        excluded=excluded_terms,
-        limit=12,
-    )
-    target_endpoint_query = _query_from_term_groups(
-        [
-            [target_label] if target_label else [],
-            [target_type] if target_type else [],
-            query_terms["relations"][:2],
-            query_terms["metrics"][:2],
-            query_terms["objective"][:4],
-        ],
-        excluded=excluded_terms,
-        limit=12,
-    )
+    source_endpoint_query = ""
+    if source_label:
+        source_endpoint_query = _query_from_term_groups(
+            [
+                [source_label],
+                [source_type] if source_type else [],
+                query_terms["relations"][:2],
+                query_terms["metrics"][:2],
+                query_terms["objective"][:4],
+            ],
+            excluded=excluded_terms,
+            limit=12,
+        )
+    target_endpoint_query = ""
+    if target_label:
+        target_endpoint_query = _query_from_term_groups(
+            [
+                [target_label],
+                [target_type] if target_type else [],
+                query_terms["relations"][:2],
+                query_terms["metrics"][:2],
+                query_terms["objective"][:4],
+            ],
+            excluded=excluded_terms,
+            limit=12,
+        )
     single_endpoint_query = source_endpoint_query or target_endpoint_query or _query_from_term_groups(
         [
             [item.get("name")] if item.get("name") else [],
@@ -1316,6 +1408,7 @@ def _graph_context_query_plan(item: dict[str, Any], objective: str, tenant: str)
     loose_pair_query = _query_from_term_groups(
         [
             [value for value in [source_label, target_label] if value],
+            [frontier_label] if frontier_label and not (source_label or target_label) else [],
             query_terms["objective"][:4],
         ],
         excluded=excluded_terms,
@@ -1323,6 +1416,7 @@ def _graph_context_query_plan(item: dict[str, Any], objective: str, tenant: str)
     ) or single_endpoint_query
     schema_broad_query = _query_from_term_groups(
         [
+            [frontier_label] if frontier_label and not (source_label or target_label) else [],
             expected_node_types[:4],
             expected_relation_types[:4],
             expected_metric_keys[:4],
@@ -1331,15 +1425,6 @@ def _graph_context_query_plan(item: dict[str, Any], objective: str, tenant: str)
         excluded=excluded_terms,
         limit=12,
     ) or loose_pair_query
-    objective_broad_query = _query_from_term_groups(
-        [
-            query_terms["objective"][:8],
-            expected_node_types[:2],
-        ],
-        excluded=excluded_terms,
-        limit=10,
-    ) or schema_broad_query
-
     common_plan = {
         "expected_node_types": expected_node_types[:4],
         "expected_relation_types": expected_relation_types[:4],
@@ -1424,23 +1509,6 @@ def _graph_context_query_plan(item: dict[str, Any], objective: str, tenant: str)
                 ]
             ),
             "acceptance": "source should introduce schema-compatible evidence; unmapped relation or type candidates enter review",
-        },
-        {
-            **common_plan,
-            "intent": "objective_broad_scan",
-            "granularity": "L4_objective_broad",
-            "degree": None,
-            "coarse_level": 4,
-            "query": objective_broad_query,
-            "radius": None,
-            "priority": 20,
-            "source_terms": source_terms(
-                [
-                    ("objective", query_terms["objective"][:8]),
-                    ("approved_schema.node_type", expected_node_types[:2]),
-                ]
-            ),
-            "acceptance": "source should discover new reviewable frontier seeds while extraction remains grounded and proposed-only",
         },
     ]
     return {
@@ -1553,6 +1621,7 @@ class IterativeGraphEnrichmentAgent:
         langextract_runner=None,
         embedding_adapter=None,
         source_db_url: str | None = None,
+        node_similarity_dedup_threshold: float = NODE_SIMILARITY_DIRECT_DEDUP_THRESHOLD,
     ):
         self.engine = create_engine(metadata_db_url)
         ensure_artifact_schema(self.engine)
@@ -1568,6 +1637,7 @@ class IterativeGraphEnrichmentAgent:
         self.max_results_per_query = max_results_per_query
         self.langextract_runner = langextract_runner
         self.embedding_adapter = embedding_adapter or SmallMultilingualEmbeddingAdapter()
+        self.node_similarity_dedup_threshold = max(0.0, min(1.0, float(node_similarity_dedup_threshold)))
 
     def _source_db_url_for_tenant(self, tenant_id: str) -> str:
         try:
@@ -3147,6 +3217,7 @@ class IterativeGraphEnrichmentAgent:
                 }
 
         dedup_text = _dedup_text_for_identity(identity, payload)
+        candidate_confidence = _float_or_none((payload or {}).get("_candidate_confidence") or (payload or {}).get("confidence"))
         candidate_embedding = self._embedding_for_dedup_text(dedup_text)
         if not candidate_embedding.get("vector"):
             alias_candidates = _short_alias_possible_duplicates(
@@ -3268,6 +3339,10 @@ class IterativeGraphEnrichmentAgent:
                 "match_method": "vector_embedding",
                 "structure_compatible": best.get("structure_compatible", False),
                 "vector_distance": best["distance"],
+                "score": best["score"],
+                "candidate_kind": identity.get("kind"),
+                "candidate_confidence": candidate_confidence,
+                "node_similarity_dedup_threshold": self.node_similarity_dedup_threshold,
                 "matched_source": best["source"],
                 "matched_status": best["status"],
             }
@@ -3314,6 +3389,16 @@ class IterativeGraphEnrichmentAgent:
         if best.get("text_similarity"):
             evidence.append(f"same-language text similarity {best['text_similarity']:.4f}")
         structural_conflict = not best.get("structure_compatible", False)
+        node_direct_dedup = (
+            identity.get("kind") == "node"
+            and not structural_conflict
+            and (candidate_confidence or 0.0) > NODE_DIRECT_DEDUP_MIN_CONFIDENCE
+            and float(best.get("score") or 0.0) >= self.node_similarity_dedup_threshold
+        )
+        if node_direct_dedup:
+            evidence.append(
+                f"node similarity {best['score']:.4f} >= threshold {self.node_similarity_dedup_threshold:.4f} with confidence {candidate_confidence:.4f}"
+            )
         return {
             "score": best["score"],
             "evidence": evidence,
@@ -3325,6 +3410,8 @@ class IterativeGraphEnrichmentAgent:
             "match_method": "vector_embedding",
             "decision_reason": "structural_conflict"
             if structural_conflict
+            else "node_similarity_confidence_threshold_met"
+            if node_direct_dedup
             else "vector distance within review window"
             if best["distance"] <= VECTOR_REVIEW_DISTANCE
             else "nearest vector outside dedup threshold",
@@ -3337,6 +3424,9 @@ class IterativeGraphEnrichmentAgent:
             "vector_distance": best["distance"],
             "text_similarity": best.get("text_similarity") or 0.0,
             "vector_top_k": top_k,
+            "candidate_kind": identity.get("kind"),
+            "candidate_confidence": candidate_confidence,
+            "node_similarity_dedup_threshold": self.node_similarity_dedup_threshold,
         }
 
     def _annotate_candidate_identity(
@@ -3352,7 +3442,8 @@ class IterativeGraphEnrichmentAgent:
         identity = _candidate_identity_payload(item)
         candidate_id = _candidate_id_for_identity(self.tenant, identity)
         item_payload = item.get("payload") or {}
-        best = self._best_identity_match(identity, identity_index, payload=item_payload)
+        match_payload = {**item_payload, "_candidate_confidence": item.get("confidence")}
+        best = self._best_identity_match(identity, identity_index, payload=match_payload)
         decision = _dedup_decision(best)
         match_score = float(best.get("score") or 0.0) if best else 0.0
         review_required = decision == "needs_review"
@@ -3401,6 +3492,9 @@ class IterativeGraphEnrichmentAgent:
             "decision_reason": best.get("decision_reason") if best else "no exact or vector identity match",
             "vector_duplicate_distance_threshold": VECTOR_DUPLICATE_DISTANCE,
             "vector_review_distance_threshold": VECTOR_REVIEW_DISTANCE,
+            "node_similarity_dedup_threshold": best.get("node_similarity_dedup_threshold") if best else self.node_similarity_dedup_threshold,
+            "node_direct_dedup_min_confidence": NODE_DIRECT_DEDUP_MIN_CONFIDENCE,
+            "candidate_confidence": best.get("candidate_confidence") if best else item.get("confidence"),
             "review_required": review_required,
             "merge_decision_source": merge_decision_source,
             "llm_merge_decision_allowed": False,
@@ -3566,6 +3660,8 @@ class IterativeGraphEnrichmentAgent:
                         "vector_top_k": VECTOR_TOP_K,
                         "vector_duplicate_distance_threshold": VECTOR_DUPLICATE_DISTANCE,
                         "vector_review_distance_threshold": VECTOR_REVIEW_DISTANCE,
+                        "node_similarity_direct_dedup_threshold": self.node_similarity_dedup_threshold,
+                        "node_direct_dedup_min_confidence": NODE_DIRECT_DEDUP_MIN_CONFIDENCE,
                         "text_similarity": "same_language_audit_only",
                         "auto_merge_threshold": 0.92,
                         "review_threshold": 0.75,

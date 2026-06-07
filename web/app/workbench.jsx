@@ -558,11 +558,12 @@ function AgentRunsWorkspace({ tenantId, query, artifacts = [], graphElements = [
   const [message, setMessage] = useStateWB(null);
   const [settingsOpen, setSettingsOpen] = useStateWB(false);
   const [agentParams, setAgentParams] = useStateWB({
-    scope: defaultAgentScopeWB(tenantId),
+    scope: "",
     budget: "3",
     allowlist: "zenodo.org",
     cadence: "manual",
     customInterval: "60",
+    nodeSimilarityThreshold: "0.6",
     stopCondition: "pause, stop, budget exhausted, or no new frontier",
     safety: "allowlist + proposed-only writes",
   });
@@ -607,6 +608,8 @@ function AgentRunsWorkspace({ tenantId, query, artifacts = [], graphElements = [
     ? "—"
     : agentBackoffLabelWB(backoffState, runtimeState.stop_reason, language);
   const latestExtractionBlockers = Number(latestRun?.proposed_count || 0) === 0 ? latestRun?.extraction_blockers || null : null;
+  const parsedNodeSimilarityThreshold = Number(agentParams.nodeSimilarityThreshold);
+  const nodeSimilarityThreshold = Number.isFinite(parsedNodeSimilarityThreshold) ? parsedNodeSimilarityThreshold : 0.6;
   const latestBlockerParts = latestExtractionBlockers ? [
     ...Object.entries(latestExtractionBlockers.extraction_engine_status_counts || {}).map(([key, count]) => `${key}:${count}`),
     ...Object.entries(latestExtractionBlockers.rejected_candidate_reason_counts || {}).map(([key, count]) => `${key}:${count}`),
@@ -629,7 +632,7 @@ function AgentRunsWorkspace({ tenantId, query, artifacts = [], graphElements = [
   useEffectWB(() => {
     setAgentParams(prev => {
       if (prev.scope && prev.scope !== "—" && prev.scope !== "default") return prev;
-      return { ...prev, scope: defaultAgentScopeWB(tenantId) };
+      return { ...prev, scope: "" };
     });
   }, [tenantId]);
 
@@ -642,6 +645,7 @@ function AgentRunsWorkspace({ tenantId, query, artifacts = [], graphElements = [
       cadence: session.config.cadence || prev.cadence,
       customInterval: String(session.config.custom_interval_minutes || prev.customInterval || "60"),
       budget: String(session.config.max_frontier || prev.budget || "3"),
+      nodeSimilarityThreshold: String(session.config.node_similarity_dedup_threshold ?? prev.nodeSimilarityThreshold ?? "0.6"),
       stopCondition: session.config.stop_condition || prev.stopCondition,
     }));
   }, [session?.session_key, JSON.stringify(session?.config || {})]);
@@ -723,11 +727,13 @@ function AgentRunsWorkspace({ tenantId, query, artifacts = [], graphElements = [
     try {
       const result = await AL_API.runContinuousEnrichmentCycle(tenantId, session.session_key, {
         created_by: "workspace",
+        objective: agentParams.scope,
         scope: agentParams.scope,
         budget: Number(agentParams.budget) || 3,
         allowlist: agentParams.allowlist,
         cadence: agentParams.cadence,
         custom_interval_minutes: Number(agentParams.customInterval) || 60,
+        node_similarity_dedup_threshold: nodeSimilarityThreshold,
         stop_condition: agentParams.stopCondition,
         trigger_autopilot: true,
       });
@@ -767,10 +773,12 @@ function AgentRunsWorkspace({ tenantId, query, artifacts = [], graphElements = [
     setMessage(null);
     try {
       await AL_API.configureContinuousEnrichmentSession(tenantId, session.session_key, {
+        objective: agentParams.scope,
         cadence: agentParams.cadence,
         custom_interval_minutes: Number(agentParams.customInterval) || 60,
         allowlist: agentParams.allowlist,
         budget: Number(agentParams.budget) || 3,
+        node_similarity_dedup_threshold: nodeSimilarityThreshold,
         stop_condition: agentParams.stopCondition,
       });
       setMessage({ kind: "ok", text: tWB(language, "Auto enriching settings saved.", "自动信息增益设置已保存。") });
@@ -912,8 +920,8 @@ function AgentRunsWorkspace({ tenantId, query, artifacts = [], graphElements = [
             {settingsOpen ? (
               <div style={{ display: "grid", gridTemplateColumns: "1fr 120px", gap: 10 }}>
                 <label>
-                  <div className="eyebrow" style={{ marginBottom: 4 }}>{tWB(language, "Scope", "范围")}</div>
-                  <input className="input" value={agentParams.scope} onChange={e => updateAgentParam("scope", e.target.value)} />
+                  <div className="eyebrow" style={{ marginBottom: 4 }}>{tWB(language, "Objective (optional)", "Objective（可选）")}</div>
+                  <input className="input" value={agentParams.scope} onChange={e => updateAgentParam("scope", e.target.value)} placeholder={tWB(language, "Leave empty to search from frontier only", "留空则只根据 frontier 检索")} />
                 </label>
                 <label>
                   <div className="eyebrow" style={{ marginBottom: 4 }}>{tWB(language, "Budget", "预算")}</div>
@@ -937,13 +945,17 @@ function AgentRunsWorkspace({ tenantId, query, artifacts = [], graphElements = [
                   <input className="input" value={agentParams.customInterval} onChange={e => updateAgentParam("customInterval", e.target.value)} />
                 </label>
                 <label>
+                  <div className="eyebrow" style={{ marginBottom: 4 }}>{tWB(language, "Node dedup threshold", "节点去重阈值")}</div>
+                  <input className="input" type="number" min="0" max="1" step="0.01" value={agentParams.nodeSimilarityThreshold} onChange={e => updateAgentParam("nodeSimilarityThreshold", e.target.value)} />
+                </label>
+                <label>
                   <div className="eyebrow" style={{ marginBottom: 4 }}>{tWB(language, "Stop condition", "停止条件")}</div>
                   <input className="input" value={agentParams.stopCondition} onChange={e => updateAgentParam("stopCondition", e.target.value)} />
                 </label>
               </div>
             ) : (
               <div style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--muted)", overflowWrap: "anywhere" }}>
-                {tWB(language, "Settings collapsed", "设置已折叠")} · {tWB(language, "scope", "范围")} {compactTextWB(agentParams.scope, 70)} · {tWB(language, "budget", "预算")} {agentParams.budget} · {tWB(language, "cadence", "频率")} {agentParams.cadence}
+                {tWB(language, "Settings collapsed", "设置已折叠")} · {tWB(language, "scope", "范围")} {compactTextWB(agentParams.scope, 70)} · {tWB(language, "budget", "预算")} {agentParams.budget} · {tWB(language, "node dedup", "节点去重")} {agentParams.nodeSimilarityThreshold} · {tWB(language, "cadence", "频率")} {agentParams.cadence}
               </div>
             )}
             <div style={{ marginTop: 10, fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--muted)" }}>
@@ -1374,14 +1386,20 @@ function buildAgentLiveTraceRowsWB({ run, session, latestExtractionBlockers }) {
   const events = session?.config?.latest_events || [];
   events.slice(-8).forEach(event => {
     const blockers = blockerSummaryPartsWB(event.extraction_blockers);
+    const eventLayer = queryLayerLabelWB(event);
     const details = [
       event.created_at ? `time: ${String(event.created_at).slice(0, 19)}` : "",
       event.run_key ? `run: ${event.run_key}` : "",
       event.autopilot_session_key ? `autopilot: ${event.autopilot_session_key}` : "",
+      eventLayer ? `query layer: ${eventLayer}` : "",
+      event.query ? `query: ${event.query}` : "",
+      event.request_url ? `request url: ${event.request_url}` : "",
+      event.frontier_key ? `frontier: ${event.frontier_key}` : "",
       event.frontier_used_count != null ? `frontier used: ${event.frontier_used_count}` : "",
       event.trusted_source_count != null ? `trusted sources: ${event.trusted_source_count}` : "",
       event.skipped_source_count != null ? `skipped sources: ${event.skipped_source_count}` : "",
       event.proposed_count != null ? `proposed: ${event.proposed_count}` : "",
+      event.error ? `error: ${event.error}` : "",
       blockers.length ? `blockers: ${blockers.join(" · ")}` : "",
     ].filter(Boolean);
     rows.push({
@@ -1426,6 +1444,7 @@ function buildAgentLiveTraceRowsWB({ run, session, latestExtractionBlockers }) {
       details: [
         source.domain ? `domain: ${source.domain}` : "",
         source.reason ? `reason: ${source.reason}` : "",
+        source.request_url ? `request url: ${source.request_url}` : "",
         source.frontier_key ? `frontier: ${source.frontier_key}` : "",
       ].filter(Boolean),
     });
@@ -1443,6 +1462,8 @@ function buildAgentLiveTraceRowsWB({ run, session, latestExtractionBlockers }) {
       ...(rejected || []).map(item => item.source_ref || item.source_url || item.url),
     ]);
     const frontier = step.frontier || {};
+    const selectedLayer = queryLayerLabelWB(step.selected_query_plan);
+    const queryLadder = queryLadderSummaryWB(step.query_plans || []);
     const schemaEdgeCount = profile.schema_context?.edge_types?.length;
     const extractedCount = (step.extracted_candidates || []).length;
     rows.push({
@@ -1452,6 +1473,8 @@ function buildAgentLiveTraceRowsWB({ run, session, latestExtractionBlockers }) {
       details: [
         frontier.key ? `frontier: ${frontier.key}` : "",
         frontier.name ? `frontier name: ${frontier.name}` : "",
+        selectedLayer ? `selected query layer: ${selectedLayer}` : "",
+        queryLadder ? `query ladder: ${queryLadder}` : "",
         step.result_count != null ? `source results: ${step.result_count}` : "",
         `extracted: candidates ${extractedCount} · nodes ${quality.node_count ?? profile.nodes?.length ?? 0} · edges ${quality.edge_count ?? profile.edges?.length ?? 0} · findings ${quality.finding_count ?? profile.findings?.length ?? 0}`,
         profile.extraction_engine ? `engine: ${profile.extraction_engine}` : "",
@@ -1483,6 +1506,31 @@ function buildAgentLiveTraceRowsWB({ run, session, latestExtractionBlockers }) {
   }
 
   return rows;
+}
+
+function queryLayerLabelWB(plan) {
+  if (!plan) return "";
+  const granularity = plan.granularity || plan.next_granularity;
+  const coarseLevel = plan.coarse_level ?? plan.plan_index ?? plan.next_plan_index;
+  const intent = plan.selected_intent || plan.intent;
+  const parts = [];
+  if (granularity) parts.push(granularity);
+  if (coarseLevel !== undefined && coarseLevel !== null) parts.push(`layer ${coarseLevel}`);
+  if (intent) parts.push(intent);
+  return parts.join(" · ");
+}
+
+function queryLadderSummaryWB(plans) {
+  if (!Array.isArray(plans) || plans.length === 0) return "";
+  return plans
+    .slice(0, 5)
+    .map(plan => {
+      const granularity = plan.granularity || `L${plan.coarse_level ?? "?"}`;
+      const intent = plan.intent || plan.selected_intent || "query";
+      const query = plan.query ? `: ${compactTextWB(plan.query, 64)}` : "";
+      return `${granularity} ${intent}${query}`;
+    })
+    .join(" | ");
 }
 
 function countByFieldWB(items, field) {
@@ -1969,10 +2017,6 @@ function pathContextLabelWB(context) {
   if (!context || typeof context !== "object") return "";
   const metrics = Array.isArray(context.metrics) ? context.metrics.filter(Boolean).join(", ") : "";
   return [context.path_label, context.source_label, context.relation, context.target_label, metrics].filter(Boolean).join(" · ");
-}
-
-function defaultAgentScopeWB(tenantId) {
-  return tenantId ? `${tenantId} graph enrichment` : "tenant graph enrichment";
 }
 
 function compactTextWB(value, max = 80) {
