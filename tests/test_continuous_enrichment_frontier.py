@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 
 from sqlalchemy.exc import OperationalError
 
-from server.workbench_server import (
+from server.aletheia_server import (
     InstanceRepository,
     _apply_edge_source_identity_presentation_guard,
     _apply_possible_duplicate_presentation_guard,

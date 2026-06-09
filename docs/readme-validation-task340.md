@@ -45,7 +45,7 @@ containers running. Bootstrap completed and created metadata/review tables.
 ### Server startup and smoke
 
 ```bash
-/tmp/aletheia-readme-venv-340-py311/bin/python server/workbench_server.py --host 127.0.0.1 --port 8772 --ensure-schema
+/tmp/aletheia-readme-venv-340-py311/bin/python server/aletheia_server.py --host 127.0.0.1 --port 8772 --ensure-schema
 curl -sS http://127.0.0.1:8772/
 curl -sS http://127.0.0.1:8772/api/tenants
 ```
@@ -58,7 +58,7 @@ Service URL: <http://127.0.0.1:8772>
 ### Backend validation
 
 ```bash
-/tmp/aletheia-readme-venv-340-py311/bin/python -m py_compile review_workbench.py server/workbench_server.py agents/iterative_graph_enrichment_agent.py agents/web_enrichment_agent.py
+/tmp/aletheia-readme-venv-340-py311/bin/python -m py_compile review_workbench.py server/aletheia_server.py agents/iterative_graph_enrichment_agent.py agents/web_enrichment_agent.py
 /tmp/aletheia-readme-venv-340-py311/bin/python -m unittest tests/test_ontology_eval.py tests/test_web_enrichment.py tests/test_iterative_graph_enrichment.py tests/test_continuous_enrichment_frontier.py tests/test_reasoning_deep_graph.py tests/test_schema_graph_modeling_agent.py tests/test_us_iran_war_import.py
 /tmp/aletheia-readme-venv-340-py311/bin/python -m unittest discover -s tests -p 'test_*.py'
 ```

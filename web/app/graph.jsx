@@ -123,6 +123,61 @@ function auditValueGX(value) {
   return String(value);
 }
 
+function nodePropertyEntriesGX(node, detail) {
+  const raw = detail || node?._raw || node || {};
+  const payloads = [
+    raw.key_properties,
+    raw.properties,
+    raw.source_row,
+    node?._raw?.key_properties,
+    node?._raw?.properties,
+  ];
+  const entries = [];
+  const seen = new Set();
+  payloads.forEach(payload => {
+    if (!payload || typeof payload !== "object" || Array.isArray(payload)) return;
+    Object.entries(payload).forEach(([key, value]) => {
+      if (seen.has(key)) return;
+      seen.add(key);
+      entries.push([key, value]);
+    });
+  });
+  return entries;
+}
+
+function NodePropertiesTableGX({ node, detail, loading, language }) {
+  const entries = nodePropertyEntriesGX(node, detail);
+  return (
+    <div style={{ marginTop: 12 }}>
+      <div className="eyebrow accent" style={{ marginBottom: 6 }}>{tGX(language, "Node properties", "节点属性")}</div>
+      {loading && (
+        <div style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--muted)", marginBottom: 6 }}>
+          {tGX(language, "Loading source properties…", "正在加载来源属性…")}
+        </div>
+      )}
+      {entries.length === 0 ? (
+        <div style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--muted)", lineHeight: 1.4 }}>
+          {tGX(language, "No node properties returned for this graph node.", "该图节点没有返回属性。")}
+        </div>
+      ) : (
+        <dl className="kv" style={{ alignItems: "start" }}>
+          {entries.slice(0, 80).map(([key, value]) => (
+            <React.Fragment key={key}>
+              <dt>{key}</dt>
+              <dd style={{ overflowWrap: "anywhere", whiteSpace: "normal" }}>{auditValueGX(value)}</dd>
+            </React.Fragment>
+          ))}
+        </dl>
+      )}
+      {entries.length > 80 && (
+        <div style={{ marginTop: 6, fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--muted)" }}>
+          {entries.length - 80} {tGX(language, "additional properties hidden", "个额外属性已隐藏")}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function endpointDedupEvidenceGX(item) {
   const payload = item?.payload || {};
   const evidence = payload.endpoint_dedup_evidence || payload.endpoint_dedup || {};
@@ -164,10 +219,6 @@ function graphEdgeSearchTextGX(edge, nodeMap = {}) {
 
 function graphEdgeRankGX(edge, selectedId = "") {
   let score = 0;
-  if (edge?.aggregateKind === "trade_dependency") score += 90;
-  if (edge?.kind === "trade dependency") score += 80;
-  if (edge?.kind === "risk propagation") score += 70;
-  if (edge?.aggregate) score += 20;
   if (edge?.s === selectedId) score += 4;
   if (edge?.t === selectedId) score += 2;
   if (edge?.muted) score -= 10;
@@ -176,8 +227,6 @@ function graphEdgeRankGX(edge, selectedId = "") {
 
 function graphEdgeToneGX(edge) {
   if (edge?.flag || edge?._raw?.conflict) return GRAPH_ROLE_COLORS_GX.conflict;
-  if (edge?.kind === "risk propagation") return GRAPH_ROLE_COLORS_GX.conflict;
-  if (edge?.kind === "trade dependency" || edge?.aggregateKind === "trade_dependency") return GRAPH_ROLE_COLORS_GX.approved;
   if (edge?._raw?.status === "proposed" || edge?._raw?.status === "draft") return GRAPH_ROLE_COLORS_GX.candidate;
   return GRAPH_ROLE_COLORS_GX.edgeDefault;
 }
@@ -196,115 +245,6 @@ function graphReviewStatusColorGX(status) {
   if (key === "rejected" || key === "failed" || key === "blocked") return GRAPH_ROLE_COLORS_GX.conflict;
   if (key === "draft" || key === "proposed" || key === "needs_evidence" || key === "changes") return GRAPH_ROLE_COLORS_GX.candidate;
   return GRAPH_ROLE_COLORS_GX.selected;
-}
-
-function tradeDependencyAggregatesGX(rawEdges) {
-  const byFact = new Map();
-  (rawEdges || []).forEach(edge => {
-    const kind = rawEdgeKindGX(edge);
-    if (kind !== "dependency_country" && kind !== "dependency_chokepoint") return;
-    const source = edge.source || edge.s;
-    const target = edge.target || edge.t;
-    if (!String(source || "").startsWith("TradeDependency:") || !target) return;
-    const rec = byFact.get(source) || { fact: source, country: "", chokepoint: "", rawEdges: [] };
-    if (kind === "dependency_country" && String(target).startsWith("Country:")) rec.country = target;
-    if (kind === "dependency_chokepoint" && String(target).startsWith("Chokepoint:")) rec.chokepoint = target;
-    rec.rawEdges.push(edge);
-    byFact.set(source, rec);
-  });
-
-  return Array.from(byFact.values())
-    .filter(rec => rec.country && rec.chokepoint)
-    .map(rec => ({
-      id: `${rec.country}->${rec.chokepoint}:trade_dependency:${rec.fact}`,
-      source: rec.country,
-      target: rec.chokepoint,
-      link_key: "trade_dependency",
-      label: "trade dependency",
-      aggregate: true,
-      aggregate_kind: "trade_dependency",
-      fact_node: rec.fact,
-      raw_edges: rec.rawEdges,
-      status: "approved",
-    }));
-}
-
-function riskProjectionLayerGX(nodeId) {
-  const prefix = String(nodeId || "").split(":", 1)[0];
-  if (prefix === "SystemicRiskResult") {
-    return {
-      key: "systemic_result",
-      title: "SystemicRiskResult",
-      summary: "Model result: quantified systemic exposure and trade-at-risk.",
-      zh: "模型结果：量化系统性暴露和贸易风险。",
-    };
-  }
-  if (prefix === "RiskFinding") {
-    return {
-      key: "risk_finding",
-      title: "RiskFinding",
-      summary: "Reviewable insight: whether this path should become a finding.",
-      zh: "可审核洞察：这条路径是否应形成发现。",
-    };
-  }
-  if (prefix === "MitigationAction") {
-    return {
-      key: "mitigation_action",
-      title: "MitigationAction",
-      summary: "Action layer: who should review or mitigate this exposure.",
-      zh: "行动层：谁需要复核或缓解该暴露。",
-    };
-  }
-  return null;
-}
-
-function riskPropagationAggregatesGX(rawEdges) {
-  const bySource = new Map();
-  (rawEdges || []).forEach(edge => {
-    const kind = rawEdgeKindGX(edge);
-    if (kind !== "risk_country" && kind !== "risk_chokepoint") return;
-    const source = edge.source || edge.s;
-    const target = edge.target || edge.t;
-    const layer = riskProjectionLayerGX(source);
-    if (!source || !target || !layer) return;
-    const rec = bySource.get(source) || { source, layer, country: "", chokepoint: "", rawEdges: [] };
-    if (kind === "risk_country" && String(target).startsWith("Country:")) rec.country = target;
-    if (kind === "risk_chokepoint" && String(target).startsWith("Chokepoint:")) rec.chokepoint = target;
-    rec.rawEdges.push(edge);
-    bySource.set(source, rec);
-  });
-
-  const byPair = new Map();
-  bySource.forEach(rec => {
-    if (!rec.country || !rec.chokepoint) return;
-    const key = `${rec.country}->${rec.chokepoint}:risk_propagation`;
-    const aggregate = byPair.get(key) || {
-      id: key,
-      source: rec.country,
-      target: rec.chokepoint,
-      link_key: "risk_propagation",
-      label: "risk propagation",
-      aggregate: true,
-      layers: [],
-      raw_edges: [],
-      status: "approved",
-    };
-    aggregate.layers.push({
-      ...rec.layer,
-      source: rec.source,
-      source_row: rec.source,
-    });
-    aggregate.raw_edges.push(...rec.rawEdges);
-    byPair.set(key, aggregate);
-  });
-
-  return Array.from(byPair.values()).map(edge => ({
-    ...edge,
-    layers: edge.layers.sort((a, b) => {
-      const order = { systemic_result: 1, risk_finding: 2, mitigation_action: 3 };
-      return (order[a.key] || 99) - (order[b.key] || 99);
-    }),
-  }));
 }
 
 // radial layout for nodes that don't already have x/y
@@ -336,15 +276,8 @@ function layoutRadial(nodes, edges, opts = {}) {
 function normalizeGraph(raw, fallback, language) {
   if (!raw || !raw.nodes) return fallback;
   const rawNodes = raw.nodes || [];
-  const rawNodeById = Object.fromEntries(rawNodes.map(n => [n.id, n]));
   const rawEdges = raw.edges || [];
-  const tradeDependencyEdges = tradeDependencyAggregatesGX(rawEdges).map(edge => ({
-    ...edge,
-    fact_node_raw: rawNodeById[edge.fact_node] || null,
-  }));
-  const projectedFactNodes = new Set(tradeDependencyEdges.map(edge => edge.fact_node).filter(Boolean));
-  const aggregateEdges = riskPropagationAggregatesGX(rawEdges);
-  const nodes = rawNodes.filter(n => !projectedFactNodes.has(n.id)).map(n => ({
+  const nodes = rawNodes.map(n => ({
     id: n.id, type: n.type,
     label: n.type === "Country"
       ? countryLabelGX(n.label || n.id, language)
@@ -355,27 +288,13 @@ function normalizeGraph(raw, fallback, language) {
     _raw: n,
   }));
   const needsLayout = nodes.some(n => n.x == null || n.y == null);
-  const edges = rawEdges
-    .filter(e => {
-      const kind = rawEdgeKindGX(e);
-      const source = e.source || e.s;
-      if ((kind === "dependency_country" || kind === "dependency_chokepoint") && String(source || "").startsWith("TradeDependency:")) return false;
-      return !(kind === "risk_country" || kind === "risk_chokepoint") || !riskProjectionLayerGX(source);
-    })
-    .concat(tradeDependencyEdges)
-    .concat(aggregateEdges)
-    .map((e, edgeIndex) => ({
-    _key: e.id || e.edge_key || e.key || `${e.source || e.s}->${e.target || e.t}:${e.aggregate_kind || e.link_key || e.label || e.kind || e.ontology_link || ""}:${e.fact_node || e.source_pk || edgeIndex}`,
+  const edges = rawEdges.map((e, edgeIndex) => ({
+    _key: e.id || e.edge_key || e.key || `${e.source || e.s}->${e.target || e.t}:${e.link_key || e.label || e.kind || e.ontology_link || ""}:${e.source_pk || edgeIndex}`,
     s: e.source || e.s,
     t: e.target || e.t,
-    kind: e.aggregate_kind === "trade_dependency" ? "trade dependency" : (e.aggregate ? "risk propagation" : (e.label || e.kind || e.ontology_link || "")),
+    kind: e.label || e.kind || e.ontology_link || e.link_key || "",
     flag: e.flag || e.conflict || false,
     muted: e.muted,
-    aggregate: !!e.aggregate,
-    aggregateKind: e.aggregate_kind || "",
-    factNode: e.fact_node || "",
-    factNodeRaw: e.fact_node_raw || null,
-    layers: e.layers || [],
     _raw: e,
   }));
   return {
@@ -410,35 +329,9 @@ function resolveCenterInputGX(input, centerType, candidates) {
       .map(v => normalizeCenterInputGX(v));
     return { ...c, id, shortId, label, searchTerms };
   });
-  const countryAliases = {
-    china: "CHN",
-    "people's republic of china": "CHN",
-    prc: "CHN",
-    "中国": "CHN",
-    "中华人民共和国": "CHN",
-    india: "IND",
-    "印度": "IND",
-    "united states": "USA",
-    usa: "USA",
-    "u.s.": "USA",
-    "美国": "USA",
-    japan: "JPN",
-    "日本": "JPN",
-    "south korea": "KOR",
-    korea: "KOR",
-    "韩国": "KOR",
-    gambia: "GMB",
-    "冈比亚": "GMB",
-    iran: "IRN",
-    "伊朗": "IRN",
-    russia: "RUS",
-    "俄罗斯": "RUS",
-    singapore: "SGP",
-    "新加坡": "SGP",
-  };
   const displayedCountryCode = raw.match(/\(([A-Za-z]{3})\)\s*$/);
   const directCountry = String(centerType || "").toLowerCase() === "country"
-    ? (countryAliases[normalized] || (displayedCountryCode ? displayedCountryCode[1].toUpperCase() : /^[a-z]{3}$/i.test(raw) ? raw.toUpperCase() : ""))
+    ? (displayedCountryCode ? displayedCountryCode[1].toUpperCase() : /^[a-z]{3}$/i.test(raw) ? raw.toUpperCase() : "")
     : "";
   if (directCountry) {
     const code = normalizeCenterInputGX(directCountry);
@@ -620,6 +513,12 @@ function GraphExplorer({ data, tenant, language }) {
   const [pendingCenterFocus, setPendingCenterFocus] = useStateGX("");
   const [focusMessage, setFocusMessage] = useStateGX("");
   const [initialGraphSelectionApplied, setInitialGraphSelectionApplied] = useStateGX(false);
+  const selectedNodeDetailQ = useApiData(
+    "graphNodeDetail",
+    [tenantId, selected?.id || ""],
+    { enabled: !!selected?.id, fallback: null }
+  );
+  const selectedNodeDetail = selectedNodeDetailQ.data || selected?._raw || null;
   useEffectGX(() => {
     setSelected(null);
     setTrailNodeIds([]);
@@ -939,7 +838,7 @@ function GraphExplorer({ data, tenant, language }) {
                 value={centerSearch}
                 onChange={e => { setCenterSearch(e.target.value); setFocusMessage(""); }}
                 onKeyDown={e => { if (e.key === "Enter") applyCenterInput(); }}
-                placeholder={centerType === "Country" ? tGX(language, "Search or type country, e.g. China or CHN", "搜索或输入国家，例如 China 或 CHN") : tGX(language, "Search or type center id", "搜索或输入中心 ID")}
+                placeholder={centerType === "Country" ? tGX(language, "Search or type country", "搜索或输入国家") : tGX(language, "Search or type center id", "搜索或输入中心 ID")}
                 disabled={!centerType}
                 style={{ marginTop: 6 }}
               />
@@ -1190,12 +1089,18 @@ function GraphExplorer({ data, tenant, language }) {
               </div>
               <div style={{ marginTop: 14 }}>
                 <dl className="kv">
-                  <dt>{tGX(language, "Status", "状态")}</dt><dd>{selected._raw?.status || "approved"}</dd>
-                  <dt>{tGX(language, "Source row", "来源行")}</dt><dd>{selected._raw?.source_table || "source"}#{selected._raw?.source_pk || selected.id.split(":").slice(1).join(":")}</dd>
+                  <dt>{tGX(language, "Status", "状态")}</dt><dd>{selectedNodeDetail?.status || selected._raw?.status || "approved"}</dd>
+                  <dt>{tGX(language, "Source row", "来源行")}</dt><dd>{selectedNodeDetail?.source_table || selected._raw?.source_table || "source"}#{selectedNodeDetail?.source_pk || selected._raw?.source_pk || selected.id.split(":").slice(1).join(":")}</dd>
                   <dt>{tGX(language, "Edges in", "入边")}</dt><dd>{connectedEdgesAll.filter(e => e.t === selected.id).length}</dd>
                   <dt>{tGX(language, "Edges out", "出边")}</dt><dd>{connectedEdgesAll.filter(e => e.s === selected.id).length}</dd>
                 </dl>
               </div>
+              <NodePropertiesTableGX
+                node={selected}
+                detail={selectedNodeDetail}
+                loading={selectedNodeDetailQ.loading}
+                language={language}
+              />
               {selected.flag && (
                 <div style={{ marginTop: 12, padding: 10, border: "1px solid oklch(0.66 0.18 25 / 0.4)", background: "oklch(0.66 0.18 25 / 0.08)", color: "var(--rejected)", fontFamily: "var(--font-mono)", fontSize: 10, textTransform: "uppercase", letterSpacing: "0.08em" }}>
                   Flagged · temporal overlap in ReportsTo
@@ -1259,35 +1164,6 @@ function GraphExplorer({ data, tenant, language }) {
                       <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-dim)" }}>{labelGX(other, language)}</span>
                       {listOnly && <span className="pill" style={{ marginLeft: "auto", fontSize: 9 }}>{tGX(language, "list-only", "仅列表")}</span>}
                     </div>
-                    {e.aggregate && e.layers?.length > 0 && (
-                      <div style={{ border: "1px solid var(--line-soft)", background: "var(--bg-2)", padding: 8, display: "flex", flexDirection: "column", gap: 5 }}>
-                        <div className="eyebrow accent">{tGX(language, "Risk propagation detail", "风险传播详情")}</div>
-                        {e.layers.map(layer => (
-                          <div key={`${e.s}-${e.t}-${layer.key}`} style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--text-dim)", lineHeight: 1.4 }}>
-                            <span style={{ color: "var(--text)" }}>{layer.title}</span>
-                            <span style={{ color: "var(--dim)" }}> · {labelGX(layer.source, language)}</span>
-                            <div>{isZhGX(language) ? layer.zh : layer.summary}</div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                    {e.aggregateKind === "trade_dependency" && e.factNode && (
-                      <div style={{ border: "1px solid var(--line-soft)", background: "var(--bg-2)", padding: 8, display: "flex", flexDirection: "column", gap: 5 }}>
-                        <div className="eyebrow accent">{tGX(language, "Trade dependency fact", "贸易依赖事实")}</div>
-                        <div style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--text-dim)", lineHeight: 1.4 }}>
-                          <span style={{ color: "var(--text)" }}>{labelGX(e.factNode, language)}</span>
-                          <div>{tGX(language, "Base fact preserved for metrics, source row, provenance, and confidence.", "基础事实仍保留，用于承载指标、来源行、溯源和置信度。")}</div>
-                        </div>
-                        {e.factNodeRaw && (
-                          <dl className="kv" style={{ marginTop: 2 }}>
-                            <dt>{tGX(language, "Source", "来源")}</dt><dd>{e.factNodeRaw.source_table || "source"}</dd>
-                            <dt>{tGX(language, "Source row", "来源行")}</dt><dd>{e.factNodeRaw.source_pk || e.factNode}</dd>
-                            <dt>{tGX(language, "Ontology", "本体")}</dt><dd>{e.factNodeRaw.ontology_artifact || "object:trade_dependency"}</dd>
-                            <dt>{tGX(language, "Status", "状态")}</dt><dd>{statusLabelGraphGX(e.factNodeRaw.status || "approved", language)}</dd>
-                          </dl>
-                        )}
-                      </div>
-                    )}
                   </div>
                 );
               })}
@@ -1325,6 +1201,12 @@ function ProposedGraphPanel({ tenantId, proposed, loading, source, focusElementK
   const runs = proposed?.runs || [];
   const elements = proposed?.elements || [];
   const totalCount = proposed?.total_count ?? elements.length;
+  const rawTotalCount = proposed?.raw_total_count ?? totalCount;
+  const rawStatusCounts = proposed?.raw_status_counts || {};
+  const rawStatusSummary = Object.entries(rawStatusCounts)
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([status, count]) => `${statusLabelGraphGX(status, language)} ${count}`)
+    .join(" · ");
   const counts = proposed?.element_type_counts || elements.reduce((acc, item) => {
     acc[item.element_type] = (acc[item.element_type] || 0) + 1;
     return acc;
@@ -1467,7 +1349,11 @@ function ProposedGraphPanel({ tenantId, proposed, loading, source, focusElementK
     <div className="section">
       <div className="section-head">
         <span>{tGX(language, "Proposed graph space", "候选图空间")}</span>
-        <span className="ct">{loading ? tGX(language, "loading", "加载中") : `${totalCount} ${tGX(language, "pending", "待处理")}`}</span>
+        <span className="ct">
+          {loading
+            ? tGX(language, "loading", "加载中")
+            : `${totalCount} ${tGX(language, "pending", "待处理")} · ${rawTotalCount} ${tGX(language, "total", "总记录")}`}
+        </span>
       </div>
       <div className="section-body">
         <div className="chip-row" style={{ marginBottom: 10 }}>
@@ -1516,7 +1402,10 @@ function ProposedGraphPanel({ tenantId, proposed, loading, source, focusElementK
           </dl>
         ) : (
           <div style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--muted)", marginBottom: 12 }}>
-            {tGX(language, "No proposed graph elements for this tenant.", "该租户暂无候选图元素。")}
+            {rawTotalCount > 0
+              ? tGX(language, "No current pending proposals. Historical proposed graph records exist outside the pending review queue.", "当前没有待处理候选；历史候选图记录仍存在，但不在待审队列中。")
+              : tGX(language, "No proposed graph elements for this tenant.", "该租户暂无候选图元素。")}
+            {rawStatusSummary ? ` ${tGX(language, "Status", "状态")}: ${rawStatusSummary}` : ""}
           </div>
         )}
         {findings.map(item => {
@@ -1574,7 +1463,9 @@ function ProposedGraphPanel({ tenantId, proposed, loading, source, focusElementK
           })}
           {filteredElements.length === 0 && (
             <div style={{ fontFamily: "var(--font-mono)", color: "var(--muted)", fontSize: 10, border: "1px solid var(--line-soft)", padding: 8 }}>
-              {tGX(language, "No", "没有")} {kindFilter} {tGX(language, "proposed graph elements.", "候选图元素。")}
+              {rawTotalCount > 0
+                ? tGX(language, "No current pending proposals match this filter.", "当前待审队列中没有匹配该过滤条件的候选。")
+                : `${tGX(language, "No", "没有")} ${kindFilter} ${tGX(language, "proposed graph elements.", "候选图元素。")}`}
             </div>
           )}
         </div>

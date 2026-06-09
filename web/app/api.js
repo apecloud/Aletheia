@@ -334,6 +334,11 @@
       return data;
     },
 
+    async graphNodeDetail(tenant, nodeKey) {
+      const data = await fetchJson(withTenantQs(`/api/graph/node/${encodeURIComponent(nodeKey)}`, tenant));
+      return data.node || data;
+    },
+
     async graphProposedElements(tenant, { runKey = "", limit = 50, status = "pending" } = {}) {
       const qs = { limit: String(limit) };
       if (runKey) qs.run_key = runKey;
@@ -567,13 +572,6 @@
 
     async runCreditcardfraudAutopilotPlaybook(tenant, body) {
       return await fetchJson(withTenantQs("/api/reasoning/autopilot/playbooks/creditcardfraud/run", tenant), {
-        method: "POST",
-        body: JSON.stringify(body || {}),
-      });
-    },
-
-    async runMaritimeRiskAutopilotPlaybook(tenant, body) {
-      return await fetchJson(withTenantQs("/api/reasoning/autopilot/playbooks/maritime-risk/run", tenant), {
         method: "POST",
         body: JSON.stringify(body || {}),
       });

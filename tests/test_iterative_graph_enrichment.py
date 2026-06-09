@@ -357,6 +357,53 @@ class IterativeGraphEnrichmentTest(unittest.TestCase):
             self.assertTrue(trace["last_extraction_profile"]["quality"]["has_descriptions"])
             self.assertTrue(trace["last_extraction_profile"]["ontology_candidates"])
 
+    def test_structural_link_type_is_not_used_as_graph_relation(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_url, _ = self._seed_db(tmpdir)
+            engine = create_engine(db_url)
+            Session = sessionmaker(bind=engine)
+            session = Session()
+            link = session.query(OntologyArtifact).filter_by(
+                project_id="maritime-risk",
+                canonical_key="link:trade_dependency",
+            ).one()
+            payload = json.loads(link.payload_json)
+            payload.pop("relation", None)
+            payload["link_type"] = "MANY_TO_MANY"
+            link.payload_json = json.dumps(payload)
+            session.commit()
+            session.close()
+
+            agent = IterativeGraphEnrichmentAgent(
+                db_url,
+                tenant="maritime-risk",
+                search_results_json=self._fixture(tmpdir),
+                allowed_domains=["zenodo.org"],
+                max_iterations=1,
+                max_frontier=1,
+                max_results_per_query=1,
+                langextract_runner=self._langextract_runner,
+                embedding_adapter=StaticTestEmbeddingAdapter(),
+            )
+
+            result = agent.run("structural link type should not become graph predicate")
+            edges = [item for item in result["proposed_graph"] if item["element_type"] == "edge"]
+            trade_edges = [item for item in edges if item["payload"].get("source_label") == "CHN"]
+
+            self.assertTrue(trade_edges)
+            self.assertEqual(trade_edges[0]["payload"]["relation"], "trade_dependency")
+            self.assertNotEqual(trade_edges[0]["payload"]["relation"], "MANY_TO_MANY")
+            self.assertEqual(trade_edges[0]["payload"]["properties"]["relation_cardinality"], "MANY_TO_MANY")
+            self.assertEqual(
+                trade_edges[0]["payload"]["relation_ontology_candidate"]["schema_artifact_key"],
+                "link:trade_dependency",
+            )
+            identity = iterative_graph_enrichment_agent._candidate_identity_payload(trade_edges[0])
+            identity_key = iterative_graph_enrichment_agent._identity_key("maritime-risk", identity)
+            self.assertNotIn("MANY_TO_MANY", identity_key)
+            self.assertNotIn("many to many", identity_key.lower())
+            self.assertIn("trade dependency", identity_key)
+
     def test_missing_schema_projection_does_not_write_dictionary_semantics(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             db_url = f"sqlite:///{Path(tmpdir) / 'metadata.db'}"
@@ -649,11 +696,81 @@ class IterativeGraphEnrichmentTest(unittest.TestCase):
                 ]
             )
             self.assertEqual(fact_edges[0]["payload"]["review_status"], "needs_review")
+            self.assertEqual(fact_edges[0]["status"], "needs_more_evidence")
             self.assertTrue(fact_edges[0]["payload"]["properties"]["fact_node_hint"])
             self.assertNotIn("canonical_id_hint", fact_edges[0]["payload"]["properties"])
             self.assertFalse(fact_edges[0]["payload"]["extraction"]["formal_graph_write"])
             self.assertFalse(fact_edges[0]["payload"]["extraction"]["canonical_ontology_write"])
             self.assertIsNone(fact_edges[0]["payload"].get("relation_ontology_candidate"))
+
+    def test_reversed_ambiguous_relation_grounding_uses_grounded_direction(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_url, _ = self._seed_db(tmpdir)
+            agent = IterativeGraphEnrichmentAgent(
+                db_url,
+                tenant="maritime-risk",
+                search_results_json=self._fixture(tmpdir),
+                allowed_domains=["zenodo.org"],
+                max_iterations=1,
+                max_frontier=1,
+                max_results_per_query=1,
+                embedding_adapter=StaticTestEmbeddingAdapter(),
+            )
+            extraction = {
+                "prompt_version": "test",
+                "extraction_source": "structured_llm_contract",
+                "extraction_engine": "google/langextract",
+                "extraction_engine_status": "ok",
+                "schema_context": {"node_types": {}, "edge_types": []},
+                "ontology_candidates": [],
+                "nodes": [],
+                "edges": [],
+                "findings": [],
+                "quality": {"extraction_steps": []},
+                "rejected_or_ambiguous_candidates": [
+                    {
+                        "reason": "ambiguous_relation",
+                        "review_required": True,
+                        "review_status": "needs_review",
+                        "source_label": "target wrapper",
+                        "target_label": "source wrapper",
+                        "source_type": "TargetType",
+                        "target_type": "SourceType",
+                        "relation_label": "mentions",
+                        "evidence_quote": "source wrapper mentions target wrapper.",
+                        "source_grounding": [
+                            {
+                                "extraction_class": "graph_relation",
+                                "extraction_text": "mentions",
+                                "attributes": {
+                                    "source_label": "source wrapper",
+                                    "target_label": "target wrapper",
+                                    "source_node_key": "SourceType",
+                                    "target_node_key": "TargetType",
+                                    "relation_label": "mentions",
+                                },
+                            }
+                        ],
+                    }
+                ],
+            }
+
+            elements = agent._candidate_elements(
+                extraction,
+                {"key": "object:test", "name": "Test", "artifact_type": "object", "source": "test", "depth": 0},
+                SimpleNamespace(url="https://example.org/source", title="Example source"),
+                "source wrapper mentions target wrapper.",
+                1,
+            )
+            fact_nodes = [item for item in elements if item["element_type"] == "node" and item["payload"].get("fact_layer")]
+            fact_edges = [item for item in elements if item["element_type"] == "edge" and item["payload"].get("fact_layer")]
+
+            self.assertTrue(fact_nodes)
+            self.assertTrue(fact_edges)
+            self.assertEqual(fact_edges[0]["payload"]["source_label"], "source wrapper")
+            self.assertEqual(fact_edges[0]["payload"]["target_label"], "target wrapper")
+            self.assertEqual(fact_edges[0]["name"], "source wrapper mentions target wrapper")
+            self.assertTrue(fact_edges[0]["payload"]["properties"]["relation_direction_conflict"])
 
     def test_relation_only_ambiguous_endpoint_uses_frontier_edge_not_fact_node(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -819,7 +936,7 @@ class IterativeGraphEnrichmentTest(unittest.TestCase):
                 )
             )
 
-    def test_unmapped_relation_with_approved_edge_becomes_review_gated_fact_edge(self):
+    def test_unmapped_relation_with_approved_edge_stays_audit_only(self):
         def fake_runner(_source_text, _schema_context):
             return SimpleNamespace(
                 extractions=[
@@ -870,22 +987,18 @@ class IterativeGraphEnrichmentTest(unittest.TestCase):
                 for item in result["proposed_graph"]
                 if item["element_type"] == "edge" and item["payload"].get("fact_layer")
             ]
-            self.assertTrue(fact_edges)
-            self.assertFalse(
-                [
-                    item
-                    for item in fact_edges
-                    if item["payload"].get("relation_ontology_candidate")
-                    or item["payload"]["extraction"].get("formal_graph_write")
-                    or item["payload"]["extraction"].get("canonical_ontology_write")
-                ]
-            )
+            fact_nodes = [
+                item
+                for item in result["proposed_graph"]
+                if item["element_type"] == "node" and item["payload"].get("fact_layer")
+            ]
+            self.assertFalse(fact_edges)
+            self.assertTrue(fact_nodes)
             self.assertTrue(any(item.get("reason") == "ambiguous_relation" for item in rejected))
             ambiguous = next(item for item in rejected if item.get("reason") == "ambiguous_relation")
             self.assertEqual(ambiguous["review_status"], "needs_review")
             self.assertTrue(ambiguous["review_required"])
             self.assertEqual(ambiguous["relation_label"], "unapproved blockade relation")
-            self.assertEqual(fact_edges[0]["payload"]["properties"]["relation_mapping_status"], "ambiguous_relation")
 
     def test_benchmark_reads_baseline_as_comparison_only(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -949,8 +1062,8 @@ class IterativeGraphEnrichmentTest(unittest.TestCase):
             query = plan["query"]
             self.assertIn("CHN", query)
             self.assertIn("Bab el-Mandeb Strait", query)
-            self.assertIn("maritime chokepoint", query)
-            self.assertIn("trade disruption", query)
+            self.assertIn("depends_on", query)
+            self.assertIn("trade_at_risk_v", query)
             self.assertEqual(plan["graph_context_used"]["relation"], "depends_on")
             self.assertIn("CHN", plan["graph_context_used"]["neighbor_nodes"])
             self.assertIn("Bab el-Mandeb Strait", plan["path_context_used"]["path_label"])
@@ -1010,7 +1123,8 @@ class IterativeGraphEnrichmentTest(unittest.TestCase):
             result = agent.run("discover maritime trade exposure", frontier_items=[frontier])
             trace = result["run"]["expansion_trace"][0]
 
-            self.assertIn("trade disruption", trace["query"])
+            self.assertIn("depends_on", trace["query"])
+            self.assertIn("trade_at_risk_v", trace["query"])
             self.assertEqual(trace["graph_context_used"]["relation"], "depends_on")
             self.assertEqual(trace["path_context_used"]["source_label"], "CHN")
             self.assertEqual(trace["selected_query_plan"]["intent"], "path_evidence")
@@ -2126,11 +2240,11 @@ class IterativeGraphEnrichmentTest(unittest.TestCase):
                 identity_index=identity_index,
             )
 
-            self.assertEqual(candidate["payload"]["dedup_decision"], "needs_review")
-            self.assertEqual(candidate["status"], "needs_more_evidence")
-            self.assertEqual(candidate["payload"]["match_method"], "short_alias_review_gate")
-            self.assertEqual(candidate["payload"]["decision_reason"], "possible_duplicate_alias_conflict")
-            self.assertTrue(candidate["payload"]["possible_duplicate"])
+            self.assertEqual(candidate["payload"]["dedup_decision"], "merge_existing")
+            self.assertEqual(candidate["status"], "draft")
+            self.assertEqual(candidate["payload"]["match_method"], "stable_identity_key")
+            self.assertEqual(candidate["payload"]["decision_reason"], "exact stable graph identity match")
+            self.assertFalse(candidate["payload"]["possible_duplicate"])
             self.assertEqual(candidate["payload"]["matched_node_key"], "Country:USA")
             self.assertEqual(candidate["payload"]["matched_source"], "approved_graph_instance")
             self.assertFalse(candidate["payload"]["embedding_degraded"])
@@ -2200,8 +2314,8 @@ class IterativeGraphEnrichmentTest(unittest.TestCase):
                 identity_index=identity_index,
             )
 
-            self.assertEqual(candidate["payload"]["dedup_decision"], "needs_review")
-            self.assertEqual(candidate["payload"]["match_method"], "short_alias_review_gate")
+            self.assertEqual(candidate["payload"]["dedup_decision"], "merge_existing")
+            self.assertEqual(candidate["payload"]["match_method"], "stable_identity_key")
             self.assertEqual(candidate["payload"]["matched_node_key"], "Country:USA")
             self.assertEqual(candidate["payload"]["matched_source"], "approved_graph_instance")
             self.assertNotEqual(candidate["payload"]["matched_node_key"], "object:country")
@@ -2330,14 +2444,11 @@ class IterativeGraphEnrichmentTest(unittest.TestCase):
                 identity = iterative_graph_enrichment_agent._candidate_identity_payload(candidate)
                 match = agent._best_identity_match(identity, identity_index, payload=candidate["payload"])
 
-            self.assertEqual(match["match_method"], "vector_embedding")
+            self.assertEqual(match["match_method"], "stable_identity_key")
             self.assertEqual(match["matched_source"], "approved_graph_instance")
             self.assertEqual(match["matched_status"], "approved")
             self.assertEqual(match["matched_node_key"], "Country:USA")
-            self.assertIn(
-                iterative_graph_enrichment_agent._dedup_decision(match),
-                {"merge_existing", "needs_review"},
-            )
+            self.assertEqual(iterative_graph_enrichment_agent._dedup_decision(match), "merge_existing")
 
     def test_approved_node_match_merges_without_new_proposal_row(self):
         with tempfile.TemporaryDirectory() as tmpdir:

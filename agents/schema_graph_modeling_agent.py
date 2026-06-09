@@ -58,6 +58,7 @@ class GraphEdgeTypeDraft(BaseModel):
     source_table: str
     target_table: str
     join_condition: str | None = None
+    properties: list[str] = Field(default_factory=list, description="Source columns exposed as edge/fact properties")
     evidence: list[str] = Field(default_factory=list)
     confidence: float = Field(ge=0.0, le=1.0)
 
@@ -227,13 +228,33 @@ You are Aletheia's Schema Graph Modeling Agent.
 
 Convert the raw physical database schema below into a draft graph ontology.
 
-Hard rule:
+Hard rules:
 - Do not use any built-in tenant/domain vocabulary, demo labels, or prior project-specific terms.
 - Infer node types, edge types, link types, names, and descriptions only from the provided schema evidence: table names, column names, primary keys, foreign keys, comments, and optional samples.
-- Do not invent review/finding/action/insight nodes unless the source schema explicitly contains those concepts.
+- Keep ontology types distinct from graph nodes and fact/event instances.
+- Do not invent review/finding/action/insight nodes unless the source schema explicitly contains durable agent/object concepts for them.
 - If a concept is ambiguous, put it in rejected_candidates or assumptions instead of promoting it to a node/edge.
 - Every node/edge must include evidence strings and confidence.
 - Output is draft-only and requires human review before canonical ontology or formal graph writes.
+
+Ontology policy for this system:
+- A draft ontology object is a continuant-like, identity-bearing object type: a person, organization, account, asset, system, place, product, policy, contract, service, model, controller, or other entity that can persist through time while maintaining identity.
+- An ontology object type may be active/agentic: it may receive events/facts, hold state, bear responsibility, make decisions, trigger workflows, or produce actions. Prefer object types that can participate in many events and support actions over one-off occurrence types.
+- A graph node is an instance-level representation. Graph nodes may include event occurrences, fact assertions, measurements, observations, findings, evidence records, or derived risk signals, but those should not be promoted to ontology object types by default.
+- An event is an occurrent-like occurrence: it happens/unfolds in time, has timestamps or intervals, and has participants. In this system, event rows should normally be modeled as graph/fact nodes or as evidence attached to relationships, not as ontology objects.
+- A fact is an assertion/observation/provenance record about objects or relationships. In this system, fact rows should normally be graph/fact nodes, edge evidence, or properties, not ontology objects.
+- Promote an event/fact table to an ontology object only if the schema clearly treats it as a durable managed object with its own lifecycle, stable identity across multiple events, ownership/responsibility, status transitions, and actions beyond recording that one occurrence. Otherwise reject it as graph_node_candidate, event_candidate, fact_candidate, evidence_candidate, or property_candidate.
+- Use edge_types for durable relationship types between ontology objects. Do not create an ontology link merely because two columns co-occur in one event/fact row; require key/FK/schema evidence or a repeated business relationship supported by the table structure.
+- Preserve source information even when you reject an event/fact/measurement table as an ontology object: map non-identity columns to node properties, edge properties, graph/fact treatment notes, or rejected_candidates. Do not silently drop source columns.
+- For association/fact tables that connect two durable objects, put quantitative metrics, risk scores, statuses, timestamps, likelihoods, severities, and provenance columns in edge_type.properties. The edge is the relationship; those columns are facts about that relationship.
+- For measurement/result tables keyed by the same durable object pair, prefer edge_type.properties over creating separate ontology objects. If multiple source tables support the same object pair, create separate relationship/fact edge types or explicitly record the table in rejected_candidates with its suggested graph treatment and property columns.
+
+Decision tests before creating each node_type:
+1. Does this candidate maintain identity beyond a single timestamped occurrence or assertion?
+2. Can many event/fact records refer to the same candidate instance?
+3. Can it own state, receive events/facts, participate in actions, or be responsible for actions?
+4. Is there schema evidence for a stable key, master table, foreign-key target, or durable lifecycle/status?
+If the answer is mostly no, do not create node_type; place the concept in rejected_candidates with the reason and suggested graph/fact treatment.
 
 Return a GraphModelDraft JSON object with:
 - node_types
@@ -241,6 +262,10 @@ Return a GraphModelDraft JSON object with:
 - rejected_candidates
 - assumptions
 - review_boundary
+
+Coverage requirement:
+- Every source table and every non-empty source column must be traceable in the output as one of: node_type.primary_key, node_type.properties, edge_type.properties, edge join/key evidence, rejected_candidates[].suggested_graph_treatment, or assumptions.
+- If a column is intentionally excluded, state why in rejected_candidates or assumptions.
 
 Raw schema:
 {json.dumps(schema_dump, ensure_ascii=False, indent=2, sort_keys=True)}
@@ -371,6 +396,8 @@ Raw schema:
                         "source_table": edge.source_table,
                         "target_table": edge.target_table,
                         "join_condition": edge.join_condition,
+                        "properties": edge.properties,
+                        "edge_properties": edge.properties,
                         "llm_inferred": True,
                         "prompt_version": prompt_version,
                         "canonical_write_boundary": draft.review_boundary,

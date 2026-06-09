@@ -1330,6 +1330,31 @@ class InstanceRepository:
             "right_col": right_col,
         }
 
+    def _schema_graph_same_row_link(self, tenant, source_table, target_table, source_pk, target_pk):
+        if not source_table or source_table != target_table:
+            return False
+        columns = self._source_columns(tenant, source_table)
+        return source_pk in columns and target_pk in columns
+
+    def _schema_graph_edge_property_columns(self, tenant, payload, table):
+        columns = self._source_columns(tenant, table)
+        result = []
+        for column in payload.get("edge_properties") or payload.get("properties") or []:
+            column = str(column or "")
+            if column in columns and column not in result:
+                result.append(column)
+        return result
+
+    def _schema_graph_edge_property_select(self, columns, table=None):
+        prefix = f"{table}." if table else ""
+        return "".join(f", {prefix}{column} AS edge_prop_{idx}" for idx, column in enumerate(columns))
+
+    def _schema_graph_edge_properties_from_row(self, row, columns):
+        properties = {}
+        for idx, column in enumerate(columns):
+            properties[column] = _jsonable(row.get(f"edge_prop_{idx}"))
+        return properties
+
     def _schema_graph_object_artifact(self, tenant, object_type):
         objects, _ = self._schema_graph_artifacts(tenant)
         compact_type = re.sub(r"[^0-9A-Za-z]", "", str(object_type or "")).lower()
@@ -1529,11 +1554,18 @@ class InstanceRepository:
             source_meta = object_meta.get(source_key)
             target_meta = object_meta.get(target_key)
             join = self._schema_graph_join_parts(tenant, payload.get("join_condition"))
-            if not source_meta or not target_meta or not join:
-                continue
             source_table = payload.get("source_table")
             target_table = payload.get("target_table")
-            if {source_table, target_table} != {join["left_table"], join["right_table"]} and source_table != target_table:
+            same_row_link = self._schema_graph_same_row_link(
+                tenant,
+                source_table,
+                target_table,
+                source_meta["pk"] if source_meta else None,
+                target_meta["pk"] if target_meta else None,
+            )
+            if not source_meta or not target_meta or (not join and not same_row_link):
+                continue
+            if join and {source_table, target_table} != {join["left_table"], join["right_table"]} and source_table != target_table:
                 continue
             # Reasoning treats link config as "source object -> rows carrying
             # the source key". For approved SchemaGraphModelingAgent links, use
@@ -1550,7 +1582,9 @@ class InstanceRepository:
                 "target_table": target_table,
                 "source_pk": source_meta["pk"],
                 "target_pk": target_meta["pk"],
-                "join_condition": join["condition"],
+                "edge_properties": self._schema_graph_edge_property_columns(tenant, payload, source_table),
+                "join_condition": join["condition"] if join else None,
+                "same_row_link": same_row_link,
                 "projection_source": "SchemaGraphModelingAgent",
             })
         return entity_config, link_config
@@ -1608,32 +1642,48 @@ class InstanceRepository:
                 target_artifact = objects.get(target_key)
                 if not source_artifact or not target_artifact:
                     continue
-                source_table, source_pk = self._schema_graph_table_and_pk(tenant, source_artifact)
-                target_table, target_pk = self._schema_graph_table_and_pk(tenant, target_artifact)
+                source_node_table, source_pk = self._schema_graph_table_and_pk(tenant, source_artifact)
+                target_node_table, target_pk = self._schema_graph_table_and_pk(tenant, target_artifact)
+                source_table = payload.get("source_table")
+                target_table = payload.get("target_table")
                 join = self._schema_graph_join_parts(tenant, payload.get("join_condition"))
-                if not source_table or not target_table or not join:
+                same_row_link = self._schema_graph_same_row_link(tenant, source_table, target_table, source_pk, target_pk)
+                if not source_table or not target_table or (not join and not same_row_link):
                     continue
+                edge_property_columns = self._schema_graph_edge_property_columns(tenant, payload, source_table)
+                edge_property_select = self._schema_graph_edge_property_select(edge_property_columns, None if same_row_link else source_table)
                 if object_key == source_key:
-                    other_artifact, other_table, other_pk = target_artifact, target_table, target_pk
+                    other_artifact, other_node_table, other_table, other_pk = target_artifact, target_node_table, target_table, target_pk
                     where_table, where_pk = source_table, source_pk
                 else:
-                    other_artifact, other_table, other_pk = source_artifact, source_table, source_pk
+                    other_artifact, other_node_table, other_table, other_pk = source_artifact, source_node_table, source_table, source_pk
                     where_table, where_pk = target_table, target_pk
                 try:
-                    rows = conn.execute(
-                        text(
-                            f"SELECT DISTINCT {other_table}.{other_pk} AS other_pk "
-                            f"FROM {source_table} JOIN {target_table} ON {join['condition']} "
-                            f"WHERE {where_table}.{where_pk} = :pk AND {other_table}.{other_pk} IS NOT NULL "
-                            f"ORDER BY {other_table}.{other_pk} LIMIT :lim"
-                        ),
-                        {"pk": instance_id, "lim": limit},
-                    ).mappings().all()
+                    if same_row_link:
+                        rows = conn.execute(
+                            text(
+                                f"SELECT DISTINCT {other_pk} AS other_pk{edge_property_select} "
+                                f"FROM {source_table} "
+                                f"WHERE {where_pk} = :pk AND {other_pk} IS NOT NULL "
+                                f"ORDER BY {other_pk} LIMIT :lim"
+                            ),
+                            {"pk": instance_id, "lim": limit},
+                        ).mappings().all()
+                    else:
+                        rows = conn.execute(
+                            text(
+                                f"SELECT DISTINCT {other_table}.{other_pk} AS other_pk{edge_property_select} "
+                                f"FROM {source_table} JOIN {target_table} ON {join['condition']} "
+                                f"WHERE {where_table}.{where_pk} = :pk AND {other_table}.{other_pk} IS NOT NULL "
+                                f"ORDER BY {other_table}.{other_pk} LIMIT :lim"
+                            ),
+                            {"pk": instance_id, "lim": limit},
+                        ).mappings().all()
                 except Exception:
                     continue
                 allowed_link_keys.append(link["canonical_key"])
                 for row in rows:
-                    other_node = remember_node(self._schema_graph_node(tenant, other_artifact, other_table, row["other_pk"]))
+                    other_node = remember_node(self._schema_graph_node(tenant, other_artifact, other_node_table, row["other_pk"]))
                     allowed_node_types.add(other_node["type"])
                     source_node = center if object_key == source_key else other_node
                     target_node = other_node if object_key == source_key else center
@@ -1641,7 +1691,7 @@ class InstanceRepository:
                     if edge_id in seen_edges:
                         continue
                     seen_edges.add(edge_id)
-                    edges.append({
+                    edge = {
                         "id": edge_id,
                         "tenant_id": tenant.tenant_id,
                         "source": source_node["id"],
@@ -1650,7 +1700,11 @@ class InstanceRepository:
                         "label": link["name"],
                         "status": "approved",
                         "projection_source": "SchemaGraphModelingAgent",
-                    })
+                    }
+                    edge_properties = self._schema_graph_edge_properties_from_row(row, edge_property_columns)
+                    if edge_properties:
+                        edge["properties"] = edge_properties
+                    edges.append(edge)
                     if len(nodes) >= limit and len(edges) >= limit:
                         break
 
@@ -1736,25 +1790,39 @@ class InstanceRepository:
                     source_table = payload.get("source_table")
                     target_table = payload.get("target_table")
                     join_condition = self._schema_graph_safe_join_condition(tenant, payload.get("join_condition"))
-                    if not source_artifact or not target_artifact or not source_table or not target_table or not join_condition:
+                    source_pk = source_artifact["payload"].get("primary_key") if source_artifact else None
+                    target_pk = target_artifact["payload"].get("primary_key") if target_artifact else None
+                    same_row_link = self._schema_graph_same_row_link(tenant, source_table, target_table, source_pk, target_pk)
+                    if not source_artifact or not target_artifact or not source_table or not target_table or (not join_condition and not same_row_link):
                         continue
                     if source_table not in source_tables or target_table not in source_tables:
                         continue
-                    source_pk = source_artifact["payload"].get("primary_key")
-                    target_pk = target_artifact["payload"].get("primary_key")
                     if source_pk not in self._source_columns(tenant, source_table) or target_pk not in self._source_columns(tenant, target_table):
                         continue
+                    edge_property_columns = self._schema_graph_edge_property_columns(tenant, payload, source_table)
+                    edge_property_select = self._schema_graph_edge_property_select(edge_property_columns, None if same_row_link else source_table)
                     try:
-                        rows = conn.execute(
-                            text(
-                                f"SELECT DISTINCT {source_table}.{source_pk} AS source_pk, "
-                                f"{target_table}.{target_pk} AS target_pk "
-                                f"FROM {source_table} JOIN {target_table} ON {join_condition} "
-                                f"WHERE {source_table}.{source_pk} IS NOT NULL AND {target_table}.{target_pk} IS NOT NULL "
-                                "LIMIT :limit"
-                            ),
-                            {"limit": limit * 3},
-                        ).mappings().all()
+                        if same_row_link:
+                            rows = conn.execute(
+                                text(
+                                    f"SELECT DISTINCT {source_pk} AS source_pk, {target_pk} AS target_pk{edge_property_select} "
+                                    f"FROM {source_table} "
+                                    f"WHERE {source_pk} IS NOT NULL AND {target_pk} IS NOT NULL "
+                                    "LIMIT :limit"
+                                ),
+                                {"limit": limit * 3},
+                            ).mappings().all()
+                        else:
+                            rows = conn.execute(
+                                text(
+                                    f"SELECT DISTINCT {source_table}.{source_pk} AS source_pk, "
+                                    f"{target_table}.{target_pk} AS target_pk{edge_property_select} "
+                                    f"FROM {source_table} JOIN {target_table} ON {join_condition} "
+                                    f"WHERE {source_table}.{source_pk} IS NOT NULL AND {target_table}.{target_pk} IS NOT NULL "
+                                    "LIMIT :limit"
+                                ),
+                                {"limit": limit * 3},
+                            ).mappings().all()
                     except Exception:
                         continue
                     for row in rows:
@@ -1764,7 +1832,7 @@ class InstanceRepository:
                         if edge_id in seen_edges:
                             continue
                         seen_edges.add(edge_id)
-                        edges.append({
+                        edge = {
                             "id": edge_id,
                             "tenant_id": tenant.tenant_id,
                             "source": source_node["id"],
@@ -1773,7 +1841,11 @@ class InstanceRepository:
                             "label": link["name"],
                             "status": "approved",
                             "projection_source": "SchemaGraphModelingAgent",
-                        })
+                        }
+                        edge_properties = self._schema_graph_edge_properties_from_row(row, edge_property_columns)
+                        if edge_properties:
+                            edge["properties"] = edge_properties
+                        edges.append(edge)
                         if len(edges) >= limit * 3:
                             break
         except (SQLAlchemyError, OSError) as exc:
@@ -1942,7 +2014,7 @@ class InstanceRepository:
             )
 
     def _default_continuous_session(self, tenant):
-        session_key = f"continuous:{tenant.tenant_id}:us-iran-impact:mvp"
+        session_key = f"continuous:{tenant.tenant_id}:default"
         objective = ""
         config = {
             "mode": "bounded_autonomous",
@@ -2030,11 +2102,16 @@ class InstanceRepository:
         timeout_seconds = float((config or {}).get("search_timeout_seconds") or 8.0)
         return DuckDuckGoHTMLSearchProvider(timeout_seconds=timeout_seconds)
 
-    def _continuous_query_search_results(self, tenant, objective, frontier_items, max_results_per_query, config, provider=None):
+    def _continuous_query_search_results(self, tenant, objective, frontier_items, max_results_per_query, config, provider=None, live_event_sink=None):
         provider = provider if provider is not None else self._continuous_search_provider(config)
         events = []
+        def emit(event):
+            events.append(event)
+            if callable(live_event_sink):
+                live_event_sink([event])
+
         if provider is None:
-            events.append(
+            emit(
                 {
                     "type": "query_search_disabled",
                     "reason": "continuous search provider disabled",
@@ -2051,7 +2128,7 @@ class InstanceRepository:
             query_plan = _graph_context_query_plan(item, objective, tenant.tenant_id)
             plans = [plan for plan in query_plan.get("plans") or [] if str(plan.get("query") or "").strip()]
             if not plans:
-                events.append(
+                emit(
                     {
                         "type": "query_search_skipped",
                         "reason": "empty query plan",
@@ -2078,7 +2155,7 @@ class InstanceRepository:
                 try:
                     found = provider.search(query, max_results_per_query)
                 except Exception as exc:
-                    events.append(
+                    emit(
                         {
                             "type": "query_search_failed",
                             "frontier_key": frontier_key,
@@ -2121,7 +2198,7 @@ class InstanceRepository:
                     results.append(source)
                     added += 1
                 accepted_for_frontier += added
-                events.append(
+                emit(
                     {
                         "type": "query_search_executed",
                         "frontier_key": frontier_key,
@@ -2149,7 +2226,7 @@ class InstanceRepository:
             else:
                 frontier_state["last_search_signal"] = "no_search_results"
                 frontier_state["next_plan_index"] = min(last_attempt_index + 1, len(plans) - 1)
-                events.append(
+                emit(
                     {
                         "type": "query_ladder_coarsened",
                         "frontier_key": frontier_key,
@@ -2180,7 +2257,20 @@ class InstanceRepository:
                     "created_at": datetime.utcnow().isoformat(),
                 }
             ]
-        return self._continuous_query_search_results(tenant, objective, frontier_items, max_results_per_query, config, provider=provider)
+        live_event_sink = None
+        if session_key and hasattr(self, "metadata_engines"):
+            def live_event_sink(new_events):
+                self._continuous_persist_session_events(tenant, session_key, config, new_events)
+
+        return self._continuous_query_search_results(
+            tenant,
+            objective,
+            frontier_items,
+            max_results_per_query,
+            config,
+            provider=provider,
+            live_event_sink=live_event_sink,
+        )
 
     def _continuous_update_config(self, config, body):
         config = dict(config or {})
@@ -2542,6 +2632,9 @@ class InstanceRepository:
             "graph_coverage": "coverage fallback is rotating through graph items after higher-priority seeds",
         }.get(source_kind or "", "continuous enrichment frontier")
 
+    def _continuous_proposed_status_is_frontier_eligible(self, status):
+        return str(status or "").replace("-", "_").lower() in {"draft", "needs_more_evidence"}
+
     def _continuous_normalize_frontier_item(self, item, *, source_kind=None, priority=None, reason=None):
         item = dict(item or {})
         if source_kind is None:
@@ -2590,6 +2683,8 @@ class InstanceRepository:
             return self._continuous_normalize_frontier_item(item)
         if not row:
             return self._continuous_normalize_frontier_item(item)
+        if not self._continuous_proposed_status_is_frontier_eligible(row["status"]):
+            return None
         hydrated = dict(item)
         payload = _load_json(row["payload_json"], {})
         deep_profile = payload.get("deep_graph_profile") if isinstance(payload.get("deep_graph_profile"), dict) else {}
@@ -2667,7 +2762,7 @@ class InstanceRepository:
                           ON e.run_id = r.id AND e.project_id = r.project_id
                         WHERE e.project_id = :tenant_id
                           AND e.element_type IN ('node', 'edge')
-                          AND e.status IN ('draft', 'needs_more_evidence', 'approved')
+                          AND e.status IN ('draft', 'needs_more_evidence')
                         ORDER BY e.created_at DESC, e.id DESC
                         LIMIT :limit
                         """
@@ -2753,7 +2848,7 @@ class InstanceRepository:
                           ON e.run_id = r.id AND e.project_id = r.project_id
                         WHERE e.project_id = :tenant_id
                           AND e.element_type = 'node'
-                          AND e.status IN ('draft', 'needs_more_evidence', 'approved')
+                          AND e.status IN ('draft', 'needs_more_evidence')
                         ORDER BY e.updated_at DESC, e.created_at DESC, e.id DESC
                         LIMIT :limit
                         """
@@ -2936,7 +3031,9 @@ class InstanceRepository:
     def _continuous_frontier_candidates(self, tenant, stored_frontier, config):
         candidates = []
         for item in stored_frontier or []:
-            candidates.append(self._hydrate_continuous_frontier_item(tenant, item))
+            hydrated = self._hydrate_continuous_frontier_item(tenant, item)
+            if hydrated:
+                candidates.append(hydrated)
         candidates.extend(self._continuous_proposed_graph_frontier(tenant, config, limit=75))
         candidates.extend(self._continuous_question_scope_frontier(tenant, limit=10))
         candidates.extend(self._continuous_reasoning_finding_frontier(tenant, limit=20))
@@ -2944,6 +3041,8 @@ class InstanceRepository:
         deduped = {}
         identities = {}
         for item in candidates:
+            if not item:
+                continue
             normalized = self._continuous_normalize_frontier_item(item)
             key = self._continuous_frontier_key(normalized)
             if not key:
@@ -2965,7 +3064,10 @@ class InstanceRepository:
         stored_candidates = []
         stored_seen = set()
         for item in stored_frontier or []:
-            normalized = self._continuous_normalize_frontier_item(self._hydrate_continuous_frontier_item(tenant, item))
+            hydrated = self._hydrate_continuous_frontier_item(tenant, item)
+            if not hydrated:
+                continue
+            normalized = self._continuous_normalize_frontier_item(hydrated)
             key = self._continuous_frontier_key(normalized)
             identity = self._continuous_frontier_identity(normalized) or key
             if not key or key in stored_seen or identity in stored_seen or key in visited or identity in visited:
@@ -3112,6 +3214,28 @@ class InstanceRepository:
         config["latest_events"] = merged[-50:]
         return config
 
+    def _continuous_persist_session_events(self, tenant, session_key, config, events):
+        if not events:
+            return config
+        self._continuous_append_events(config, events)
+        with self.metadata_engine_for(tenant).begin() as conn:
+            conn.execute(
+                text(
+                    """
+                    UPDATE aletheia_continuous_enrichment_sessions
+                    SET config_json = :config_json,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE project_id = :tenant_id AND session_key = :session_key
+                    """
+                ),
+                {
+                    "tenant_id": tenant.tenant_id,
+                    "session_key": session_key,
+                    "config_json": _json_dump(config),
+                },
+            )
+        return config
+
     def _continuous_session_runtime_state(self, status, config, frontier, now_ts=None):
         config = config or {}
         frontier = frontier or []
@@ -3254,6 +3378,7 @@ class InstanceRepository:
             "status": row["status"],
             "config": config,
             "frontier": frontier,
+            "latest_events": config.get("latest_events") or [],
             "last_run_key": row["last_run_key"],
             "cycle_count": row["cycle_count"],
             "created_at": _jsonable(row["created_at"]),
@@ -3950,9 +4075,7 @@ class InstanceRepository:
                 },
             }
             try:
-                if tenant.tenant_id == "maritime-risk":
-                    autopilot_result = self.reasoning_repository.run_maritime_risk_autopilot_playbook(tenant, autopilot_payload)
-                elif tenant.tenant_id == "creditcardfraud":
+                if tenant.tenant_id == "creditcardfraud":
                     autopilot_result = self.reasoning_repository.run_creditcardfraud_autopilot_playbook(tenant, autopilot_payload)
                 else:
                     autopilot_result = self.reasoning_repository.create_autopilot_session(tenant, autopilot_payload)
@@ -4386,6 +4509,8 @@ class InstanceRepository:
         if run_key:
             where += " AND r.run_key = :run_key"
             params["run_key"] = run_key
+        raw_where = where
+        raw_params = dict(params)
         status_filter = (status_filter or "pending").replace("-", "_").lower()
         if status_filter in {"pending", "active", "draft"}:
             where += " AND e.status IN ('draft', 'needs_more_evidence')"
@@ -4429,6 +4554,17 @@ class InstanceRepository:
                 ),
                 params,
             ).mappings().first()
+            raw_summary = conn.execute(
+                text(
+                    f"""
+                    SELECT COUNT(*) AS total_count
+                    FROM aletheia_proposed_graph_elements e
+                    JOIN aletheia_iterative_graph_enrichment_runs r ON r.id = e.run_id
+                    WHERE {raw_where}
+                    """
+                ),
+                raw_params,
+            ).mappings().first()
             type_rows = conn.execute(
                 text(
                     f"""
@@ -4440,6 +4576,30 @@ class InstanceRepository:
                     """
                 ),
                 params,
+            ).mappings().all()
+            raw_type_rows = conn.execute(
+                text(
+                    f"""
+                    SELECT e.element_type, COUNT(*) AS count
+                    FROM aletheia_proposed_graph_elements e
+                    JOIN aletheia_iterative_graph_enrichment_runs r ON r.id = e.run_id
+                    WHERE {raw_where}
+                    GROUP BY e.element_type
+                    """
+                ),
+                raw_params,
+            ).mappings().all()
+            raw_status_rows = conn.execute(
+                text(
+                    f"""
+                    SELECT e.status, COUNT(*) AS count
+                    FROM aletheia_proposed_graph_elements e
+                    JOIN aletheia_iterative_graph_enrichment_runs r ON r.id = e.run_id
+                    WHERE {raw_where}
+                    GROUP BY e.status
+                    """
+                ),
+                raw_params,
             ).mappings().all()
             rows = conn.execute(
                 text(
@@ -4585,6 +4745,9 @@ class InstanceRepository:
             "elements": elements,
             "total_count": sum(filtered_type_counts.values()) if pending_like_filter else int(summary["total_count"] or 0) if summary else len(elements),
             "element_type_counts": filtered_type_counts if pending_like_filter else {row["element_type"]: int(row["count"] or 0) for row in type_rows},
+            "raw_total_count": int(raw_summary["total_count"] or 0) if raw_summary else len(elements),
+            "raw_element_type_counts": {row["element_type"]: int(row["count"] or 0) for row in raw_type_rows},
+            "raw_status_counts": {row["status"]: int(row["count"] or 0) for row in raw_status_rows},
             "status_filter": status_filter,
         }
 
@@ -5479,31 +5642,40 @@ class ReasoningRepository:
             "promotion_requires": "separate ontology/graph/rule proposal review gate",
         }
 
-    DEEP_GRAPH_REQUIRED_STEPS = ("hazard", "chokepoint", "dependent_country", "risk_metric", "recommended_action")
+    DEEP_GRAPH_REQUIRED_STEPS = ("source_entity", "relation", "target_entity", "evidence", "action")
 
     def _deep_graph_profile(self, evidence_chain):
         def step_for(item):
             kind = str(item.get("kind") or "").lower()
-            metric = str(item.get("metric") or "").lower()
-            if "hazard" in kind or kind in {"risk_indicator"} or metric.startswith("likelihood_") or metric.startswith("severity_"):
-                return "hazard"
-            if "chokepoint" in kind or metric == "canal":
-                return "chokepoint"
-            if kind in {"dependent_country", "dependent_countries", "country", "countries"} or metric == "iso3":
-                return "dependent_country"
-            if kind in {"trade_metric", "risk_metric"} or metric in {"trade_at_risk_v", "trade_impacted", "v_canal", "v_canal / v", "top_trade_at_risk_v"}:
-                return "risk_metric"
             if "action" in kind:
-                return "recommended_action"
+                return "action"
+            if "source" in kind and "entity" in kind:
+                return "source_entity"
+            if "target" in kind and "entity" in kind:
+                return "target_entity"
+            if "relation" in kind or "edge" in kind or item.get("source_label") or item.get("target_label"):
+                return "relation"
+            if item.get("source_label") or item.get("source") or item.get("subject"):
+                return "source_entity"
+            if item.get("target_label") or item.get("target") or item.get("object"):
+                return "target_entity"
+            if item.get("metric") or isinstance(item.get("value"), (int, float)):
+                return "evidence"
+            if item.get("source_ref"):
+                return "evidence"
             return None
 
         def label_for(item):
             value = item.get("value")
             if isinstance(value, list):
-                countries = [str(v.get("iso3")) for v in value if isinstance(v, dict) and v.get("iso3")]
-                return ", ".join(countries[:5]) or item.get("metric") or item.get("kind")
+                labels = [
+                    str(v.get("label") or v.get("name") or v.get("id") or v.get("key") or v)
+                    for v in value[:5]
+                    if isinstance(v, dict)
+                ]
+                return ", ".join(labels[:5]) or item.get("metric") or item.get("kind")
             if isinstance(value, dict):
-                return value.get("label") or value.get("name") or value.get("iso3") or value.get("canal") or item.get("metric") or item.get("kind")
+                return value.get("label") or value.get("name") or value.get("id") or value.get("key") or item.get("metric") or item.get("kind")
             return str(value) if value not in (None, "") else item.get("metric") or item.get("kind")
 
         step_order = []
@@ -5682,319 +5854,6 @@ class ReasoningRepository:
             self.add_autopilot_candidate_finding(tenant, session_key, spec)
 
         return self.get_autopilot_session(tenant, session_key)
-
-    def run_maritime_risk_autopilot_playbook(self, tenant, payload):
-        if tenant.tenant_id != "maritime-risk":
-            raise ValueError("maritime-risk playbook requires tenant=maritime-risk")
-        profile = self._maritime_risk_profile(tenant)
-        objective = payload.get("objective") or "Discover graph reasoning findings for maritime chokepoint risk"
-        session_payload = {
-            "session_key": payload.get("session_key"),
-            "objective": objective,
-            "scope": {
-                "tenant": tenant.tenant_id,
-                "tables": [
-                    "maritime_chokepoint_country_dependencies",
-                    "maritime_chokepoint_risk_indicators",
-                    "maritime_chokepoint_systemic_risk_results",
-                ],
-                "approved_only": True,
-                "source_surface": "maritime_risk_graph_reasoning_playbook",
-                "source_mode": profile.get("source_mode"),
-                "reasoning_mode": "graph_multi_hop",
-                "finding_emphasis": "deep_graph_findings",
-                "required_finding_path": [
-                    "hazard",
-                    "chokepoint",
-                    "dependent_country",
-                    "trade_or_risk_metric",
-                    "recommended_action",
-                ],
-            },
-            "budget": payload.get("budget") or {
-                "max_hypotheses": 8,
-                "max_reasoning_tasks": 5,
-                "max_tool_calls": 20,
-                "max_runtime_seconds": 120,
-            },
-            "safety_profile": {
-                "approved_only": True,
-                "safe_views_only": True,
-                "allow_sensitive_fields": False,
-                "blocked_fields": [],
-                "canonical_writes": "disabled",
-                "auto_approve_findings": False,
-            },
-            "created_by": payload.get("created_by") or "Maritime-risk Graph Reasoning Playbook",
-        }
-        if isinstance(payload.get("scope"), dict):
-            session_payload["scope"].update(payload["scope"])
-        created = self.create_autopilot_session(tenant, session_payload)
-        session_key = created["session"]["session_key"]
-
-        hypothesis_specs = [
-            {
-                "title": "Single-chokepoint dependency can create concentrated country exposure",
-                "rationale": "Rank country/chokepoint pairs by value share and dependent trade value to find countries exposed to one chokepoint.",
-                "status": "completed",
-                "priority": 10,
-                "evidence_plan": [
-                    {
-                        "kind": "graph_path",
-                        "source_ref": "maritime_chokepoint_risk_indicators -> maritime_chokepoint_country_dependencies -> maritime_risk_playbook",
-                        "metric": "hazard_to_country_dependency_share_to_action",
-                        "required_graph_path": list(self.DEEP_GRAPH_REQUIRED_STEPS),
-                    }
-                ],
-                "reasoning_task_keys": ["reasoning:maritime-risk:chokepoint-dependency:v1"],
-            },
-            {
-                "title": "Hazard severity should be joined to dependent trade value before ranking chokepoints",
-                "rationale": "Combine hazard likelihood/severity with systemic risk results so the finding explains risk propagation, not just trade volume.",
-                "status": "completed",
-                "priority": 20,
-                "evidence_plan": [
-                    {
-                        "kind": "graph_path",
-                        "source_ref": "maritime_chokepoint_risk_indicators -> maritime_chokepoint_systemic_risk_results -> maritime_risk_playbook",
-                        "metric": "hazard_adjusted_trade_at_risk_to_action",
-                        "required_graph_path": list(self.DEEP_GRAPH_REQUIRED_STEPS),
-                    }
-                ],
-                "reasoning_task_keys": ["reasoning:maritime-risk:hazard-adjusted-risk:v1"],
-            },
-            {
-                "title": "Red Sea / Bab el-Mandeb escalation should prioritize dependent countries by systemic risk",
-                "rationale": "Use the chokepoint hazard row and downstream country risk rows to prioritize analyst review when upstream events increase.",
-                "status": "completed",
-                "priority": 30,
-                "evidence_plan": [
-                    {
-                        "kind": "graph_path",
-                        "source_ref": "maritime_chokepoint_risk_indicators -> maritime_chokepoint_systemic_risk_results -> maritime_risk_playbook",
-                        "metric": "bab_el_mandeb_hazard_to_country_priority_to_action",
-                        "required_graph_path": list(self.DEEP_GRAPH_REQUIRED_STEPS),
-                    }
-                ],
-                "reasoning_task_keys": ["reasoning:maritime-risk:red-sea-priority:v1"],
-            },
-            {
-                "title": "High throughput alone is not enough for a graph reasoning finding",
-                "rationale": "A volume-only ranking does not explain hazard, dependency, country exposure, and action linkage.",
-                "status": "pruned",
-                "priority": 90,
-                "evidence_plan": [{"kind": "aggregate", "source_ref": "maritime_chokepoint_country_dependencies", "metric": "sum_v_canal"}],
-                "pruned_reason": "Pruned because it is a ranking/reporting hypothesis without a complete hazard -> chokepoint -> country -> risk metric -> action path.",
-                "reasoning_task_keys": ["reasoning:maritime-risk:volume-only:v1"],
-            },
-        ]
-        hypotheses = {}
-        for spec in hypothesis_specs:
-            result = self.add_autopilot_hypothesis(tenant, session_key, spec)
-            hypotheses[spec["title"]] = result["hypothesis"]["hypothesis_key"]
-
-        for spec in self._maritime_risk_candidate_specs(profile, hypotheses):
-            self.add_autopilot_candidate_finding(tenant, session_key, spec)
-
-        return self.get_autopilot_session(tenant, session_key)
-
-    def _maritime_risk_profile(self, tenant):
-        fallback = {
-            "source_mode": "fallback_reported_profile",
-            "tables": {
-                "maritime_chokepoint_country_dependencies": 4950,
-                "maritime_chokepoint_risk_indicators": 24,
-                "maritime_chokepoint_systemic_risk_results": 4752,
-            },
-            "top_dependency": [
-                {"iso3": "ERI", "canal": "Bab el-Mandeb Strait", "v_canal": 820217259.96, "v": 1122417684.78, "share": 0.7308},
-                {"iso3": "QAT", "canal": "Strait of Hormuz", "v_canal": 96857752381.97, "v": 139422651416.03, "share": 0.6947},
-                {"iso3": "DJI", "canal": "Bab el-Mandeb Strait", "v_canal": 5487893583.24, "v": 7982553963.16, "share": 0.6875},
-            ],
-            "top_systemic_risk": [
-                {"iso3": "CHN", "canal": "Taiwan Strait", "trade_at_risk_v": 23559681578.78, "trade_impacted": 81768261948.46, "v_share": 0.2324},
-                {"iso3": "CHN", "canal": "Bab el-Mandeb Strait", "trade_at_risk_v": 15110427387.67, "trade_impacted": 46556020850.45, "v_share": 0.0918},
-                {"iso3": "USA", "canal": "Panama Canal", "trade_at_risk_v": 12192832212.34, "trade_impacted": 306107297223.91, "v_share": 0.1049},
-            ],
-            "bab_el_mandeb_priority": [
-                {"iso3": "CHN", "canal": "Bab el-Mandeb Strait", "trade_at_risk_v": 15110427387.67, "trade_impacted": 46556020850.45, "v_share": 0.0918},
-                {"iso3": "IND", "canal": "Bab el-Mandeb Strait", "trade_at_risk_v": 7067159777.33, "trade_impacted": 21774290660.73, "v_share": 0.2291},
-                {"iso3": "USA", "canal": "Bab el-Mandeb Strait", "trade_at_risk_v": 6574347208.87, "trade_impacted": 20255909239.48, "v_share": 0.0479},
-            ],
-            "bab_el_mandeb_hazard": {
-                "canal": "Bab el-Mandeb Strait",
-                "likelihood_conflict": 0.6731,
-                "severity_conflict": 0.5,
-                "likelihood_geopolitical": 2.3529,
-                "severity_geopolitical": 0.5,
-                "likelihood_piracy": 0.2556,
-                "severity_piracy": 0.005,
-            },
-            "top_dependency_hazard": {
-                "canal": "Bab el-Mandeb Strait",
-                "likelihood_conflict": 0.6731,
-                "severity_conflict": 0.5,
-                "likelihood_geopolitical": 2.3529,
-                "severity_geopolitical": 0.5,
-                "likelihood_piracy": 0.2556,
-                "severity_piracy": 0.005,
-            },
-        }
-        try:
-            with self.source_engine_for(tenant).connect() as conn:
-                tables = {
-                    table: int(conn.execute(text(f"SELECT COUNT(*) FROM {table}")).scalar_one())
-                    for table in fallback["tables"]
-                }
-                top_dependency = [
-                    dict(row)
-                    for row in conn.execute(text("""
-                        SELECT iso3, canal, v_canal, v, v_canal / NULLIF(v, 0) AS share
-                        FROM maritime_chokepoint_country_dependencies
-                        WHERE v > 0
-                        ORDER BY share DESC, v_canal DESC
-                        LIMIT 5
-                    """)).mappings().all()
-                ]
-                dependency_canal = top_dependency[0]["canal"] if top_dependency else fallback["top_dependency"][0]["canal"]
-                dependency_hazard = conn.execute(
-                    text("""
-                        SELECT canal, likelihood_conflict, severity_conflict,
-                               likelihood_geopolitical, severity_geopolitical,
-                               likelihood_piracy, severity_piracy,
-                               likelihood_blockage, severity_blockage
-                        FROM maritime_chokepoint_risk_indicators
-                        WHERE canal = :canal
-                    """),
-                    {"canal": dependency_canal},
-                ).mappings().first()
-                top_systemic_risk = [
-                    dict(row)
-                    for row in conn.execute(text("""
-                        SELECT iso3, canal, trade_at_risk_v, trade_impacted, revenue_at_risk, v_share
-                        FROM maritime_chokepoint_systemic_risk_results
-                        ORDER BY trade_at_risk_v DESC
-                        LIMIT 5
-                    """)).mappings().all()
-                ]
-                bab_priority = [
-                    dict(row)
-                    for row in conn.execute(text("""
-                        SELECT iso3, canal, trade_at_risk_v, trade_impacted, revenue_at_risk, v_share
-                        FROM maritime_chokepoint_systemic_risk_results
-                        WHERE canal = 'Bab el-Mandeb Strait'
-                        ORDER BY trade_at_risk_v DESC
-                        LIMIT 5
-                    """)).mappings().all()
-                ]
-                bab_hazard = conn.execute(text("""
-                    SELECT canal, likelihood_conflict, severity_conflict,
-                           likelihood_geopolitical, severity_geopolitical,
-                           likelihood_piracy, severity_piracy,
-                           likelihood_blockage, severity_blockage
-                    FROM maritime_chokepoint_risk_indicators
-                    WHERE canal = 'Bab el-Mandeb Strait'
-                """)).mappings().first()
-            return {
-                **fallback,
-                "source_mode": "live_source_tables",
-                "tables": tables,
-                "top_dependency": top_dependency or fallback["top_dependency"],
-                "top_systemic_risk": top_systemic_risk or fallback["top_systemic_risk"],
-                "bab_el_mandeb_priority": bab_priority or fallback["bab_el_mandeb_priority"],
-                "bab_el_mandeb_hazard": dict(bab_hazard) if bab_hazard else fallback["bab_el_mandeb_hazard"],
-                "top_dependency_hazard": dict(dependency_hazard) if dependency_hazard else fallback["top_dependency_hazard"],
-            }
-        except Exception:
-            return fallback
-
-    def _maritime_risk_candidate_specs(self, profile, hypotheses):
-        dependency = profile["top_dependency"][0]
-        dependency_hazard = profile["top_dependency_hazard"]
-        systemic = profile["top_systemic_risk"][0]
-        bab_priority = profile["bab_el_mandeb_priority"]
-        bab_hazard = profile["bab_el_mandeb_hazard"]
-        priority_labels = ", ".join(
-            f"{row['iso3']} (${float(row['trade_at_risk_v']) / 1_000_000_000:.1f}B at risk)"
-            for row in bab_priority[:3]
-        )
-        evidence_limit = "Draft candidate from maritime-risk graph playbook; requires human review before formal finding approval."
-        return [
-            {
-                "hypothesis_key": hypotheses["Single-chokepoint dependency can create concentrated country exposure"],
-                "title": "Single chokepoint dependency creates concentrated country exposure",
-                "conclusion": (
-                    f"{dependency['iso3']} depends heavily on {dependency['canal']}, where the hazard profile includes "
-                    f"conflict likelihood {dependency_hazard.get('likelihood_conflict') or 'n/a'} and geopolitical likelihood "
-                    f"{dependency_hazard.get('likelihood_geopolitical') or 'n/a'}: "
-                    f"{float(dependency['share']):.1%} of modeled maritime trade value flows through that chokepoint "
-                    f"(${float(dependency['v_canal']) / 1_000_000_000:.2f}B of dependent value)."
-                ),
-                "value_score": 0.82,
-                "confidence": 0.78,
-                "novelty_score": 0.62,
-                "impact_score": 0.8,
-                "evidence_chain": [
-                    {"kind": "hazard", "source_ref": "maritime_chokepoint_risk_indicators", "metric": "likelihood_conflict", "value": dependency_hazard.get("likelihood_conflict")},
-                    {"kind": "hazard", "source_ref": "maritime_chokepoint_risk_indicators", "metric": "likelihood_geopolitical", "value": dependency_hazard.get("likelihood_geopolitical")},
-                    {"kind": "chokepoint", "source_ref": "maritime_chokepoint_risk_indicators", "metric": "canal", "value": dependency["canal"]},
-                    {"kind": "dependent_country", "source_ref": "maritime_chokepoint_country_dependencies", "metric": "iso3", "value": dependency["iso3"]},
-                    {"kind": "trade_metric", "source_ref": "maritime_chokepoint_country_dependencies", "metric": "v_canal", "value": round(float(dependency["v_canal"]), 2)},
-                    {"kind": "risk_metric", "source_ref": "maritime_chokepoint_country_dependencies", "metric": "v_canal / v", "value": f"{float(dependency['share']):.1%}"},
-                    {"kind": "recommended_action", "source_ref": "maritime_risk_playbook", "metric": "portfolio_review", "value": "Prioritize dependency diversification review for the country/chokepoint pair."},
-                ],
-                "evidence_limits": [evidence_limit, "This phase uses structural 2022 dependency data and does not include live event updates."],
-                "suggested_action": {"next": "Open a country/chokepoint dependency review and compare alternate maritime routes."},
-            },
-            {
-                "hypothesis_key": hypotheses["Hazard severity should be joined to dependent trade value before ranking chokepoints"],
-                "title": "Hazard-adjusted chokepoint risk should drive review priority",
-                "conclusion": (
-                    f"{systemic['canal']} has the highest modeled trade-at-risk row in the current dataset: "
-                    f"{systemic['iso3']} shows ${float(systemic['trade_at_risk_v']) / 1_000_000_000:.1f}B expected trade value at risk "
-                    f"and ${float(systemic['trade_impacted']) / 1_000_000_000:.1f}B trade impacted."
-                ),
-                "value_score": 0.88,
-                "confidence": 0.8,
-                "novelty_score": 0.66,
-                "impact_score": 0.87,
-                "evidence_chain": [
-                    {"kind": "hazard", "source_ref": "maritime_chokepoint_risk_indicators", "metric": "chokepoint", "value": systemic["canal"]},
-                    {"kind": "chokepoint", "source_ref": "maritime_chokepoint_risk_indicators", "metric": "canal", "value": systemic["canal"]},
-                    {"kind": "dependent_country", "source_ref": "maritime_chokepoint_systemic_risk_results", "metric": "iso3", "value": systemic["iso3"]},
-                    {"kind": "risk_metric", "source_ref": "maritime_chokepoint_systemic_risk_results", "metric": "trade_at_risk_v", "value": round(float(systemic["trade_at_risk_v"]), 2)},
-                    {"kind": "risk_metric", "source_ref": "maritime_chokepoint_systemic_risk_results", "metric": "trade_impacted", "value": round(float(systemic["trade_impacted"]), 2)},
-                    {"kind": "recommended_action", "source_ref": "maritime_risk_playbook", "metric": "risk_review_queue", "value": "Create a priority review queue for countries with high trade_at_risk_v on this chokepoint."},
-                ],
-                "evidence_limits": [evidence_limit, "Hazard indicators are joined at chokepoint level; country-level risk is modeled through dependency and systemic risk tables."],
-                "suggested_action": {"next": "Rank affected countries by trade_at_risk_v and validate current operational exposure."},
-            },
-            {
-                "hypothesis_key": hypotheses["Red Sea / Bab el-Mandeb escalation should prioritize dependent countries by systemic risk"],
-                "title": "Bab el-Mandeb risk propagation identifies countries for immediate review",
-                "conclusion": (
-                    "If Red Sea / Bab el-Mandeb risk rises, the first review queue should include "
-                    f"{priority_labels}. The graph path is hazard at Bab el-Mandeb -> chokepoint -> dependent country -> systemic risk metric -> analyst action."
-                ),
-                "value_score": 0.9,
-                "confidence": 0.82,
-                "novelty_score": 0.72,
-                "impact_score": 0.9,
-                "evidence_chain": [
-                    {"kind": "hazard", "source_ref": "maritime_chokepoint_risk_indicators", "metric": "likelihood_conflict", "value": bab_hazard.get("likelihood_conflict")},
-                    {"kind": "hazard", "source_ref": "maritime_chokepoint_risk_indicators", "metric": "severity_conflict", "value": bab_hazard.get("severity_conflict")},
-                    {"kind": "chokepoint", "source_ref": "maritime_chokepoint_risk_indicators", "metric": "canal", "value": "Bab el-Mandeb Strait"},
-                    {"kind": "dependent_countries", "source_ref": "maritime_chokepoint_systemic_risk_results", "metric": "top_trade_at_risk_v", "value": [
-                        {"iso3": row["iso3"], "trade_at_risk_v": round(float(row["trade_at_risk_v"]), 2), "trade_impacted": round(float(row["trade_impacted"]), 2)}
-                        for row in bab_priority[:5]
-                    ]},
-                    {"kind": "risk_metric", "source_ref": "maritime_chokepoint_systemic_risk_results", "metric": "top_trade_at_risk_v", "value": round(float(bab_priority[0]["trade_at_risk_v"]), 2) if bab_priority else None},
-                    {"kind": "recommended_action", "source_ref": "maritime_risk_playbook", "metric": "country_priority_review", "value": "Assign analyst review to top exposed countries and request updated live event enrichment."},
-                ],
-                "evidence_limits": [evidence_limit, "The playbook uses structural chokepoint risk data; ACLED/GDELT live events are a planned enrichment, not yet imported."],
-                "suggested_action": {"next": "Create a Bab el-Mandeb review case for the top exposed countries and attach live event enrichment when available."},
-            },
-        ]
 
     def _creditcardfraud_profile(self, tenant):
         fallback = {
@@ -6984,9 +6843,7 @@ class ReasoningRepository:
                         for p in second_hop_paths[:3]
                     )
                     ranking_summary += f"; depth-{source_key_profile.get('scope_depth', scope_depth)} shared paths: {shared_summary}"
-                source_tables = [str(t.get("table") or "") for t in source_key_profile.get("related_tables", [])]
-                profile_label = "Maritime Exposure Profile" if any(table.startswith("maritime_") for table in source_tables) else "Source Evidence Profile"
-                aggregate_label = f"{label} {profile_label}"
+                aggregate_label = f"{label} Source Evidence Profile"
                 aggregate_source_ref = f"{metrics.get('object_type', 'entity')} + degree + source-key metric aggregation"
             else:
                 ranking_summary = "; ".join(
@@ -7236,20 +7093,14 @@ class ReasoningRepository:
         top_labels = [str(path.get("label")) for path in (ranked_paths or []) if path.get("label")][:3]
         if not top_labels:
             return f"{label} 风险画像" if wants_zh else f"{label} risk profile"
-        usa_paths = self._paths_with_peer(second_hop_paths, {"USA"})
         if wants_zh:
-            if usa_paths and ("美国" in (question or "") or "USA" in (question or "").upper()):
-                return f"{label} 与 USA 的风险重叠：{'、'.join(usa_paths[:3])}"
-            return f"{label} 主要敏感海峡：{'、'.join(top_labels)}"
-        if usa_paths and "USA" in (question or "").upper():
-            return f"{label} USA risk overlap: {', '.join(usa_paths[:3])}"
-        return f"{label} main chokepoint exposure: {', '.join(top_labels)}"
+            return f"{label} 主要关联路径：{'、'.join(top_labels)}"
+        return f"{label} main relationship paths: {', '.join(top_labels)}"
 
     def _plain_reasoning_conclusion(self, question, label, detailed_conclusion, ranked_paths, second_hop_paths, graph_degree):
         wants_zh = bool(re.search(r"[\u4e00-\u9fff]", question or ""))
         label = self._display_label_from_question(question, label or "selected entity")
         top_labels = [str(path.get("label")) for path in (ranked_paths or []) if path.get("label")][:3]
-        usa_paths = self._paths_with_peer(second_hop_paths, {"USA"})
         peer_keys = []
         for path in second_hop_paths or []:
             for peer in path.get("top_peers") or []:
@@ -7263,27 +7114,16 @@ class ReasoningRepository:
         source_rows = (graph_degree or {}).get("source_key_row_degree")
         if top_labels:
             paths_text = "、".join(top_labels) if wants_zh else ", ".join(top_labels)
-            if usa_paths and ("美国" in (question or "") or "USA" in (question or "").upper()):
-                usa_text = "、".join(usa_paths[:3]) if wants_zh else ", ".join(usa_paths[:3])
-                if wants_zh:
-                    return (
-                        f"{label} 最敏感的海上通道集中在 {paths_text}；其中 {usa_text} 也连接 USA，"
-                        "是中美风险重叠最需要优先核查的海峡。"
-                    )
-                return (
-                    f"{label}'s strongest maritime exposure is concentrated in {paths_text}. "
-                    f"{usa_text} also connects USA, so those chokepoints should be reviewed first for US overlap."
-                )
             if peer_keys:
                 peers_text = "、".join(peer_keys) if wants_zh else ", ".join(peer_keys)
                 if wants_zh:
                     return (
                         f"{label} 的主要敏感路径集中在 {paths_text}。这些路径还连接 {peers_text} 等相关方，"
-                        "说明风险来自高价值路径和关键国家/地区的重叠。"
+                        "说明风险来自高价值路径和关键对象的重叠。"
                     )
                 return (
                     f"{label}'s main exposure is concentrated in {paths_text}. "
-                    f"Those paths also connect {peers_text}, so the risk is driven by overlap between high-value routes and key counterparties."
+                    f"Those paths also connect {peers_text}, so the risk is driven by overlap between high-value paths and key counterparties."
                 )
             if wants_zh:
                 return f"{label} 的主要敏感路径集中在 {paths_text}；具体排序和数值见下方关键路径。"
@@ -7456,8 +7296,8 @@ class ReasoningRepository:
         top_source_paths = (source_key_profile or {}).get("top_paths") or []
         source_backed_related_nodes = [
             {
-                "id": f"MaritimeChokepoint:{path.get('label')}",
-                "type": "MaritimeChokepoint",
+                "id": f"SourcePath:{path.get('label')}",
+                "type": "SourcePath",
                 "label": path.get("label"),
                 "source_table": path.get("table"),
                 "source_pk": f"{(source_key_profile or {}).get('center_key_col', 'key')}={instance_id}; {path.get('label_col') or 'label'}={path.get('label')}",
@@ -7467,8 +7307,8 @@ class ReasoningRepository:
         source_backed_related_edges = [
             {
                 "source": center_node,
-                "target": f"MaritimeChokepoint:{path.get('label')}",
-                "label": "trade dependency",
+                "target": f"SourcePath:{path.get('label')}",
+                "label": "source path metric",
                 "metric": path.get("metric"),
                 "metric_value": path.get("metric_value"),
                 "row_count": path.get("row_count"),
@@ -7605,9 +7445,7 @@ class ReasoningRepository:
                         for p in second_hop_paths[:3]
                     )
                     ranking_summary += f"; depth-{source_key_profile.get('scope_depth', scope_depth)} shared paths: {shared_summary}"
-                source_tables = [str(t.get("table") or "") for t in source_key_profile.get("related_tables", [])]
-                profile_label = "Maritime Exposure Profile" if any(table.startswith("maritime_") for table in source_tables) else "Source Evidence Profile"
-                aggregate_label = f"{label} {profile_label}"
+                aggregate_label = f"{label} Source Evidence Profile"
                 aggregate_source_ref = f"{metrics.get('object_type', 'entity')} + degree + source-key metric aggregation"
             else:
                 ranking_summary = "; ".join(
@@ -9370,7 +9208,7 @@ print(json.dumps({
         }
 
 
-class ReviewWorkbenchHandler(BaseHTTPRequestHandler):
+class AletheiaServerHandler(BaseHTTPRequestHandler):
     repository = None
     instance_repository = None
     reasoning_repository = None
@@ -9882,18 +9720,6 @@ class ReviewWorkbenchHandler(BaseHTTPRequestHandler):
                 return
             self._send_json(result)
             return
-        if parsed.path == "/api/reasoning/autopilot/playbooks/maritime-risk/run":
-            try:
-                body = self._read_json()
-                result = self.reasoning_repository.run_maritime_risk_autopilot_playbook(tenant, body)
-            except ValueError as exc:
-                self._send_error(HTTPStatus.BAD_REQUEST, str(exc))
-                return
-            except Exception as exc:  # pragma: no cover - displayed to local operator
-                self._send_error(HTTPStatus.INTERNAL_SERVER_ERROR, str(exc))
-                return
-            self._send_json(result)
-            return
         if parsed.path.startswith("/api/reasoning/autopilot/sessions/") and parsed.path.endswith("/hypotheses"):
             session_key = unquote(parsed.path.removeprefix("/api/reasoning/autopilot/sessions/").removesuffix("/hypotheses").rstrip("/"))
             try:
@@ -10389,8 +10215,11 @@ class ReviewWorkbenchHandler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
 
+ReviewWorkbenchHandler = AletheiaServerHandler
+
+
 def main():
-    parser = argparse.ArgumentParser(description="Run the Aletheia Workbench API and frontend app")
+    parser = argparse.ArgumentParser(description="Run the Aletheia API and frontend app")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8765)
     parser.add_argument("--db-url", default=DB_URL)
@@ -10404,17 +10233,17 @@ def main():
     os.environ["ALETHEIA_PG_URL"] = args.db_url
     os.environ["ALETHEIA_MYSQL_URL"] = args.source_db_url
     registry = TenantRegistry.load(args.tenants_file)
-    ReviewWorkbenchHandler.repository = ReviewRepository(registry, ensure_schema=args.ensure_schema)
-    ReviewWorkbenchHandler.instance_repository = InstanceRepository(registry, ensure_schema=args.ensure_schema)
-    ReviewWorkbenchHandler.reasoning_repository = ReasoningRepository(
+    AletheiaServerHandler.repository = ReviewRepository(registry, ensure_schema=args.ensure_schema)
+    AletheiaServerHandler.instance_repository = InstanceRepository(registry, ensure_schema=args.ensure_schema)
+    AletheiaServerHandler.reasoning_repository = ReasoningRepository(
         registry,
-        ReviewWorkbenchHandler.instance_repository,
+        AletheiaServerHandler.instance_repository,
         ensure_schema=args.ensure_schema,
     )
-    ReviewWorkbenchHandler.instance_repository.reasoning_repository = ReviewWorkbenchHandler.reasoning_repository
-    ReviewWorkbenchHandler.agent_gateway_repository = AgentGatewayRepository(registry, ensure_schema=args.ensure_schema)
-    ReviewWorkbenchHandler.instance_repository.start_continuous_enrichment_scheduler(interval_seconds=60)
-    server = LocalThreadingHTTPServer((args.host, args.port), ReviewWorkbenchHandler)
+    AletheiaServerHandler.instance_repository.reasoning_repository = AletheiaServerHandler.reasoning_repository
+    AletheiaServerHandler.agent_gateway_repository = AgentGatewayRepository(registry, ensure_schema=args.ensure_schema)
+    AletheiaServerHandler.instance_repository.start_continuous_enrichment_scheduler(interval_seconds=60)
+    server = LocalThreadingHTTPServer((args.host, args.port), AletheiaServerHandler)
     scheme = "http"
     if args.tls_cert and args.tls_key:
         ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
@@ -10423,13 +10252,13 @@ def main():
         ctx.load_cert_chain(args.tls_cert, args.tls_key)
         server.socket = ctx.wrap_socket(server.socket, server_side=True)
         scheme = "https"
-    print(f"Aletheia Workbench: {scheme}://{args.host}:{args.port}", flush=True)
+    print(f"Aletheia Server: {scheme}://{args.host}:{args.port}", flush=True)
     try:
         server.serve_forever()
     except KeyboardInterrupt:
         pass
     finally:
-        ReviewWorkbenchHandler.instance_repository.stop_continuous_enrichment_scheduler()
+        AletheiaServerHandler.instance_repository.stop_continuous_enrichment_scheduler()
 
 
 if __name__ == "__main__":

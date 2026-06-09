@@ -706,8 +706,7 @@ function AgentRunsWorkspace({ tenantId, query, artifacts = [], graphElements = [
           safety_profile: agentParams.safety,
         };
         let result = null;
-        if (tenantId === "maritime-risk") result = await AL_API.runMaritimeRiskAutopilotPlaybook(tenantId, body);
-        else if (tenantId === "creditcardfraud") result = await AL_API.runCreditcardfraudAutopilotPlaybook(tenantId, body);
+        if (tenantId === "creditcardfraud") result = await AL_API.runCreditcardfraudAutopilotPlaybook(tenantId, body);
         else result = await AL_API.createAutopilotSession(tenantId, body);
         setMessage({ kind: "ok", text: `Autopilot run queued: ${result?.session_key || result?.session?.session_key || result?.run_key || "created"}` });
         window.dispatchEvent(new CustomEvent("aletheia:retry"));
@@ -1332,7 +1331,7 @@ function workspacePathLabel(item) {
   const payload = raw.payload || {};
   const source = pathPartWB(payload.source_label || payload.source || payload.country || "");
   const relation = pathPartWB(payload.relation || payload.edge_type || payload.path_relation || "");
-  const target = pathPartWB(payload.target_label || payload.target || payload.chokepoint || "");
+  const target = pathPartWB(payload.target_label || payload.target || "");
   if (source || relation || target) {
     return [source, relation, target].filter(Boolean).join(" -> ");
   }

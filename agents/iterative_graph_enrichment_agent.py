@@ -23,6 +23,11 @@ from typing import Any
 from sqlalchemy import create_engine, func, inspect, text
 from sqlalchemy.orm import sessionmaker
 
+try:
+    import pycountry
+except Exception:  # pragma: no cover - optional dependency fallback
+    pycountry = None
+
 from ontology_artifacts import (
     GraphIdentityIndex,
     GraphDeepResearchBenchmarkRun,
@@ -47,36 +52,7 @@ NODE_SIMILARITY_DIRECT_DEDUP_THRESHOLD = 0.6
 NODE_DIRECT_DEDUP_MIN_CONFIDENCE = 0.6
 _DOTENV_CACHE: dict[str, str] | None = None
 
-DEEP_GRAPH_REQUIRED_STEPS = ("hazard", "chokepoint", "dependent_country", "risk_metric", "recommended_action")
-
-COUNTRY_ALIASES = {
-    "CHN": "China",
-    "IND": "India",
-    "USA": "United States",
-    "JPN": "Japan",
-    "KOR": "South Korea",
-    "GMB": "Gambia",
-    "IRN": "Iran",
-    "SAU": "Saudi Arabia",
-    "ARE": "United Arab Emirates",
-}
-
-METRIC_TERMS = {
-    "trade_at_risk_v": ["trade at risk", "trade exposure", "trade disruption"],
-    "trade_impacted": ["trade impacted", "trade disruption", "supply chain impact"],
-    "v_canal": ["canal volume", "shipping volume"],
-    "dependency_share": ["dependency share", "trade dependency"],
-    "import exposure": ["import exposure", "trade exposure"],
-}
-
-RELATION_TERMS = {
-    "depends_on": ["depends on", "trade dependency", "maritime chokepoint"],
-    "trade_dependency": ["depends on", "trade dependency", "maritime chokepoint", "trade route exposure"],
-    "raises_risk_for": ["risk propagation", "hazard", "maritime disruption"],
-    "dependency_chokepoint": ["chokepoint dependency", "trade route"],
-    "risk_country": ["country exposure", "risk exposure"],
-    "risk_chokepoint": ["chokepoint risk", "maritime risk"],
-}
+DEEP_GRAPH_REQUIRED_STEPS = ("source_entity", "relation", "target_entity", "evidence", "action")
 
 GRAPH_EXTRACTION_PROMPT_VERSION = "graph_entity_relation_v2"
 
@@ -318,6 +294,71 @@ def _source_identity(value: dict[str, Any]) -> str | None:
     return None
 
 
+def _country_from_identity_surface(value: Any):
+    if pycountry is None:
+        return None
+    text = str(value or "").strip()
+    if not text:
+        return None
+    if "=" in text:
+        key, raw_value = text.split("=", 1)
+        if key.strip().lower() in {"iso3", "alpha_3", "country_code"}:
+            text = raw_value.strip()
+    if text.lower().startswith("country:"):
+        text = text.split(":", 1)[1].strip()
+    upper = text.upper()
+    if re.fullmatch(r"[A-Z]{3}", upper):
+        country = pycountry.countries.get(alpha_3=upper)
+        if country is not None:
+            return country
+    if re.fullmatch(r"[A-Z]{2}", upper):
+        country = pycountry.countries.get(alpha_2=upper)
+        if country is not None:
+            return country
+    try:
+        matches = pycountry.countries.search_fuzzy(text)
+    except LookupError:
+        return None
+    return matches[0] if matches else None
+
+
+def _country_identity_normalization(
+    entity_type: Any,
+    label: Any,
+    properties: dict[str, Any],
+    payload: dict[str, Any],
+    source_identity: str | None,
+) -> dict[str, Any]:
+    if _normalize_identity_text(entity_type) != "country":
+        return {"normalized_label": _normalize_identity_text(label), "aliases": [], "source_identity": source_identity}
+    surfaces = [
+        label,
+        properties.get("iso3"),
+        properties.get("country_code"),
+        properties.get("source_pk"),
+        payload.get("source_pk"),
+        source_identity,
+    ]
+    country = next((match for surface in surfaces if (match := _country_from_identity_surface(surface))), None)
+    if country is None:
+        return {"normalized_label": _normalize_identity_text(label), "aliases": [], "source_identity": source_identity}
+    alias_values = {
+        country.alpha_2,
+        country.alpha_3,
+        country.name,
+        str(label or ""),
+    }
+    for attr in ("official_name", "common_name"):
+        value = getattr(country, attr, None)
+        if value:
+            alias_values.add(value)
+    return {
+        "normalized_label": _normalize_identity_text(country.alpha_3),
+        "aliases": sorted({_normalize_identity_text(alias) for alias in alias_values if _normalize_identity_text(alias)}),
+        "source_identity": f"iso3={country.alpha_3}",
+    }
+
+
 def _edge_fact_identity(value: dict[str, Any]) -> str | None:
     for key in (
         "fact_identity",
@@ -396,13 +437,17 @@ def _node_identity_payload(item: dict[str, Any]) -> dict[str, Any]:
     entity_type = payload.get("ontology_type") or payload.get("type") or item.get("element_type")
     source_identity = _source_identity(properties) or _source_identity(payload)
     normalized_label = _normalize_identity_text(label)
+    type_normalization = _country_identity_normalization(entity_type, label, properties, payload, source_identity)
+    normalized_label = type_normalization["normalized_label"]
     normalized_aliases = sorted(
         {
             _normalize_identity_text(alias)
             for alias in (properties.get("aliases") or payload.get("aliases") or [])
             if _normalize_identity_text(alias)
         }
+        | set(type_normalization["aliases"])
     )
+    source_identity = type_normalization["source_identity"]
     return {
         "kind": "node",
         "entity_type": str(entity_type or "").strip(),
@@ -623,12 +668,18 @@ def _dedup_text_for_identity(identity: dict[str, Any], payload: dict[str, Any] |
             ]
         )
     else:
+        entity_type = str(identity.get("entity_type") or payload.get("ontology_type") or payload.get("type") or "")
+        label = str(identity.get("label") or payload.get("label") or payload.get("name") or "")
+        aliases = [str(alias) for alias in identity.get("aliases") or []]
+        class_object_surfaces = [f"{entity_type} {label}", f"{label} {entity_type}"]
+        class_object_surfaces.extend(f"{entity_type} {alias}" for alias in aliases[:8])
         parts.extend(
             [
-                str(identity.get("entity_type") or payload.get("ontology_type") or payload.get("type") or ""),
-                str(identity.get("label") or payload.get("label") or payload.get("name") or ""),
+                " ".join(surface for surface in class_object_surfaces if surface.strip()),
+                entity_type,
+                label,
                 str(identity.get("normalized_label") or ""),
-                " ".join(str(alias) for alias in identity.get("aliases") or []),
+                " ".join(aliases),
             ]
         )
     parts.extend(
@@ -945,45 +996,24 @@ def _dedup_decision(match: dict[str, Any] | None) -> str:
 
 
 def _extract_terms(text: str) -> dict[str, list[str]]:
-    hazard_terms = []
-    chokepoint_terms = []
-    country_terms = []
-    metric_terms = []
-    lowered = text.lower()
-    for term in (
-        "likelihood_conflict",
-        "severity_conflict",
-        "likelihood_geopolitical",
-        "missile strike",
-        "shipping disruption",
-        "sanctions",
-        "conflict",
-        "hazard",
-    ):
-        if term.lower() in lowered:
-            hazard_terms.append(term)
-    for term in (
-        "Bab el-Mandeb Strait",
-        "Hormuz Strait",
-        "Gibraltar Strait",
-        "Suez Canal",
-        "Panama Canal",
-        "Malacca Strait",
-        "chokepoint",
-    ):
-        if term.lower() in lowered:
-            chokepoint_terms.append(term)
-    for term in ("CHN", "IND", "USA", "GMB", "JPN", "KOR", "IRN", "SAU", "ARE"):
-        if re.search(rf"\b{re.escape(term)}\b", text):
-            country_terms.append(term)
-    for term in ("trade_at_risk_v", "trade_impacted", "v_canal", "dependency_share", "import exposure"):
-        if term.lower() in lowered:
-            metric_terms.append(term)
+    """Extract low-risk query terms without tenant/domain dictionaries."""
+    country_terms: list[str] = []
+    metric_terms: list[str] = []
+    entity_terms: list[str] = []
+    for term in re.findall(r"\b[A-Z]{3}\b", text or ""):
+        if _country_from_identity_surface(term):
+            _append_unique(country_terms, term)
+    for term in re.findall(r"\b[A-Za-z][A-Za-z0-9_]{3,}\b", text or ""):
+        if "_" in term:
+            _append_unique(metric_terms, term)
+    for match in re.finditer(r"\b[A-Z][A-Za-z0-9-]*(?:\s+[A-Z][A-Za-z0-9-]*){0,4}\b", text or ""):
+        phrase = match.group(0).strip()
+        if phrase and phrase not in country_terms:
+            _append_unique(entity_terms, phrase)
     return {
-        "hazards": list(dict.fromkeys(hazard_terms)),
-        "chokepoints": list(dict.fromkeys(chokepoint_terms)),
-        "countries": list(dict.fromkeys(country_terms)),
-        "metrics": list(dict.fromkeys(metric_terms)),
+        "entities": entity_terms[:8],
+        "countries": country_terms[:8],
+        "metrics": metric_terms[:8],
     }
 
 
@@ -1001,19 +1031,10 @@ def _evidence_excerpt(text: str, terms: list[str], limit: int = 280) -> str:
 
 
 def _entity_key(entity_type: str, label: str) -> str:
-    if entity_type == "Country":
-        iso3 = label.upper()
-        return f"Country:{iso3}"
     return f"{entity_type}:{label}"
 
 
 def _entity_description(entity_type: str, label: str, source_title: str) -> str:
-    if entity_type == "Country":
-        return f"Country or economy mentioned as exposed to maritime chokepoint trade disruption: {label}."
-    if entity_type == "Chokepoint":
-        return f"Maritime chokepoint or canal mentioned as a trade disruption concentration point: {label}."
-    if entity_type == "Hazard":
-        return f"Risk driver or disruption condition mentioned in source evidence: {label}."
     return f"{entity_type} extracted from {source_title or 'crawled evidence'}: {label}."
 
 
@@ -1030,12 +1051,7 @@ def _ontology_candidate(artifact_type: str, label: str, description: str, **extr
 
 
 def _heuristic_graph_semantics_fallback(frontier_item: dict[str, Any], result, summary: str) -> dict[str, Any]:
-    """Legacy/dev smoke extractor.
-
-    This path is intentionally not used by the production proposed-graph write
-    flow. It remains available for explicit no-LLM smoke runs and query-planning
-    tests where term dictionaries are acceptable as audit hints.
-    """
+    """Legacy/dev smoke extractor with no tenant/domain term dictionaries."""
     source_text = _clean_text(" ".join([result.title or "", result.snippet or "", summary or ""]), 1600)
     terms = _extract_terms(source_text)
     source_ref = result.url
@@ -1043,124 +1059,6 @@ def _heuristic_graph_semantics_fallback(frontier_item: dict[str, Any], result, s
     ontology_candidates: list[dict[str, Any]] = []
     nodes: list[dict[str, Any]] = []
     edges: list[dict[str, Any]] = []
-
-    def add_node(entity_type: str, label: str, confidence: float) -> None:
-        label = str(label).strip()
-        if not label:
-            return
-        if any(node["type"] == entity_type and node["label"] == label for node in nodes):
-            return
-        evidence_quote = _evidence_excerpt(source_text, [label, COUNTRY_ALIASES.get(label, "")])
-        description = _entity_description(entity_type, label, source_title)
-        properties = {
-            "canonical_id_hint": _entity_key(entity_type, label),
-            "source_title": source_title,
-            "source_url": source_ref,
-            "extracted_from_frontier": frontier_item.get("key"),
-        }
-        if entity_type == "Country":
-            properties["iso3"] = label.upper()
-            properties["name"] = COUNTRY_ALIASES.get(label.upper(), label)
-        if entity_type == "Chokepoint":
-            properties["domain"] = "maritime chokepoint"
-        if entity_type == "Hazard":
-            properties["hazard_category"] = "maritime disruption risk"
-        nodes.append(
-            {
-                "type": entity_type,
-                "label": label,
-                "description": description,
-                "properties": properties,
-                "evidence_quote": evidence_quote,
-                "confidence": confidence,
-            }
-        )
-        ontology_candidates.append(
-            _ontology_candidate(
-                "object",
-                entity_type,
-                f"{entity_type} entities extracted from crawled maritime risk evidence.",
-                properties=["label", "description", "source_url", "confidence"],
-            )
-        )
-
-    for hazard in terms["hazards"][:2]:
-        add_node("Hazard", hazard, 0.68)
-    for chokepoint in terms["chokepoints"][:2]:
-        add_node("Chokepoint", chokepoint, 0.74)
-    for country in terms["countries"][:4]:
-        add_node("Country", country, 0.72)
-
-    if terms["chokepoints"] and terms["countries"]:
-        relation = "trade_dependency"
-        ontology_candidates.append(
-            _ontology_candidate(
-                "link",
-                relation,
-                "A country has trade exposure or dependency through a maritime chokepoint.",
-                domain="Country",
-                range="Chokepoint",
-                edge_properties=["metrics", "source_url", "confidence", "evidence_quote"],
-            )
-        )
-        for country in terms["countries"][:4]:
-            for chokepoint in terms["chokepoints"][:1]:
-                metric_terms = terms["metrics"][:5]
-                evidence_quote = _evidence_excerpt(source_text, [country, COUNTRY_ALIASES.get(country, ""), chokepoint] + metric_terms)
-                edges.append(
-                    {
-                        "source_type": "Country",
-                        "source_label": country,
-                        "relation": relation,
-                        "target_type": "Chokepoint",
-                        "target_label": chokepoint,
-                        "description": f"{country} has a maritime trade dependency through {chokepoint}.",
-                        "properties": {
-                            "metrics": metric_terms,
-                            "source_url": source_ref,
-                            "source_title": source_title,
-                            "evidence_quote": evidence_quote,
-                            "extracted_from_frontier": frontier_item.get("key"),
-                            "fact_node_hint": f"TradeDependency:{country}::{chokepoint}",
-                        },
-                        "evidence_quote": evidence_quote,
-                        "confidence": 0.76 if metric_terms else 0.7,
-                    }
-                )
-
-    if terms["hazards"] and terms["chokepoints"]:
-        relation = "raises_risk_for"
-        ontology_candidates.append(
-            _ontology_candidate(
-                "link",
-                relation,
-                "A hazard or disruption driver raises risk for a maritime chokepoint.",
-                domain="Hazard",
-                range="Chokepoint",
-                edge_properties=["source_url", "confidence", "evidence_quote"],
-            )
-        )
-        hazard = terms["hazards"][0]
-        chokepoint = terms["chokepoints"][0]
-        evidence_quote = _evidence_excerpt(source_text, [hazard, chokepoint])
-        edges.append(
-            {
-                "source_type": "Hazard",
-                "source_label": hazard,
-                "relation": relation,
-                "target_type": "Chokepoint",
-                "target_label": chokepoint,
-                "description": f"{hazard} is stated as a risk driver for {chokepoint}.",
-                "properties": {
-                    "source_url": source_ref,
-                    "source_title": source_title,
-                    "evidence_quote": evidence_quote,
-                    "extracted_from_frontier": frontier_item.get("key"),
-                },
-                "evidence_quote": evidence_quote,
-                "confidence": 0.7,
-            }
-        )
 
     # Dedupe ontology candidate labels while keeping the richer first version.
     deduped_candidates = []
@@ -1252,27 +1150,21 @@ def _graph_context_query_plan(item: dict[str, Any], objective: str, tenant: str)
 
     for term in extracted["countries"]:
         _append_unique(country_terms, term)
-        _append_unique(country_terms, COUNTRY_ALIASES.get(term))
-    for term in extracted["chokepoints"]:
-        _append_unique(node_terms, term)
-    for term in extracted["hazards"]:
+        country = _country_from_identity_surface(term)
+        if country is not None:
+            _append_unique(country_terms, getattr(country, "name", None))
+    for term in extracted["entities"]:
         _append_unique(node_terms, term)
     for raw in [item.get("name"), payload.get("source_label"), payload.get("target_label"), payload.get("label")]:
         if raw:
-            # Keep useful multi-word labels such as "Bab el-Mandeb Strait" and
-            # edge labels such as "CHN depends on Bab el-Mandeb Strait".
             _append_unique(node_terms, raw, excluded=excluded_terms)
     relation = str(payload.get("relation") or item.get("relation") or "").strip()
     _append_unique(relation_terms, relation, excluded=excluded_terms)
-    for term in RELATION_TERMS.get(relation, []):
-        _append_unique(relation_terms, term)
     raw_metrics = payload.get("metrics") or extracted["metrics"]
     if not isinstance(raw_metrics, list):
         raw_metrics = [raw_metrics] if raw_metrics else []
     for metric in raw_metrics:
         _append_unique(metric_terms, metric)
-        for term in METRIC_TERMS.get(str(metric), []):
-            _append_unique(metric_terms, term)
     objective_terms = []
     for term in re.split(r"[^A-Za-z0-9_/-]+", objective or ""):
         if len(term) >= 4:
@@ -1553,30 +1445,34 @@ def deep_graph_profile(evidence_chain: list[dict[str, Any]]) -> dict[str, Any]:
     def step_for(item: dict[str, Any]) -> str | None:
         kind = str(item.get("kind") or "").lower()
         metric = str(item.get("metric") or "").lower()
-        if "hazard" in kind or kind == "risk_indicator" or metric.startswith("likelihood_") or metric.startswith("severity_"):
-            return "hazard"
-        if "chokepoint" in kind or metric == "canal":
-            return "chokepoint"
-        if kind in {"dependent_country", "dependent_countries", "country", "countries"} or metric == "iso3":
-            return "dependent_country"
-        if kind in {"trade_metric", "risk_metric"} or metric in {"trade_at_risk_v", "trade_impacted", "v_canal", "dependency_share"}:
-            return "risk_metric"
         if "action" in kind:
-            return "recommended_action"
+            return "action"
+        if "relation" in kind or "edge" in kind or item.get("source_label") or item.get("target_label"):
+            return "relation"
+        if metric or isinstance(item.get("value"), (int, float)):
+            return "evidence"
+        if item.get("source_ref"):
+            return "source_entity"
         return None
 
     def label_for(item: dict[str, Any]) -> str:
         value = item.get("value")
         if isinstance(value, list):
-            return ", ".join(str(v.get("iso3") or v.get("name") or v) for v in value[:5])
+            return ", ".join(str(v.get("id") or v.get("key") or v.get("label") or v.get("name") or v) for v in value[:5])
         if isinstance(value, dict):
-            return str(value.get("label") or value.get("name") or value.get("iso3") or value.get("canal") or item.get("metric") or item.get("kind"))
+            return str(value.get("label") or value.get("name") or value.get("id") or value.get("key") or item.get("metric") or item.get("kind"))
         return str(value) if value not in (None, "") else str(item.get("metric") or item.get("kind"))
 
     step_order: list[str] = []
     path = []
-    for item in evidence_chain:
+    for index, item in enumerate(evidence_chain):
         step = step_for(item)
+        if index == 0 and step == "evidence":
+            step = "source_entity"
+        if index >= 1 and step == "evidence" and "relation" not in step_order:
+            step = "relation"
+        if index >= 2 and step == "evidence" and "target_entity" not in step_order:
+            step = "target_entity"
         if not step:
             continue
         if step not in step_order:
@@ -1702,13 +1598,9 @@ class IterativeGraphEnrichmentAgent:
                     "confidence": artifact.confidence,
                 }
             elif artifact.artifact_type == "link":
-                relation = (
-                    payload.get("relation")
-                    or payload.get("graph_edge_name")
-                    or payload.get("edge_type")
-                    or payload.get("link_type")
-                    or _slug(artifact.name, 64).replace("-", "_")
-                )
+                relation = payload.get("relation") or payload.get("graph_edge_name") or payload.get("edge_type")
+                if not relation:
+                    relation = natural_key or _slug(artifact.name, 64).replace("-", "_")
                 edge_types.append(
                     {
                         "key": natural_key,
@@ -1716,6 +1608,7 @@ class IterativeGraphEnrichmentAgent:
                         "name": artifact.name,
                         "description": artifact.description or payload.get("description") or "",
                         "relation": str(relation),
+                        "relation_cardinality": str(payload.get("link_type") or ""),
                         "aliases": list(payload.get("relation_aliases") or payload.get("aliases") or []),
                         "source_node_key": str(payload.get("source_object_key") or payload.get("source_node_key") or ""),
                         "target_node_key": str(payload.get("target_object_key") or payload.get("target_node_key") or ""),
@@ -1799,7 +1692,7 @@ class IterativeGraphEnrichmentAgent:
         relation = "related_to"
         for edge_type in schema_context.get("edge_types") or []:
             if edge_type.get("source_node_key") == first_key and edge_type.get("target_node_key") == second_key:
-                relation = str(edge_type.get("relation") or relation)
+                relation = self._schema_edge_relation_label(edge_type)
                 break
         try:
             import langextract as lx
@@ -1964,9 +1857,23 @@ class IterativeGraphEnrichmentAgent:
         text = re.sub(r"[^a-z0-9]+", " ", text)
         return " ".join(token for token in text.split() if token)
 
+    def _schema_edge_relation_label(self, edge_type: dict[str, Any]) -> str:
+        relation = str(edge_type.get("relation") or "").strip()
+        structural = {"many_to_many", "one_to_many", "many_to_one", "one_to_one"}
+        if relation and _slug(relation, 64).replace("-", "_") not in structural:
+            return relation
+        key = str(edge_type.get("key") or "").strip()
+        if key:
+            return key
+        name = str(edge_type.get("name") or "").strip()
+        if name:
+            return _slug(name, 64).replace("-", "_")
+        return relation or "related_to"
+
     def _edge_relation_aliases(self, edge_type: dict[str, Any]) -> set[str]:
         aliases: set[str] = set()
         for value in (
+            self._schema_edge_relation_label(edge_type),
             edge_type.get("relation"),
             edge_type.get("key"),
             edge_type.get("name"),
@@ -2171,6 +2078,7 @@ class IterativeGraphEnrichmentAgent:
                 metric_grounding_by_pair.setdefault(pair, []).append(self._grounding_from_langextract_item(metric, source_ref))
         relation_items = list(langextract_candidates["relations"])
         for edge_type in schema_context["edge_types"]:
+            edge_relation = self._schema_edge_relation_label(edge_type)
             source_nodes = nodes_by_type.get(edge_type.get("source_node_key"), [])
             target_nodes = nodes_by_type.get(edge_type.get("target_node_key"), [])
             if not source_nodes or not target_nodes:
@@ -2181,7 +2089,7 @@ class IterativeGraphEnrichmentAgent:
                             "review_status": "needs_review",
                             "review_required": True,
                             "schema_edge_key": edge_type.get("canonical_key"),
-                            "relation": edge_type.get("relation"),
+                            "relation": edge_relation,
                             "source_node_count": len(source_nodes),
                             "target_node_count": len(target_nodes),
                         }
@@ -2190,8 +2098,8 @@ class IterativeGraphEnrichmentAgent:
             ontology_candidates.append(
                 _ontology_candidate(
                     "link",
-                    str(edge_type["relation"]),
-                    edge_type.get("description") or f"Approved schema graph relation {edge_type['relation']}.",
+                    edge_relation,
+                    edge_type.get("description") or f"Approved schema graph relation {edge_relation}.",
                     domain=(schema_context["node_types"].get(edge_type.get("source_node_key")) or {}).get("name"),
                     range=(schema_context["node_types"].get(edge_type.get("target_node_key")) or {}).get("name"),
                     review_required=False,
@@ -2261,10 +2169,10 @@ class IterativeGraphEnrichmentAgent:
                         GraphEvidenceEdgeDraft(
                             source_type=source_node.type,
                             source_label=source_node.label,
-                            relation=str(edge_type["relation"]),
+                            relation=edge_relation,
                             target_type=target_node.type,
                             target_label=target_node.label,
-                            description=f"{source_node.label} is connected to {target_node.label} by approved schema relation {edge_type['relation']}.",
+                            description=f"{source_node.label} is connected to {target_node.label} by approved schema relation {edge_relation}.",
                             properties={
                                 "metrics": metric_terms,
                                 "source_url": source_ref,
@@ -2273,7 +2181,8 @@ class IterativeGraphEnrichmentAgent:
                                 "extracted_from_frontier": frontier_item.get("key"),
                                 "schema_edge_key": edge_type.get("canonical_key"),
                                 "schema_projection_source": "SchemaGraphModelingAgent",
-                                "fact_node_hint": f"{edge_type['relation']}:{source_node.label}::{target_node.label}",
+                                "relation_cardinality": edge_type.get("relation_cardinality") or None,
+                                "fact_node_hint": f"{edge_relation}:{source_node.label}::{target_node.label}",
                                 "source_grounding": source_grounding,
                                 "relation_direction": relation_direction,
                             },
@@ -2475,11 +2384,16 @@ class IterativeGraphEnrichmentAgent:
                 }
             )
         for edge in extraction["edges"]:
+            edge_schema_key = (edge.get("properties") or {}).get("schema_edge_key")
             relation_ontology = next(
                 (
                     candidate
                     for candidate in extraction["ontology_candidates"]
-                    if candidate.get("artifact_type") == "link" and candidate.get("label") == edge["relation"]
+                    if candidate.get("artifact_type") == "link"
+                    and (
+                        (edge_schema_key and candidate.get("schema_artifact_key") == edge_schema_key)
+                        or candidate.get("label") == edge["relation"]
+                    )
                 ),
                 None,
             )
@@ -2520,6 +2434,7 @@ class IterativeGraphEnrichmentAgent:
             emitted_edge_keys.add((str(edge["source_label"]), str(edge["relation"]), str(edge["target_label"])))
         fact_reasons = {"ambiguous_relation", "unmapped_relation", "ambiguous_relation_endpoint"}
         frontier_payload = frontier_item.get("payload") if isinstance(frontier_item.get("payload"), dict) else {}
+        approved_schema_edges_present = bool((extraction.get("schema_context") or {}).get("edge_types"))
         for candidate in extraction.get("rejected_or_ambiguous_candidates") or []:
             reason = str(candidate.get("reason") or "").strip()
             if reason not in fact_reasons or not candidate.get("review_required"):
@@ -2538,6 +2453,39 @@ class IterativeGraphEnrichmentAgent:
                 continue
             evidence_quote = _clean_text(str(candidate.get("evidence_quote") or ""), 500)
             source_grounding = list(candidate.get("source_grounding") or [])
+            grounded_source_label = ""
+            grounded_target_label = ""
+            grounded_source_type = ""
+            grounded_target_type = ""
+            for grounding in source_grounding:
+                if not isinstance(grounding, dict):
+                    continue
+                attrs = grounding.get("attributes")
+                if not isinstance(attrs, dict):
+                    continue
+                grounded_relation = _clean_text(str(attrs.get("relation_label") or grounding.get("extraction_text") or ""), 120)
+                if relation_label and grounded_relation and _normalize_identity_text(grounded_relation) != _normalize_identity_text(relation_label):
+                    continue
+                grounded_source_label = _clean_text(str(attrs.get("source_label") or ""), 160) or grounded_source_label
+                grounded_target_label = _clean_text(str(attrs.get("target_label") or ""), 160) or grounded_target_label
+                grounded_source_type = str(attrs.get("source_type") or attrs.get("source_node_key") or "").strip() or grounded_source_type
+                grounded_target_type = str(attrs.get("target_type") or attrs.get("target_node_key") or "").strip() or grounded_target_type
+            relation_direction_conflict = False
+            if grounded_source_label and grounded_target_label and source_label and target_label:
+                candidate_direction = (
+                    _normalize_identity_text(source_label),
+                    _normalize_identity_text(target_label),
+                )
+                grounded_direction = (
+                    _normalize_identity_text(grounded_source_label),
+                    _normalize_identity_text(grounded_target_label),
+                )
+                relation_direction_conflict = candidate_direction != grounded_direction
+            if relation_direction_conflict:
+                source_label = grounded_source_label
+                target_label = grounded_target_label
+            fact_source_type = grounded_source_type if relation_direction_conflict else str(candidate.get("source_type") or "").strip()
+            fact_target_type = grounded_target_type if relation_direction_conflict else str(candidate.get("target_type") or "").strip()
             fact_fingerprint = _digest(
                 {
                     "source_label": source_label,
@@ -2562,6 +2510,9 @@ class IterativeGraphEnrichmentAgent:
                 "candidate_schema_edge_key": candidate.get("schema_edge_key"),
                 "source_grounding": source_grounding,
                 "fact_node_hint": f"fact:{fact_fingerprint}",
+                "relation_direction_conflict": relation_direction_conflict,
+                "grounded_source_label": grounded_source_label or None,
+                "grounded_target_label": grounded_target_label or None,
                 "unresolved_endpoint_mapping": {
                     "source_label_missing": not bool(candidate.get("source_label")),
                     "target_label_missing": not bool(candidate.get("target_label")),
@@ -2622,8 +2573,14 @@ class IterativeGraphEnrichmentAgent:
                     }
                 )
 
-            add_fact_endpoint(source_label, str(candidate.get("source_type") or ""), "source")
-            add_fact_endpoint(target_label, str(candidate.get("target_type") or ""), "target")
+            add_fact_endpoint(source_label, fact_source_type, "source")
+            add_fact_endpoint(target_label, fact_target_type, "target")
+            if grounded_source_label and not source_label:
+                source_label = grounded_source_label
+            if grounded_target_label and not target_label:
+                target_label = grounded_target_label
+            if reason == "ambiguous_relation" and approved_schema_edges_present:
+                continue
             if source_label and target_label and relation_label:
                 edge_key = (source_label, relation_label, target_label)
                 if edge_key in emitted_edge_keys:
@@ -2634,8 +2591,8 @@ class IterativeGraphEnrichmentAgent:
                         "element_type": "edge",
                         "name": f"{source_label} {relation_label} {target_label}",
                         "payload": {
-                            "source_type": str(candidate.get("source_type") or "EvidenceEntity"),
-                            "target_type": str(candidate.get("target_type") or "EvidenceEntity"),
+                            "source_type": str(fact_source_type or grounded_source_type or "EvidenceEntity"),
+                            "target_type": str(fact_target_type or grounded_target_type or "EvidenceEntity"),
                             "relation": relation_label,
                             "relation_label": relation_label,
                             "source_label": source_label,
@@ -2949,7 +2906,7 @@ class IterativeGraphEnrichmentAgent:
         for row in rows:
             payload = _json_load(row.payload_json, {})
             identity = payload.get("identity")
-            if row.element_type in {"edge", "finding"} or not isinstance(identity, dict):
+            if row.element_type in {"node", "edge", "finding"} or not isinstance(identity, dict):
                 identity = _candidate_identity_payload(
                     {
                         "element_type": row.element_type,
@@ -3446,7 +3403,9 @@ class IterativeGraphEnrichmentAgent:
         best = self._best_identity_match(identity, identity_index, payload=match_payload)
         decision = _dedup_decision(best)
         match_score = float(best.get("score") or 0.0) if best else 0.0
-        review_required = decision == "needs_review"
+        existing_review_required = bool(item_payload.get("review_required") or item_payload.get("review_status") == "needs_review")
+        existing_review_required = existing_review_required or item.get("status") == "needs_more_evidence"
+        review_required = existing_review_required or decision == "needs_review"
         merge_decision_source = (
             "stable_identity_key"
             if best and best.get("match_method") == "stable_identity_key"
@@ -4085,7 +4044,7 @@ class GraphDeepResearchBenchmark:
             "multi_hop_path_completeness": {
                 "aletheia": len(complete_paths) / max(len(findings), 1),
                 "baseline": 0.6 if baseline.get("mentions_multi_hop") else 0.25,
-                "difference": "Aletheia requires explicit hazard -> chokepoint -> country -> metric -> action paths.",
+                "difference": "Aletheia requires explicit source -> relation -> target -> evidence -> action paths.",
             },
             "coverage": {
                 "aletheia": min(len(findings) / 3, 1.0),

@@ -138,12 +138,6 @@ const RESULT_TITLE_ZH_RX = {
   "Missing POS entry mode should be reviewed as a weak-control pattern": "缺失 POS 录入模式应作为弱控制模式复核",
   "Merchant category concentration reveals high-yield fraud review segments": "商户类别集中度揭示高价值欺诈复核分组",
   "Same-day duplicate transaction clusters need multi-swipe review": "同日重复交易簇需要复核多次刷卡风险",
-  "Single chokepoint dependency creates concentrated country exposure": "单一咽喉点依赖造成国家风险集中暴露",
-  "Hazard-adjusted chokepoint risk should drive review priority": "咽喉点复核优先级应纳入风险因子调整",
-  "Bab el-Mandeb risk propagation identifies countries for immediate review": "Bab el-Mandeb 风险传播识别需立即复核的国家",
-  "Single-chokepoint dependency can create concentrated country exposure": "单一咽喉点依赖可能造成国家暴露集中",
-  "Hazard severity should be joined to dependent trade value before ranking chokepoints": "咽喉点排序前应把风险严重度与依赖贸易额关联",
-  "Red Sea / Bab el-Mandeb escalation should prioritize dependent countries by systemic risk": "红海 / Bab el-Mandeb 升级风险应按系统性风险确定国家优先级",
   "High throughput alone is not enough for a graph reasoning finding": "仅有高吞吐量不足以形成图推理发现",
   "Card-not-present transactions concentrate fraud risk": "非面对面交易集中欺诈风险",
   "Verification mismatch transactions have elevated fraud rate": "验证不匹配交易欺诈率更高",
@@ -151,8 +145,6 @@ const RESULT_TITLE_ZH_RX = {
   "Merchant categories concentrate fraud exposure": "商户类别集中欺诈暴露",
   "Same account/merchant/amount/day duplicate clusters indicate multi-swipe risk": "同账户/商户/金额/日期重复簇提示多次刷卡风险",
   "Expiration-key mismatch does not clear the value threshold": "有效期录入不匹配未达到价值阈值",
-  "Find graph reasoning findings for maritime chokepoint risk": "发现海运咽喉点风险的图推理发现",
-  "Discover graph reasoning findings for maritime chokepoint risk": "发现海运咽喉点风险的图推理发现",
   "Find high-value fraud risk findings": "发现高价值欺诈风险发现",
   "Discover high-value credit card fraud risk findings": "发现高价值信用卡欺诈风险发现",
   "Find high-value reasoning findings": "发现高价值推理发现",
@@ -162,10 +154,6 @@ const RESULT_TITLE_ZH_RX = {
   "Rank merchant categories by fraud rate and volume to separate noisy rates from high-value findings.": "按欺诈率和交易量对商户类别排序，区分噪声比例和高价值发现。",
   "Repeated same-day transaction clusters are useful triage candidates for duplicate authorization or multi-swipe review.": "同日重复交易簇适合作为重复授权或多次刷卡复核的分诊候选。",
   "The imported profile did not show enough value lift to promote this into a candidate finding before stronger evidence exists.": "导入画像尚未显示足够价值提升，因此在更强证据出现前不提升为候选发现。",
-  "Rank country/chokepoint pairs by value share and dependent trade value to find countries exposed to one chokepoint.": "按价值占比和依赖贸易额排序国家/咽喉点组合，识别暴露于单一咽喉点的国家。",
-  "Combine hazard likelihood/severity with systemic risk results so the finding explains risk propagation, not just trade volume.": "把风险可能性/严重度与系统性风险结果结合，使发现能解释风险传播，而不只是贸易量。",
-  "Use the chokepoint hazard row and downstream country risk rows to prioritize analyst review when upstream events increase.": "使用咽喉点风险行和下游国家风险行，在上游事件升级时确定分析师复核优先级。",
-  "A volume-only ranking does not explain hazard, dependency, country exposure, and action linkage.": "仅按交易量排名无法解释风险因子、依赖关系、国家暴露和行动关联。",
   "No rationale recorded.": "未记录依据。",
 };
 
@@ -180,18 +168,8 @@ const RESULT_TEXT_ZH_RX = [
     "最高风险的商户类别包括 $1。"],
   [/The dataset contains ([0-9,]+) same customer \/ same merchant \/ same amount \/ same-day duplicate clusters, a useful review entry point for duplicate authorization and multi-swipe behavior\./,
     "数据集中存在 $1 个同客户 / 同商户 / 同金额 / 同日重复交易簇，可作为重复授权和多次刷卡行为的复核入口。"],
-  [/([A-Z]{2,3}) depends heavily on ([^,]+), where the hazard profile includes conflict likelihood ([^ ]+) and geopolitical likelihood ([^:]+): ([^ ]+) of modeled maritime trade value flows through that chokepoint \(\$([^)]+) of dependent value\)\./,
-    "$1 高度依赖 $2；该咽喉点风险画像包含冲突可能性 $3、地缘政治可能性 $4。建模海运贸易价值中有 $5 经过该咽喉点，依赖价值为 $6。"],
-  [/([^ ]+(?: [^ ]+)*) has the highest modeled trade-at-risk row in the current dataset: ([A-Z]{2,3}) shows \$(.+) expected trade value at risk and \$(.+) trade impacted\./,
-    "当前数据集中 $1 对应最高的建模风险贸易行：$2 的预期风险贸易价值为 $3，受影响贸易额为 $4。"],
-  [/If Red Sea \/ Bab el-Mandeb risk rises, the first review queue should include (.+)\. The graph path is hazard at Bab el-Mandeb -> chokepoint -> dependent country -> systemic risk metric -> analyst action\./,
-    "如果红海 / Bab el-Mandeb 风险上升，首批复核队列应包含 $1。图路径为：Bab el-Mandeb 风险因子 -> 咽喉点 -> 依赖国家 -> 系统性风险指标 -> 分析师行动。"],
-  [/Draft candidate from maritime-risk graph playbook; requires human review before formal finding approval\./,
-    "来自 maritime-risk 图推理 playbook 的候选发现；正式批准前需要人工复核。"],
   [/This phase uses structural 2022 dependency data and does not include live event updates\./,
     "当前阶段使用 2022 年结构性依赖数据，尚未包含实时事件更新。"],
-  [/The playbook uses structural chokepoint risk data; ACLED\/GDELT live events are a planned enrichment, not yet imported\./,
-    "该 playbook 使用结构化咽喉点风险数据；ACLED/GDELT 实时事件是计划中的信息增益数据，尚未导入。"],
   [/Draft candidate from Autopilot playbook; requires human review before formal finding approval\./,
     "来自 Autopilot playbook 的候选发现；正式批准前需要人工复核。"],
   [/Uses a derived match flag only; raw verification values are not surfaced\./,
@@ -202,8 +180,6 @@ const RESULT_TEXT_ZH_RX = [
     "重复簇可能包含正常重复交易；该候选需要逐案复核。"],
   [/Pruned because expected fraud-rate lift is below candidate threshold and no strong operational action follows from the field alone\./,
     "已剪枝：预期欺诈率提升低于候选阈值，且仅凭该字段无法形成强运营动作。"],
-  [/Pruned because it is a ranking\/reporting hypothesis without a complete hazard -> chokepoint -> country -> risk metric -> action path\./,
-    "已剪枝：这只是排名/报表假设，缺少完整的风险因子 -> 咽喉点 -> 国家 -> 风险指标 -> 行动路径。"],
   [/Use this draft as a reviewer prompt; do not treat it as an approved finding until it passes the review gate\./,
     "将该草稿作为审核提示使用；在通过审核关口前，不要把它当作已批准发现。"],
   [/Conclusions are based solely on the approved graph and controlled aggregation; performance targets, utilization, profitability, or satisfaction data are not included\./,
@@ -237,18 +213,7 @@ function resultTextRX(value, language) {
 function expandCountryCodesRX(text, language) {
   if (!isZhRX(language) || text == null) return text;
   if (typeof displayCountryCodesUI === "function") return displayCountryCodesUI(text, language);
-  const names = {
-    ARE: "United Arab Emirates",
-    CHN: "China",
-    GMB: "Gambia",
-    IND: "India",
-    IRN: "Iran",
-    JPN: "Japan",
-    KOR: "South Korea",
-    SAU: "Saudi Arabia",
-    USA: "United States",
-  };
-  return String(text).replace(/\b(ARE|CHN|GMB|IND|IRN|JPN|KOR|SAU|USA)\b/g, code => names[code] ? `${names[code]} (${code})` : code);
+  return String(text);
 }
 
 function resultListRX(values, language) {
@@ -259,19 +224,10 @@ function questionTextRX(value, language) {
   const text = value == null ? "" : String(value);
   if (!isZhRX(language)) return text;
   const replacements = [
-    [/^Select a chokepoint, country, dependency, or risk result to analyze propagation risk\.$/, "选择咽喉点、国家、依赖关系或风险结果来分析传播风险。"],
     [/^Select a transaction, account, card, or merchant to analyze fraud risk\.$/, "选择交易、账户、卡或商户来分析欺诈风险。"],
     [/^Select a center node to ask a scoped question\.$/, "选择中心节点来提出范围问题。"],
-    [/^Which countries are most exposed to (.+)\?$/, "哪些国家最暴露于 $1？"],
-    [/^Which chokepoint dependencies create the highest risk for (.+)\?$/, "$1 的哪些咽喉点依赖带来最高风险？"],
     [/^Explain the risk path for (.+)$/, "解释 $1 的风险路径"],
-    [/^What evidence supports this maritime risk signal for (.+)\?$/, "哪些证据支持 $1 的海运风险信号？"],
-    [/^Find maritime chokepoint risk findings for (.+)$/, "发现 $1 的海运咽喉点风险发现"],
-    [/^Show the hazard -> chokepoint -> country -> risk metric path for (.+)$/, "展示 $1 的 风险因子 -> 咽喉点 -> 国家 -> 风险指标 路径"],
-    [/^Which dependent countries or chokepoints should be prioritized from (.+)\?$/, "基于 $1，应优先复核哪些依赖国家或咽喉点？"],
-    [/^What action should be created from (.+)'s maritime risk evidence\?$/, "应基于 $1 的海运风险证据创建什么行动？"],
     [/^What evidence supports the risk propagation path for (.+)\?$/, "哪些证据支持 $1 的风险传播路径？"],
-    [/^Which downstream countries or trade metrics are affected by (.+)\?$/, "$1 影响哪些下游国家或贸易指标？"],
     [/^Which (.+) produce the strongest multi-hop risk chain\?$/, "哪些 $1 产生最强多跳风险链？"],
     [/^Explain fraud risk signals for (.+)$/, "解释 $1 的欺诈风险信号"],
     [/^Summarize fraud exposure and suspicious activity for (.+)$/, "总结 $1 的欺诈暴露和可疑活动"],
@@ -302,13 +258,11 @@ function evidenceKindLabelRX(kind, language) {
     cluster: "重复簇",
     example: "样例",
     privacy_boundary: "隐私边界",
-    hazard: "风险因子",
-    chokepoint: "咽喉点",
-    dependent_country: "依赖国家",
-    dependent_countries: "依赖国家",
-    trade_metric: "贸易指标",
-    risk_metric: "风险指标",
-    recommended_action: "建议行动",
+    source_entity: "来源实体",
+    relation: "关系",
+    target_entity: "目标实体",
+    evidence: "证据",
+    action: "行动",
     graph_path: "图路径",
     join: "关联证据",
     fact: "事实",
@@ -455,9 +409,6 @@ function displayActionTextRX(value, language) {
     "Review ingestion completeness and POS-mode normalization rules.": "复核数据摄取完整性和 POS 模式归一化规则。",
     "Create category-specific review queues for high-rate and high-volume intersections.": "为高欺诈率与高交易量交叉分组创建类别专项复核队列。",
     "Separate reversals, merchant retries, and high-confidence multi-swipe clusters.": "区分冲正、商户重试和高置信多次刷卡簇。",
-    "Open a country/chokepoint dependency review and compare alternate maritime routes.": "创建国家/咽喉点依赖复核，并比较替代海运路线。",
-    "Rank chokepoint review by hazard-adjusted trade-at-risk, not volume alone.": "按风险调整后的贸易风险排序咽喉点复核优先级，而不是仅按吞吐量排序。",
-    "Create a Bab el-Mandeb review case for the top exposed countries and attach live event enrichment when available.": "为最高暴露国家创建 Bab el-Mandeb 复核事项，并在可用时附加实时事件信息增益证据。",
     "Use this draft as a reviewer prompt; do not treat it as an approved finding until it passes the review gate.": "将该草稿作为审核提示使用；在通过审核关口前，不要把它当作已批准发现。",
   };
   return map[text] || resultTextRX(text, language);
@@ -699,14 +650,12 @@ function canonicalTypeFromListRX(raw, types) {
 }
 
 function tenantEmptyQuestionRX(tenantId) {
-  if (tenantId === "maritime-risk") return "Select a chokepoint, country, dependency, or risk result to analyze propagation risk.";
   return tenantId === "creditcardfraud"
     ? "Select a transaction, account, card, or merchant to analyze fraud risk."
     : "Select a center node to ask a scoped question.";
 }
 
 function autopilotObjectiveForTenantRX(tenantId, language) {
-  if (tenantId === "maritime-risk") return tRX(language, "Find graph reasoning findings for maritime chokepoint risk", "发现海运咽喉点风险的图推理发现");
   if (tenantId === "creditcardfraud") return tRX(language, "Find high-value fraud risk findings", "发现高价值欺诈风险发现");
   return tRX(language, "Find high-value reasoning findings", "发现高价值推理发现");
 }
@@ -714,13 +663,6 @@ function autopilotObjectiveForTenantRX(tenantId, language) {
 function defaultQuestionForTenantRX(tenantId, type, label, node) {
   const typeText = String(type || "").replace(/([a-z])([A-Z])/g, "$1 $2");
   const lower = typeText.toLowerCase();
-  if (tenantId === "maritime-risk") {
-    if (/chokepoint/i.test(type)) return `Which countries are most exposed to ${label}?`;
-    if (/country/i.test(type)) return `Which chokepoint dependencies create the highest risk for ${label}?`;
-    if (/dependency/i.test(type)) return `Explain the risk path for ${label}`;
-    if (/risk/i.test(type) || /hazard/i.test(type)) return `What evidence supports this maritime risk signal for ${label}?`;
-    return `Find maritime chokepoint risk findings for ${label || node || lower}`;
-  }
   if (tenantId === "creditcardfraud") {
     if (/transaction/i.test(type)) return `Explain fraud risk signals for ${label}`;
     if (/account/i.test(type)) return `Summarize fraud exposure and suspicious activity for ${label}`;
@@ -737,33 +679,6 @@ function suggestedQuestionsForTenantRX({ tenantId, type, centerNode, label, ques
   const typeText = String(type || "").replace(/([a-z])([A-Z])/g, "$1 $2");
   const plural = typeText.endsWith("s") ? typeText : `${typeText}s`;
   const hasEntity = !!(centerNode && label);
-  if (tenantId === "maritime-risk") {
-    if (hasEntity) {
-      if (q) {
-        const base = q.toLowerCase().includes(String(label).toLowerCase()) || q.includes(centerNode) ? q : `${q} — ${label}`;
-        return [
-          { q: base, node: centerNode },
-          { q: `Show the hazard -> chokepoint -> country -> risk metric path for ${label}`, node: centerNode },
-          { q: `Which dependent countries or chokepoints should be prioritized from ${label}?`, node: centerNode },
-          { q: `What action should be created from ${label}'s maritime risk evidence?`, node: centerNode },
-        ];
-      }
-      return [
-        { q: defaultQuestionForTenantRX(tenantId, type, label, centerNode), node: centerNode },
-        { q: `What evidence supports the risk propagation path for ${label}?`, node: centerNode },
-        { q: `Which downstream countries or trade metrics are affected by ${label}?`, node: centerNode },
-      ];
-    }
-    const base = samples.map(ent => ({
-      q: q ? `${q} — ${ent.label || ent.id}` : defaultQuestionForTenantRX(tenantId, type, ent.label || ent.id, ent.id),
-      node: ent.id,
-    }));
-    if (base.length) {
-      base.push({ q: `Which ${plural} produce the strongest multi-hop risk chain?`, node: base[0].node });
-      return base;
-    }
-    return [{ q: tenantEmptyQuestionRX(tenantId), node: "" }];
-  }
   if (tenantId === "creditcardfraud") {
     if (hasEntity) {
       if (q) {
@@ -1381,20 +1296,18 @@ function Reasoning({ tenant, language }) {
       return;
     }
     setAutopilotStarting(true);
-    setActionMsg(null);
-    try {
-      const tid = tenant ? tenant.id : "default";
-      const isFraudTenant = tid === "creditcardfraud";
-      const isMaritimeTenant = tid === "maritime-risk";
-      const res = await window.AL_API.createAutopilotSession(tid, {
-        objective: autopilotObjective.trim(),
-        scope: {
-          tenant: tid,
-          approved_only: true,
-          source_surface: "reasoning_autopilot_ui",
-          ...(isFraudTenant ? { table: "credit_card_transactions_safe" } : {}),
-          ...(isMaritimeTenant ? { tables: ["maritime_chokepoint_country_dependencies", "maritime_chokepoint_risk_indicators", "maritime_chokepoint_systemic_risk_results"] } : {}),
-        },
+      setActionMsg(null);
+      try {
+        const tid = tenant ? tenant.id : "default";
+        const isFraudTenant = tid === "creditcardfraud";
+        const res = await window.AL_API.createAutopilotSession(tid, {
+          objective: autopilotObjective.trim(),
+          scope: {
+            tenant: tid,
+            approved_only: true,
+            source_surface: "reasoning_autopilot_ui",
+            ...(isFraudTenant ? { table: "credit_card_transactions_safe" } : {}),
+          },
         budget: {
           max_hypotheses: Number(autopilotMaxHypotheses) || 8,
           max_reasoning_tasks: Number(autopilotMaxRuns) || 5,
@@ -1479,33 +1392,6 @@ function Reasoning({ tenant, language }) {
       if (key) setAutopilotSelectedKey(key);
       setActiveTab("autopilot");
       setActionMsg({ kind: "ok", msg: "Creditcardfraud playbook completed · " + (key || "") });
-      window.dispatchEvent(new CustomEvent("aletheia:retry"));
-    } catch (err) {
-      setActionMsg({ kind: "err", msg: err.message || String(err) });
-    } finally {
-      setAutopilotPlaybookRunning(false);
-    }
-  }
-
-  async function runMaritimeRiskPlaybook() {
-    setAutopilotPlaybookRunning(true);
-    setActionMsg(null);
-    try {
-      const tid = tenant ? tenant.id : "default";
-      const res = await window.AL_API.runMaritimeRiskAutopilotPlaybook(tid, {
-        objective: autopilotObjective.trim() || "Discover graph reasoning findings for maritime chokepoint risk",
-        session_key: autopilotSelectedKey || undefined,
-        budget: {
-          max_hypotheses: Number(autopilotMaxHypotheses) || 8,
-          max_reasoning_tasks: Number(autopilotMaxRuns) || 5,
-          max_tool_calls: Number(autopilotMaxToolCalls) || 20,
-          max_runtime_seconds: 120,
-        },
-      });
-      const key = res?.session?.session_key;
-      if (key) setAutopilotSelectedKey(key);
-      setActiveTab("autopilot");
-      setActionMsg({ kind: "ok", msg: tRX(language, "Maritime-risk playbook completed · ", "Maritime-risk playbook 已完成 · ") + (key || "") });
       window.dispatchEvent(new CustomEvent("aletheia:retry"));
     } catch (err) {
       setActionMsg({ kind: "err", msg: err.message || String(err) });
@@ -1725,7 +1611,7 @@ function Reasoning({ tenant, language }) {
               onReviewCandidate={reviewAutopilotCandidate}
               onStart={startAutopilot}
               starting={autopilotStarting}
-              onRunPlaybook={(tenant && tenant.id) === "maritime-risk" ? runMaritimeRiskPlaybook : runCreditcardfraudPlaybook}
+              onRunPlaybook={runCreditcardfraudPlaybook}
               playbookRunning={autopilotPlaybookRunning}
               language={language}
             />
@@ -2082,7 +1968,7 @@ function Reasoning({ tenant, language }) {
               setMaxToolCalls={setAutopilotMaxToolCalls}
               starting={autopilotStarting}
               onStart={startAutopilot}
-              onRunPlaybook={(tenant && tenant.id) === "maritime-risk" ? runMaritimeRiskPlaybook : runCreditcardfraudPlaybook}
+              onRunPlaybook={runCreditcardfraudPlaybook}
               playbookRunning={autopilotPlaybookRunning}
               detail={autopilotDetail}
               language={language}
@@ -2254,9 +2140,9 @@ function AutopilotWorkspace({
             <div style={{ display: "flex", alignItems: "center", gap: 12, color: "var(--muted)", fontSize: 12 }}>
               <span>{tRX(language, "Start a session to create a visible hypothesis queue and draft Finding Inbox.", "启动会话后会生成可见的假设队列和候选发现草稿收件箱。")}</span>
               <button className="btn primary" onClick={onStart} disabled={starting}>{starting ? tRX(language, "Starting…", "启动中…") : "▶ " + tRX(language, "Start Autopilot", "启动 Autopilot")}</button>
-              {(tenant?.id === "creditcardfraud" || tenant?.id === "maritime-risk") && (
+              {tenant?.id === "creditcardfraud" && (
                 <button className="btn" onClick={onRunPlaybook} disabled={playbookRunning}>
-                  {playbookRunning ? tRX(language, "Running playbook…", "Playbook 运行中…") : tenant?.id === "maritime-risk" ? tRX(language, "Run maritime-risk playbook", "运行 maritime-risk playbook") : tRX(language, "Run fraud playbook", "运行欺诈 playbook")}
+                  {playbookRunning ? tRX(language, "Running playbook…", "Playbook 运行中…") : tRX(language, "Run fraud playbook", "运行欺诈 playbook")}
                 </button>
               )}
             </div>
@@ -2290,7 +2176,7 @@ function AutopilotWorkspace({
               </div>
               {deepGraphCandidates.length === 0 ? (
                 <div style={{ color: "var(--muted)", fontFamily: "var(--font-mono)", fontSize: 11 }}>
-                  {tRX(language, "No complete deep graph findings yet. A complete finding must connect hazard, chokepoint, dependent country, risk metric, and recommended action.", "尚无完整深度图发现。完整发现必须连接风险因子、咽喉点、依赖国家、风险指标和建议动作。")}
+                  {tRX(language, "No complete deep graph findings yet. A complete finding must connect source entity, relation, target entity, evidence, and action.", "尚无完整深度图发现。完整发现必须连接来源实体、关系、目标实体、证据和动作。")}
                 </div>
               ) : (
                 <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
@@ -2330,12 +2216,10 @@ function AutopilotWorkspace({
               )}
             </Panel>
 
-            {(tenant?.id === "creditcardfraud" || tenant?.id === "maritime-risk") && (
-              <Panel eyebrow="Playbook" title={tenant?.id === "maritime-risk" ? tRX(language, "Maritime-risk graph reasoning playbook", "Maritime-risk 图推理 Playbook") : tRX(language, "Creditcardfraud discovery playbook", "信用卡欺诈发现 Playbook")} count={tRX(language, "draft-only", "仅草稿")} style={{ marginBottom: 16 }}>
+            {tenant?.id === "creditcardfraud" && (
+              <Panel eyebrow="Playbook" title={tRX(language, "Creditcardfraud discovery playbook", "信用卡欺诈发现 Playbook")} count={tRX(language, "draft-only", "仅草稿")} style={{ marginBottom: 16 }}>
                 <div style={{ display: "flex", gap: 10, alignItems: "center", color: "var(--muted)", fontSize: 12, lineHeight: 1.5 }}>
-                  <span>{tenant?.id === "maritime-risk"
-                    ? tRX(language, "Run the fixed maritime playbook to populate chokepoint dependency, hazard-adjusted risk, and country-priority graph findings, plus a pruned non-graph ranking hypothesis.", "运行固定 maritime playbook，生成咽喉点依赖、风险因子调整、国家优先级等图推理发现，并保留一条已剪枝的非图排名假设。")
-                    : tRX(language, "Run the fixed fraud playbook to populate card-not-present, verification mismatch, POS missing, merchant category, duplicate-cluster candidates, plus a pruned hypothesis with reason.", "运行固定欺诈 playbook，生成非面对面交易、验证不匹配、POS 缺失、商户类别、重复簇等候选发现，并保留一条带原因的剪枝假设。")}</span>
+                  <span>{tRX(language, "Run the fixed fraud playbook to populate card-not-present, verification mismatch, POS missing, merchant category, duplicate-cluster candidates, plus a pruned hypothesis with reason.", "运行固定欺诈 playbook，生成非面对面交易、验证不匹配、POS 缺失、商户类别、重复簇等候选发现，并保留一条带原因的剪枝假设。")}</span>
                   <button className="btn primary" onClick={onRunPlaybook} disabled={playbookRunning} style={{ marginLeft: "auto", whiteSpace: "nowrap" }}>
                     {playbookRunning ? tRX(language, "Running…", "运行中…") : tRX(language, "Run playbook", "运行 Playbook")}
                   </button>
@@ -2503,11 +2387,11 @@ function DeepGraphPathCard({ profile, title, language, compact = false }) {
 
 function graphStepLabelRX(step, language) {
   const labels = {
-    hazard: ["hazard", "风险因子"],
-    chokepoint: ["chokepoint", "咽喉点"],
-    dependent_country: ["dependent country", "依赖国家"],
-    risk_metric: ["risk metric", "风险指标"],
-    recommended_action: ["recommended action", "建议动作"],
+    source_entity: ["source entity", "来源实体"],
+    relation: ["relation", "关系"],
+    target_entity: ["target entity", "目标实体"],
+    evidence: ["evidence", "证据"],
+    action: ["action", "动作"],
   };
   const pair = labels[step] || [step, step];
   return tRX(language, pair[0], pair[1]);
@@ -2542,9 +2426,9 @@ function AutopilotStartPanel({ tenant, objective, setObjective, maxHypotheses, s
               </div>
             </div>
             <button className="btn primary" type="submit" disabled={starting}>{starting ? tRX(language, "Starting…", "启动中…") : "▶ " + tRX(language, "Start Autopilot", "启动 Autopilot")}</button>
-            {(tenant?.id === "creditcardfraud" || tenant?.id === "maritime-risk") && (
+            {tenant?.id === "creditcardfraud" && (
               <button className="btn" type="button" onClick={onRunPlaybook} disabled={playbookRunning}>
-                {playbookRunning ? tRX(language, "Running playbook…", "Playbook 运行中…") : tenant?.id === "maritime-risk" ? tRX(language, "Run maritime-risk playbook", "运行 maritime-risk playbook") : tRX(language, "Run creditcardfraud playbook", "运行 creditcardfraud playbook")}
+                {playbookRunning ? tRX(language, "Running playbook…", "Playbook 运行中…") : tRX(language, "Run creditcardfraud playbook", "运行 creditcardfraud playbook")}
               </button>
             )}
           </form>

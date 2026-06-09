@@ -36,8 +36,8 @@ injecting Employee/Order demo objects.
 | `scripts/` | Dataset import, bootstrap, and pipeline runner scripts |
 | `tests/` | Unit and integration-style regression tests |
 | `web/app/` | Frontend app for Workspace, Ontology, Graph, Reasoning, and Settings |
-| `server/workbench_server.py` | Local API server and metadata/review backend |
-| `review_workbench.py` | Compatibility launcher for legacy server commands; new entrypoint is `server/workbench_server.py` |
+| `server/aletheia_server.py` | Local API server and metadata/review backend |
+| `review_workbench.py` | Compatibility launcher for legacy server commands; new entrypoint is `server/aletheia_server.py` |
 | `query_artifacts.py`, `query_graph.py`, `query_metadata.py` | CLI inspection tools |
 
 ## Core Concepts
@@ -147,7 +147,7 @@ repeatable ontology artifacts for the local review server.
 Run this in a separate terminal and keep it running while you use the browser UI:
 
 ```bash
-python server/workbench_server.py --host 127.0.0.1 --port 8772 --ensure-schema
+python server/aletheia_server.py --host 127.0.0.1 --port 8772 --ensure-schema
 ```
 
 Open <http://127.0.0.1:8772>.
@@ -172,7 +172,7 @@ Useful direct links:
 ### 7. Run backend validation
 
 ```bash
-python -m py_compile review_workbench.py server/workbench_server.py agents/iterative_graph_enrichment_agent.py agents/web_enrichment_agent.py
+python -m py_compile review_workbench.py server/aletheia_server.py agents/iterative_graph_enrichment_agent.py agents/web_enrichment_agent.py
 python -m unittest \
   tests/test_ontology_eval.py \
   tests/test_web_enrichment.py \
@@ -300,7 +300,7 @@ export ALETHEIA_GRAPH_SPACE="tenant_graph_space"
 - Missing `requirements.txt`: use the top-level `requirements.txt`, not the old
   split files. The split `requirements_*.txt` files are retained only for legacy
   agent-specific installs.
-- `ERR_CONNECTION_REFUSED`: ensure `server/workbench_server.py` or the
+- `ERR_CONNECTION_REFUSED`: ensure `server/aletheia_server.py` or the
   compatibility launcher `review_workbench.py` is running on the port you
   opened, usually `8772`.
 - Empty demo pages on a fresh DB: run `python scripts/bootstrap_demo_environment.py`

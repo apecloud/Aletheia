@@ -27,8 +27,8 @@ fixtures.
 | `requirements_scraper.txt` | Scraper pipeline dependencies | Legacy scraper pipeline | Keep for now; candidate to fold into extras later |
 | `requirements_hf_scraper.txt` | Hugging Face scraper dependencies | `hf_dataset_scraper.py` legacy tool | Merge/delete candidate after deciding HF scraper fate |
 | `init_env.sh` | Local environment bootstrap | No current `rg` reference | Keep as optional helper; candidate to replace with README-only runbook |
-| `review_workbench.py` | Legacy compatibility launcher | Imports `server.workbench_server`; README labels compatibility | Keep as compatibility shim only |
-| `reasoning_engine.py` | Reasoning profile engine | Imported by `server/workbench_server.py` | Keep; review hardcoded config in task #339 |
+| `review_workbench.py` | Legacy compatibility launcher | Imports `server.aletheia_server`; README labels compatibility | Keep as compatibility shim only |
+| `reasoning_engine.py` | Reasoning profile engine | Imported by `server/aletheia_server.py` | Keep; review hardcoded config in task #339 |
 | `query_artifacts.py` | Artifact inspection CLI | Operator CLI | Keep |
 | `query_graph.py` | Graph query CLI | Imports `agents.graph_db_client.NebulaGraphClient` | Keep |
 | `query_metadata.py` | Metadata inspection CLI | Operator CLI | Keep |
@@ -59,7 +59,7 @@ fixtures.
 
 ## Keep
 
-- Production server and app: `server/workbench_server.py`, `web/app/`,
+- Production server and app: `server/aletheia_server.py`, `web/app/`,
   `reasoning_engine.py`.
 - Production modeling/enrichment: `SchemaGraphModelingAgent`,
   `ontology_artifacts.py`, `tenant_registry.py`, `web_enrichment_agent.py`,

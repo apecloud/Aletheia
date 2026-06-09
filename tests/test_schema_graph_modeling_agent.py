@@ -53,7 +53,12 @@ class SchemaGraphModelingAgentTest(unittest.TestCase):
 
         prompt = self.agent.build_prompt(schema)
         self.assertIn("Do not use any built-in tenant/domain vocabulary", prompt)
-        self.assertIn("Do not invent review/finding/action/insight nodes", prompt)
+        self.assertIn("Keep ontology types distinct from graph nodes and fact/event instances", prompt)
+        self.assertIn("A draft ontology object is a continuant-like, identity-bearing object type", prompt)
+        self.assertIn("event rows should normally be modeled as graph/fact nodes", prompt)
+        self.assertIn("fact rows should normally be graph/fact nodes, edge evidence, or properties", prompt)
+        self.assertIn("receive events/facts, participate in actions", prompt)
+        self.assertIn("graph_node_candidate", prompt)
         for forbidden in ("RiskFinding", "TradeDependency", "Chokepoint", "maritime-risk"):
             self.assertNotIn(forbidden, prompt)
 
@@ -82,6 +87,7 @@ class SchemaGraphModelingAgentTest(unittest.TestCase):
                     source_table="customers",
                     target_table="invoices",
                     join_condition="invoices.customer_id = customers.customer_id",
+                    properties=["invoice_total", "invoice_status"],
                     evidence=["invoices.customer_id foreign key references customers.customer_id"],
                     confidence=0.88,
                 )
@@ -95,6 +101,7 @@ class SchemaGraphModelingAgentTest(unittest.TestCase):
             self.assertEqual(spec["payload"]["canonical_write_boundary"], "draft_only_until_human_review")
             self.assertTrue(spec["payload"]["llm_inferred"])
             self.assertEqual(spec["payload"]["prompt_version"], "schema_graph_modeling_v1")
+        self.assertEqual(specs[1]["payload"]["edge_properties"], ["invoice_total", "invoice_status"])
 
     def test_legacy_object_model_adapter_uses_unified_contract(self):
         legacy_objects = SimpleNamespace(
