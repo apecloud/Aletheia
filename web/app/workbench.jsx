@@ -52,6 +52,7 @@ const DEDUP_AUDIT_FIELDS_WB = [
   "matched_element_key",
   "matched_status",
   "matched_source",
+  "nearest_proposal_match",
   "match_score",
   "match_evidence",
   "conflict_fields",
@@ -73,6 +74,21 @@ function dedupAuditWB(item) {
   });
   if (audit.llm_merge_decision_allowed === undefined && Object.keys(audit).length) audit.llm_merge_decision_allowed = false;
   return audit;
+}
+
+function proposalMatchSummaryTextWB(match, language) {
+  if (!match || typeof match !== "object") return "";
+  const relation = match.relation_label || match.relation;
+  const structure = match.element_type === "edge"
+    ? [match.source_label, relation, match.target_label].filter(Boolean).join(" ")
+    : [match.label, match.ontology_type].filter(Boolean).join(" · ");
+  const confidence = match.confidence === undefined || match.confidence === null ? "" : `${Math.round(match.confidence * 100)}%`;
+  return [
+    match.name || structure || match.element_key,
+    [match.element_type, statusLabelWB(match.status, language), confidence].filter(Boolean).join(" · "),
+    match.element_key,
+    match.source_url,
+  ].filter(Boolean).join(" | ");
 }
 
 function dedupDecisionLabelWB(decision, language) {
@@ -1245,6 +1261,7 @@ function InlineReviewDetails({ item, language }) {
   const boundary = workspaceBoundaryFacts(item);
   const dedupAudit = dedupAuditWB(item);
   const matchedKey = dedupAudit.matched_node_key || dedupAudit.matched_edge_key || dedupAudit.matched_element_key || "";
+  const nearestProposalMatch = dedupAudit.nearest_proposal_match || payload.nearest_proposal_match;
   const matchEvidence = Array.isArray(dedupAudit.match_evidence) ? dedupAudit.match_evidence : [];
   const conflictFields = Array.isArray(dedupAudit.conflict_fields) ? dedupAudit.conflict_fields : [];
   return (
@@ -1269,6 +1286,11 @@ function InlineReviewDetails({ item, language }) {
             <CaseField label={tWB(language, "Fingerprints", "指纹")} value={[dedupAudit.source_fingerprint, dedupAudit.evidence_fingerprint].filter(Boolean).join(" · ") || "—"} />
             <CaseField label={tWB(language, "LLM auto-merge", "LLM 自动合并")} value={llmMergePolicyLabelWB(dedupAudit.llm_merge_decision_allowed, language)} />
           </div>
+          {nearestProposalMatch && (
+            <div style={{ marginTop: 8 }}>
+              <CaseField label={tWB(language, "Nearest proposal", "距离最近的候选")} value={proposalMatchSummaryTextWB(nearestProposalMatch, language)} />
+            </div>
+          )}
           {dedupAudit.decision_reason && (
             <div style={{ marginTop: 8, fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-dim)", overflowWrap: "anywhere" }}>
               {tWB(language, "Reason", "原因")}: {textWB(dedupAudit.decision_reason, language)}

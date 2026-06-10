@@ -80,6 +80,7 @@ const DEDUP_AUDIT_FIELDS_GX = [
   "matched_element_key",
   "matched_status",
   "matched_source",
+  "nearest_proposal_match",
   "match_score",
   "match_evidence",
   "conflict_fields",
@@ -183,6 +184,37 @@ function endpointDedupEvidenceGX(item) {
   const evidence = payload.endpoint_dedup_evidence || payload.endpoint_dedup || {};
   if (!evidence || typeof evidence !== "object") return [];
   return ["source", "target"].map(role => ({ role, data: evidence[role] })).filter(entry => entry.data && typeof entry.data === "object");
+}
+
+function ProposalMatchSummaryGX({ match, language }) {
+  if (!match || typeof match !== "object") return null;
+  const relation = match.relation_label || match.relation;
+  const endpointLine = match.element_type === "edge"
+    ? [match.source_label, relation, match.target_label].filter(Boolean).join(" ")
+    : [match.label, match.ontology_type].filter(Boolean).join(" · ");
+  return (
+    <div style={{ marginTop: 6, border: "1px solid var(--line-soft)", background: "var(--bg)", padding: "8px 9px" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "baseline" }}>
+        <div style={{ fontWeight: 600, color: "var(--text)", overflowWrap: "anywhere" }}>
+          {labelGX(match.name || endpointLine || match.element_key, language)}
+        </div>
+        <div style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--muted)", whiteSpace: "nowrap" }}>
+          {match.element_type || "—"} · {statusLabelGraphGX(match.status, language)}
+        </div>
+      </div>
+      {endpointLine && (
+        <div style={{ marginTop: 4, fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--text-dim)", overflowWrap: "anywhere" }}>
+          {labelGX(endpointLine, language)}
+        </div>
+      )}
+      <dl className="kv" style={{ marginTop: 6 }}>
+        <dt>{tGX(language, "Key", "键")}</dt><dd>{match.element_key || "—"}</dd>
+        <dt>{tGX(language, "Run", "运行")}</dt><dd>{match.run_key || "—"}</dd>
+        <dt>{tGX(language, "Confidence", "置信度")}</dt><dd>{match.confidence === undefined || match.confidence === null ? "—" : `${Math.round(match.confidence * 100)}%`}</dd>
+        <dt>{tGX(language, "Source", "来源")}</dt><dd>{match.source_url || "—"}</dd>
+      </dl>
+    </div>
+  );
 }
 
 function rawEdgeKindGX(edge) {
@@ -1500,6 +1532,7 @@ function ProposedGraphDetail({ item, reason, setReason, busy, message, onReview,
   const conclusion = payload.conclusion || payload.summary || payload.description || "";
   const dedupAudit = dedupAuditGX(item);
   const matchedKey = dedupAudit.matched_node_key || dedupAudit.matched_edge_key || dedupAudit.matched_element_key || "";
+  const nearestProposalMatch = dedupAudit.nearest_proposal_match || payload.nearest_proposal_match;
   const matchEvidence = Array.isArray(dedupAudit.match_evidence) ? dedupAudit.match_evidence : [];
   const conflictFields = Array.isArray(dedupAudit.conflict_fields) ? dedupAudit.conflict_fields : [];
   const endpointEvidence = endpointDedupEvidenceGX(item);
@@ -1533,6 +1566,12 @@ function ProposedGraphDetail({ item, reason, setReason, busy, message, onReview,
               {tGX(language, "Reason", "原因")}: {labelGX(dedupAudit.decision_reason, language)}
             </div>
           )}
+          {nearestProposalMatch && (
+            <div style={{ marginTop: 8 }}>
+              <div className="eyebrow" style={{ marginBottom: 5 }}>{tGX(language, "Nearest proposal", "距离最近的候选")}</div>
+              <ProposalMatchSummaryGX match={nearestProposalMatch} language={language} />
+            </div>
+          )}
           {conflictFields.length > 0 && (
             <div style={{ marginTop: 8, fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--changes)", overflowWrap: "anywhere" }}>
               {tGX(language, "Conflicts require review gate", "冲突字段需要审核入口判定")}: {conflictFields.join(", ")}
@@ -1564,6 +1603,9 @@ function ProposedGraphDetail({ item, reason, setReason, busy, message, onReview,
                     <dt>{tGX(language, "Score", "分数")}</dt><dd>{data.match_score === undefined ? "—" : data.match_score}</dd>
                     <dt>{tGX(language, "Node proposal", "节点候选")}</dt><dd>{data.proposed_node_created ? tGX(language, "created", "已创建") : tGX(language, "not created", "未创建")}</dd>
                   </dl>
+                  {data.nearest_proposal_match && (
+                    <ProposalMatchSummaryGX match={data.nearest_proposal_match} language={language} />
+                  )}
                   {Array.isArray(data.match_evidence) && data.match_evidence.length > 0 && (
                     <div style={{ marginTop: 4, fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--muted)", overflowWrap: "anywhere" }}>
                       {data.match_evidence.slice(0, 3).map(auditValueGX).join(" · ")}

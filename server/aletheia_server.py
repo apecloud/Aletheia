@@ -23,7 +23,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.append(str(ROOT))
 sys.path.append(str(ROOT / "agents"))
 
-from sqlalchemy import create_engine, inspect, text
+from sqlalchemy import bindparam, create_engine, inspect, text
 from sqlalchemy.exc import SQLAlchemyError
 
 from reasoning_engine import ReasoningEngine
@@ -226,6 +226,94 @@ def _dedup_audit_from_payload(payload):
     elif audit:
         audit["llm_merge_decision_allowed"] = False
     return audit
+
+
+def _matched_proposed_graph_key(value):
+    value = str(value or "").strip()
+    return value if value.startswith("proposed-graph:") else ""
+
+
+def _proposal_match_keys_from_payload(payload):
+    payload = payload or {}
+    keys = set()
+    for field in ("matched_node_key", "matched_edge_key", "matched_element_key"):
+        key = _matched_proposed_graph_key(payload.get(field))
+        if key:
+            keys.add(key)
+    endpoint_evidence = payload.get("endpoint_dedup_evidence") if isinstance(payload.get("endpoint_dedup_evidence"), dict) else {}
+    for evidence in endpoint_evidence.values():
+        if not isinstance(evidence, dict):
+            continue
+        key = _matched_proposed_graph_key(evidence.get("matched_node_key") or evidence.get("candidate_key"))
+        if key:
+            keys.add(key)
+    for item in payload.get("vector_top_k") if isinstance(payload.get("vector_top_k"), list) else []:
+        if not isinstance(item, dict):
+            continue
+        key = _matched_proposed_graph_key(item.get("node_key"))
+        if key:
+            keys.add(key)
+    return keys
+
+
+def _proposal_match_summary(row):
+    if not row:
+        return None
+    payload = _load_json(row["payload_json"], {})
+    properties = payload.get("properties") if isinstance(payload.get("properties"), dict) else {}
+    summary = {
+        "element_key": row["element_key"],
+        "element_type": row["element_type"],
+        "name": row["name"],
+        "status": row["status"],
+        "confidence": row["confidence"],
+        "source_url": row["source_url"],
+        "evidence_refs": _load_json(row["evidence_refs_json"], []),
+        "run_key": row.get("run_key"),
+        "created_at": _jsonable(row["created_at"]),
+    }
+    for field in (
+        "source_type",
+        "source_label",
+        "relation",
+        "relation_label",
+        "target_type",
+        "target_label",
+        "ontology_type",
+        "label",
+    ):
+        value = payload.get(field) or properties.get(field)
+        if value not in (None, "", [], {}):
+            summary[field] = value
+    return summary
+
+
+def _attach_proposal_match_summaries(payload, proposal_match_lookup):
+    if not proposal_match_lookup:
+        return payload
+    enriched = dict(payload or {})
+    for field in ("matched_node_key", "matched_edge_key", "matched_element_key"):
+        match = proposal_match_lookup.get(_matched_proposed_graph_key(enriched.get(field)))
+        if match:
+            enriched["nearest_proposal_match"] = match
+            break
+    endpoint_evidence = enriched.get("endpoint_dedup_evidence")
+    if isinstance(endpoint_evidence, dict):
+        endpoint_copy = {}
+        changed = False
+        for role, evidence in endpoint_evidence.items():
+            if not isinstance(evidence, dict):
+                endpoint_copy[role] = evidence
+                continue
+            item = dict(evidence)
+            match = proposal_match_lookup.get(_matched_proposed_graph_key(item.get("matched_node_key") or item.get("candidate_key")))
+            if match:
+                item["nearest_proposal_match"] = match
+                changed = True
+            endpoint_copy[role] = item
+        if changed:
+            enriched["endpoint_dedup_evidence"] = endpoint_copy
+    return enriched
 
 
 def _graph_identity_terms(value):
@@ -4641,6 +4729,30 @@ class InstanceRepository:
                     {"tenant_id": tenant.tenant_id},
                 ).mappings().all()
             ]
+            proposal_match_keys = set()
+            for row in rows:
+                proposal_match_keys.update(_proposal_match_keys_from_payload(_load_json(row["payload_json"], {})))
+            proposal_match_lookup = {}
+            if proposal_match_keys:
+                match_query = text(
+                        """
+                        SELECT e.element_key, e.element_type, e.name, e.payload_json,
+                               e.evidence_refs_json, e.source_url, e.confidence, e.status,
+                               e.created_at, r.run_key
+                        FROM aletheia_proposed_graph_elements e
+                        JOIN aletheia_iterative_graph_enrichment_runs r ON r.id = e.run_id
+                        WHERE e.project_id = :tenant_id
+                          AND e.element_key IN :element_keys
+                        """
+                ).bindparams(bindparam("element_keys", expanding=True))
+                match_rows = conn.execute(
+                    match_query,
+                    {"tenant_id": tenant.tenant_id, "element_keys": list(proposal_match_keys)},
+                ).mappings().all()
+                proposal_match_lookup = {
+                    match_row["element_key"]: _proposal_match_summary(match_row)
+                    for match_row in match_rows
+                }
         try:
             approved_graph = self.full_graph(tenant, limit=1000) or {}
             for node in approved_graph.get("nodes", []):
@@ -4684,6 +4796,7 @@ class InstanceRepository:
         pending_edge_fact_keys = set()
         for row in rows:
             payload = _load_json(row["payload_json"], {})
+            payload = _attach_proposal_match_summaries(payload, proposal_match_lookup)
             row_status = row["status"]
             if pending_like_filter:
                 guarded_for_filter = _apply_edge_source_identity_presentation_guard(

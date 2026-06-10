@@ -499,27 +499,18 @@ class IterativeGraphEnrichmentTest(unittest.TestCase):
                 for item in result["proposed_graph"]
                 if item["element_type"] == "edge" and item["payload"].get("fact_layer")
             ]
-            self.assertTrue(fact_edges)
-            self.assertFalse(
-                [
-                    item
-                    for item in fact_edges
-                    if item["payload"].get("relation_ontology_candidate")
-                    or item["payload"]["extraction"].get("formal_graph_write")
-                    or item["payload"]["extraction"].get("canonical_ontology_write")
-                ]
-            )
+            self.assertFalse(fact_edges)
             self.assertTrue(rejected)
             self.assertEqual(rejected[0]["reason"], "unmapped_relation")
             self.assertEqual(rejected[0]["review_status"], "needs_review")
             self.assertTrue(rejected[0]["review_required"])
+            self.assertTrue(rejected[0]["proposal_suppressed"])
+            self.assertEqual(rejected[0]["review_surface"], "live_trace")
             self.assertIn("source_label", rejected[0])
             self.assertIn("target_label", rejected[0])
             self.assertTrue(rejected[0]["relation_label"])
             self.assertTrue(rejected[0]["evidence_quote"])
             self.assertEqual(rejected[0]["source_ref"], "https://zenodo.org/records/13841882")
-            self.assertEqual(fact_edges[0]["payload"]["review_status"], "needs_review")
-            self.assertEqual(fact_edges[0]["payload"]["properties"]["relation_mapping_status"], "unmapped_relation")
 
     def test_langextract_runner_feeds_structured_contract(self):
         def char_interval(start, end):
@@ -634,7 +625,7 @@ class IterativeGraphEnrichmentTest(unittest.TestCase):
             self.assertFalse(extraction["nodes"])
             self.assertFalse(extraction["edges"])
 
-    def test_ambiguous_relation_endpoint_becomes_review_gated_fact_edge(self):
+    def test_ambiguous_relation_endpoint_stays_in_live_trace(self):
         def fake_runner(_source_text, _schema_context):
             return SimpleNamespace(
                 extractions=[
@@ -684,9 +675,11 @@ class IterativeGraphEnrichmentTest(unittest.TestCase):
                 if item["element_type"] == "edge" and item["payload"].get("fact_layer")
             ]
 
-            self.assertTrue(any(item.get("reason") == "ambiguous_relation_endpoint" for item in rejected))
-            self.assertTrue(fact_nodes)
-            self.assertTrue(fact_edges)
+            endpoint_rejected = next(item for item in rejected if item.get("reason") == "ambiguous_relation_endpoint")
+            self.assertTrue(endpoint_rejected["proposal_suppressed"])
+            self.assertEqual(endpoint_rejected["review_surface"], "live_trace")
+            self.assertFalse(fact_nodes)
+            self.assertFalse(fact_edges)
             self.assertFalse(
                 [
                     item
@@ -695,13 +688,6 @@ class IterativeGraphEnrichmentTest(unittest.TestCase):
                     and item["payload"].get("label") == "exposed through"
                 ]
             )
-            self.assertEqual(fact_edges[0]["payload"]["review_status"], "needs_review")
-            self.assertEqual(fact_edges[0]["status"], "needs_more_evidence")
-            self.assertTrue(fact_edges[0]["payload"]["properties"]["fact_node_hint"])
-            self.assertNotIn("canonical_id_hint", fact_edges[0]["payload"]["properties"])
-            self.assertFalse(fact_edges[0]["payload"]["extraction"]["formal_graph_write"])
-            self.assertFalse(fact_edges[0]["payload"]["extraction"]["canonical_ontology_write"])
-            self.assertIsNone(fact_edges[0]["payload"].get("relation_ontology_candidate"))
 
     def test_reversed_ambiguous_relation_grounding_uses_grounded_direction(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -765,14 +751,12 @@ class IterativeGraphEnrichmentTest(unittest.TestCase):
             fact_nodes = [item for item in elements if item["element_type"] == "node" and item["payload"].get("fact_layer")]
             fact_edges = [item for item in elements if item["element_type"] == "edge" and item["payload"].get("fact_layer")]
 
-            self.assertTrue(fact_nodes)
-            self.assertTrue(fact_edges)
-            self.assertEqual(fact_edges[0]["payload"]["source_label"], "source wrapper")
-            self.assertEqual(fact_edges[0]["payload"]["target_label"], "target wrapper")
-            self.assertEqual(fact_edges[0]["name"], "source wrapper mentions target wrapper")
-            self.assertTrue(fact_edges[0]["payload"]["properties"]["relation_direction_conflict"])
+            self.assertFalse(fact_nodes)
+            self.assertFalse(fact_edges)
+            self.assertTrue(extraction["rejected_or_ambiguous_candidates"][0]["proposal_suppressed"])
+            self.assertEqual(extraction["rejected_or_ambiguous_candidates"][0]["review_surface"], "live_trace")
 
-    def test_relation_only_ambiguous_endpoint_uses_frontier_edge_not_fact_node(self):
+    def test_relation_only_ambiguous_endpoint_does_not_use_frontier_fallback(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             db_url, _ = self._seed_db(tmpdir)
             agent = IterativeGraphEnrichmentAgent(
@@ -835,13 +819,13 @@ class IterativeGraphEnrichmentTest(unittest.TestCase):
                 if item["element_type"] == "node" and item["name"] == "has_country_dependency"
             ]
 
-            self.assertTrue(fact_edges)
+            self.assertFalse(fact_edges)
             self.assertFalse(relation_nodes)
-            self.assertEqual(fact_edges[0]["payload"]["relation"], "has_country_dependency")
-            self.assertEqual(fact_edges[0]["payload"]["source_label"], "South Korea (KOR)")
-            self.assertEqual(fact_edges[0]["payload"]["target_label"], "Hormuz Strait")
-            self.assertTrue(fact_edges[0]["payload"]["properties"]["unresolved_endpoint_mapping"]["source_label_missing"])
-            self.assertTrue(fact_edges[0]["payload"]["properties"]["unresolved_endpoint_mapping"]["target_label_missing"])
+            candidate = extraction["rejected_or_ambiguous_candidates"][0]
+            self.assertTrue(candidate["proposal_suppressed"])
+            self.assertEqual(candidate["review_surface"], "live_trace")
+            self.assertNotIn("source_label", candidate)
+            self.assertNotIn("target_label", candidate)
 
     def test_langextract_key_can_be_read_from_configured_env_file(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -993,11 +977,13 @@ class IterativeGraphEnrichmentTest(unittest.TestCase):
                 if item["element_type"] == "node" and item["payload"].get("fact_layer")
             ]
             self.assertFalse(fact_edges)
-            self.assertTrue(fact_nodes)
+            self.assertFalse(fact_nodes)
             self.assertTrue(any(item.get("reason") == "ambiguous_relation" for item in rejected))
             ambiguous = next(item for item in rejected if item.get("reason") == "ambiguous_relation")
             self.assertEqual(ambiguous["review_status"], "needs_review")
             self.assertTrue(ambiguous["review_required"])
+            self.assertTrue(ambiguous["proposal_suppressed"])
+            self.assertEqual(ambiguous["review_surface"], "live_trace")
             self.assertEqual(ambiguous["relation_label"], "unapproved blockade relation")
 
     def test_benchmark_reads_baseline_as_comparison_only(self):
