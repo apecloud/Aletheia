@@ -115,6 +115,12 @@ function dedupDecisionLabelGX(decision, language) {
   return labels[key] || key || "—";
 }
 
+function endpointNodeWriteLabelGX(data, language) {
+  if (data?.proposed_node_created) return tGX(language, "created in this run", "本轮已创建");
+  if (data?.matched_node_key) return tGX(language, "skipped; reused matched node", "未新建，复用命中节点");
+  return tGX(language, "not created", "未创建");
+}
+
 function auditValueGX(value) {
   if (value === false) return "false";
   if (value === true) return "true";
@@ -1601,7 +1607,7 @@ function ProposedGraphDetail({ item, reason, setReason, busy, message, onReview,
                     <dt>{tGX(language, "Matched", "命中")}</dt><dd>{data.matched_node_key || data.candidate_key || "—"}</dd>
                     <dt>{tGX(language, "Space", "空间")}</dt><dd>{data.matched_space || data.matched_source || "—"}</dd>
                     <dt>{tGX(language, "Score", "分数")}</dt><dd>{data.match_score === undefined ? "—" : data.match_score}</dd>
-                    <dt>{tGX(language, "Node proposal", "节点候选")}</dt><dd>{data.proposed_node_created ? tGX(language, "created", "已创建") : tGX(language, "not created", "未创建")}</dd>
+                    <dt>{tGX(language, "Node write", "本轮节点写入")}</dt><dd>{endpointNodeWriteLabelGX(data, language)}</dd>
                   </dl>
                   {data.nearest_proposal_match && (
                     <ProposalMatchSummaryGX match={data.nearest_proposal_match} language={language} />

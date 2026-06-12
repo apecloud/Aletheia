@@ -54,7 +54,7 @@ _DOTENV_CACHE: dict[str, str] | None = None
 
 DEEP_GRAPH_REQUIRED_STEPS = ("source_entity", "relation", "target_entity", "evidence", "action")
 
-GRAPH_EXTRACTION_PROMPT_VERSION = "graph_entity_relation_v2"
+GRAPH_EXTRACTION_PROMPT_VERSION = "graph_entity_relation_v3"
 
 GRAPH_EXTRACTION_PROMPT = """Extract graph-ready facts from crawled evidence.
 Return strict JSON with:
@@ -64,6 +64,8 @@ Return strict JSON with:
 4. findings: candidate analytical findings only when the evidence supports a complete path.
 Rules:
 - Use only facts explicitly supported by the source text.
+- Resolve contextual references and generic noun phrases before emitting entities. Do not emit labels such as "second strait", "another waterway", "the country", "this port", or "key route" as graph nodes; emit the canonical named entity only when the source text states enough context to resolve it.
+- If a phrase refers to an entity but the canonical name is not explicit or safely resolvable from the source text, put it in rejected_or_ambiguous_candidates with reason unresolved_entity_reference instead of creating a node or edge.
 - Use relation types only from approved SchemaGraphModelingAgent edge metadata.
 - If evidence suggests a relation that cannot be mapped to approved edge metadata, return it as ambiguous_relation for review.
 - Keep metrics, confidence, source_url, and provenance as properties, not hidden text.
@@ -262,6 +264,70 @@ def _normalize_identity_text(value: Any) -> str:
     stopwords = {"the", "a", "an"}
     tokens = [token for token in text.split() if token not in stopwords]
     return " ".join(tokens)
+
+
+_GENERIC_REFERENCE_MODIFIERS = {
+    "this",
+    "that",
+    "these",
+    "those",
+    "another",
+    "other",
+    "same",
+    "first",
+    "second",
+    "third",
+    "fourth",
+    "fifth",
+    "next",
+    "nearby",
+    "regional",
+    "global",
+    "major",
+    "main",
+    "key",
+    "critical",
+    "strategic",
+    "important",
+    "vital",
+    "new",
+    "old",
+}
+_GENERIC_REFERENCE_HEADS = {
+    "area",
+    "asset",
+    "canal",
+    "chokepoint",
+    "corridor",
+    "country",
+    "economy",
+    "entity",
+    "hub",
+    "market",
+    "nation",
+    "node",
+    "port",
+    "region",
+    "route",
+    "state",
+    "strait",
+    "territory",
+    "waterway",
+    "zone",
+}
+
+
+def _is_unresolved_entity_reference(label: Any, entity_type: Any = None) -> bool:
+    normalized = _normalize_identity_text(label)
+    tokens = normalized.split()
+    if len(tokens) < 2:
+        return False
+    type_tokens = set(_normalize_identity_text(entity_type).split())
+    generic_heads = _GENERIC_REFERENCE_HEADS | {token for token in type_tokens if len(token) >= 4}
+    has_generic_head = any(token in generic_heads for token in tokens)
+    if not has_generic_head:
+        return False
+    return all(token in _GENERIC_REFERENCE_MODIFIERS or token in generic_heads for token in tokens)
 
 
 def _identity_terms(value: Any) -> set[str]:
@@ -487,21 +553,39 @@ def _edge_identity_payload(item: dict[str, Any]) -> dict[str, Any]:
     relation = _normalize_identity_text(payload.get("relation"))
     source_node = _normalize_identity_text(payload.get("source_label"))
     target_node = _normalize_identity_text(payload.get("target_label"))
+    endpoint_evidence = payload.get("endpoint_dedup_evidence") if isinstance(payload.get("endpoint_dedup_evidence"), dict) else {}
+
+    def canonical_endpoint(role: str) -> str:
+        evidence = endpoint_evidence.get(role) if isinstance(endpoint_evidence.get(role), dict) else {}
+        matched_key = str(evidence.get("matched_node_key") or evidence.get("candidate_key") or "").strip()
+        matched_space = str(evidence.get("matched_space") or evidence.get("matched_source") or "").strip()
+        if matched_key and matched_space in {"approved_graph", "approved_graph_instance", "approved_graph_projection"}:
+            return _normalize_identity_text(matched_key)
+        return ""
+
+    source_canonical_key = canonical_endpoint("source")
+    target_canonical_key = canonical_endpoint("target")
+    if relation and (source_canonical_key or target_canonical_key):
+        source_identity = f"{relation}:{source_canonical_key or source_node}::{target_canonical_key or target_node}"
+        if metric_identity:
+            source_identity = f"{source_identity}|{metric_identity}"
     return {
         "kind": "edge",
         "source_type": str(payload.get("source_type") or "").strip(),
         "target_type": str(payload.get("target_type") or "").strip(),
         "source_node": source_node,
         "target_node": target_node,
+        "source_canonical_key": source_canonical_key,
+        "target_canonical_key": target_canonical_key,
         "relation": relation,
         "source_identity": source_identity,
         "property_fingerprint": _digest(
             {
                 "source_type": payload.get("source_type"),
-                "source_node": source_node,
+                "source_node": source_canonical_key or source_node,
                 "relation": relation,
                 "target_type": payload.get("target_type"),
-                "target_node": target_node,
+                "target_node": target_canonical_key or target_node,
                 "source_identity": source_identity,
             },
             16,
@@ -568,6 +652,28 @@ def _candidate_identity_payload(item: dict[str, Any]) -> dict[str, Any]:
         return _node_identity_payload(item)
     if item.get("element_type") == "finding":
         return _finding_identity_payload(item)
+    if item.get("element_type") == "ontology_relation":
+        payload = item.get("payload") or {}
+        relation_label = str(payload.get("relation_label") or item.get("name") or "").strip()
+        domain = str(payload.get("domain") or payload.get("source_type") or "").strip()
+        range_type = str(payload.get("range") or payload.get("target_type") or "").strip()
+        source_identity = payload.get("source_identity") or _digest(
+            {
+                "relation_label": _normalize_identity_text(relation_label),
+                "domain": _normalize_identity_text(domain),
+                "range": _normalize_identity_text(range_type),
+            },
+            16,
+        )
+        return {
+            "kind": "ontology_relation",
+            "label": relation_label,
+            "normalized_label": _normalize_identity_text(relation_label),
+            "domain": domain,
+            "range": range_type,
+            "source_identity": source_identity,
+            "property_fingerprint": source_identity,
+        }
     return {
         "kind": item.get("element_type"),
         "label": str(item.get("name") or "").strip(),
@@ -581,9 +687,9 @@ def _identity_key(tenant: str, identity: dict[str, Any]) -> str:
     if identity.get("kind") == "edge":
         return "edge:{tenant}:{source}:{relation}:{target}:{source_identity}".format(
             tenant=tenant,
-            source=identity.get("source_node") or "unknown-source",
+            source=identity.get("source_canonical_key") or identity.get("source_node") or "unknown-source",
             relation=identity.get("relation") or "related",
-            target=identity.get("target_node") or "unknown-target",
+            target=identity.get("target_canonical_key") or identity.get("target_node") or "unknown-target",
             source_identity=identity.get("source_identity") or identity.get("property_fingerprint"),
         )
     if identity.get("kind") == "finding":
@@ -591,6 +697,14 @@ def _identity_key(tenant: str, identity: dict[str, Any]) -> str:
             tenant=tenant,
             finding_type=_normalize_identity_text(identity.get("finding_type")) or "candidate-finding",
             label=identity.get("normalized_label") or "unknown",
+            source_identity=identity.get("source_identity") or identity.get("property_fingerprint"),
+        )
+    if identity.get("kind") == "ontology_relation":
+        return "ontology-relation:{tenant}:{domain}:{relation}:{range}:{source_identity}".format(
+            tenant=tenant,
+            domain=_normalize_identity_text(identity.get("domain")) or "unknown-domain",
+            relation=identity.get("normalized_label") or "unknown-relation",
+            range=_normalize_identity_text(identity.get("range")) or "unknown-range",
             source_identity=identity.get("source_identity") or identity.get("property_fingerprint"),
         )
     return "node:{tenant}:{entity_type}:{label}:{source_identity}".format(
@@ -735,11 +849,21 @@ def _structure_compatibility(candidate: dict[str, Any], existing: dict[str, Any]
     if candidate.get("kind") == "edge":
         required_fields = ("source_type", "target_type", "source_node", "target_node", "relation", "source_identity")
         for field in required_fields:
-            candidate_value = candidate.get(field)
-            existing_value = existing.get(field)
+            if field == "source_node":
+                candidate_value = candidate.get("source_canonical_key") or candidate.get("source_node")
+                existing_value = existing.get("source_canonical_key") or existing.get("source_node")
+                evidence_field = "source_endpoint"
+            elif field == "target_node":
+                candidate_value = candidate.get("target_canonical_key") or candidate.get("target_node")
+                existing_value = existing.get("target_canonical_key") or existing.get("target_node")
+                evidence_field = "target_endpoint"
+            else:
+                candidate_value = candidate.get(field)
+                existing_value = existing.get(field)
+                evidence_field = field
             if candidate_value and existing_value:
                 if candidate_value == existing_value:
-                    evidence.append(f"same {field}")
+                    evidence.append(f"same {evidence_field}")
                 elif field == "source_identity" and _edge_fact_identity_compatible(candidate_value, existing_value):
                     evidence.append("compatible source/metric identity")
                 else:
@@ -1121,6 +1245,80 @@ def _query_from_term_groups(groups: list[list[str]], *, excluded: list[dict[str,
     return " ".join(terms[:limit]).strip()
 
 
+_SEARCH_INSTRUCTION_TERMS = {
+    "find",
+    "recent",
+    "public",
+    "evidence",
+    "analyze",
+    "investigate",
+    "about",
+    "affecting",
+    "related",
+    "current",
+    "latest",
+}
+_SEARCH_INTERNAL_TERMS = {
+    "proposed_node",
+    "proposed_edge",
+    "proposed graph",
+    "schema",
+    "frontier",
+    "evidenceentity",
+    "has_systemic_risk",
+    "depends_on",
+    "many_to_many",
+}
+_RELATION_SEARCH_HINTS = {
+    "has_systemic_risk": ["risk", "disruption", "security"],
+    "depends_on": ["dependency", "shipping"],
+    "many_to_many": [],
+}
+
+
+def _search_surface_term(value: Any) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    normalized = text.replace("_", " ").replace("-", " ")
+    compact = normalized.lower().strip()
+    if compact in _SEARCH_INSTRUCTION_TERMS or compact in _SEARCH_INTERNAL_TERMS:
+        return ""
+    if compact.startswith("proposed "):
+        return ""
+    return normalized
+
+
+def _append_search_term(items: list[str], value: Any, *, excluded: list[dict[str, str]] | None = None, reason: str = "search_noise") -> None:
+    text = _search_surface_term(value)
+    if not text:
+        raw = str(value or "").strip()
+        if raw and excluded is not None:
+            excluded.append({"term": raw, "reason": reason})
+        return
+    if text not in items:
+        items.append(text)
+
+
+def _objective_search_hints(objective: str) -> list[str]:
+    hints: list[str] = []
+    for match in re.finditer(r"\b[A-Z][A-Za-z0-9-]*(?:\s+[A-Z][A-Za-z0-9-]*){0,3}\b", objective or ""):
+        _append_search_term(hints, match.group(0))
+    for term in re.split(r"[^A-Za-z0-9_/-]+", objective or ""):
+        if len(term) < 5:
+            continue
+        _append_search_term(hints, term)
+    return hints[:5]
+
+
+def _query_from_search_terms(groups: list[list[str]], *, excluded: list[dict[str, str]] | None = None, limit: int = 8) -> str:
+    terms: list[str] = []
+    for group in groups:
+        for term in group:
+            _append_search_term(terms, term, excluded=excluded)
+    return " ".join(terms[:limit]).strip()
+
+
 def _graph_context_query_plan(item: dict[str, Any], objective: str, tenant: str) -> dict[str, Any]:
     payload = item.get("payload") if isinstance(item.get("payload"), dict) else {}
     context_text = " ".join(
@@ -1160,15 +1358,13 @@ def _graph_context_query_plan(item: dict[str, Any], objective: str, tenant: str)
             _append_unique(node_terms, raw, excluded=excluded_terms)
     relation = str(payload.get("relation") or item.get("relation") or "").strip()
     _append_unique(relation_terms, relation, excluded=excluded_terms)
+    relation_search_hints = _RELATION_SEARCH_HINTS.get(relation.lower(), [])
     raw_metrics = payload.get("metrics") or extracted["metrics"]
     if not isinstance(raw_metrics, list):
         raw_metrics = [raw_metrics] if raw_metrics else []
     for metric in raw_metrics:
         _append_unique(metric_terms, metric)
-    objective_terms = []
-    for term in re.split(r"[^A-Za-z0-9_/-]+", objective or ""):
-        if len(term) >= 4:
-            _append_unique(objective_terms, term, excluded=excluded_terms)
+    objective_terms = _objective_search_hints(objective)
 
     query_terms = {
         "countries": country_terms[:4],
@@ -1251,71 +1447,64 @@ def _graph_context_query_plan(item: dict[str, Any], objective: str, tenant: str)
                 terms.append({"term": text, "source": source})
         return terms
 
-    path_query = _query_from_term_groups(
+    path_query = _query_from_search_terms(
         [
             [value for value in [source_label, target_label] if value],
             [frontier_label] if frontier_label and not (source_label or target_label) else [],
-            query_terms["relations"],
-            query_terms["metrics"],
-            query_terms["objective"][:4],
+            relation_search_hints[:2],
+            query_terms["objective"][:2],
         ],
         excluded=excluded_terms,
-        limit=14,
+        limit=8,
     ) or query
     source_endpoint_query = ""
     if source_label:
-        source_endpoint_query = _query_from_term_groups(
+        source_endpoint_query = _query_from_search_terms(
             [
                 [source_label],
-                [source_type] if source_type else [],
-                query_terms["relations"][:2],
-                query_terms["metrics"][:2],
-                query_terms["objective"][:4],
+                relation_search_hints[:2],
+                query_terms["objective"][:2],
             ],
             excluded=excluded_terms,
-            limit=12,
+            limit=7,
         )
     target_endpoint_query = ""
     if target_label:
-        target_endpoint_query = _query_from_term_groups(
+        target_endpoint_query = _query_from_search_terms(
             [
                 [target_label],
-                [target_type] if target_type else [],
-                query_terms["relations"][:2],
-                query_terms["metrics"][:2],
-                query_terms["objective"][:4],
+                relation_search_hints[:2],
+                query_terms["objective"][:2],
             ],
             excluded=excluded_terms,
-            limit=12,
+            limit=7,
         )
-    single_endpoint_query = source_endpoint_query or target_endpoint_query or _query_from_term_groups(
+    single_endpoint_query = target_endpoint_query or source_endpoint_query or _query_from_search_terms(
         [
             [item.get("name")] if item.get("name") else [],
-            query_terms["objective"][:4],
-            expected_node_types[:2],
+            query_terms["objective"][:2],
         ],
         excluded=excluded_terms,
-        limit=12,
+        limit=7,
     ) or path_query
-    loose_pair_query = _query_from_term_groups(
+    loose_pair_query = _query_from_search_terms(
         [
             [value for value in [source_label, target_label] if value],
             [frontier_label] if frontier_label and not (source_label or target_label) else [],
-            query_terms["objective"][:4],
+            query_terms["objective"][:2],
         ],
         excluded=excluded_terms,
-        limit=10,
+        limit=7,
     ) or single_endpoint_query
-    schema_broad_query = _query_from_term_groups(
+    schema_broad_query = _query_from_search_terms(
         [
             [frontier_label] if frontier_label and not (source_label or target_label) else [],
-            expected_node_types[:4],
-            expected_relation_types[:4],
-            expected_metric_keys[:4],
-            query_terms["objective"][:4],
+            [target_label or source_label] if (target_label or source_label) else [],
+            relation_search_hints[:2],
+            query_terms["objective"][:2],
         ],
         excluded=excluded_terms,
-        limit=12,
+        limit=7,
     ) or loose_pair_query
     common_plan = {
         "expected_node_types": expected_node_types[:4],
@@ -1568,6 +1757,14 @@ class IterativeGraphEnrichmentAgent:
 
     def _query_plan_for_frontier(self, item: dict[str, Any], objective: str) -> dict[str, Any]:
         return _graph_context_query_plan(item, objective, self.tenant)
+
+    def _frontier_allows_ontology_expansion(self, frontier_item: dict[str, Any]) -> bool:
+        payload = frontier_item.get("payload") if isinstance(frontier_item.get("payload"), dict) else {}
+        return (
+            frontier_item.get("source_kind") == "research_topic"
+            or frontier_item.get("kind") == "research_topic"
+            or payload.get("research_mode") == "deep_research"
+        )
 
     def _schema_graph_projection_context(self, session) -> dict[str, Any]:
         rows = (
@@ -2014,6 +2211,7 @@ class IterativeGraphEnrichmentAgent:
         entities = self._extract_capitalized_entities(source_text)
         nodes_by_type: dict[str, list[GraphEvidenceNodeDraft]] = {}
         ontology_candidates: list[dict[str, Any]] = []
+        rejected: list[dict[str, Any]] = []
         for node_key, node_type in schema_context["node_types"].items():
             labels: list[str] = []
             grounding_by_label: dict[str, list[dict[str, Any]]] = {}
@@ -2031,6 +2229,22 @@ class IterativeGraphEnrichmentAgent:
             for label in labels:
                 evidence_quote = _evidence_excerpt(source_text, [label])
                 source_grounding = grounding_by_label.get(label, [])
+                if _is_unresolved_entity_reference(label, node_type.get("name")):
+                    rejected.append(
+                        {
+                            "reason": "unresolved_entity_reference",
+                            "review_status": "blocked",
+                            "review_required": False,
+                            "entity_type": node_type.get("name"),
+                            "label": label,
+                            "evidence_quote": evidence_quote,
+                            "source_ref": source_ref,
+                            "schema_projection_source": "SchemaGraphModelingAgent",
+                            "source_grounding": source_grounding,
+                            "resolution_policy": "generic or contextual entity references must resolve to a canonical named entity before graph proposal",
+                        }
+                    )
+                    continue
                 properties = {
                     "canonical_id_hint": f"{node_type['name']}:{label}",
                     "source_title": source_title,
@@ -2064,7 +2278,6 @@ class IterativeGraphEnrichmentAgent:
             )
 
         edges: list[GraphEvidenceEdgeDraft] = []
-        rejected: list[dict[str, Any]] = []
         mapped_node_pairs: set[tuple[str, str]] = set()
         metrics_by_pair: dict[frozenset[str], list[str]] = {}
         metric_grounding_by_pair: dict[frozenset[str], list[dict[str, Any]]] = {}
@@ -2433,6 +2646,7 @@ class IterativeGraphEnrichmentAgent:
             )
             emitted_edge_keys.add((str(edge["source_label"]), str(edge["relation"]), str(edge["target_label"])))
         fact_reasons = {"ambiguous_relation", "unmapped_relation", "ambiguous_relation_endpoint"}
+        allow_ontology_expansion = self._frontier_allows_ontology_expansion(frontier_item)
         for candidate in extraction.get("rejected_or_ambiguous_candidates") or []:
             reason = str(candidate.get("reason") or "").strip()
             if reason not in fact_reasons or not candidate.get("review_required"):
@@ -2444,6 +2658,66 @@ class IterativeGraphEnrichmentAgent:
             candidate["review_surface"] = "live_trace"
             candidate["canonical_ontology_write"] = False
             candidate["formal_graph_write"] = False
+            relation_label = str(candidate.get("relation_label") or candidate.get("relation") or "").strip()
+            if allow_ontology_expansion and relation_label and reason in {"ambiguous_relation", "unmapped_relation"}:
+                source_type = str(candidate.get("source_type") or "").strip()
+                target_type = str(candidate.get("target_type") or "").strip()
+                ontology_candidate = _ontology_candidate(
+                    "link",
+                    relation_label,
+                    (
+                        f"Candidate relation discovered during deep research: {relation_label}. "
+                        "Requires human ontology review before becoming an approved SchemaGraph relation."
+                    ),
+                    domain=source_type,
+                    range=target_type,
+                    review_required=True,
+                    schema_projection_source="DeepResearchOntologyExpansion",
+                    source_ref=candidate.get("source_ref") or source_ref,
+                )
+                elements.append(
+                    {
+                        "element_type": "ontology_relation",
+                        "name": relation_label,
+                        "payload": {
+                            "relation_label": relation_label,
+                            "domain": source_type,
+                            "range": target_type,
+                            "source_type": source_type,
+                            "target_type": target_type,
+                            "source_label": candidate.get("source_label"),
+                            "target_label": candidate.get("target_label"),
+                            "description": ontology_candidate["description"],
+                            "ontology_candidate": ontology_candidate,
+                            "evidence_quote": candidate.get("evidence_quote"),
+                            "source_grounding": candidate.get("source_grounding") or [],
+                            "source_url": candidate.get("source_ref") or source_ref,
+                            "source_title": source_title,
+                            "discovered_from": frontier_item.get("key"),
+                            "research_mode": "deep_research",
+                            "proposal_scope": "ontology_expansion",
+                            "review_status": "needs_review",
+                            "review_required": True,
+                            "rejected_candidate_reason": reason,
+                            "extraction": {
+                                "prompt_version": extraction["prompt_version"],
+                                "extraction_source": extraction.get("extraction_source"),
+                                "schema_context": extraction.get("schema_context"),
+                                "quality": extraction["quality"],
+                                "review_boundary": "ontology_relation_review",
+                                "canonical_ontology_write": False,
+                                "formal_graph_write": False,
+                            },
+                            "recommended_action": "Review whether this relation type should be added to the ontology/schema graph.",
+                            "writes_canonical": False,
+                        },
+                        "evidence_refs": [candidate.get("source_ref") or source_ref],
+                        "source_url": candidate.get("source_ref") or source_ref,
+                        "confidence": 0.58,
+                        "status": "needs_more_evidence",
+                        "iteration": iteration,
+                    }
+                )
         for finding in extraction.get("findings") or []:
             evidence_chain = finding.get("evidence_chain") or []
             elements.append(
@@ -2743,13 +3017,29 @@ class IterativeGraphEnrichmentAgent:
                         "source_url": row.source_url,
                     }
                 )
+            node_key = row.element_key
+            status = "approved" if row.status == "approved" else "proposed"
+            source = "proposed_graph"
+            if (
+                row.element_type == "node"
+                and payload.get("dedup_decision") == "merge_existing"
+                and payload.get("matched_node_key")
+                and (
+                    payload.get("matched_status") == "approved"
+                    or payload.get("matched_source") in {"approved_graph_instance", "approved_graph", "approved_graph_projection"}
+                )
+            ):
+                node_key = payload.get("matched_node_key")
+                status = "approved"
+                source = payload.get("matched_source") or "approved_graph_instance"
             index.append(
                 {
-                    "node_key": row.element_key,
-                    "status": "approved" if row.status == "approved" else "proposed",
-                    "source": "proposed_graph",
+                    "node_key": node_key,
+                    "status": status,
+                    "source": source,
                     "identity": identity,
                     "identity_key": _identity_key(self.tenant, identity),
+                    "payload": payload,
                 }
             )
         return index
@@ -2934,6 +3224,161 @@ class IterativeGraphEnrichmentAgent:
                 "identity_index_count": len(index),
                 "identity_index": index,
             }
+        except Exception:
+            session.rollback()
+            raise
+        finally:
+            session.close()
+
+    def _approved_proposed_node_aliases(self, session) -> dict[str, str]:
+        aliases: dict[str, str] = {}
+        rows = (
+            session.query(ProposedGraphElement)
+            .filter(ProposedGraphElement.project_id == self.tenant)
+            .filter(ProposedGraphElement.element_type == "node")
+            .all()
+        )
+        for row in rows:
+            payload = _json_load(row.payload_json, {})
+            matched_key = str(payload.get("matched_node_key") or "").strip()
+            if not matched_key:
+                continue
+            if not (
+                payload.get("matched_status") == "approved"
+                or payload.get("matched_source") in {"approved_graph_instance", "approved_graph", "approved_graph_projection"}
+            ):
+                continue
+            aliases[row.element_key] = matched_key
+            identity_key = str(payload.get("identity_key") or "").strip()
+            if identity_key:
+                aliases[identity_key] = matched_key
+        return aliases
+
+    def _canonical_endpoint_for_cleanup(
+        self,
+        payload: dict[str, Any],
+        role: str,
+        aliases: dict[str, str],
+    ) -> tuple[str, str]:
+        evidence = payload.get("endpoint_dedup_evidence") if isinstance(payload.get("endpoint_dedup_evidence"), dict) else {}
+        endpoint = evidence.get(role) if isinstance(evidence.get(role), dict) else {}
+        matched_key = str(endpoint.get("matched_node_key") or endpoint.get("candidate_key") or "").strip()
+        matched_space = str(endpoint.get("matched_space") or endpoint.get("matched_source") or "").strip()
+        if matched_key in aliases:
+            return _normalize_identity_text(aliases[matched_key]), "approved_alias"
+        if matched_space in {"approved_graph", "approved_graph_instance", "approved_graph_projection"} and matched_key:
+            return _normalize_identity_text(matched_key), "approved_direct"
+        identity_key = str(endpoint.get("identity_key") or "").strip()
+        if identity_key in aliases:
+            return _normalize_identity_text(aliases[identity_key]), "approved_alias"
+        label_key = "source_label" if role == "source" else "target_label"
+        return _normalize_identity_text(payload.get(label_key)), "label"
+
+    def _canonical_edge_cleanup_key(
+        self,
+        payload: dict[str, Any],
+        aliases: dict[str, str],
+    ) -> tuple[tuple[str, str, str, str, str], dict[str, Any]] | tuple[None, dict[str, Any]]:
+        source, source_basis = self._canonical_endpoint_for_cleanup(payload, "source", aliases)
+        target, target_basis = self._canonical_endpoint_for_cleanup(payload, "target", aliases)
+        relation = _normalize_identity_text(payload.get("relation") or payload.get("relation_label") or payload.get("graph_edge_name"))
+        source_type = _normalize_identity_text(payload.get("source_type"))
+        target_type = _normalize_identity_text(payload.get("target_type"))
+        trace = {
+            "source": source,
+            "target": target,
+            "relation": relation,
+            "source_type": source_type,
+            "target_type": target_type,
+            "source_basis": source_basis,
+            "target_basis": target_basis,
+        }
+        if not all([source, target, relation, source_type, target_type]):
+            return None, trace
+        if source_basis not in {"approved_direct", "approved_alias"} or target_basis not in {"approved_direct", "approved_alias"}:
+            return None, trace
+        return (source_type, source, relation, target_type, target), trace
+
+    def _duplicate_edge_rank(self, row: ProposedGraphElement, payload: dict[str, Any], trace: dict[str, Any]) -> tuple[int, int, float, int]:
+        direct_endpoint_count = sum(
+            1 for basis in (trace.get("source_basis"), trace.get("target_basis")) if basis == "approved_direct"
+        )
+        status_rank = {"approved": 4, "draft": 3, "needs_review": 2, "needs_more_evidence": 1}.get(row.status, 0)
+        confidence = float(row.confidence or payload.get("candidate_confidence") or 0.0)
+        return (direct_endpoint_count, status_rank, confidence, -int(row.id or 0))
+
+    def _cleanup_duplicate_proposed_edges(self, session, *, reviewer: str = "Continuous Enrichment Agent") -> dict[str, Any]:
+        aliases = self._approved_proposed_node_aliases(session)
+        pending_statuses = {"draft", "needs_review", "needs_more_evidence"}
+        rows = (
+            session.query(ProposedGraphElement)
+            .filter(ProposedGraphElement.project_id == self.tenant)
+            .filter(ProposedGraphElement.element_type == "edge")
+            .filter(ProposedGraphElement.status.in_(sorted(pending_statuses)))
+            .all()
+        )
+        groups: dict[tuple[str, str, str, str, str], list[tuple[ProposedGraphElement, dict[str, Any], dict[str, Any]]]] = {}
+        skipped = []
+        for row in rows:
+            payload = _json_load(row.payload_json, {})
+            group_key, trace = self._canonical_edge_cleanup_key(payload, aliases)
+            if not group_key:
+                skipped.append({"element_key": row.element_key, "reason": "no_approved_canonical_edge_key", "trace": trace})
+                continue
+            groups.setdefault(group_key, []).append((row, payload, trace))
+
+        reviewed = []
+        for group_key, members in groups.items():
+            if len(members) < 2:
+                continue
+            winner, winner_payload, winner_trace = max(
+                members,
+                key=lambda item: self._duplicate_edge_rank(item[0], item[1], item[2]),
+            )
+            winner_payload = {**winner_payload}
+            winner_payload["canonical_edge_cleanup"] = {
+                "group_key": list(group_key),
+                "retained": True,
+                "duplicate_count": len(members) - 1,
+                "trace": winner_trace,
+            }
+            winner.payload_json = _json_dump(winner_payload)
+            for row, payload, trace in members:
+                if row.element_key == winner.element_key:
+                    continue
+                payload = {**payload}
+                payload["dedup_decision"] = "duplicate_existing_proposal"
+                payload["matched_node_key"] = winner.element_key
+                payload["matched_edge_key"] = winner.element_key
+                payload["matched_status"] = "proposed"
+                payload["matched_source"] = "proposed_graph"
+                payload["review_required"] = False
+                payload["canonical_edge_cleanup"] = {
+                    "group_key": list(group_key),
+                    "retained": False,
+                    "duplicate_of": winner.element_key,
+                    "reviewer": reviewer,
+                    "reason": "same approved-canonical source, relation, and target edge fact",
+                    "trace": trace,
+                }
+                row.payload_json = _json_dump(payload)
+                row.status = "rejected"
+                reviewed.append(
+                    {
+                        "element_key": row.element_key,
+                        "duplicate_of": winner.element_key,
+                        "group_key": list(group_key),
+                    }
+                )
+        session.flush()
+        return {"tenant": self.tenant, "reviewed": reviewed, "skipped": skipped, "group_count": len(groups)}
+
+    def cleanup_duplicate_proposed_edges(self) -> dict[str, Any]:
+        session = self.Session()
+        try:
+            result = self._cleanup_duplicate_proposed_edges(session)
+            session.commit()
+            return result
         except Exception:
             session.rollback()
             raise
@@ -3528,6 +3973,11 @@ class IterativeGraphEnrichmentAgent:
                         endpoint_evidence: dict[str, dict[str, Any]] = {}
                         for candidate in candidates:
                             candidate_seq += 1
+                            if candidate.get("element_type") == "edge":
+                                candidate = {**candidate, "_candidate_seq": candidate_seq}
+                                annotated_candidates.append(candidate)
+                                continue
+
                             candidate = self._annotate_candidate_identity(
                                 candidate,
                                 task_id=task_id,
@@ -3549,6 +3999,15 @@ class IterativeGraphEnrichmentAgent:
                         for candidate in annotated_candidates:
                             if candidate["element_type"] == "edge":
                                 candidate = self._attach_endpoint_dedup_evidence(candidate, endpoint_evidence)
+                                candidate = self._annotate_candidate_identity(
+                                    candidate,
+                                    task_id=task_id,
+                                    run_id=run_key,
+                                    frontier_id=frontier_id,
+                                    candidate_seq=int(candidate.get("_candidate_seq") or 0),
+                                    identity_index=identity_index,
+                                )
+                                candidate.pop("_candidate_seq", None)
                             if (
                                 candidate["element_type"] in {"node", "edge"}
                                 and candidate["dedup_decision"] in {"merge_existing", "duplicate_current_run"}
@@ -3720,6 +4179,11 @@ class IterativeGraphEnrichmentAgent:
             run.proposed_count = proposed_count
             run.pruned_count = pruned_count
             run.finding_count = finding_count
+            duplicate_cleanup = self._cleanup_duplicate_proposed_edges(session)
+            if duplicate_cleanup.get("reviewed"):
+                safety_profile = _json_load(run.safety_profile_json, {})
+                safety_profile["post_run_duplicate_edge_cleanup"] = duplicate_cleanup
+                run.safety_profile_json = _json_dump(safety_profile)
             run.status = "completed"
             run.finished_at = datetime.utcnow()
             session.commit()

@@ -29,6 +29,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from reasoning_engine import ReasoningEngine
 from iterative_graph_enrichment_agent import (  # noqa: E402
     IterativeGraphEnrichmentAgent,
+    _configured_api_key,
     _edge_fact_identity_compatible,
     _edge_fact_identity_parts,
     _graph_context_query_plan,
@@ -47,6 +48,7 @@ SOURCE_DB_URL = os.environ.get(
     f"mysql+pymysql://aletheia_user:aletheia_password@127.0.0.1:3306/{os.environ.get('ALETHEIA_MYSQL_DB', 'aletheia_test_data')}",
 )
 STATIC_ROOT = ROOT / "web" / "app"
+CONTINUOUS_RUNNING_STALE_SECONDS = int(os.environ.get("ALETHEIA_CONTINUOUS_RUNNING_STALE_SECONDS", "900"))
 
 
 class LocalThreadingHTTPServer(ThreadingHTTPServer):
@@ -178,12 +180,32 @@ def _graph_edge_metric_identity(payload, properties):
 def _graph_edge_fact_key(payload):
     payload = payload or {}
     properties = payload.get("properties") if isinstance(payload.get("properties"), dict) else {}
+    endpoint_evidence = payload.get("endpoint_dedup_evidence") if isinstance(payload.get("endpoint_dedup_evidence"), dict) else {}
+
+    def endpoint_key(role, *fallbacks):
+        evidence = endpoint_evidence.get(role) if isinstance(endpoint_evidence.get(role), dict) else {}
+        matched_key = evidence.get("matched_node_key") or evidence.get("candidate_key")
+        matched_space = evidence.get("matched_space") or evidence.get("matched_source")
+        if matched_key and matched_space in {"approved_graph", "approved_graph_instance", "approved_graph_projection", "proposed_graph"}:
+            return _graph_identity_text(matched_key)
+        for fallback in fallbacks:
+            value = _graph_identity_text(fallback)
+            if value:
+                return value
+        return ""
+
     relation = _graph_identity_text(payload.get("relation") or payload.get("link_type") or payload.get("graph_edge_name"))
-    source_label = _graph_identity_text(
-        payload.get("source_label") or payload.get("source_node_key") or payload.get("source_object_key")
+    source_label = endpoint_key(
+        "source",
+        payload.get("source_label"),
+        payload.get("source_node_key"),
+        payload.get("source_object_key"),
     )
-    target_label = _graph_identity_text(
-        payload.get("target_label") or payload.get("target_node_key") or payload.get("target_object_key")
+    target_label = endpoint_key(
+        "target",
+        payload.get("target_label"),
+        payload.get("target_node_key"),
+        payload.get("target_object_key"),
     )
     if not relation or not source_label or not target_label:
         return None
@@ -2106,6 +2128,18 @@ class InstanceRepository:
         objective = ""
         config = {
             "mode": "bounded_autonomous",
+            "research_mode": "frontier_enrichment",
+            "research_topics": [],
+            "retrieval_lanes": [
+                "breaking_news",
+                "official_sources",
+                "academic",
+                "think_tank",
+                "industry",
+                "historical_cases",
+            ],
+            "recency_windows": ["24h", "7d", "30d", "historical"],
+            "max_queries_per_lane": 2,
             "run_mode": "scheduled_or_manual",
             "cadence": "manual",
             "custom_interval_minutes": 60,
@@ -2115,7 +2149,18 @@ class InstanceRepository:
             "max_iterations": 1,
             "max_frontier": 4,
             "max_results_per_query": 4,
+            "search_query_planner": "llm_with_fallback",
+            "search_query_planner_model": "gemini-3.5-flash",
+            "frontier_selector": "llm_with_fallback",
+            "frontier_selector_model": "gemini-3.5-flash",
+            "frontier_selector_shortlist": 20,
+            "frontier_max_per_cluster": 2,
             "node_similarity_dedup_threshold": 0.6,
+            "auto_review_similar_proposals": False,
+            "auto_review_llm_verifier": True,
+            "auto_review_model": "gemini-3.5-flash",
+            "auto_reject_similarity_threshold": 0.92,
+            "auto_review_reviewer": "Continuous Enrichment Agent",
             "budget": {
                 "max_frontier_per_cycle": 4,
                 "max_results_per_query": 4,
@@ -2190,7 +2235,283 @@ class InstanceRepository:
         timeout_seconds = float((config or {}).get("search_timeout_seconds") or 8.0)
         return DuckDuckGoHTMLSearchProvider(timeout_seconds=timeout_seconds)
 
+    def _continuous_llm_query_plans(self, tenant, item, objective, fallback_plan, config):
+        if (config or {}).get("search_query_planner") in {"deterministic", "fallback", "off", "disabled"}:
+            return None, "disabled"
+        api_key = _configured_api_key("GEMINI_API_KEY", "GOOGLE_API_KEY")
+        if not api_key:
+            return None, "missing_api_key"
+        try:
+            from google import genai
+        except Exception as exc:
+            return None, f"google_genai_unavailable: {_safe_error_message(exc)}"
+        fallback_plans = fallback_plan.get("plans") or []
+        payload = item.get("payload") if isinstance(item.get("payload"), dict) else {}
+        prompt = {
+            "task": "Generate broad web search queries for evidence discovery. Queries are for a search engine, not for an AI assistant.",
+            "rules": [
+                "Return strict JSON only: {\"plans\":[{\"query\":\"...\",\"intent\":\"...\",\"granularity\":\"...\",\"coarse_level\":0}]}",
+                "Use short, recall-oriented search queries, normally 3 to 8 words.",
+                "Prefer real-world entity names, aliases, places, products, organizations, events, and plain domain concepts.",
+                "Do not include instruction words such as find, recent, public, evidence, investigate, analyze, current, latest unless they are part of a proper name.",
+                "Do not include internal schema/control tokens such as proposed_node, proposed_edge, frontier, graph, schema, has_systemic_risk, depends_on, many_to_many, EvidenceEntity.",
+                "Translate schema relation IDs into plain-language concepts only when useful; otherwise omit them.",
+                "Start with important entities, then broaden for recall. Do not over-constrain every query.",
+                "No Boolean operators, no quotes, no site filters unless explicitly present in the frontier.",
+            ],
+            "objective": objective,
+            "tenant_id": tenant.tenant_id,
+            "frontier": {
+                "key": item.get("key"),
+                "name": item.get("name"),
+                "source_label": payload.get("source_label"),
+                "target_label": payload.get("target_label"),
+                "relation": payload.get("relation") or item.get("relation"),
+                "source_type": payload.get("source_type"),
+                "target_type": payload.get("target_type"),
+                "ontology_type": item.get("ontology_type") or payload.get("ontology_type"),
+                "metrics": payload.get("metrics") or [],
+            },
+            "fallback_plans": [
+                {
+                    "intent": plan.get("intent"),
+                    "granularity": plan.get("granularity"),
+                    "coarse_level": plan.get("coarse_level"),
+                    "query": plan.get("query"),
+                }
+                for plan in fallback_plans[:4]
+            ],
+        }
+        try:
+            client = genai.Client(api_key=api_key)
+            response = client.models.generate_content(
+                model=(config or {}).get("search_query_planner_model") or "gemini-3.5-flash",
+                contents=json.dumps(prompt, ensure_ascii=False),
+            )
+            raw_text = (getattr(response, "text", "") or "").strip()
+            if raw_text.startswith("```"):
+                raw_text = re.sub(r"^```(?:json)?\s*", "", raw_text)
+                raw_text = re.sub(r"\s*```$", "", raw_text)
+            parsed = json.loads(raw_text)
+        except Exception as exc:
+            return None, f"llm_error: {_safe_error_message(exc)}"
+        raw_plans = parsed.get("plans") if isinstance(parsed, dict) else None
+        if not isinstance(raw_plans, list):
+            return None, "invalid_llm_plan_shape"
+        forbidden = {
+            "find",
+            "public",
+            "evidence",
+            "proposed_node",
+            "proposed_edge",
+            "has_systemic_risk",
+            "depends_on",
+            "many_to_many",
+            "evidenceentity",
+        }
+        plans = []
+        seen_queries = set()
+        for index, raw_plan in enumerate(raw_plans):
+            if not isinstance(raw_plan, dict):
+                continue
+            query = re.sub(r"\s+", " ", str(raw_plan.get("query") or "")).strip()
+            lowered = query.lower()
+            if not query or query in seen_queries or any(term in lowered for term in forbidden):
+                continue
+            words = query.split()
+            if len(words) > 10:
+                query = " ".join(words[:10])
+            fallback = fallback_plans[min(index, len(fallback_plans) - 1)] if fallback_plans else {}
+            plans.append(
+                {
+                    **fallback,
+                    "query": query,
+                    "intent": raw_plan.get("intent") or fallback.get("intent") or "llm_recall_discovery",
+                    "granularity": raw_plan.get("granularity") or fallback.get("granularity") or f"L{index}_llm_recall",
+                    "coarse_level": int(raw_plan.get("coarse_level") if raw_plan.get("coarse_level") is not None else fallback.get("coarse_level") or index),
+                    "planner": "llm",
+                    "source_terms": raw_plan.get("source_terms") if isinstance(raw_plan.get("source_terms"), list) else fallback.get("source_terms") or [],
+                }
+            )
+            seen_queries.add(query)
+        if not plans:
+            return None, "empty_llm_plan_after_validation"
+        return {**fallback_plan, "query": plans[0]["query"], "plans": plans, "selected_plan": plans[0], "planner": "llm"}, "ok"
+
+    def _continuous_research_mode(self, config):
+        mode = str((config or {}).get("research_mode") or (config or {}).get("mode") or "").strip().lower()
+        if mode in {"deep_research", "topic_research", "research"}:
+            return "deep_research"
+        return "frontier_enrichment"
+
+    def _continuous_research_topics(self, objective, config, body=None):
+        body = body or {}
+        raw_topics = body.get("research_topics")
+        if raw_topics is None:
+            raw_topics = (config or {}).get("research_topics")
+        topics = []
+        if isinstance(raw_topics, str):
+            raw_topics = [part.strip() for part in re.split(r"[\n;]+", raw_topics) if part.strip()]
+        for topic in raw_topics or []:
+            text = re.sub(r"\s+", " ", str(topic or "").strip())
+            if text and text.lower() not in {item.lower() for item in topics}:
+                topics.append(text)
+        objective_text = re.sub(r"\s+", " ", str(body.get("objective") or objective or "").strip())
+        if objective_text and not topics:
+            topics.append(objective_text)
+        return topics[:20]
+
+    def _continuous_retrieval_lanes(self, config, body=None):
+        body = body or {}
+        default_lanes = [
+            "breaking_news",
+            "official_sources",
+            "academic",
+            "think_tank",
+            "industry",
+            "historical_cases",
+        ]
+        raw_lanes = body.get("retrieval_lanes")
+        if raw_lanes is None:
+            raw_lanes = (config or {}).get("retrieval_lanes") or default_lanes
+        if isinstance(raw_lanes, str):
+            raw_lanes = [part.strip() for part in re.split(r"[,\s]+", raw_lanes) if part.strip()]
+        allowed = set(default_lanes)
+        lanes = []
+        for lane in raw_lanes or []:
+            normalized = str(lane or "").strip().lower().replace("-", "_")
+            if normalized in allowed and normalized not in lanes:
+                lanes.append(normalized)
+        return lanes or default_lanes
+
+    def _continuous_recency_windows(self, config, body=None):
+        body = body or {}
+        raw_windows = body.get("recency_windows")
+        if raw_windows is None:
+            raw_windows = (config or {}).get("recency_windows") or ["24h", "7d", "30d", "historical"]
+        if isinstance(raw_windows, str):
+            raw_windows = [part.strip() for part in re.split(r"[,\s]+", raw_windows) if part.strip()]
+        windows = []
+        for window in raw_windows or []:
+            normalized = str(window or "").strip().lower()
+            if normalized in {"24h", "48h", "7d", "30d", "90d", "historical"} and normalized not in windows:
+                windows.append(normalized)
+        return windows or ["24h", "7d", "30d", "historical"]
+
+    def _continuous_research_frontier_items(self, tenant, objective, config, body=None, max_frontier=4):
+        topics = self._continuous_research_topics(objective, config, body)
+        lanes = self._continuous_retrieval_lanes(config, body)
+        windows = self._continuous_recency_windows(config, body)
+        if not topics:
+            return []
+        items = []
+        for topic in topics:
+            key = f"research-topic:{tenant.tenant_id}:{_slug(topic)[:72].strip('-')}"
+            item = {
+                "key": key,
+                "frontier_identity": f"research-topic:{topic.lower()}",
+                "name": topic,
+                "artifact_type": "research_topic",
+                "kind": "research_topic",
+                "source": "research_agenda",
+                "source_kind": "research_topic",
+                "priority": 120,
+                "reason": "open-ended deep research topic should discover new developments, expert analysis, and graph expansion candidates",
+                "depth": 0,
+                "payload": {
+                    "topic": topic,
+                    "retrieval_lanes": lanes,
+                    "recency_windows": windows,
+                    "research_mode": "deep_research",
+                    "tenant_id": tenant.tenant_id,
+                },
+            }
+            items.append(self._continuous_normalize_frontier_item(item, source_kind="research_topic", priority=120))
+            if len(items) >= max_frontier:
+                break
+        return items
+
+    def _continuous_research_query_plan(self, item, objective, config):
+        payload = item.get("payload") if isinstance(item.get("payload"), dict) else {}
+        topic = re.sub(r"\s+", " ", str(payload.get("topic") or item.get("name") or objective or "").strip())
+        lanes = payload.get("retrieval_lanes") if isinstance(payload.get("retrieval_lanes"), list) else self._continuous_retrieval_lanes(config)
+        windows = payload.get("recency_windows") if isinstance(payload.get("recency_windows"), list) else self._continuous_recency_windows(config)
+        max_queries_per_lane = max(1, min(int((config or {}).get("max_queries_per_lane") or 2), 5))
+        lane_templates = {
+            "breaking_news": [
+                ("latest_developments", "24h", "{topic} latest developments"),
+                ("recent_news", "7d", "{topic} news analysis"),
+            ],
+            "official_sources": [
+                ("official_assessment", "30d", "{topic} government report"),
+                ("official_statement", "7d", "{topic} official statement"),
+            ],
+            "academic": [
+                ("academic_mechanism", "historical", "{topic} academic paper risk analysis"),
+                ("literature_review", "historical", "{topic} journal article energy security"),
+            ],
+            "think_tank": [
+                ("expert_analysis", "30d", "{topic} think tank analysis"),
+                ("policy_brief", "historical", "{topic} policy brief strategic risk"),
+            ],
+            "industry": [
+                ("market_impact", "7d", "{topic} shipping insurance oil market"),
+                ("industry_risk", "30d", "{topic} maritime trade risk report"),
+            ],
+            "historical_cases": [
+                ("historical_case", "historical", "{topic} historical crisis analysis"),
+                ("comparative_history", "historical", "{topic} past disruption case study"),
+            ],
+        }
+        window_rank = {window: index for index, window in enumerate(windows)}
+        plans = []
+        seen = set()
+        for lane in lanes:
+            templates = lane_templates.get(str(lane), [])
+            for intent, window, template in templates[:max_queries_per_lane]:
+                query = re.sub(r"\s+", " ", template.format(topic=topic)).strip()
+                lowered = query.lower()
+                if not query or lowered in seen:
+                    continue
+                seen.add(lowered)
+                coarse_level = window_rank.get(window, len(plans))
+                plans.append(
+                    {
+                        "query": query,
+                        "intent": intent,
+                        "lane": lane,
+                        "recency_window": window,
+                        "granularity": f"research_{lane}_{window}",
+                        "coarse_level": coarse_level,
+                        "degree": 0,
+                        "radius": 1,
+                        "source_terms": [
+                            {"source": "research_topic", "term": topic},
+                            {"source": "retrieval_lane", "term": lane},
+                            {"source": "recency_window", "term": window},
+                        ],
+                    }
+                )
+        return {
+            "query": plans[0]["query"] if plans else topic,
+            "query_terms": {
+                "topic": [topic],
+                "lanes": lanes,
+                "recency_windows": windows,
+            },
+            "plans": plans,
+            "selected_plan": plans[0] if plans else None,
+            "planner": "deep_research_lane_planner",
+            "research_agenda": {
+                "topic": topic,
+                "lanes": lanes,
+                "recency_windows": windows,
+                "goal": "discover recent developments, expert historical analysis, mechanisms, contradictions, indicators, and graph expansion candidates",
+            },
+        }
+
     def _continuous_query_search_results(self, tenant, objective, frontier_items, max_results_per_query, config, provider=None, live_event_sink=None):
+        injected_provider = provider is not None
         provider = provider if provider is not None else self._continuous_search_provider(config)
         events = []
         def emit(event):
@@ -2213,7 +2534,52 @@ class InstanceRepository:
         max_plans_per_frontier = int(config.get("max_query_plans_per_frontier") or 5)
         for item in frontier_items or []:
             frontier_key = self._continuous_frontier_key(item)
-            query_plan = _graph_context_query_plan(item, objective, tenant.tenant_id)
+            if item.get("source_kind") == "research_topic" or item.get("kind") == "research_topic":
+                query_plan = self._continuous_research_query_plan(item, objective, config)
+                emit(
+                    {
+                        "type": "research_agenda_planned",
+                        "frontier_key": frontier_key,
+                        "topic": (query_plan.get("research_agenda") or {}).get("topic"),
+                        "lanes": (query_plan.get("research_agenda") or {}).get("lanes") or [],
+                        "recency_windows": (query_plan.get("research_agenda") or {}).get("recency_windows") or [],
+                        "plan_count": len(query_plan.get("plans") or []),
+                        "created_at": datetime.utcnow().isoformat(),
+                    }
+                )
+                planner_mode = "deterministic"
+            else:
+                query_plan = _graph_context_query_plan(item, objective, tenant.tenant_id)
+                planner_mode = (config or {}).get("search_query_planner") or ("deterministic" if injected_provider else "llm_with_fallback")
+            if planner_mode not in {"deterministic", "fallback", "off", "disabled"}:
+                llm_plan, planner_status = self._continuous_llm_query_plans(
+                    tenant,
+                    item,
+                    objective,
+                    query_plan,
+                    {**(config or {}), "search_query_planner": planner_mode},
+                )
+                if llm_plan:
+                    query_plan = llm_plan
+                    emit(
+                        {
+                            "type": "query_planner_used",
+                            "frontier_key": frontier_key,
+                            "planner": "llm",
+                            "plan_count": len(query_plan.get("plans") or []),
+                            "created_at": datetime.utcnow().isoformat(),
+                        }
+                    )
+                else:
+                    emit(
+                        {
+                            "type": "query_planner_fallback",
+                            "frontier_key": frontier_key,
+                            "planner": "deterministic_recall",
+                            "reason": planner_status,
+                            "created_at": datetime.utcnow().isoformat(),
+                        }
+                    )
             plans = [plan for plan in query_plan.get("plans") or [] if str(plan.get("query") or "").strip()]
             if not plans:
                 emit(
@@ -2276,6 +2642,8 @@ class InstanceRepository:
                         "frontier_key": frontier_key,
                         "query_plan": {
                             "selected_intent": selected_plan.get("intent"),
+                            "lane": selected_plan.get("lane"),
+                            "recency_window": selected_plan.get("recency_window"),
                             "granularity": selected_plan.get("granularity"),
                             "coarse_level": selected_plan.get("coarse_level"),
                             "degree": selected_plan.get("degree"),
@@ -2304,7 +2672,7 @@ class InstanceRepository:
                         "created_at": datetime.utcnow().isoformat(),
                     }
                 )
-                if added > 0:
+                if added > 0 and item.get("source_kind") != "research_topic" and item.get("kind") != "research_topic":
                     break
             frontier_state["last_attempted_plan_index"] = last_attempt_index
             frontier_state["last_attempted_granularity"] = (plans[last_attempt_index] or {}).get("granularity")
@@ -2370,6 +2738,43 @@ class InstanceRepository:
         if "custom_interval_minutes" in body:
             interval = max(1, min(int(body.get("custom_interval_minutes") or 60), 10080))
             config["custom_interval_minutes"] = interval
+        if "search_query_planner" in body:
+            planner = str(body.get("search_query_planner") or "llm_with_fallback").strip().lower()
+            if planner not in {"llm_with_fallback", "llm", "deterministic", "fallback", "off", "disabled"}:
+                raise ValueError("search_query_planner must be llm_with_fallback, llm, deterministic, fallback, off, or disabled")
+            config["search_query_planner"] = planner
+        if "research_mode" in body:
+            mode = str(body.get("research_mode") or "frontier_enrichment").strip().lower()
+            if mode not in {"frontier_enrichment", "deep_research", "topic_research", "research"}:
+                raise ValueError("research_mode must be frontier_enrichment or deep_research")
+            config["research_mode"] = "deep_research" if mode in {"deep_research", "topic_research", "research"} else "frontier_enrichment"
+            if mode in {"deep_research", "topic_research", "research"}:
+                config["mode"] = "deep_research"
+        if "research_topics" in body:
+            config["research_topics"] = self._continuous_research_topics("", config, body)
+        if "retrieval_lanes" in body:
+            config["retrieval_lanes"] = self._continuous_retrieval_lanes(config, body)
+        if "recency_windows" in body:
+            config["recency_windows"] = self._continuous_recency_windows(config, body)
+        if "max_queries_per_lane" in body:
+            config["max_queries_per_lane"] = max(1, min(int(body.get("max_queries_per_lane") or 2), 5))
+        if "search_query_planner_model" in body:
+            model = str(body.get("search_query_planner_model") or "").strip()
+            if model:
+                config["search_query_planner_model"] = model
+        if "frontier_selector" in body:
+            selector = str(body.get("frontier_selector") or "llm_with_fallback").strip().lower()
+            if selector not in {"llm_with_fallback", "llm", "deterministic", "score", "off", "disabled"}:
+                raise ValueError("frontier_selector must be llm_with_fallback, llm, deterministic, score, off, or disabled")
+            config["frontier_selector"] = selector
+        if "frontier_selector_model" in body:
+            model = str(body.get("frontier_selector_model") or "").strip()
+            if model:
+                config["frontier_selector_model"] = model
+        if "frontier_selector_shortlist" in body:
+            config["frontier_selector_shortlist"] = max(1, min(int(body.get("frontier_selector_shortlist") or 20), 100))
+        if "frontier_max_per_cluster" in body:
+            config["frontier_max_per_cluster"] = max(1, min(int(body.get("frontier_max_per_cluster") or 2), 10))
         if "allowlist" in body or "allowed_domains" in body:
             raw_domains = body.get("allowed_domains") or body.get("allowlist") or []
             if isinstance(raw_domains, str):
@@ -2419,6 +2824,24 @@ class InstanceRepository:
             except (TypeError, ValueError):
                 raise ValueError("node_similarity_dedup_threshold must be a number between 0 and 1")
             config["node_similarity_dedup_threshold"] = round(max(0.0, min(threshold, 1.0)), 4)
+        if "auto_review_similar_proposals" in body:
+            config["auto_review_similar_proposals"] = bool(body.get("auto_review_similar_proposals"))
+        if "auto_review_llm_verifier" in body:
+            config["auto_review_llm_verifier"] = bool(body.get("auto_review_llm_verifier"))
+        if "auto_review_model" in body:
+            model = str(body.get("auto_review_model") or "").strip()
+            if model:
+                config["auto_review_model"] = model
+        if "auto_reject_similarity_threshold" in body:
+            try:
+                threshold = float(body.get("auto_reject_similarity_threshold"))
+            except (TypeError, ValueError):
+                raise ValueError("auto_reject_similarity_threshold must be a number between 0 and 1")
+            config["auto_reject_similarity_threshold"] = round(max(0.0, min(threshold, 1.0)), 4)
+        if "auto_review_reviewer" in body:
+            reviewer = str(body.get("auto_review_reviewer") or "").strip()
+            if reviewer:
+                config["auto_review_reviewer"] = reviewer
         if body.get("reset_frontier_visit_state"):
             config["visited_frontier_keys"] = []
             config["query_ladder_state"] = {}
@@ -2637,6 +3060,80 @@ class InstanceRepository:
         except Exception:
             return None
 
+    def _continuous_running_stale_after_seconds(self, config=None):
+        config = config or {}
+        raw = config.get("running_stale_after_seconds") or CONTINUOUS_RUNNING_STALE_SECONDS
+        try:
+            return max(60, int(raw))
+        except (TypeError, ValueError):
+            return CONTINUOUS_RUNNING_STALE_SECONDS
+
+    def _continuous_running_stale(self, status, config, now_ts=None):
+        if status != "running":
+            return None
+        config = config or {}
+        started_ts = self._continuous_parse_iso_ts(config.get("last_started_at"))
+        if started_ts is None:
+            return None
+        now_ts = time.time() if now_ts is None else now_ts
+        stale_after = self._continuous_running_stale_after_seconds(config)
+        elapsed = max(0, int(now_ts - started_ts))
+        if elapsed < stale_after:
+            return None
+        return {
+            "elapsed_seconds": elapsed,
+            "stale_after_seconds": stale_after,
+            "last_started_at": config.get("last_started_at"),
+        }
+
+    def _recover_stale_continuous_session_row(self, tenant, row, now_ts=None):
+        if row is None:
+            return None
+        config = _load_json(row["config_json"], {})
+        stale = self._continuous_running_stale(row["status"], config, now_ts=now_ts)
+        if not stale:
+            return row
+        now_iso = datetime.utcnow().isoformat()
+        config["last_finished_at"] = now_iso
+        config["stop_reason"] = "recovered stale running session"
+        self._continuous_append_events(
+            config,
+            [
+                {
+                    "type": "stale_running_recovered",
+                    "reason": "session was marked running but no cycle completed within the stale threshold",
+                    "last_started_at": stale["last_started_at"],
+                    "elapsed_seconds": stale["elapsed_seconds"],
+                    "stale_after_seconds": stale["stale_after_seconds"],
+                    "created_at": now_iso,
+                }
+            ],
+        )
+        config_json = _json_dump(config)
+        with self.metadata_engine_for(tenant).begin() as conn:
+            conn.execute(
+                text(
+                    """
+                    UPDATE aletheia_continuous_enrichment_sessions
+                    SET status = 'idle',
+                        config_json = :config_json,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE project_id = :tenant_id
+                      AND session_key = :session_key
+                      AND status = 'running'
+                    """
+                ),
+                {
+                    "tenant_id": tenant.tenant_id,
+                    "session_key": row["session_key"],
+                    "config_json": config_json,
+                },
+            )
+        recovered = dict(row)
+        recovered["status"] = "idle"
+        recovered["config_json"] = config_json
+        return recovered
+
     def _continuous_frontier_key(self, item):
         return str(item.get("key") or item.get("target_key") or item.get("name") or "").strip()
 
@@ -2706,6 +3203,7 @@ class InstanceRepository:
         return {
             "new_graph_node": 100,
             "new_graph_edge": 100,
+            "research_topic": 120,
             "user_question_scope": 80,
             "reasoning_finding_seed": 60,
             "graph_coverage": 20,
@@ -2715,6 +3213,7 @@ class InstanceRepository:
         return {
             "new_graph_node": "new proposed graph node has not been enriched yet",
             "new_graph_edge": "new proposed graph edge/path has not been enriched yet",
+            "research_topic": "open-ended deep research topic should discover new developments and expert analysis",
             "user_question_scope": "user scoped reasoning question is an active research focus",
             "reasoning_finding_seed": "reasoning finding suggests a path that needs more evidence or expansion",
             "graph_coverage": "coverage fallback is rotating through graph items after higher-priority seeds",
@@ -3118,6 +3617,14 @@ class InstanceRepository:
 
     def _continuous_frontier_candidates(self, tenant, stored_frontier, config):
         candidates = []
+        if self._continuous_research_mode(config) == "deep_research":
+            candidates = self._continuous_research_frontier_items(
+                tenant,
+                (config or {}).get("_frontier_selection_objective") or "",
+                config,
+                max_frontier=max(1, min(int((config or {}).get("max_frontier") or 4), 20)),
+            )
+            return candidates
         for item in stored_frontier or []:
             hydrated = self._hydrate_continuous_frontier_item(tenant, item)
             if hydrated:
@@ -3144,6 +3651,172 @@ class InstanceRepository:
                 deduped[key] = normalized
                 identities[identity] = key
         return list(deduped.values())
+
+    def _continuous_frontier_searchability_score(self, item):
+        payload = item.get("payload") if isinstance(item.get("payload"), dict) else {}
+        labels = [
+            item.get("name"),
+            payload.get("label"),
+            payload.get("source_label"),
+            payload.get("target_label"),
+            payload.get("summary"),
+            item.get("path"),
+        ]
+        text = " ".join(str(value or "") for value in labels if value).strip()
+        if not text:
+            return 0.0, ["missing_label"]
+        tokens = re.findall(r"[A-Za-z0-9][A-Za-z0-9-]*", text)
+        proper_phrases = re.findall(r"\b[A-Z][A-Za-z0-9-]*(?:\s+[A-Z][A-Za-z0-9-]*){1,4}\b", text)
+        score = min(len(set(token.lower() for token in tokens)), 8) * 1.5
+        score += min(len(proper_phrases), 3) * 4
+        if payload.get("source_label") and payload.get("target_label"):
+            score += 8
+        if payload.get("relation") or item.get("relation"):
+            score += 2
+        penalties = []
+        lowered = text.lower()
+        weak_terms = {"unknown", "entity", "evidenceentity", "second strait", "proposed graph", "proposed node", "proposed edge"}
+        for term in weak_terms:
+            if term in lowered:
+                score -= 8
+                penalties.append(f"weak_label:{term}")
+        if len(tokens) <= 2 and not proper_phrases:
+            score -= 5
+            penalties.append("too_few_search_terms")
+        return max(0.0, score), penalties
+
+    def _continuous_frontier_score(self, item, config):
+        payload = item.get("payload") if isinstance(item.get("payload"), dict) else {}
+        source_kind = item.get("source_kind")
+        base = float(item.get("priority") or self._continuous_source_priority(source_kind))
+        score = base
+        reasons = [{"feature": "source_priority", "value": base}]
+        if source_kind == "new_graph_edge":
+            score += 2
+            reasons.append({"feature": "edge_path_bonus", "value": 2})
+        status = str(item.get("status") or payload.get("status") or "").replace("-", "_").lower()
+        if status == "needs_more_evidence":
+            score += 12
+            reasons.append({"feature": "needs_more_evidence", "value": 12})
+        confidence = item.get("confidence")
+        try:
+            if confidence is not None and float(confidence) < 0.75:
+                score += 4
+                reasons.append({"feature": "low_confidence_evidence_gap", "value": 4})
+        except (TypeError, ValueError):
+            pass
+        searchability, penalties = self._continuous_frontier_searchability_score(item)
+        score += searchability
+        reasons.append({"feature": "searchability", "value": round(searchability, 3)})
+        ladder_state = (config or {}).get("query_ladder_state") or {}
+        key = self._continuous_frontier_key(item)
+        state = ladder_state.get(key) if isinstance(ladder_state.get(key), dict) else {}
+        if state.get("last_novelty_result") in {"no_new_proposals", "duplicate_only"}:
+            score -= 15
+            reasons.append({"feature": "recent_low_novelty_penalty", "value": -15})
+        if state.get("last_search_signal") == "no_search_results":
+            score -= 8
+            reasons.append({"feature": "recent_no_search_results_penalty", "value": -8})
+        for penalty in penalties:
+            reasons.append({"feature": penalty, "value": "penalty_applied"})
+        return {"score": round(score, 3), "reasons": reasons, "searchability_penalties": penalties}
+
+    def _continuous_frontier_cluster_key(self, item):
+        payload = item.get("payload") if isinstance(item.get("payload"), dict) else {}
+        endpoints = [
+            str(payload.get("source_label") or "").strip().lower(),
+            str(payload.get("target_label") or "").strip().lower(),
+        ]
+        endpoints = sorted(value for value in endpoints if value)
+        relation = str(payload.get("relation") or item.get("relation") or "").strip().lower()
+        if endpoints:
+            return "|".join([*endpoints, relation])
+        return str(item.get("source_kind") or item.get("kind") or "frontier")
+
+    def _continuous_llm_rerank_frontier(self, tenant, objective, candidates, max_frontier, config):
+        mode = (config or {}).get("frontier_selector") or "deterministic"
+        if mode in {"deterministic", "score", "off", "disabled"}:
+            return None, {"planner": "deterministic", "reason": "disabled"}
+        api_key = _configured_api_key("GEMINI_API_KEY", "GOOGLE_API_KEY")
+        if not api_key:
+            return None, {"planner": "deterministic", "reason": "missing_api_key"}
+        try:
+            from google import genai
+        except Exception as exc:
+            return None, {"planner": "deterministic", "reason": f"google_genai_unavailable: {_safe_error_message(exc)}"}
+        prompt_candidates = []
+        for item in candidates:
+            payload = item.get("payload") if isinstance(item.get("payload"), dict) else {}
+            score = item.get("_frontier_score") or {}
+            prompt_candidates.append(
+                {
+                    "key": self._continuous_frontier_key(item),
+                    "name": self._continuous_frontier_name(item),
+                    "source_kind": item.get("source_kind"),
+                    "priority": item.get("priority"),
+                    "score": score.get("score"),
+                    "score_reasons": score.get("reasons"),
+                    "cluster": item.get("_frontier_cluster"),
+                    "source_label": payload.get("source_label"),
+                    "target_label": payload.get("target_label"),
+                    "relation": payload.get("relation") or item.get("relation"),
+                    "ontology_type": item.get("ontology_type") or payload.get("ontology_type"),
+                    "confidence": item.get("confidence"),
+                    "path": item.get("path"),
+                    "reason": item.get("reason"),
+                }
+            )
+        prompt = {
+            "task": "Select the best frontier items for the next enrichment cycle.",
+            "objective": objective,
+            "max_frontier": int(max_frontier),
+            "rules": [
+                "Return strict JSON only: {\"selected\":[{\"key\":\"...\",\"reason\":\"...\"}],\"skipped\":[{\"key\":\"...\",\"reason\":\"...\"}]}",
+                "Choose items that are likely to produce new, externally searchable evidence.",
+                "Prefer clear real-world entities, endpoints, paths, and evidence gaps.",
+                "Penalize vague labels, duplicate-looking items, weak searchability, and items likely to repeat prior results.",
+                "Maintain diversity across clusters, endpoints, and relation types.",
+                "Never invent keys. Select only keys present in candidates.",
+                "Hard filters such as cooldown, visited state, tenant, and budget have already been applied.",
+            ],
+            "candidates": prompt_candidates,
+        }
+        try:
+            client = genai.Client(api_key=api_key)
+            response = client.models.generate_content(
+                model=(config or {}).get("frontier_selector_model") or "gemini-3.5-flash",
+                contents=json.dumps(prompt, ensure_ascii=False),
+            )
+            raw_text = (getattr(response, "text", "") or "").strip()
+            if raw_text.startswith("```"):
+                raw_text = re.sub(r"^```(?:json)?\s*", "", raw_text)
+                raw_text = re.sub(r"\s*```$", "", raw_text)
+            parsed = json.loads(raw_text)
+        except Exception as exc:
+            return None, {"planner": "deterministic", "reason": f"llm_error: {_safe_error_message(exc)}"}
+        selected = parsed.get("selected") if isinstance(parsed, dict) else None
+        if not isinstance(selected, list):
+            return None, {"planner": "deterministic", "reason": "invalid_llm_selection_shape"}
+        valid = {self._continuous_frontier_key(item): item for item in candidates}
+        ordered = []
+        seen = set()
+        selection_reasons = {}
+        for entry in selected:
+            key = entry.get("key") if isinstance(entry, dict) else entry
+            key = str(key or "").strip()
+            if key and key in valid and key not in seen:
+                ordered.append(valid[key])
+                seen.add(key)
+                if isinstance(entry, dict):
+                    selection_reasons[key] = entry.get("reason")
+        if not ordered:
+            return None, {"planner": "deterministic", "reason": "empty_valid_llm_selection"}
+        return ordered, {
+            "planner": "llm",
+            "selected_keys": [self._continuous_frontier_key(item) for item in ordered],
+            "selection_reasons": selection_reasons,
+            "raw_selected_count": len(selected),
+        }
 
     def _continuous_frontier_for_cycle(self, tenant, stored_frontier, config, max_frontier):
         now_ts = time.time()
@@ -3175,14 +3848,51 @@ class InstanceRepository:
         available_candidates = [item for item in candidates if self._continuous_frontier_available(item, config, now_ts)]
         if not available_candidates and not stored_frontier:
             available_candidates = [item for item in candidates if item.get("source_kind") == "graph_coverage"]
+        for item in available_candidates:
+            item["_frontier_score"] = self._continuous_frontier_score(item, config)
+            item["_frontier_cluster"] = self._continuous_frontier_cluster_key(item)
+        score_ranked_candidates = sorted(
+            available_candidates,
+            key=lambda item: (
+                -float((item.get("_frontier_score") or {}).get("score") or 0),
+                int(item.get("depth") or 0),
+                self._continuous_frontier_key(item),
+            ),
+        )
         if not stored_frontier:
-            available_candidates.sort(key=lambda item: (-float(item.get("priority") or 0), int(item.get("depth") or 0), self._continuous_frontier_key(item)))
+            available_candidates = score_ranked_candidates
+        shortlist_size = max(int(max_frontier), min(int((config or {}).get("frontier_selector_shortlist") or 20), 100))
+        shortlist = score_ranked_candidates[:shortlist_size]
+        reranked, selector_trace = self._continuous_llm_rerank_frontier(tenant, (config or {}).get("_frontier_selection_objective") or "", shortlist, max_frontier, config or {})
+        if reranked:
+            selected_keys = {self._continuous_frontier_key(item) for item in reranked}
+            available_candidates = reranked + [item for item in available_candidates if self._continuous_frontier_key(item) not in selected_keys]
+        config["_frontier_selection_trace"] = {
+            **(selector_trace or {"planner": "deterministic", "reason": "not_run"}),
+            "candidate_source": "stored_frontier" if stored_frontier else "dynamic_frontier",
+            "shortlist_count": len(shortlist),
+            "candidate_count": len(available_candidates),
+            "top_scores": [
+                {
+                    "key": self._continuous_frontier_key(item),
+                    "name": self._continuous_frontier_name(item),
+                    "score": (item.get("_frontier_score") or {}).get("score"),
+                    "cluster": item.get("_frontier_cluster"),
+                }
+                for item in shortlist[:10]
+            ],
+        }
+        max_per_cluster = max(1, int((config or {}).get("frontier_max_per_cluster") or 2))
+        cluster_counts = {}
         for hydrated in available_candidates:
             key = self._continuous_frontier_key(hydrated)
             if not key:
                 continue
             identity = self._continuous_frontier_identity(hydrated) or key
             if identity in {self._continuous_frontier_identity(item) or self._continuous_frontier_key(item) for item in selected}:
+                continue
+            cluster_key = hydrated.get("_frontier_cluster") or self._continuous_frontier_cluster_key(hydrated)
+            if not stored_frontier and cluster_counts.get(cluster_key, 0) >= max_per_cluster and len(available_candidates) - len(selected) > max_frontier:
                 continue
             selected_item = {
                 "key": key,
@@ -3194,6 +3904,9 @@ class InstanceRepository:
                 "priority": float(hydrated.get("priority") or self._continuous_source_priority(hydrated.get("source_kind"))),
                 "reason": hydrated.get("reason") or self._continuous_source_reason(hydrated.get("source_kind")),
                 "depth": int(hydrated.get("depth") or 0),
+                "selection_score": (hydrated.get("_frontier_score") or {}).get("score"),
+                "selection_reasons": (hydrated.get("_frontier_score") or {}).get("reasons"),
+                "selection_cluster": cluster_key,
             }
             for field in (
                 "kind",
@@ -3212,6 +3925,7 @@ class InstanceRepository:
                 if hydrated.get(field) is not None:
                     selected_item[field] = hydrated.get(field)
             selected.append(selected_item)
+            cluster_counts[cluster_key] = cluster_counts.get(cluster_key, 0) + 1
             if len(selected) >= max_frontier:
                 break
         return selected
@@ -3458,6 +4172,11 @@ class InstanceRepository:
             }
         config = _load_json(row["config_json"], {})
         config.setdefault("node_similarity_dedup_threshold", 0.6)
+        config.setdefault("auto_review_similar_proposals", False)
+        config.setdefault("auto_review_llm_verifier", True)
+        config.setdefault("auto_review_model", "gemini-3.5-flash")
+        config.setdefault("auto_reject_similarity_threshold", 0.92)
+        config.setdefault("auto_review_reviewer", "Continuous Enrichment Agent")
         frontier = _load_json(row["frontier_json"], [])
         return {
             "session_key": row["session_key"],
@@ -3577,12 +4296,14 @@ class InstanceRepository:
                 ),
                 {"tenant_id": tenant.tenant_id},
             ).mappings().all()
+        rows = [self._recover_stale_continuous_session_row(tenant, row) for row in rows]
         return {"tenant": tenant.public_dict(), "sessions": [self._continuous_session_to_dict(tenant, row) for row in rows]}
 
     def continuous_enrichment_session(self, tenant, session_key):
         row = self._continuous_session_row(tenant, session_key)
         if row is None:
             return None
+        row = self._recover_stale_continuous_session_row(tenant, row)
         return {"tenant": tenant.public_dict(), "session": self._continuous_session_to_dict(tenant, row)}
 
     def run_due_continuous_enrichment_sessions(self, limit=10):
@@ -3858,9 +4579,13 @@ class InstanceRepository:
                     "autopilot_auto_approve": False,
                 },
             }
+        objective = body.get("objective") or row["objective"]
+        config["_frontier_selection_objective"] = objective
         source_trust_policy = self._continuous_source_trust_policy(config)
         crawl_policy = self._continuous_agent_crawl_policy(config)
         stored_frontier = _load_json(row["frontier_json"], [])
+        if self._continuous_research_mode(config) == "deep_research":
+            stored_frontier = []
         frontier_items = self._continuous_frontier_for_cycle(tenant, stored_frontier, config, max_frontier)
         events.append(
             {
@@ -3879,9 +4604,11 @@ class InstanceRepository:
                 "type": "frontier_selected",
                 "selected_count": len(frontier_items),
                 "selected_keys": [self._continuous_frontier_key(item) for item in frontier_items],
+                "selection_trace": config.pop("_frontier_selection_trace", None),
                 "created_at": datetime.utcnow().isoformat(),
             }
         )
+        config.pop("_frontier_selection_objective", None)
         if not frontier_items:
             event = {
                 "type": "no_frontier_stop",
@@ -3923,7 +4650,6 @@ class InstanceRepository:
                     "autopilot_auto_approve": False,
                 },
             }
-        objective = body.get("objective") or row["objective"]
         raw_search_results, search_events = self._continuous_search_results_for_cycle(
             tenant,
             session_key,
@@ -4073,6 +4799,23 @@ class InstanceRepository:
                 pass
         run_key = result["run"]["run_key"]
         proposed_graph = result.get("proposed_graph") or []
+        auto_review_result = self._continuous_auto_review_similar_proposals(tenant, proposed_graph, config)
+        if auto_review_result.get("enabled"):
+            events.append(
+                {
+                    "type": "auto_review_similar_proposals",
+                    "run_key": run_key,
+                    "reviewed_count": len(auto_review_result.get("reviewed") or []),
+                    "skipped_count": len(auto_review_result.get("skipped") or []),
+                    "reviewed": (auto_review_result.get("reviewed") or [])[:20],
+                    "skipped": (auto_review_result.get("skipped") or [])[:20],
+                    "threshold": float(config.get("auto_reject_similarity_threshold") or 0.92),
+                    "created_at": datetime.utcnow().isoformat(),
+                    "canonical_write": False,
+                    "formal_graph_write": False,
+                    "target": "proposed_graph_review_gate",
+                }
+            )
         next_frontier, frontier_additions = self._continuous_next_frontier(stored_frontier, result, config, consumed_frontier=frontier_items)
         config = self._continuous_mark_frontier_visited(config, frontier_items)
         frontier_state = self._continuous_frontier_state(config)
@@ -4966,6 +5709,140 @@ class InstanceRepository:
                 boundary.get("requires_ontology_review"),
             )
         )
+
+    def _auto_review_similarity_score(self, payload):
+        payload = payload or {}
+        for key in ("match_score", "score", "similarity_score"):
+            try:
+                value = payload.get(key)
+                if value is not None:
+                    return float(value)
+            except (TypeError, ValueError):
+                pass
+        try:
+            distance = payload.get("vector_distance")
+            if distance is not None:
+                return max(0.0, min(1.0, 1.0 - float(distance)))
+        except (TypeError, ValueError):
+            pass
+        return 0.0
+
+    def _should_auto_reject_similar_proposal(self, element, config):
+        if not (config or {}).get("auto_review_similar_proposals"):
+            return False, "disabled", 0.0
+        payload = element.get("payload") or {}
+        status = str(element.get("status") or "").replace("-", "_").lower()
+        if status not in {"draft", "needs_review", "needs_more_evidence"}:
+            return False, f"status_not_pending:{status or 'unknown'}", 0.0
+        if payload.get("decision_reason") == "structural_conflict" or payload.get("conflict_fields"):
+            return False, "structural_conflict_requires_human_review", self._auto_review_similarity_score(payload)
+        score = self._auto_review_similarity_score(payload)
+        threshold = float((config or {}).get("auto_reject_similarity_threshold") or 0.92)
+        if score < threshold:
+            return False, "below_similarity_threshold", score
+        decision = str(payload.get("dedup_decision") or element.get("dedup_decision") or "").replace("-", "_").lower()
+        matched_key = payload.get("matched_node_key") or payload.get("matched_edge_key") or payload.get("matched_element_key")
+        if decision in {"duplicate_existing_proposal", "duplicate_current_run", "merge_existing"} and matched_key:
+            return True, "high_similarity_duplicate", score
+        if decision == "needs_review" and matched_key and payload.get("match_method") in {"vector_embedding", "embedding_degraded_alias_scan"}:
+            return True, "high_similarity_needs_review_duplicate", score
+        return False, "not_duplicate_decision", score
+
+    def _continuous_llm_verify_auto_reject(self, element, score, reason, config):
+        if not (config or {}).get("auto_review_llm_verifier", True):
+            return True, {"verifier": "deterministic", "decision": "reject_duplicate", "reason": "llm_verifier_disabled"}
+        api_key = _configured_api_key("GEMINI_API_KEY", "GOOGLE_API_KEY")
+        if not api_key:
+            return False, {"verifier": "llm", "decision": "skip", "reason": "missing_api_key"}
+        try:
+            from google import genai
+        except Exception as exc:
+            return False, {"verifier": "llm", "decision": "skip", "reason": f"google_genai_unavailable: {_safe_error_message(exc)}"}
+        payload = element.get("payload") or {}
+        prompt = {
+            "task": "Review whether a proposed graph element should be auto-rejected as a duplicate.",
+            "rules": [
+                "Return strict JSON only: {\"decision\":\"reject_duplicate|keep_for_human_review\",\"reason\":\"...\"}.",
+                "Choose reject_duplicate only when the proposal is clearly the same entity/fact/finding as the matched existing item.",
+                "Choose keep_for_human_review if source node, target node, relation, entity type, or source identity differ in a meaningful way.",
+                "Choose keep_for_human_review for structural conflicts, ambiguous endpoints, or evidence that supports a different claim.",
+                "This decision only updates proposed graph review status; it never writes canonical ontology or formal graph data.",
+            ],
+            "proposal": {
+                "key": element.get("element_key") or element.get("key"),
+                "type": element.get("element_type"),
+                "name": element.get("name"),
+                "status": element.get("status"),
+                "confidence": element.get("confidence"),
+                "source_url": element.get("source_url"),
+                "dedup_decision": payload.get("dedup_decision"),
+                "decision_reason": payload.get("decision_reason"),
+                "conflict_fields": payload.get("conflict_fields") or [],
+                "match_score": score,
+                "auto_reason": reason,
+                "matched_key": payload.get("matched_node_key") or payload.get("matched_edge_key") or payload.get("matched_element_key"),
+                "matched_source": payload.get("matched_source"),
+                "matched_status": payload.get("matched_status"),
+                "identity": payload.get("identity"),
+                "match_evidence": payload.get("match_evidence") or [],
+                "vector_top_k": (payload.get("vector_top_k") or [])[:5],
+            },
+        }
+        try:
+            client = genai.Client(api_key=api_key)
+            response = client.models.generate_content(
+                model=(config or {}).get("auto_review_model") or "gemini-3.5-flash",
+                contents=json.dumps(prompt, ensure_ascii=False),
+            )
+            raw_text = (getattr(response, "text", "") or "").strip()
+            if raw_text.startswith("```"):
+                raw_text = re.sub(r"^```(?:json)?\s*", "", raw_text)
+                raw_text = re.sub(r"\s*```$", "", raw_text)
+            parsed = json.loads(raw_text)
+        except Exception as exc:
+            return False, {"verifier": "llm", "decision": "skip", "reason": f"llm_error: {_safe_error_message(exc)}"}
+        decision = str(parsed.get("decision") if isinstance(parsed, dict) else "").strip()
+        llm_reason = str(parsed.get("reason") if isinstance(parsed, dict) else "").strip()
+        if decision == "reject_duplicate":
+            return True, {"verifier": "llm", "decision": decision, "reason": llm_reason}
+        return False, {"verifier": "llm", "decision": decision or "keep_for_human_review", "reason": llm_reason or "llm_kept_for_review"}
+
+    def _continuous_auto_review_similar_proposals(self, tenant, proposed_graph, config):
+        if not (config or {}).get("auto_review_similar_proposals"):
+            return {"enabled": False, "reviewed": [], "skipped": []}
+        reviewed = []
+        skipped = []
+        reviewer = str((config or {}).get("auto_review_reviewer") or "Continuous Enrichment Agent")
+        threshold = float((config or {}).get("auto_reject_similarity_threshold") or 0.92)
+        for element in proposed_graph or []:
+            element_key = element.get("element_key") or element.get("key")
+            if not element_key:
+                continue
+            should_reject, reason, score = self._should_auto_reject_similar_proposal(element, config)
+            if not should_reject:
+                skipped.append({"element_key": element_key, "reason": reason, "similarity_score": round(score, 4)})
+                continue
+            verified, verifier_trace = self._continuous_llm_verify_auto_reject(element, score, reason, config)
+            if not verified:
+                skipped.append({"element_key": element_key, "reason": "llm_kept_for_review", "similarity_score": round(score, 4), "verifier": verifier_trace})
+                continue
+            review_reason = (
+                f"Auto-rejected by enrichment agent: similarity {score:.4f} >= {threshold:.4f}; "
+                f"{reason}; matched existing proposal/object; verifier={verifier_trace.get('verifier')}: {verifier_trace.get('reason') or verifier_trace.get('decision')}."
+            )
+            try:
+                result = self.review_proposed_graph_element(
+                    tenant,
+                    element_key,
+                    "reject",
+                    {"reviewer": reviewer, "reason": review_reason},
+                )
+            except Exception as exc:
+                skipped.append({"element_key": element_key, "reason": f"review_failed: {_safe_error_message(exc)}", "similarity_score": round(score, 4)})
+                continue
+            if result:
+                reviewed.append({"element_key": element_key, "reason": reason, "similarity_score": round(score, 4), "verifier": verifier_trace})
+        return {"enabled": True, "reviewed": reviewed, "skipped": skipped}
 
     def review_proposed_graph_elements_batch(self, tenant, element_keys, action, body=None):
         action = (action or "").replace("_", "-").lower()

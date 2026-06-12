@@ -123,6 +123,281 @@ class TypeArtifactNearestEmbeddingAdapter:
 
 
 class IterativeGraphEnrichmentTest(unittest.TestCase):
+    def test_edge_identity_uses_canonical_endpoint_dedup_evidence(self):
+        candidate = {
+            "element_type": "edge",
+            "name": "Iran depends on Hormuz",
+            "payload": {
+                "source_type": "Country",
+                "source_label": "Iran",
+                "target_type": "Chokepoint",
+                "target_label": "Hormuz",
+                "relation": "depends_on",
+                "endpoint_dedup_evidence": {
+                    "source": {
+                        "matched_node_key": "Country:IRN",
+                        "matched_space": "approved_graph",
+                    },
+                    "target": {
+                        "matched_node_key": "Chokepoint:Strait of Hormuz",
+                        "matched_space": "approved_graph",
+                    },
+                },
+            },
+        }
+
+        identity = iterative_graph_enrichment_agent._candidate_identity_payload(candidate)
+        identity_key = iterative_graph_enrichment_agent._identity_key("maritime-risk", identity)
+
+        self.assertEqual(identity["source_canonical_key"], "country irn")
+        self.assertEqual(identity["target_canonical_key"], "chokepoint strait of hormuz")
+        self.assertIn("country irn", identity_key)
+        self.assertIn("chokepoint strait of hormuz", identity_key)
+        self.assertIn("depends on:country irn::chokepoint strait of hormuz", identity["source_identity"])
+
+    def test_proposed_node_index_transitively_prefers_approved_match(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_url, _ = self._seed_db(tmpdir)
+            engine = create_engine(db_url)
+            Session = sessionmaker(bind=engine)
+            session = Session()
+            run = IterativeGraphEnrichmentRun(
+                project_id="maritime-risk",
+                run_key="node-alias-run",
+                objective="node alias",
+                status="completed",
+            )
+            session.add(run)
+            session.flush()
+            session.add(
+                ProposedGraphElement(
+                    run_id=run.id,
+                    project_id="maritime-risk",
+                    element_key="proposed-graph:maritime-risk:node:hormuz",
+                    element_type="node",
+                    name="Hormuz",
+                    payload_json=json.dumps(
+                        {
+                            "ontology_type": "Chokepoint",
+                            "label": "Hormuz",
+                            "dedup_decision": "merge_existing",
+                            "matched_node_key": "Chokepoint:Strait of Hormuz",
+                            "matched_source": "approved_graph_instance",
+                            "matched_status": "approved",
+                        }
+                    ),
+                    evidence_refs_json=json.dumps([]),
+                    source_url="https://example.test/hormuz",
+                    confidence=0.82,
+                    status="draft",
+                )
+            )
+            session.commit()
+
+            agent = IterativeGraphEnrichmentAgent(
+                db_url,
+                tenant="maritime-risk",
+                embedding_adapter=StaticTestEmbeddingAdapter(),
+            )
+            indexed = agent._proposed_identity_index(session)
+            session.close()
+
+        row = next(item for item in indexed if item["identity"].get("label") == "Hormuz")
+        self.assertEqual(row["node_key"], "Chokepoint:Strait of Hormuz")
+        self.assertEqual(row["source"], "approved_graph_instance")
+        self.assertEqual(row["status"], "approved")
+
+    def test_cleanup_duplicate_edges_uses_approved_endpoint_aliases(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_url, _ = self._seed_db(tmpdir)
+            engine = create_engine(db_url)
+            Session = sessionmaker(bind=engine)
+            session = Session()
+            run = IterativeGraphEnrichmentRun(
+                project_id="maritime-risk",
+                run_key="cleanup-run",
+                objective="cleanup duplicate edges",
+                status="completed",
+            )
+            session.add(run)
+            session.flush()
+            session.add(
+                ProposedGraphElement(
+                    run_id=run.id,
+                    project_id="maritime-risk",
+                    element_key="proposed-graph:maritime-risk:node:hormuz",
+                    element_type="node",
+                    name="Hormuz",
+                    payload_json=json.dumps(
+                        {
+                            "ontology_type": "Chokepoint",
+                            "label": "Hormuz",
+                            "dedup_decision": "merge_existing",
+                            "matched_node_key": "Chokepoint:Strait of Hormuz",
+                            "matched_source": "approved_graph_instance",
+                            "matched_status": "approved",
+                        }
+                    ),
+                    evidence_refs_json=json.dumps([]),
+                    confidence=0.82,
+                    status="draft",
+                )
+            )
+            direct_payload = {
+                "source_type": "Country",
+                "source_label": "Iran",
+                "target_type": "Chokepoint",
+                "target_label": "Strait of Hormuz",
+                "relation": "depends_on",
+                "endpoint_dedup_evidence": {
+                    "source": {"matched_node_key": "Country:IRN", "matched_space": "approved_graph"},
+                    "target": {"matched_node_key": "Chokepoint:Strait of Hormuz", "matched_space": "approved_graph"},
+                },
+            }
+            alias_payload = {
+                "source_type": "Country",
+                "source_label": "Iran",
+                "target_type": "Chokepoint",
+                "target_label": "Hormuz",
+                "relation": "depends_on",
+                "endpoint_dedup_evidence": {
+                    "source": {"matched_node_key": "Country:IRN", "matched_space": "approved_graph"},
+                    "target": {
+                        "matched_node_key": "proposed-graph:maritime-risk:node:hormuz",
+                        "matched_space": "proposed_graph",
+                    },
+                },
+            }
+            session.add_all(
+                [
+                    ProposedGraphElement(
+                        run_id=run.id,
+                        project_id="maritime-risk",
+                        element_key="proposed-graph:maritime-risk:edge:direct",
+                        element_type="edge",
+                        name="Iran depends on Strait of Hormuz",
+                        payload_json=json.dumps(direct_payload),
+                        evidence_refs_json=json.dumps([]),
+                        confidence=0.7,
+                        status="draft",
+                    ),
+                    ProposedGraphElement(
+                        run_id=run.id,
+                        project_id="maritime-risk",
+                        element_key="proposed-graph:maritime-risk:edge:alias",
+                        element_type="edge",
+                        name="Iran depends on Hormuz",
+                        payload_json=json.dumps(alias_payload),
+                        evidence_refs_json=json.dumps([]),
+                        confidence=0.78,
+                        status="needs_more_evidence",
+                    ),
+                ]
+            )
+            session.commit()
+            session.close()
+
+            agent = IterativeGraphEnrichmentAgent(
+                db_url,
+                tenant="maritime-risk",
+                embedding_adapter=StaticTestEmbeddingAdapter(),
+            )
+            cleanup = agent.cleanup_duplicate_proposed_edges()
+
+            session = Session()
+            try:
+                alias = session.query(ProposedGraphElement).filter_by(element_key="proposed-graph:maritime-risk:edge:alias").one()
+                direct = session.query(ProposedGraphElement).filter_by(element_key="proposed-graph:maritime-risk:edge:direct").one()
+                alias_payload = json.loads(alias.payload_json)
+                direct_payload = json.loads(direct.payload_json)
+            finally:
+                session.close()
+
+        self.assertEqual(alias.status, "rejected")
+        self.assertEqual(alias_payload["matched_edge_key"], "proposed-graph:maritime-risk:edge:direct")
+        self.assertEqual(alias_payload["canonical_edge_cleanup"]["duplicate_of"], "proposed-graph:maritime-risk:edge:direct")
+        self.assertEqual(direct.status, "draft")
+        self.assertTrue(direct_payload["canonical_edge_cleanup"]["retained"])
+        self.assertEqual(cleanup["reviewed"][0]["element_key"], "proposed-graph:maritime-risk:edge:alias")
+
+    def test_unresolved_generic_entity_reference_is_not_promoted_to_node(self):
+        self.assertTrue(iterative_graph_enrichment_agent._is_unresolved_entity_reference("Second Strait", "Chokepoint"))
+        self.assertFalse(iterative_graph_enrichment_agent._is_unresolved_entity_reference("Taiwan Strait", "Chokepoint"))
+
+        def fake_runner(source_text, _schema_context):
+            def interval(text):
+                start = source_text.find(text)
+                return SimpleNamespace(start_pos=start, end_pos=start + len(text)) if start >= 0 else None
+
+            return SimpleNamespace(
+                extractions=[
+                    SimpleNamespace(
+                        extraction_class="graph_node",
+                        extraction_text="Iran",
+                        attributes={"schema_node_key": "country", "node_type": "Country", "confidence": 0.86},
+                        char_interval=interval("Iran"),
+                    ),
+                    SimpleNamespace(
+                        extraction_class="graph_node",
+                        extraction_text="Second Strait",
+                        attributes={"schema_node_key": "chokepoint", "node_type": "Chokepoint", "confidence": 0.82},
+                        char_interval=interval("Second Strait"),
+                    ),
+                    SimpleNamespace(
+                        extraction_class="graph_relation",
+                        extraction_text="eyes",
+                        attributes={
+                            "source_label": "Iran",
+                            "target_label": "Second Strait",
+                            "relation_label": "eyes",
+                        },
+                        char_interval=interval("eyes"),
+                    ),
+                ]
+            )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_url, _ = self._seed_db(tmpdir)
+            agent = IterativeGraphEnrichmentAgent(
+                db_url,
+                tenant="maritime-risk",
+                langextract_runner=fake_runner,
+                embedding_adapter=StaticTestEmbeddingAdapter(),
+            )
+            session = agent.Session()
+            try:
+                result = SimpleNamespace(
+                    title="Iran Eyes Second Strait",
+                    snippet="Iran Eyes Second Strait",
+                    url="https://example.org/iran-eyes-second-strait",
+                )
+                extraction = agent._extract_graph_evidence_contract(
+                    session,
+                    {"key": "frontier:bab", "name": "Bab el-Mandeb Strait"},
+                    result,
+                    "Iran Eyes Second Strait",
+                )
+            finally:
+                session.close()
+
+            elements = agent._candidate_elements(
+                extraction,
+                {"key": "frontier:bab", "name": "Bab el-Mandeb Strait"},
+                result,
+                "Iran Eyes Second Strait",
+                1,
+            )
+
+        self.assertFalse([item for item in extraction["nodes"] if item.get("label") == "Second Strait"])
+        self.assertFalse([item for item in elements if item["element_type"] == "node" and item["name"] == "Second Strait"])
+        self.assertTrue(
+            any(
+                item.get("reason") == "unresolved_entity_reference"
+                and item.get("label") == "Second Strait"
+                for item in extraction["rejected_or_ambiguous_candidates"]
+            )
+        )
+
     def _seed_db(self, tmpdir: str):
         db_url = f"sqlite:///{Path(tmpdir) / 'metadata.db'}"
         engine = create_engine(db_url)
@@ -986,6 +1261,75 @@ class IterativeGraphEnrichmentTest(unittest.TestCase):
             self.assertEqual(ambiguous["review_surface"], "live_trace")
             self.assertEqual(ambiguous["relation_label"], "unapproved blockade relation")
 
+    def test_deep_research_unmapped_relation_becomes_ontology_relation_proposal(self):
+        def fake_runner(_source_text, _schema_context):
+            return SimpleNamespace(
+                extractions=[
+                    SimpleNamespace(
+                        extraction_class="graph_node",
+                        extraction_text="Iran",
+                        attributes={"schema_node_key": "country", "node_type": "Country"},
+                        char_interval=SimpleNamespace(start_pos=0, end_pos=4),
+                    ),
+                    SimpleNamespace(
+                        extraction_class="graph_node",
+                        extraction_text="Strait of Hormuz",
+                        attributes={"schema_node_key": "chokepoint", "node_type": "Chokepoint"},
+                        char_interval=SimpleNamespace(start_pos=22, end_pos=38),
+                    ),
+                    SimpleNamespace(
+                        extraction_class="graph_relation",
+                        extraction_text="raises war-risk insurance premiums through",
+                        attributes={
+                            "source_label": "Iran",
+                            "target_label": "Strait of Hormuz",
+                            "relation_label": "raises war-risk insurance premiums through",
+                        },
+                        char_interval=SimpleNamespace(start_pos=5, end_pos=21),
+                    ),
+                ]
+            )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_url, _ = self._seed_db(tmpdir)
+            agent = IterativeGraphEnrichmentAgent(
+                db_url,
+                tenant="maritime-risk",
+                search_results_json=self._fixture(tmpdir),
+                allowed_domains=["zenodo.org"],
+                max_iterations=1,
+                max_frontier=1,
+                max_results_per_query=1,
+                langextract_runner=fake_runner,
+                embedding_adapter=StaticTestEmbeddingAdapter(),
+            )
+            frontier = {
+                "key": "research-topic:maritime-risk:middle-east-risk",
+                "name": "Middle East maritime systemic risk",
+                "kind": "research_topic",
+                "source_kind": "research_topic",
+                "payload": {"research_mode": "deep_research"},
+            }
+
+            result = agent.run("deep research should expand ontology relation types", frontier_items=[frontier])
+            relation_proposals = [
+                item
+                for item in result["proposed_graph"]
+                if item["element_type"] == "ontology_relation"
+            ]
+
+            self.assertTrue(relation_proposals)
+            proposal = relation_proposals[0]
+            payload = proposal["payload"]
+            self.assertEqual(proposal["status"], "needs_more_evidence")
+            self.assertEqual(payload["proposal_scope"], "ontology_expansion")
+            self.assertEqual(payload["relation_label"], "raises war-risk insurance premiums through")
+            self.assertEqual(payload["domain"], "Country")
+            self.assertEqual(payload["range"], "Chokepoint")
+            self.assertEqual(payload["ontology_candidate"]["artifact_type"], "link")
+            self.assertEqual(payload["extraction"]["review_boundary"], "ontology_relation_review")
+            self.assertFalse(payload["writes_canonical"])
+
     def test_benchmark_reads_baseline_as_comparison_only(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             db_url, _ = self._seed_db(tmpdir)
@@ -1047,9 +1391,9 @@ class IterativeGraphEnrichmentTest(unittest.TestCase):
             plan = agent._query_plan_for_frontier(frontier, "discover maritime trade exposure")
             query = plan["query"]
             self.assertIn("CHN", query)
-            self.assertIn("Bab el-Mandeb Strait", query)
-            self.assertIn("depends_on", query)
-            self.assertIn("trade_at_risk_v", query)
+            self.assertIn("Bab el Mandeb Strait", query)
+            self.assertNotIn("depends_on", query)
+            self.assertNotIn("trade_at_risk_v", query)
             self.assertEqual(plan["graph_context_used"]["relation"], "depends_on")
             self.assertIn("CHN", plan["graph_context_used"]["neighbor_nodes"])
             self.assertIn("Bab el-Mandeb Strait", plan["path_context_used"]["path_label"])
@@ -1069,9 +1413,9 @@ class IterativeGraphEnrichmentTest(unittest.TestCase):
             )
             self.assertEqual([item["coarse_level"] for item in plan["plans"]], [0, 1, 2, 3])
             self.assertEqual(plan["plans"][1]["radius"], 1)
-            self.assertIn("CHN", plan["plans"][1]["query"])
+            self.assertIn("Bab el Mandeb Strait", plan["plans"][1]["query"])
             self.assertIn("SchemaGraph mapping", plan["plans"][2]["acceptance"])
-            self.assertIn("Chokepoint", plan["plans"][3]["query"])
+            self.assertTrue(plan["plans"][3]["query"])
             self.assertEqual(plan["expansion_policy"]["default_max_radius"], 1)
             self.assertEqual(plan["expansion_policy"]["query_ladder"][0], "L0_path_exact")
             self.assertNotIn("L4_objective_broad", plan["expansion_policy"]["query_ladder"])
@@ -1109,8 +1453,8 @@ class IterativeGraphEnrichmentTest(unittest.TestCase):
             result = agent.run("discover maritime trade exposure", frontier_items=[frontier])
             trace = result["run"]["expansion_trace"][0]
 
-            self.assertIn("depends_on", trace["query"])
-            self.assertIn("trade_at_risk_v", trace["query"])
+            self.assertNotIn("depends_on", trace["query"])
+            self.assertNotIn("trade_at_risk_v", trace["query"])
             self.assertEqual(trace["graph_context_used"]["relation"], "depends_on")
             self.assertEqual(trace["path_context_used"]["source_label"], "CHN")
             self.assertEqual(trace["selected_query_plan"]["intent"], "path_evidence")
@@ -1299,6 +1643,9 @@ class IterativeGraphEnrichmentTest(unittest.TestCase):
             self.assertFalse(endpoint_evidence.get("target", {}).get("proposed_node_created"))
             self.assertTrue(endpoint_evidence.get("source", {}).get("matched_node_key"))
             self.assertTrue(endpoint_evidence.get("target", {}).get("matched_node_key"))
+            identity = edge_payload.get("identity") or {}
+            self.assertEqual(identity.get("source_canonical_key"), "")
+            self.assertEqual(identity.get("target_canonical_key"), "")
             self.assertTrue(
                 any(
                     item.get("reason") == "duplicate_endpoint_node_not_proposed"

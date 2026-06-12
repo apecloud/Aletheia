@@ -580,6 +580,9 @@ function AgentRunsWorkspace({ tenantId, query, artifacts = [], graphElements = [
     cadence: "manual",
     customInterval: "60",
     nodeSimilarityThreshold: "0.6",
+    autoReviewSimilarProposals: false,
+    autoReviewLlmVerifier: true,
+    autoRejectSimilarityThreshold: "0.92",
     stopCondition: "pause, stop, budget exhausted, or no new frontier",
     safety: "allowlist + proposed-only writes",
   });
@@ -626,6 +629,8 @@ function AgentRunsWorkspace({ tenantId, query, artifacts = [], graphElements = [
   const latestExtractionBlockers = Number(latestRun?.proposed_count || 0) === 0 ? latestRun?.extraction_blockers || null : null;
   const parsedNodeSimilarityThreshold = Number(agentParams.nodeSimilarityThreshold);
   const nodeSimilarityThreshold = Number.isFinite(parsedNodeSimilarityThreshold) ? parsedNodeSimilarityThreshold : 0.6;
+  const parsedAutoRejectSimilarityThreshold = Number(agentParams.autoRejectSimilarityThreshold);
+  const autoRejectSimilarityThreshold = Number.isFinite(parsedAutoRejectSimilarityThreshold) ? parsedAutoRejectSimilarityThreshold : 0.92;
   const latestBlockerParts = latestExtractionBlockers ? [
     ...Object.entries(latestExtractionBlockers.extraction_engine_status_counts || {}).map(([key, count]) => `${key}:${count}`),
     ...Object.entries(latestExtractionBlockers.rejected_candidate_reason_counts || {}).map(([key, count]) => `${key}:${count}`),
@@ -662,6 +667,9 @@ function AgentRunsWorkspace({ tenantId, query, artifacts = [], graphElements = [
       customInterval: String(session.config.custom_interval_minutes || prev.customInterval || "60"),
       budget: String(session.config.max_frontier || prev.budget || "3"),
       nodeSimilarityThreshold: String(session.config.node_similarity_dedup_threshold ?? prev.nodeSimilarityThreshold ?? "0.6"),
+      autoReviewSimilarProposals: Boolean(session.config.auto_review_similar_proposals ?? prev.autoReviewSimilarProposals),
+      autoReviewLlmVerifier: Boolean(session.config.auto_review_llm_verifier ?? prev.autoReviewLlmVerifier ?? true),
+      autoRejectSimilarityThreshold: String(session.config.auto_reject_similarity_threshold ?? prev.autoRejectSimilarityThreshold ?? "0.92"),
       stopCondition: session.config.stop_condition || prev.stopCondition,
     }));
   }, [session?.session_key, JSON.stringify(session?.config || {})]);
@@ -749,6 +757,9 @@ function AgentRunsWorkspace({ tenantId, query, artifacts = [], graphElements = [
         cadence: agentParams.cadence,
         custom_interval_minutes: Number(agentParams.customInterval) || 60,
         node_similarity_dedup_threshold: nodeSimilarityThreshold,
+        auto_review_similar_proposals: Boolean(agentParams.autoReviewSimilarProposals),
+        auto_review_llm_verifier: Boolean(agentParams.autoReviewLlmVerifier),
+        auto_reject_similarity_threshold: autoRejectSimilarityThreshold,
         stop_condition: agentParams.stopCondition,
         trigger_autopilot: true,
       });
@@ -794,6 +805,9 @@ function AgentRunsWorkspace({ tenantId, query, artifacts = [], graphElements = [
         allowlist: agentParams.allowlist,
         budget: Number(agentParams.budget) || 3,
         node_similarity_dedup_threshold: nodeSimilarityThreshold,
+        auto_review_similar_proposals: Boolean(agentParams.autoReviewSimilarProposals),
+        auto_review_llm_verifier: Boolean(agentParams.autoReviewLlmVerifier),
+        auto_reject_similarity_threshold: autoRejectSimilarityThreshold,
         stop_condition: agentParams.stopCondition,
       });
       setMessage({ kind: "ok", text: tWB(language, "Auto enriching settings saved.", "自动信息增益设置已保存。") });
@@ -963,6 +977,28 @@ function AgentRunsWorkspace({ tenantId, query, artifacts = [], graphElements = [
                   <div className="eyebrow" style={{ marginBottom: 4 }}>{tWB(language, "Node dedup threshold", "节点去重阈值")}</div>
                   <input className="input" type="number" min="0" max="1" step="0.01" value={agentParams.nodeSimilarityThreshold} onChange={e => updateAgentParam("nodeSimilarityThreshold", e.target.value)} />
                 </label>
+                <label style={{ display: "flex", alignItems: "center", gap: 8, border: "1px solid var(--line-soft)", background: "var(--bg-2)", padding: "8px 10px" }}>
+                  <input type="checkbox" checked={Boolean(agentParams.autoReviewSimilarProposals)} onChange={e => updateAgentParam("autoReviewSimilarProposals", e.target.checked)} />
+                  <span>
+                    <div className="eyebrow">{tWB(language, "Auto review duplicates", "自动审核重复候选")}</div>
+                    <div style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--muted)", marginTop: 3 }}>
+                      {tWB(language, "Review high-similarity non-conflicting proposals after each run.", "每轮结束后审核高相似且无结构冲突的候选。")}
+                    </div>
+                  </span>
+                </label>
+                <label style={{ display: "flex", alignItems: "center", gap: 8, border: "1px solid var(--line-soft)", background: "var(--bg-2)", padding: "8px 10px" }}>
+                  <input type="checkbox" checked={Boolean(agentParams.autoReviewLlmVerifier)} onChange={e => updateAgentParam("autoReviewLlmVerifier", e.target.checked)} />
+                  <span>
+                    <div className="eyebrow">{tWB(language, "LLM verifier", "LLM 审核确认")}</div>
+                    <div style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--muted)", marginTop: 3 }}>
+                      {tWB(language, "Reject only when the LLM confirms duplicate semantics.", "仅在 LLM 确认语义重复时自动拒绝。")}
+                    </div>
+                  </span>
+                </label>
+                <label>
+                  <div className="eyebrow" style={{ marginBottom: 4 }}>{tWB(language, "Auto reject threshold", "自动拒绝阈值")}</div>
+                  <input className="input" type="number" min="0" max="1" step="0.01" value={agentParams.autoRejectSimilarityThreshold} onChange={e => updateAgentParam("autoRejectSimilarityThreshold", e.target.value)} />
+                </label>
                 <label>
                   <div className="eyebrow" style={{ marginBottom: 4 }}>{tWB(language, "Stop condition", "停止条件")}</div>
                   <input className="input" value={agentParams.stopCondition} onChange={e => updateAgentParam("stopCondition", e.target.value)} />
@@ -970,7 +1006,7 @@ function AgentRunsWorkspace({ tenantId, query, artifacts = [], graphElements = [
               </div>
             ) : (
               <div style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--muted)", overflowWrap: "anywhere" }}>
-                {tWB(language, "Settings collapsed", "设置已折叠")} · {tWB(language, "scope", "范围")} {compactTextWB(agentParams.scope, 70)} · {tWB(language, "budget", "预算")} {agentParams.budget} · {tWB(language, "node dedup", "节点去重")} {agentParams.nodeSimilarityThreshold} · {tWB(language, "cadence", "频率")} {agentParams.cadence}
+                {tWB(language, "Settings collapsed", "设置已折叠")} · {tWB(language, "scope", "范围")} {compactTextWB(agentParams.scope, 70)} · {tWB(language, "budget", "预算")} {agentParams.budget} · {tWB(language, "node dedup", "节点去重")} {agentParams.nodeSimilarityThreshold} · {tWB(language, "auto review", "自动审核")} {agentParams.autoReviewSimilarProposals ? tWB(language, "on", "开启") : tWB(language, "off", "关闭")} · {tWB(language, "cadence", "频率")} {agentParams.cadence}
               </div>
             )}
             <div style={{ marginTop: 10, fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--muted)" }}>

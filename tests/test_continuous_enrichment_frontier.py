@@ -3,6 +3,7 @@ import tempfile
 import unittest
 from datetime import datetime, timedelta
 
+from sqlalchemy import text
 from sqlalchemy.exc import OperationalError
 
 from server.aletheia_server import (
@@ -12,6 +13,7 @@ from server.aletheia_server import (
     _dedup_audit_from_payload,
     _is_current_graph_proposal,
 )
+from agents.iterative_graph_enrichment_agent import _graph_context_query_plan
 from tenant_registry import TenantConfig, TenantRegistry
 
 
@@ -211,6 +213,68 @@ class ContinuousEnrichmentFrontierTest(unittest.TestCase):
 
         with self.assertRaises(ValueError):
             repo._continuous_update_config({}, {"node_similarity_dedup_threshold": "not-a-number"})
+
+    def test_continuous_config_accepts_auto_review_similarity_settings(self):
+        repo = object.__new__(InstanceRepository)
+
+        config = repo._continuous_update_config(
+            {},
+            {
+                "auto_review_similar_proposals": True,
+                "auto_review_llm_verifier": False,
+                "auto_reject_similarity_threshold": "0.91",
+                "auto_review_reviewer": "Auto Reviewer",
+            },
+        )
+
+        self.assertTrue(config["auto_review_similar_proposals"])
+        self.assertFalse(config["auto_review_llm_verifier"])
+        self.assertEqual(config["auto_reject_similarity_threshold"], 0.91)
+        self.assertEqual(config["auto_review_reviewer"], "Auto Reviewer")
+
+    def test_auto_review_rejects_high_similarity_non_conflicting_duplicate(self):
+        repo = object.__new__(InstanceRepository)
+        element = {
+            "element_key": "proposed-graph:edge:new",
+            "status": "draft",
+            "payload": {
+                "dedup_decision": "duplicate_existing_proposal",
+                "match_score": 0.95,
+                "matched_node_key": "proposed-graph:edge:existing",
+            },
+        }
+
+        should_reject, reason, score = repo._should_auto_reject_similar_proposal(
+            element,
+            {"auto_review_similar_proposals": True, "auto_reject_similarity_threshold": 0.92},
+        )
+
+        self.assertTrue(should_reject)
+        self.assertEqual(reason, "high_similarity_duplicate")
+        self.assertEqual(score, 0.95)
+
+    def test_auto_review_does_not_reject_structural_conflict(self):
+        repo = object.__new__(InstanceRepository)
+        element = {
+            "element_key": "proposed-graph:edge:new",
+            "status": "needs_more_evidence",
+            "payload": {
+                "dedup_decision": "needs_review",
+                "decision_reason": "structural_conflict",
+                "conflict_fields": ["source_node", "target_node", "relation"],
+                "match_score": 0.99,
+                "matched_node_key": "proposed-graph:edge:existing",
+            },
+        }
+
+        should_reject, reason, score = repo._should_auto_reject_similar_proposal(
+            element,
+            {"auto_review_similar_proposals": True, "auto_reject_similarity_threshold": 0.92},
+        )
+
+        self.assertFalse(should_reject)
+        self.assertEqual(reason, "structural_conflict_requires_human_review")
+        self.assertEqual(score, 0.99)
 
     def test_stored_frontier_queue_order_takes_precedence_over_dynamic_priority(self):
         candidates = [
@@ -768,6 +832,113 @@ class ContinuousEnrichmentFrontierTest(unittest.TestCase):
         self.assertTrue(events[-1]["request_url"].startswith("https://search.test/html/?q="))
         self.assertEqual(events[-1]["accepted_for_trust_filter_count"], 1)
 
+    def test_frontier_query_plan_is_recall_oriented_not_instruction_or_schema_terms(self):
+        plan = _graph_context_query_plan(
+            {
+                "key": "proposed-graph:maritime-risk:edge:1bdbe61b8ac0d42f",
+                "name": "Iran has systemic risk Strait of Hormuz",
+                "payload": {
+                    "source_label": "Iran",
+                    "target_label": "Strait of Hormuz",
+                    "relation": "has_systemic_risk",
+                },
+            },
+            "Find recent public evidence about maritime chokepoint disruption risks affecting China trade dependencies.",
+            "maritime-risk",
+        )
+
+        queries = [item["query"] for item in plan["plans"]]
+        joined = " ".join(queries).lower()
+        self.assertTrue(any("iran" in query.lower() and "strait of hormuz" in query.lower() for query in queries))
+        self.assertNotIn("find recent public evidence", joined)
+        self.assertNotIn("has_systemic_risk", joined)
+        self.assertNotIn("proposed_edge", joined)
+        self.assertNotIn("evidenceentity", joined)
+
+    def test_deep_research_mode_selects_topic_frontier(self):
+        repo = object.__new__(InstanceRepository)
+        repo._continuous_proposed_graph_frontier = lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("deep research should not load proposed graph frontier")
+        )
+        tenant = type("Tenant", (), {"tenant_id": "maritime-risk"})()
+        config = {
+            "research_mode": "deep_research",
+            "research_topics": ["Middle East maritime chokepoint systemic risk"],
+            "retrieval_lanes": ["breaking_news", "academic"],
+            "recency_windows": ["24h", "historical"],
+            "frontier_state": {},
+            "frontier_cooldown_minutes": 360,
+            "max_frontier": 4,
+        }
+
+        selected = repo._continuous_frontier_for_cycle(tenant, [], config, 4)
+
+        self.assertEqual(len(selected), 1)
+        self.assertEqual(selected[0]["source_kind"], "research_topic")
+        self.assertEqual(selected[0]["name"], "Middle East maritime chokepoint systemic risk")
+        self.assertEqual(selected[0]["payload"]["retrieval_lanes"], ["breaking_news", "academic"])
+
+    def test_deep_research_query_planner_emits_lane_queries(self):
+        class FakeSearchProvider:
+            def __init__(self):
+                self.queries = []
+
+            def request_url(self, query):
+                return f"https://search.test/html/?q={query.replace(' ', '+')}"
+
+            def search(self, query, max_results):
+                self.queries.append(query)
+                return [
+                    {
+                        "query": query,
+                        "title": "Research source",
+                        "url": f"https://example.com/{len(self.queries)}",
+                        "snippet": "Research source about maritime chokepoint risk.",
+                        "rank": 1,
+                        "provider": "fake",
+                    }
+                ]
+
+        repo = object.__new__(InstanceRepository)
+        tenant = type("Tenant", (), {"tenant_id": "maritime-risk"})()
+        config = {
+            "research_mode": "deep_research",
+            "retrieval_lanes": ["breaking_news", "academic", "official_sources"],
+            "recency_windows": ["24h", "historical"],
+            "max_queries_per_lane": 1,
+            "max_query_plans_per_frontier": 10,
+        }
+        frontier = [
+            repo._continuous_research_frontier_items(
+                tenant,
+                "Middle East maritime chokepoint systemic risk",
+                config,
+                max_frontier=1,
+            )[0]
+        ]
+
+        results, events = repo._continuous_search_results_for_cycle(
+            tenant,
+            "continuous:maritime-risk:deep",
+            "Middle East maritime chokepoint systemic risk",
+            {},
+            frontier,
+            2,
+            config,
+            provider=FakeSearchProvider(),
+        )
+
+        planned = [event for event in events if event["type"] == "research_agenda_planned"]
+        executed = [event for event in events if event["type"] == "query_search_executed"]
+        self.assertEqual(len(planned), 1)
+        self.assertEqual(planned[0]["lanes"], ["breaking_news", "academic", "official_sources"])
+        self.assertEqual(len(executed), 3)
+        self.assertEqual(executed[0]["granularity"], "research_breaking_news_24h")
+        self.assertEqual(executed[1]["granularity"], "research_academic_historical")
+        self.assertEqual(executed[2]["granularity"], "research_official_sources_30d")
+        self.assertIn("latest developments", executed[0]["query"])
+        self.assertEqual(results[0]["query_plan"]["lane"], "breaking_news")
+
     def test_continuous_query_search_failed_records_request_url(self):
         class FailingSearchProvider:
             def request_url(self, query):
@@ -999,6 +1170,53 @@ class ContinuousEnrichmentFrontierTest(unittest.TestCase):
         self.assertFalse(due)
         self.assertEqual(reason, "status_paused")
 
+    def test_running_session_stale_detection_uses_started_at_threshold(self):
+        repo = object.__new__(InstanceRepository)
+        old_started_at = (datetime.utcnow() - timedelta(minutes=20)).isoformat()
+        recent_started_at = (datetime.utcnow() - timedelta(seconds=30)).isoformat()
+
+        stale = repo._continuous_running_stale(
+            "running",
+            {"last_started_at": old_started_at, "running_stale_after_seconds": 60},
+        )
+        fresh = repo._continuous_running_stale(
+            "running",
+            {"last_started_at": recent_started_at, "running_stale_after_seconds": 60},
+        )
+
+        self.assertIsNotNone(stale)
+        self.assertGreaterEqual(stale["elapsed_seconds"], 60)
+        self.assertIsNone(fresh)
+
+    def test_reading_stale_running_session_recovers_to_idle(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo, tenant = self._sqlite_tenant_repo(tmpdir)
+            session_key = repo._default_continuous_session(tenant)
+            old_started_at = (datetime.utcnow() - timedelta(minutes=20)).isoformat()
+            config = {"last_started_at": old_started_at, "running_stale_after_seconds": 60}
+            with repo.metadata_engine_for(tenant).begin() as conn:
+                conn.execute(
+                    text(
+                        """
+                        UPDATE aletheia_continuous_enrichment_sessions
+                        SET status = 'running',
+                            config_json = :config_json
+                        WHERE project_id = :tenant_id AND session_key = :session_key
+                        """
+                    ),
+                    {
+                        "tenant_id": tenant.tenant_id,
+                        "session_key": session_key,
+                        "config_json": json.dumps(config),
+                    },
+                )
+
+            session = repo.continuous_enrichment_session(tenant, session_key)["session"]
+
+            self.assertEqual(session["status"], "idle")
+            self.assertEqual(session["config"]["stop_reason"], "recovered stale running session")
+            self.assertEqual(session["latest_events"][-1]["type"], "stale_running_recovered")
+
     def test_auto_scheduler_treats_non_manual_missing_next_run_as_due(self):
         repo = object.__new__(InstanceRepository)
 
@@ -1040,6 +1258,69 @@ class ContinuousEnrichmentFrontierTest(unittest.TestCase):
         self.assertEqual(state["frontier_state"]["coverage_cursor"], 7)
         self.assertTrue(state["auto_due"])
         self.assertEqual(state["auto_due_reason"], "next_run_due")
+
+    def test_frontier_score_penalizes_weak_search_labels(self):
+        repo = object.__new__(InstanceRepository)
+        weak = {
+            "key": "proposed-graph:edge:weak",
+            "name": "second strait has_systemic_risk Iran",
+            "source_kind": "new_graph_edge",
+            "payload": {"source_label": "second strait", "target_label": "Iran", "relation": "has_systemic_risk"},
+        }
+        strong = {
+            "key": "proposed-graph:edge:strong",
+            "name": "Iran depends on Strait of Hormuz",
+            "source_kind": "new_graph_edge",
+            "payload": {"source_label": "Iran", "target_label": "Strait of Hormuz", "relation": "depends_on"},
+        }
+
+        weak_score = repo._continuous_frontier_score(weak, {})["score"]
+        strong_score = repo._continuous_frontier_score(strong, {})["score"]
+
+        self.assertGreater(strong_score, weak_score)
+
+    def test_llm_frontier_rerank_can_reorder_valid_shortlist(self):
+        candidates = [
+            {"key": "frontier:a", "name": "A", "source_kind": "graph_coverage", "priority": 20},
+            {"key": "frontier:b", "name": "B", "source_kind": "graph_coverage", "priority": 20},
+            {"key": "frontier:c", "name": "C", "source_kind": "graph_coverage", "priority": 20},
+        ]
+        repo = self._repo_with_candidates(candidates)
+        tenant = type("Tenant", (), {"tenant_id": "tenant-a"})()
+
+        def rerank(_tenant, _objective, shortlist, _max_frontier, _config):
+            by_key = {item["key"]: item for item in shortlist}
+            return [by_key["frontier:c"], by_key["frontier:a"]], {"planner": "llm", "selected_keys": ["frontier:c", "frontier:a"]}
+
+        repo._continuous_llm_rerank_frontier = rerank
+        selected = repo._continuous_frontier_for_cycle(
+            tenant,
+            [],
+            {"frontier_selector": "llm_with_fallback", "_frontier_selection_objective": "expand evidence"},
+            2,
+        )
+
+        self.assertEqual([item["key"] for item in selected], ["frontier:c", "frontier:a"])
+
+    def test_llm_frontier_rerank_applies_to_stored_frontier_queue(self):
+        repo = self._repo_with_candidates([])
+        tenant = type("Tenant", (), {"tenant_id": "tenant-a"})()
+        stored_frontier = [
+            {"key": "queue:first", "name": "Weak queued", "source_kind": "graph_coverage", "priority": 10},
+            {"key": "queue:second", "name": "Strong queued", "source_kind": "graph_coverage", "priority": 10},
+        ]
+
+        def rerank(_tenant, _objective, shortlist, _max_frontier, _config):
+            by_key = {item["key"]: item for item in shortlist}
+            return [by_key["queue:second"]], {"planner": "llm", "selected_keys": ["queue:second"]}
+
+        config = {"frontier_selector": "llm_with_fallback", "_frontier_selection_objective": "expand evidence"}
+        repo._continuous_llm_rerank_frontier = rerank
+        selected = repo._continuous_frontier_for_cycle(tenant, stored_frontier, config, 1)
+
+        self.assertEqual([item["key"] for item in selected], ["queue:second"])
+        self.assertEqual(config["_frontier_selection_trace"]["planner"], "llm")
+        self.assertEqual(config["_frontier_selection_trace"]["candidate_source"], "stored_frontier")
 
     def test_resume_persistent_session_preserves_queue_and_schedules_immediate_tick(self):
         repo = object.__new__(InstanceRepository)
