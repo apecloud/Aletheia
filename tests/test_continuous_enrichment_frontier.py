@@ -704,7 +704,7 @@ class ContinuousEnrichmentFrontierTest(unittest.TestCase):
         self.assertEqual(config["frontier_state"]["coverage_cursor"], 0)
         self.assertIsNone(config["stop_reason"])
 
-    def test_source_trust_rejects_unlisted_domains_with_event_payload(self):
+    def test_source_trust_accepts_public_domains_without_allowlist(self):
         repo = object.__new__(InstanceRepository)
         config = {
             "source_trust": {
@@ -720,11 +720,11 @@ class ContinuousEnrichmentFrontierTest(unittest.TestCase):
             config,
         )
 
-        self.assertEqual(len(trusted), 1)
+        self.assertEqual(len(trusted), 2)
         self.assertEqual(trusted[0]["source_trust"]["domain"], "zenodo.org")
-        self.assertEqual(len(skipped), 1)
-        self.assertEqual(skipped[0]["type"], "source_trust_rejected")
-        self.assertEqual(events[0]["reason"], "domain not in allowed source trust policy")
+        self.assertEqual(trusted[1]["source_trust"]["domain"], "example.org")
+        self.assertEqual(len(skipped), 0)
+        self.assertEqual(events, [])
 
     def test_allowlist_updates_source_trust_policy(self):
         repo = object.__new__(InstanceRepository)
@@ -736,8 +736,9 @@ class ContinuousEnrichmentFrontierTest(unittest.TestCase):
 
         self.assertTrue(decision["trusted"])
         self.assertEqual(config["source_trust"]["allowed_domains"], ["example.com"])
+        self.assertFalse(config["source_trust"]["reject_unlisted_domains"])
 
-    def test_crawl_policy_allows_discovered_domains_when_source_trust_is_not_strict_allowlist(self):
+    def test_crawl_policy_always_allows_discovered_public_domains(self):
         repo = object.__new__(InstanceRepository)
 
         strict = repo._continuous_agent_crawl_policy(
@@ -747,8 +748,8 @@ class ContinuousEnrichmentFrontierTest(unittest.TestCase):
             {"source_trust": {"allowed_domains": ["zenodo.org"], "reject_unlisted_domains": False}}
         )
 
-        self.assertEqual(strict["allowed_domains"], ["zenodo.org"])
-        self.assertFalse(strict["allow_discovered_domains"])
+        self.assertEqual(strict["allowed_domains"], [])
+        self.assertTrue(strict["allow_discovered_domains"])
         self.assertEqual(permissive["allowed_domains"], [])
         self.assertTrue(permissive["allow_discovered_domains"])
 
@@ -762,7 +763,7 @@ class ContinuousEnrichmentFrontierTest(unittest.TestCase):
         decision = repo._continuous_source_trust_decision({"url": "https://example.org/source"}, config)
         crawl_policy = repo._continuous_agent_crawl_policy(config)
 
-        self.assertEqual(config["source_trust"]["allowed_domains"], ["*"])
+        self.assertEqual(config["source_trust"]["allowed_domains"], [])
         self.assertTrue(policy["allow_all_public_sources"])
         self.assertFalse(policy["reject_unlisted_domains"])
         self.assertTrue(decision["trusted"])

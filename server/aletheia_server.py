@@ -2145,7 +2145,7 @@ class InstanceRepository:
             "custom_interval_minutes": 60,
             "rate_limit_per_cycle": 4,
             "stop_condition": "pause, stop, budget exhausted, or no new frontier",
-            "allowed_domains": ["zenodo.org"],
+            "allowed_domains": [],
             "max_iterations": 1,
             "max_frontier": 4,
             "max_results_per_query": 4,
@@ -2175,8 +2175,8 @@ class InstanceRepository:
                 "last_error": None,
             },
             "source_trust": {
-                "allowed_domains": ["zenodo.org"],
-                "reject_unlisted_domains": True,
+                "allowed_domains": [],
+                "reject_unlisted_domains": False,
                 "rejected_domains": [],
             },
             "stop_policy": {
@@ -2781,11 +2781,10 @@ class InstanceRepository:
                 domains = [part.strip().lower() for part in re.split(r"[,\\s]+", raw_domains) if part.strip()]
             else:
                 domains = [str(part).strip().lower() for part in raw_domains if str(part).strip()]
-            if not domains:
-                raise ValueError("allowlist must include at least one public domain")
             config["allowed_domains"] = list(dict.fromkeys(domains))
             trust = dict(config.get("source_trust") or {})
             trust["allowed_domains"] = config["allowed_domains"]
+            trust["reject_unlisted_domains"] = False
             config["source_trust"] = trust
         if "budget" in body:
             raw_budget = body.get("budget") or config.get("max_frontier") or 4
@@ -2857,16 +2856,17 @@ class InstanceRepository:
             config["stop_policy"] = {**dict(config.get("stop_policy") or {}), **body["stop_policy"]}
         if body.get("source_trust") == "*":
             trust = {**dict(config.get("source_trust") or {})}
-            trust["allowed_domains"] = ["*"]
+            trust["allowed_domains"] = []
             trust["reject_unlisted_domains"] = False
             config["source_trust"] = trust
-            config["allowed_domains"] = ["*"]
+            config["allowed_domains"] = []
         elif "source_trust" in body and isinstance(body.get("source_trust"), dict):
             trust = {**dict(config.get("source_trust") or {}), **body["source_trust"]}
             if "allowed_domains" in trust:
                 trust["allowed_domains"] = self._continuous_normalize_domains(trust.get("allowed_domains"))
             if "rejected_domains" in trust:
                 trust["rejected_domains"] = self._continuous_normalize_domains(trust.get("rejected_domains"))
+            trust["reject_unlisted_domains"] = False
             config["source_trust"] = trust
         if "backoff" in body and isinstance(body.get("backoff"), dict):
             backoff = {**dict(config.get("backoff") or {}), **body["backoff"]}
@@ -2904,15 +2904,11 @@ class InstanceRepository:
         }
 
     def _continuous_source_trust_policy(self, config):
-        trust = dict((config or {}).get("source_trust") or {})
-        allowed = self._continuous_normalize_domains(trust.get("allowed_domains") or (config or {}).get("allowed_domains") or [])
-        rejected = set(self._continuous_normalize_domains(trust.get("rejected_domains") or []))
-        allow_all = "*" in allowed
         return {
-            "allowed_domains": [] if allow_all else allowed,
-            "rejected_domains": rejected,
-            "reject_unlisted_domains": False if allow_all else trust.get("reject_unlisted_domains", True) is not False,
-            "allow_all_public_sources": allow_all,
+            "allowed_domains": [],
+            "rejected_domains": set(),
+            "reject_unlisted_domains": False,
+            "allow_all_public_sources": True,
         }
 
     def _continuous_agent_crawl_policy(self, config):
@@ -2929,13 +2925,7 @@ class InstanceRepository:
         domain = urlparse(url).netloc.lower().removeprefix("www.")
         if not domain:
             return {"trusted": False, "domain": "", "reason": "missing source URL"}
-        if domain in policy["rejected_domains"]:
-            return {"trusted": False, "domain": domain, "reason": "domain explicitly rejected by source trust policy"}
-        allowed = policy["allowed_domains"]
-        if allowed and not any(domain == allowed_domain or domain.endswith(f".{allowed_domain}") for allowed_domain in allowed):
-            reason = "domain not in allowed source trust policy" if policy["reject_unlisted_domains"] else "domain outside allowlist but accepted by policy"
-            return {"trusted": not policy["reject_unlisted_domains"], "domain": domain, "reason": reason}
-        return {"trusted": True, "domain": domain, "reason": "domain accepted by source trust policy"}
+        return {"trusted": True, "domain": domain, "reason": "source trust allowlist disabled"}
 
     def _continuous_trusted_search_results(self, search_results, config):
         trusted = []

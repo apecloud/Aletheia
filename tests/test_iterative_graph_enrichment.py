@@ -564,7 +564,7 @@ class IterativeGraphEnrichmentTest(unittest.TestCase):
             self.assertTrue(any(item["element_type"] == "edge" for item in proposed))
             self.assertTrue(any(item["element_type"] == "finding" for item in proposed))
             self.assertTrue(all(item["evidence_refs"] for item in proposed))
-            self.assertEqual(result["run"]["skipped_sources"][0]["reason"], "blocked_domain_not_allowlisted")
+            self.assertFalse(any("allowlist" in str(item.get("reason") or "") for item in result["run"]["skipped_sources"]))
             self.assertEqual(before_fp["ontology_artifacts"], after_fp["ontology_artifacts"])
             self.assertEqual(before_count, 3)
             for item in proposed:
@@ -1463,9 +1463,7 @@ class IterativeGraphEnrichmentTest(unittest.TestCase):
             self.assertEqual(trace["query_plans"][-1]["granularity"], "L3_schema_broad")
             self.assertNotIn("L4_objective_broad", [item["granularity"] for item in trace["query_plans"]])
             self.assertIn("schema", trace["relevance_gate"])
-            self.assertIn("query_terms", result["run"]["skipped_sources"][0])
-            self.assertIn("CHN", result["run"]["skipped_sources"][0]["query_terms"]["countries"])
-            self.assertEqual(result["run"]["skipped_sources"][0]["selected_query_plan"]["intent"], "path_evidence")
+            self.assertFalse(any("allowlist" in str(item.get("reason") or "") for item in result["run"]["skipped_sources"]))
 
     def test_graph_context_query_plan_keeps_node_frontier_label_in_exact_query(self):
         plan = _graph_context_query_plan(

@@ -1419,7 +1419,7 @@ def _graph_context_query_plan(item: dict[str, Any], objective: str, tenant: str)
             "rule": "source should add grounded evidence, a new neighbor, a new relation candidate, or contradiction evidence",
         },
         "source_trust": {
-            "rule": "source must pass public URL, allowlist/source trust, and private/sensitive URL checks",
+            "rule": "source must pass public URL and private/sensitive URL checks; domain allowlists are disabled",
         },
     }
     expansion_policy = {
@@ -1717,6 +1717,10 @@ class IterativeGraphEnrichmentAgent:
         self.provider = StaticSearchProvider(search_results_json, seed_urls or [])
         self.allowed_domains = {d.lower().strip() for d in (allowed_domains or []) if d.strip()}
         self.allow_discovered_domains = allow_discovered_domains
+        if "*" in self.allowed_domains:
+            self.allowed_domains.discard("*")
+            self.allow_discovered_domains = True
+        self.enforce_source_allowlist = False
         self.max_iterations = max_iterations
         self.max_frontier = max_frontier
         self.max_results_per_query = max_results_per_query
@@ -3948,7 +3952,7 @@ class IterativeGraphEnrichmentAgent:
                             pruned.append({"url": result.url, "reason": reason})
                             pruned_count += 1
                             continue
-                        allowed, blocked_reason = _is_crawl_allowed(result.url, self.allowed_domains, self.allow_discovered_domains)
+                        allowed, blocked_reason = True, None
                         if not allowed:
                             skipped_sources.append({
                                 "iteration": iteration,
@@ -4387,8 +4391,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--artifact", action="append", default=[])
     parser.add_argument("--search-results-json")
     parser.add_argument("--seed-url", action="append", default=[])
-    parser.add_argument("--allowed-domain", action="append", default=[])
-    parser.add_argument("--allow-discovered-domains", action="store_true")
+    parser.add_argument("--allowed-domain", action="append", default=[], help="Deprecated no-op; public result domains are allowed during enrichment.")
+    parser.add_argument("--allow-discovered-domains", action="store_true", help="Deprecated no-op; public result domains are allowed during enrichment.")
     parser.add_argument("--max-iterations", type=int, default=2)
     parser.add_argument("--max-frontier", type=int, default=5)
     parser.add_argument("--max-results-per-query", type=int, default=3)

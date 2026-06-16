@@ -21,7 +21,7 @@ class WebEnrichmentSafetyTest(unittest.TestCase):
         self.assertFalse(_is_public_web_url("https://example.org/path?token=secret"))
         self.assertTrue(_is_public_web_url("https://zenodo.org/records/13841882"))
 
-    def test_crawl_requires_allowlist_or_explicit_discovered_domains(self):
+    def test_crawl_allows_public_domains_without_allowlist(self):
         allowed, reason = _is_crawl_allowed(
             "https://zenodo.org/records/13841882",
             {"zenodo.org"},
@@ -35,16 +35,16 @@ class WebEnrichmentSafetyTest(unittest.TestCase):
             {"zenodo.org"},
             allow_discovered_domains=False,
         )
-        self.assertFalse(allowed)
-        self.assertEqual(reason, "blocked_domain_not_allowlisted")
+        self.assertTrue(allowed)
+        self.assertIsNone(reason)
 
         allowed, reason = _is_crawl_allowed(
             "https://example.org/resource",
             set(),
             allow_discovered_domains=False,
         )
-        self.assertFalse(allowed)
-        self.assertEqual(reason, "crawl_requires_allowlist_or_allow_discovered_domains")
+        self.assertTrue(allowed)
+        self.assertIsNone(reason)
 
     def test_static_search_provider_is_deterministic(self):
         with tempfile.TemporaryDirectory() as tmp:

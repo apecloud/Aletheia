@@ -61,11 +61,6 @@ def _clean_text(value: str | None, limit: int = 1200) -> str:
     return text[:limit].rstrip()
 
 
-def _domain_matches(hostname: str, allowed_domains: set[str]) -> bool:
-    host = hostname.lower().strip(".")
-    return any(host == domain or host.endswith("." + domain) for domain in allowed_domains)
-
-
 def _robots_txt_url(source_url: str) -> str:
     parsed = urlparse(source_url)
     return f"{parsed.scheme}://{parsed.netloc}/robots.txt"
@@ -97,11 +92,6 @@ def _is_public_web_url(url: str) -> bool:
 def _is_crawl_allowed(url: str, allowed_domains: set[str], allow_discovered_domains: bool) -> tuple[bool, str | None]:
     if not _is_public_web_url(url):
         return False, "blocked_non_public_or_sensitive_url"
-    hostname = (urlparse(url).hostname or "").lower()
-    if allowed_domains and not _domain_matches(hostname, allowed_domains):
-        return False, "blocked_domain_not_allowlisted"
-    if not allowed_domains and not allow_discovered_domains:
-        return False, "crawl_requires_allowlist_or_allow_discovered_domains"
     return True, None
 
 
@@ -470,7 +460,8 @@ class WebEnrichmentAgent:
             safety_profile_json=_json_dump(
                 {
                     "allowed_domains": sorted(self.allowed_domains),
-                    "allow_discovered_domains": self.allow_discovered_domains,
+                    "allow_discovered_domains": True,
+                    "source_allowlist_enforced": False,
                     "blocked_private_networks": True,
                     "canonical_writes": "disabled",
                     "graph_writes": "disabled",
@@ -706,11 +697,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--search-results-json", help="Deterministic search result fixture for offline/test runs.")
     parser.add_argument("--seed-url", action="append", default=[], help="Seed URL used as a search result. Repeatable.")
     parser.add_argument("--enable-live-search", action="store_true", help="Use DuckDuckGo HTML search.")
-    parser.add_argument("--allowed-domain", action="append", default=[], help="Domain allowlist for page crawling.")
+    parser.add_argument("--allowed-domain", action="append", default=[], help="Deprecated no-op; public result domains are allowed during crawling.")
     parser.add_argument(
         "--allow-discovered-domains",
         action="store_true",
-        help="Allow crawling public result domains not listed by --allowed-domain.",
+        help="Deprecated no-op; public result domains are allowed during crawling.",
     )
     parser.add_argument("--max-artifacts", type=int, default=5)
     parser.add_argument("--max-results-per-query", type=int, default=3)

@@ -225,8 +225,8 @@ draft-only and review-gated:
 - writes `WebEnrichment` draft artifacts and `web_source` evidence
 - records query, URL, retrieval time, summary, confidence, robots/license risk,
   and field-level provenance
-- blocks localhost/private-network URLs, secret-bearing URLs, and domains outside
-  the allowlist
+- blocks localhost/private-network URLs and secret-bearing URLs; public source
+  domains are not allowlisted during development/test enrichment
 - never auto-approves ontology artifacts and never writes the formal graph
 
 Offline fixture mode is the recommended CI path:
@@ -236,7 +236,6 @@ python agents/web_enrichment_agent.py \
   --tenant maritime-risk \
   --artifact object:chokepoint \
   --search-results-json datasets/maritime_web_enrichment_fixture.json \
-  --allowed-domain zenodo.org \
   --json
 ```
 
@@ -247,7 +246,6 @@ python agents/web_enrichment_agent.py \
   --tenant maritime-risk \
   --artifact object:chokepoint \
   --enable-live-search \
-  --allowed-domain zenodo.org \
   --max-artifacts 1 \
   --max-results-per-query 2 \
   --max-crawl-pages 1
