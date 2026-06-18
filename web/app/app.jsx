@@ -38,6 +38,29 @@ function initialAppLanguage() {
   return localStorage.getItem("aletheia.language") || "en";
 }
 
+function sanitizeAppUrlForScreen(url, screen) {
+  if (!url || !url.searchParams) return url;
+  if (screen === "graph") {
+    [
+      "artifact",
+      "workspace_tab",
+      "workspace_item",
+      "agent_tab",
+      "reasoning_tab",
+      "ontology_basis",
+      "task",
+      "active_tab",
+    ].forEach(param => url.searchParams.delete(param));
+  }
+  if (screen === "ontology") {
+    ["graph_tab", "proposed_key", "selected_node", "selected_edge", "view", "depth", "limit", "type", "id"].forEach(param => url.searchParams.delete(param));
+  }
+  if (screen === "workbench") {
+    ["artifact", "graph_tab", "proposed_key", "selected_node", "selected_edge", "ontology_basis", "task"].forEach(param => url.searchParams.delete(param));
+  }
+  return url;
+}
+
 function App() {
   const [screen, setScreen] = useStateApp(initialAppScreen);
   const [tenantId, setTenantId] = useStateApp(initialAppTenant);
@@ -83,6 +106,10 @@ function App() {
       if (s) setScreen(s);
       if (t) setTenantId(t);
       if (lang === "zh" || lang === "en") setLanguage(lang);
+      const nextScreen = APP_SCREENS.has(s) ? s : screen;
+      const url = new URL(location.href);
+      sanitizeAppUrlForScreen(url, nextScreen);
+      history.replaceState(null, "", url.toString());
     } catch {}
   }, []);
 
@@ -103,9 +130,10 @@ function App() {
       document.documentElement.lang = language === "zh" ? "zh-CN" : "en";
       const url = new URL(location.href);
       url.searchParams.set("lang", language);
+      sanitizeAppUrlForScreen(url, screen);
       history.replaceState(null, "", url.toString());
     } catch {}
-  }, [language]);
+  }, [language, screen]);
 
   const data = window.AL_DATA;
 
@@ -122,6 +150,7 @@ function App() {
       url.searchParams.set("screen", screen);
       url.searchParams.delete("task");
       url.searchParams.delete("ontology_basis");
+      sanitizeAppUrlForScreen(url, screen);
       history.replaceState(null, "", url.toString());
     } catch {}
   }
@@ -133,6 +162,7 @@ function App() {
       url.searchParams.set("screen", next);
       url.searchParams.set("tenant", tenant.id);
       url.searchParams.set("lang", language);
+      sanitizeAppUrlForScreen(url, next);
       history.replaceState(null, "", url.toString());
     } catch {}
   }

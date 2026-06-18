@@ -80,6 +80,7 @@ const DEDUP_AUDIT_FIELDS_GX = [
   "matched_element_key",
   "matched_status",
   "matched_source",
+  "matched_collection",
   "nearest_proposal_match",
   "match_score",
   "match_evidence",
@@ -432,11 +433,11 @@ function GraphExplorer({ data, tenant, language }) {
   const allCandidates = Array.isArray(allCandidatesQ.data) ? allCandidatesQ.data : [];
   const centerCandidateUniverse = allCandidates.length ? allCandidates : candidates;
   const visibleCandidates = candidates.length || centerSearch.trim() ? candidates : allCandidates;
-  const proposedQ = useApiData("graphProposedElements", [tenantId, { limit: 100 }], {
+  const proposedQ = useApiData("graphProposedElements", [tenantId, {}], {
     fallback: { runs: [], elements: [] },
   });
   const proposed = proposedQ.data || { runs: [], elements: [] };
-  const proposedTotalCount = proposed?.total_count ?? (proposed.elements || []).length;
+  const proposedGraphReviewCount = (proposed.elements || []).filter(item => !isOntologyReviewElementGX(item)).length;
   const selectGraphTab = (tab) => {
     setLeftTab(normalizeGraphTab(tab));
   };
@@ -523,6 +524,7 @@ function GraphExplorer({ data, tenant, language }) {
       url.searchParams.set("depth", String(depth));
       url.searchParams.set("limit", String(limit));
       url.searchParams.set("graph_tab", leftTab);
+      url.searchParams.delete("artifact");
       if (focusElementKey) url.searchParams.set("proposed_key", focusElementKey); else url.searchParams.delete("proposed_key");
       history.replaceState(null, "", url.toString());
     } catch {}
@@ -846,7 +848,7 @@ function GraphExplorer({ data, tenant, language }) {
                 {tGX(language, "Approved graph", "已批准图谱")} <span className="ct">{graphWithPositions.nodes.length}</span>
               </button>
               <button className={"side-tab" + (leftTab === "proposed" ? " active" : "")} onClick={() => selectGraphTab("proposed")}>
-                {tGX(language, "Proposed graph", "候选图谱")} <span className="ct">{proposedTotalCount}</span>
+                {tGX(language, "Proposed graph", "候选图谱")} <span className="ct">{proposedGraphReviewCount}</span>
               </button>
               <button className={"side-tab" + (leftTab === "saved" ? " active" : "")} onClick={() => selectGraphTab("saved")}>
                 {tGX(language, "Saved views", "保存视图")} <span className="ct">0</span>
@@ -1237,18 +1239,24 @@ function ProposedGraphPanel({ tenantId, proposed, loading, source, focusElementK
   const [reviewBusy, setReviewBusy] = useStateGX(false);
   const [reviewMessage, setReviewMessage] = useStateGX(null);
   const runs = proposed?.runs || [];
-  const elements = proposed?.elements || [];
-  const totalCount = proposed?.total_count ?? elements.length;
+  const allElements = proposed?.elements || [];
+  const elements = allElements.filter(item => !isOntologyReviewElementGX(item));
+  const movedOntologyCount = allElements.length - elements.length;
+  const totalCount = elements.length;
   const rawTotalCount = proposed?.raw_total_count ?? totalCount;
   const rawStatusCounts = proposed?.raw_status_counts || {};
   const rawStatusSummary = Object.entries(rawStatusCounts)
     .sort(([left], [right]) => left.localeCompare(right))
     .map(([status, count]) => `${statusLabelGraphGX(status, language)} ${count}`)
     .join(" · ");
-  const counts = proposed?.element_type_counts || elements.reduce((acc, item) => {
+  const counts = elements.reduce((acc, item) => {
     acc[item.element_type] = (acc[item.element_type] || 0) + 1;
     return acc;
   }, {});
+  const primaryKinds = ["node", "edge", "finding"];
+  const extraKinds = Object.keys(counts)
+    .filter(kind => kind && !primaryKinds.includes(kind))
+    .sort((left, right) => left.localeCompare(right));
   const latestRun = runs[0] || null;
   const filteredElements = kindFilter === "all"
     ? elements
@@ -1399,7 +1407,18 @@ function ProposedGraphPanel({ tenantId, proposed, loading, source, focusElementK
           <Chip active={kindFilter === "node"} onClick={() => selectKind("node")} count={counts.node || 0}>{tGX(language, "nodes", "节点")}</Chip>
           <Chip active={kindFilter === "edge"} onClick={() => selectKind("edge")} count={counts.edge || 0}>{tGX(language, "edges", "边")}</Chip>
           <Chip active={kindFilter === "finding"} onClick={() => selectKind("finding")} count={counts.finding || 0}>{tGX(language, "findings", "发现")}</Chip>
+          {extraKinds.map(kind => (
+            <Chip key={kind} active={kindFilter === kind} onClick={() => selectKind(kind)} count={counts[kind] || 0}>{labelGX(kind, language)}</Chip>
+          ))}
         </div>
+        {movedOntologyCount > 0 && (
+          <div style={{ marginBottom: 10, fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--muted)", border: "1px solid var(--line-soft)", padding: 8 }}>
+            {tGX(language, "Ontology candidates moved to Ontology review.", "本体候选已移至本体审核。")}{" "}
+            <a href={`/?screen=ontology&tenant=${encodeURIComponent(tenantId)}&ontology_tab=discovered`} style={{ color: "var(--accent)" }}>
+              {movedOntologyCount} {tGX(language, "items", "项")}
+            </a>
+          </div>
+        )}
         <div style={{ border: "1px solid var(--line-soft)", background: "var(--bg-2)", padding: 8, marginBottom: 10 }}>
           <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center", marginBottom: 8 }}>
             <span className="eyebrow">{tGX(language, "Batch review", "批量审核")}</span>
@@ -1526,6 +1545,13 @@ function ProposedGraphPanel({ tenantId, proposed, loading, source, focusElementK
       </div>
     </div>
   );
+}
+
+function isOntologyReviewElementGX(item) {
+  const type = String(item?.element_type || item?.type || "").toLowerCase();
+  if (type === "ontology_concept") return true;
+  const artifactType = String((item?.payload || {}).artifact_type || "").toLowerCase();
+  return type.includes("ontology") && ["class", "object", "property", "link", "event", "action", "function", "policy"].includes(artifactType);
 }
 
 function ProposedGraphDetail({ item, reason, setReason, busy, message, onReview, language }) {

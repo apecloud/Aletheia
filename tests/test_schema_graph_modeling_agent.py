@@ -58,6 +58,10 @@ class SchemaGraphModelingAgentTest(unittest.TestCase):
         self.assertIn("event rows should normally be modeled as graph/fact nodes", prompt)
         self.assertIn("fact rows should normally be graph/fact nodes, edge evidence, or properties", prompt)
         self.assertIn("receive events/facts, participate in actions", prompt)
+        self.assertIn("Keep the durable ontology small", prompt)
+        self.assertIn("Situational claims, observations, metric changes, impact claims, indicator claims", prompt)
+        self.assertIn("without using a fixed ontology class name", prompt)
+        self.assertIn("Decision tests before creating each edge_type", prompt)
         self.assertIn("graph_node_candidate", prompt)
         for forbidden in ("RiskFinding", "TradeDependency", "Chokepoint", "maritime-risk"):
             self.assertNotIn(forbidden, prompt)

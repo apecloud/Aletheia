@@ -188,7 +188,7 @@ function Workbench({ data, tenant, language }) {
   const tasksQ = useApiData("reasoningTasks", [tenantId]);
   const agentRunsQ = useApiData("agentRunsConsole", [tenantId, { limit: 20 }], { fallback: { sessions: [], runs: [] } });
   const artifactsQ = useApiData("artifacts", [tenantId, {}], { fallback: [] });
-  const graphProposedQ = useApiData("graphProposedElements", [tenantId, { limit: 100 }], { fallback: { runs: [], elements: [] } });
+  const graphProposedQ = useApiData("graphProposedElements", [tenantId, {}], { fallback: { runs: [], elements: [] } });
   const isStale = tasksQ.source === "live-stale";
   const isMock = tasksQ.source === "mock";
   const initialWorkspaceTab = (() => {
@@ -576,7 +576,6 @@ function AgentRunsWorkspace({ tenantId, query, artifacts = [], graphElements = [
   const [agentParams, setAgentParams] = useStateWB({
     scope: "",
     budget: "3",
-    allowlist: "zenodo.org",
     cadence: "manual",
     customInterval: "60",
     nodeSimilarityThreshold: "0.6",
@@ -584,7 +583,7 @@ function AgentRunsWorkspace({ tenantId, query, artifacts = [], graphElements = [
     autoReviewLlmVerifier: true,
     autoRejectSimilarityThreshold: "0.92",
     stopCondition: "pause, stop, budget exhausted, or no new frontier",
-    safety: "allowlist + proposed-only writes",
+    safety: "GPT Researcher + proposed-only writes",
   });
   const filteredRuns = runs.filter(run => agentTab === "autopilot"
     ? run.kind === "autopilot_deep_reasoning"
@@ -662,7 +661,6 @@ function AgentRunsWorkspace({ tenantId, query, artifacts = [], graphElements = [
     setAgentParams(prev => ({
       ...prev,
       scope: session.objective || session.config.scope || prev.scope,
-      allowlist: (session.config.allowed_domains || []).join(", ") || prev.allowlist,
       cadence: session.config.cadence || prev.cadence,
       customInterval: String(session.config.custom_interval_minutes || prev.customInterval || "60"),
       budget: String(session.config.max_frontier || prev.budget || "3"),
@@ -753,7 +751,6 @@ function AgentRunsWorkspace({ tenantId, query, artifacts = [], graphElements = [
         objective: agentParams.scope,
         scope: agentParams.scope,
         budget: Number(agentParams.budget) || 3,
-        allowlist: agentParams.allowlist,
         cadence: agentParams.cadence,
         custom_interval_minutes: Number(agentParams.customInterval) || 60,
         node_similarity_dedup_threshold: nodeSimilarityThreshold,
@@ -802,7 +799,6 @@ function AgentRunsWorkspace({ tenantId, query, artifacts = [], graphElements = [
         objective: agentParams.scope,
         cadence: agentParams.cadence,
         custom_interval_minutes: Number(agentParams.customInterval) || 60,
-        allowlist: agentParams.allowlist,
         budget: Number(agentParams.budget) || 3,
         node_similarity_dedup_threshold: nodeSimilarityThreshold,
         auto_review_similar_proposals: Boolean(agentParams.autoReviewSimilarProposals),
@@ -955,10 +951,6 @@ function AgentRunsWorkspace({ tenantId, query, artifacts = [], graphElements = [
                 <label>
                   <div className="eyebrow" style={{ marginBottom: 4 }}>{tWB(language, "Budget", "预算")}</div>
                   <input className="input" value={agentParams.budget} onChange={e => updateAgentParam("budget", e.target.value)} />
-                </label>
-                <label>
-                  <div className="eyebrow" style={{ marginBottom: 4 }}>{tWB(language, "Allowlist / safety", "允许域名 / 安全")}</div>
-                  <input className="input" value={agentParams.allowlist} onChange={e => updateAgentParam("allowlist", e.target.value)} />
                 </label>
                 <label>
                   <div className="eyebrow" style={{ marginBottom: 4 }}>{tWB(language, "Cadence", "频率")}</div>
@@ -1205,9 +1197,11 @@ function buildWorkspaceReviewItems({ tenantId, artifacts, graphElements, agentRu
     .filter(e => !["approved", "done"].includes(String(e.status || "").toLowerCase()))
     .forEach(e => {
       const type = String(e.element_type || e.type || "element").toLowerCase();
+      const ontologyCandidate = isOntologyConceptProposalWB(e);
       const status = String(e.status || "draft").toLowerCase();
       const blocked = ["needs_evidence", "rejected", "failed", "blocked"].includes(status);
       const itemType =
+        ontologyCandidate ? "Ontology candidate" :
         type.includes("edge") ? "Graph edge" :
         type.includes("finding") ? "Candidate finding" :
         type.includes("node") ? "Graph node" :
@@ -1226,11 +1220,15 @@ function buildWorkspaceReviewItems({ tenantId, artifacts, graphElements, agentRu
         updated: e.updated_at || e.created_at || "",
         updatedLabel: fmtCaseTime(e.updated_at || e.created_at),
         confidenceLabel: e.confidence != null ? String(e.confidence) : "—",
-        nextAction: blocked ? "Review evidence gap or rejection reason in Graph" : "Review proposed graph element",
-        reviewHref: `/?screen=graph&tenant=${encodeURIComponent(tenantId)}&graph_tab=proposed&proposed_key=${encodeURIComponent(e.element_key || "")}`,
-        reviewLabel: "Open in Graph",
-        reviewKind: "graph",
-        reviewKindLabel: "Proposed graph review gate",
+        nextAction: ontologyCandidate
+          ? "Review discovered ontology candidate"
+          : blocked ? "Review evidence gap or rejection reason in Graph" : "Review proposed graph element",
+        reviewHref: ontologyCandidate
+          ? ontologyCandidateHrefWB(tenantId, e)
+          : `/?screen=graph&tenant=${encodeURIComponent(tenantId)}&graph_tab=proposed&proposed_key=${encodeURIComponent(e.element_key || "")}`,
+        reviewLabel: ontologyCandidate ? "Open in Ontology" : "Open in Graph",
+        reviewKind: ontologyCandidate ? "ontology_candidate" : "graph",
+        reviewKindLabel: ontologyCandidate ? "Ontology candidate review gate" : "Proposed graph review gate",
         runHref: e.run_key ? `/?screen=workbench&tenant=${encodeURIComponent(tenantId)}&workspace_tab=agents&agent_tab=enrichment&run_key=${encodeURIComponent(e.run_key)}` : "",
         boundary: "proposed graph space; formal graph writes disabled",
         dedupAudit: dedupAuditWB(e),
@@ -1687,6 +1685,18 @@ function buildAgentOutputGroups({ agentTab, tenantId, runs, artifacts, graphElem
       href: item => `/?screen=graph&tenant=${encodeURIComponent(tenantId)}&graph_tab=proposed&proposed_key=${encodeURIComponent(item.element_key || "")}`,
     },
     {
+      key: "graph_ontology_proposals",
+      title: "Operational ontology proposals",
+      description: "Current ontology expansion proposals from graph enrichment review.",
+      items: activeGraphItems.filter(item => {
+        const type = String(item.element_type || item.type || "").toLowerCase();
+        return type.includes("ontology") || type.includes("semantic") || type.includes("situation") || type.includes("metric") || type.includes("indicator") || type.includes("impact") || type.includes("recommendation");
+      }),
+      href: item => isOntologyConceptProposalWB(item)
+        ? ontologyCandidateHrefWB(tenantId, item)
+        : `/?screen=graph&tenant=${encodeURIComponent(tenantId)}&graph_tab=proposed&proposed_key=${encodeURIComponent(item.element_key || "")}`,
+    },
+    {
       key: "duplicate_outputs",
       title: "Duplicate candidates",
       description: "Candidates that match existing graph proposals and still need review handling.",
@@ -1709,6 +1719,14 @@ function agentOutputIsActionableStatusWB(item) {
   const status = String(item?.status || item?.rawStatus || "draft").toLowerCase();
   const actionable = ["", "draft", "proposed", "candidate", "new", "new_proposal", "needs_review", "needs_more_evidence", "needs_evidence"];
   return actionable.includes(status);
+}
+
+function isOntologyConceptProposalWB(item) {
+  return String(item?.element_type || item?.type || "").toLowerCase() === "ontology_concept";
+}
+
+function ontologyCandidateHrefWB(tenantId, item) {
+  return `/?screen=ontology&tenant=${encodeURIComponent(tenantId)}&ontology_tab=discovered&ontology_candidate=${encodeURIComponent(item?.element_key || "")}`;
 }
 
 function agentOutputIsActiveGraphProposalWB(item) {

@@ -3,8 +3,8 @@
 
 The import is intentionally small and repeatable: it downloads the three
 Zenodo CSV files when missing, loads them into the shared source MySQL
-database, registers the `maritime-risk` tenant, and seeds draft ontology
-artifacts for graph reasoning validation.
+database, and registers the `maritime-risk` tenant. It can optionally seed
+legacy draft ontology artifacts for graph reasoning validation.
 
 The `OBJECT_SPECS` and `LINK_SPECS` below are curated demo/bootstrap fixtures.
 They are not the production schema-to-graph modeling path. Production rebuilds
@@ -419,10 +419,20 @@ def seed_metadata(metadata_db_url: str) -> dict:
     return {"seeded": seeded, "artifact_counts": [dict(row) for row in counts]}
 
 
-def import_dataset(data_dir: Path, source_db_url: str, metadata_db_url: str) -> dict:
+def import_dataset(data_dir: Path, source_db_url: str, metadata_db_url: str, *, seed_fixtures: bool = False) -> dict:
     files = download_files(data_dir)
     source_tables = import_source_tables(source_db_url, data_dir)
-    metadata = seed_metadata(metadata_db_url)
+    if seed_fixtures:
+        metadata = seed_metadata(metadata_db_url)
+    else:
+        engine = create_engine(metadata_db_url)
+        ensure_artifact_schema(engine)
+        ensure_maritime_tenant(engine)
+        metadata = {
+            "seeded": [],
+            "artifact_counts": [],
+            "bootstrap_fixtures_skipped": True,
+        }
     return {
         "tenant_id": TENANT_ID,
         "display_name": TENANT_DISPLAY,
@@ -443,8 +453,26 @@ def main() -> None:
     parser.add_argument("--source-db-url", default=default_source_db_url())
     parser.add_argument("--metadata-db-url", default=default_metadata_db_url())
     parser.add_argument("--report-json", default=str(ROOT / "reports" / "maritime-risk-import-task165.json"))
+    parser.set_defaults(seed_bootstrap_fixtures=False)
+    parser.add_argument(
+        "--seed-bootstrap-fixtures",
+        dest="seed_bootstrap_fixtures",
+        action="store_true",
+        help="Also seed legacy demo ontology fixtures. Production rebuilds should leave this disabled.",
+    )
+    parser.add_argument(
+        "--skip-bootstrap-fixtures",
+        dest="seed_bootstrap_fixtures",
+        action="store_false",
+        help=argparse.SUPPRESS,
+    )
     args = parser.parse_args()
-    result = import_dataset(Path(args.data_dir), args.source_db_url, args.metadata_db_url)
+    result = import_dataset(
+        Path(args.data_dir),
+        args.source_db_url,
+        args.metadata_db_url,
+        seed_fixtures=args.seed_bootstrap_fixtures,
+    )
     report_path = Path(args.report_json)
     report_path.parent.mkdir(parents=True, exist_ok=True)
     report_path.write_text(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")

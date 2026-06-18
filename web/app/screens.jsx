@@ -16,18 +16,65 @@ function textXS(value, language) {
 
 /* ---------------- ONTOLOGY ---------------- */
 function Ontology({ data, tenant, language }) {
+  const initialOntologyTab = (() => {
+    try {
+      const params = new URLSearchParams(location.search);
+      if (params.get("ontology_tab") === "catalog" || params.get("artifact")) return "catalog";
+      if (params.get("ontology_tab") === "discovered" || params.get("ontology_candidate")) return "discovered";
+      if (["graph_tab", "proposed_key", "view", "depth", "limit", "type", "id"].some(param => params.has(param))) return "discovered";
+      return "catalog";
+    } catch { return "catalog"; }
+  })();
+  const [ontologyTab, setOntologyTab] = useStateXS(initialOntologyTab);
   const [active, setActive] = useStateXS("ObjectType");
   const [selectedId, setSelectedId] = useStateXS(null);
+  const [selectedCandidateKey, setSelectedCandidateKey] = useStateXS(() => {
+    try { return new URLSearchParams(location.search).get("ontology_candidate") || ""; }
+    catch { return ""; }
+  });
   const [search, setSearch] = useStateXS("");
   const [detailMode, setDetailMode] = useStateXS("source");
   const [statusView, setStatusView] = useStateXS("approved");
+  const [candidateKind, setCandidateKind] = useStateXS("all");
+  const [candidateStatus, setCandidateStatus] = useStateXS("pending");
   const [reviewReason, setReviewReason] = useStateXS("");
   const [reviewMsg, setReviewMsg] = useStateXS(null);
+  const [selectedCandidateKeys, setSelectedCandidateKeys] = useStateXS([]);
+  const [batchReviewBusy, setBatchReviewBusy] = useStateXS(false);
 
   const listQ = useApiData("artifacts", [tenant ? tenant.id : "default", {}], { fallback: data.ARTIFACTS });
   const artifacts = listQ.data || [];
   const isMock = listQ.source === "mock";
   const isStale = listQ.source === "live-stale";
+  const tenantId = tenant ? tenant.id : "default";
+  const instanceTypesQ = useApiData("instanceTypes", [tenantId, { includeDraft: true }], { fallback: [] });
+  const graphProposedQ = useApiData("graphProposedElements", [tenantId, { status: "all" }], { fallback: { runs: [], elements: [] } });
+  const ontologyCandidates = useMemoXS(() => {
+    return ((graphProposedQ.data || {}).elements || []).filter(isOntologyCandidateXS);
+  }, [JSON.stringify(((graphProposedQ.data || {}).elements || []).map(e => [e.element_key, e.status, e.element_type, (e.payload || {}).artifact_type]))]);
+  const ontologyCandidateKinds = useMemoXS(() => {
+    const kinds = Array.from(new Set(ontologyCandidates.map(item => ontologyCandidateKindXS(item)).filter(Boolean)));
+    return kinds.sort((a, b) => a.localeCompare(b));
+  }, [JSON.stringify(ontologyCandidates.map(item => ontologyCandidateKindXS(item)))]);
+  const filteredOntologyCandidates = useMemoXS(() => {
+    const q = search.trim().toLowerCase();
+    return ontologyCandidates
+      .filter(item => candidateKind === "all" || ontologyCandidateKindXS(item) === candidateKind)
+      .filter(item => {
+        const status = String(item.status || "").toLowerCase();
+        if (candidateStatus === "all") return true;
+        if (candidateStatus === "pending") return !["approved", "rejected", "done"].includes(status);
+        return status === candidateStatus;
+      })
+      .filter(item => !q || JSON.stringify([item.name, item.element_key, item.element_type, item.payload], null, 0).toLowerCase().includes(q));
+  }, [ontologyCandidates, candidateKind, candidateStatus, search]);
+  const selectedOntologyCandidate = ontologyCandidates.find(item => item.element_key === selectedCandidateKey) || filteredOntologyCandidates[0] || null;
+  const graphTypeByArtifact = useMemoXS(() => {
+    const pairs = (instanceTypesQ.data || [])
+      .filter(t => t && t.ontology_artifact && t.type)
+      .map(t => [t.ontology_artifact, t]);
+    return Object.fromEntries(pairs);
+  }, [JSON.stringify((instanceTypesQ.data || []).map(t => [t.ontology_artifact, t.type, t.approved]))]);
 
   const grouped = useMemoXS(() => ({
     ObjectType: artifacts.filter(a => a.type === "ObjectType"),
@@ -66,7 +113,7 @@ function Ontology({ data, tenant, language }) {
   const evidence = (selected && selected.evidence) || [];
   const audit = (selected && selected.audit) || [];
   const canonicalKey = selected && (selected.canonical_key || selected.id);
-  const tenantId = tenant ? tenant.id : "default";
+  const graphTypeForSelected = canonicalKey ? graphTypeByArtifact[canonicalKey] : null;
 
   const stats = {
     total: activeArtifacts.length,
@@ -95,6 +142,53 @@ function Ontology({ data, tenant, language }) {
     } catch {}
   }, [artifacts.map(a => a.canonical_key || a.id).join("|")]);
 
+  useEffectXS(() => {
+    try {
+      const params = new URLSearchParams(location.search);
+      const key = params.get("ontology_candidate");
+      if (key) {
+        setOntologyTab("discovered");
+        setSelectedCandidateKey(key);
+      }
+    } catch {}
+  }, []);
+
+  useEffectXS(() => {
+    if (ontologyTab !== "discovered") return;
+    if (!selectedCandidateKey && filteredOntologyCandidates[0]) setSelectedCandidateKey(filteredOntologyCandidates[0].element_key);
+  }, [ontologyTab, filteredOntologyCandidates.map(item => item.element_key).join("|")]);
+
+  useEffectXS(() => {
+    if (ontologyTab !== "discovered" || candidateStatus !== "pending") return;
+    const pending = ontologyCandidates.filter(item => !["approved", "rejected", "done"].includes(String(item.status || "").toLowerCase()));
+    if (!pending.length && ontologyCandidates.length) setCandidateStatus("all");
+  }, [ontologyTab, candidateStatus, ontologyCandidates.map(item => `${item.element_key}:${item.status}`).join("|")]);
+
+  useEffectXS(() => {
+    const valid = new Set(ontologyCandidates.map(item => item.element_key));
+    const nextKeys = selectedCandidateKeys.filter(key => valid.has(key));
+    if (nextKeys.length !== selectedCandidateKeys.length) setSelectedCandidateKeys(nextKeys);
+  }, [ontologyCandidates.map(item => item.element_key).join("|")]);
+
+  useEffectXS(() => {
+    try {
+      const url = new URL(location.href);
+      url.searchParams.set("screen", "ontology");
+      url.searchParams.set("tenant", tenantId);
+      ["graph_tab", "proposed_key", "selected_node", "selected_edge", "view", "depth", "limit", "type", "id"].forEach(param => url.searchParams.delete(param));
+      if (ontologyTab === "discovered") {
+        url.searchParams.set("ontology_tab", "discovered");
+        url.searchParams.delete("artifact");
+        if (selectedCandidateKey) url.searchParams.set("ontology_candidate", selectedCandidateKey);
+        else url.searchParams.delete("ontology_candidate");
+      } else {
+        url.searchParams.delete("ontology_tab");
+        url.searchParams.delete("ontology_candidate");
+      }
+      history.replaceState(null, "", url.toString());
+    } catch {}
+  }, [tenantId, ontologyTab, selectedCandidateKey]);
+
   function ontologyHref(key) {
     return `/?screen=ontology&tenant=${encodeURIComponent(tenantId)}&artifact=${encodeURIComponent(key || "")}`;
   }
@@ -102,6 +196,21 @@ function Ontology({ data, tenant, language }) {
   function reasoningHref(key) {
     const qs = new URLSearchParams({ screen: "reasoning", tenant: tenantId });
     if (key) qs.set("ontology_basis", key);
+    return "/?" + qs.toString();
+  }
+
+  function graphHrefForArtifact(key) {
+    const graphType = key ? graphTypeByArtifact[key] : null;
+    if (!graphType) return "";
+    const qs = new URLSearchParams({
+      screen: "graph",
+      tenant: tenantId,
+      graph_tab: "approved",
+      view: "all",
+      depth: "1",
+      limit: "200",
+      type: graphType.type,
+    });
     return "/?" + qs.toString();
   }
 
@@ -129,14 +238,97 @@ function Ontology({ data, tenant, language }) {
     }
   }
 
+  async function reviewOntologyCandidate(action) {
+    if (!selectedOntologyCandidate) return;
+    const reason = reviewReason.trim();
+    if ((action === "reject" || action === "needs-evidence") && !reason) {
+      setReviewMsg({ kind: "err", msg: tXS(language, "Decision rationale is required for reject / needs evidence.", "拒绝或要求补证据时必须填写决策理由。") });
+      return;
+    }
+    try {
+      const result = await window.AL_API.reviewGraphProposedElement(
+        tenantId,
+        selectedOntologyCandidate.element_key,
+        action,
+        { reason, reviewer: "M. Aoki", review_surface: "ontology" },
+      );
+      setReviewReason("");
+      setReviewMsg({ kind: "ok", msg: tXS(language, `Ontology candidate ${action} recorded.`, `本体候选 ${action} 已记录。`) });
+      if (graphProposedQ.refetch) await graphProposedQ.refetch();
+      window.dispatchEvent(new CustomEvent("aletheia:retry"));
+      if (action === "approve") setCandidateStatus("all");
+      const reviewedKey = result?.element?.element_key || selectedOntologyCandidate.element_key;
+      const next = filteredOntologyCandidates.find(item => item.element_key !== reviewedKey);
+      if (next) setSelectedCandidateKey(next.element_key);
+    } catch (e) {
+      setReviewMsg({ kind: "err", msg: e.message || String(e) });
+    }
+  }
+
+  async function reviewOntologyCandidatesBatch(action, elementKeys) {
+    const keys = Array.from(new Set((elementKeys || selectedCandidateKeys).filter(Boolean)));
+    const reason = reviewReason.trim();
+    if (!keys.length) {
+      setReviewMsg({ kind: "err", msg: tXS(language, "Select at least one ontology candidate.", "请至少选择一个本体候选。") });
+      return;
+    }
+    if ((action === "reject" || action === "needs-evidence") && !reason) {
+      setReviewMsg({ kind: "err", msg: tXS(language, "Decision rationale is required for batch reject / needs evidence.", "批量拒绝或要求补证据时必须填写决策理由。") });
+      return;
+    }
+    setBatchReviewBusy(true);
+    setReviewMsg(null);
+    try {
+      const chunks = [];
+      for (let i = 0; i < keys.length; i += 200) chunks.push(keys.slice(i, i + 200));
+      const results = [];
+      for (const chunk of chunks) {
+        const result = await window.AL_API.reviewGraphProposedElementsBatch(
+          tenantId,
+          chunk,
+          action,
+          { reason, reviewer: "M. Aoki", review_surface: "ontology" },
+        );
+        results.push(result);
+      }
+      const ok = results.reduce((sum, result) => sum + (result?.ok_count || 0), 0);
+      const failedItems = results.flatMap(result => (result?.results || []).filter(item => !item.ok));
+      const failed = failedItems.length;
+      if (graphProposedQ.refetch) await graphProposedQ.refetch();
+      window.dispatchEvent(new CustomEvent("aletheia:retry"));
+      if (!failed) {
+        setSelectedCandidateKeys([]);
+        setReviewReason("");
+        if (action === "approve") setCandidateStatus("all");
+        const reviewed = new Set(keys);
+        const next = filteredOntologyCandidates.find(item => !reviewed.has(item.element_key));
+        setSelectedCandidateKey(next?.element_key || "");
+      }
+      setReviewMsg({
+        kind: failed ? "err" : "ok",
+        msg: failed
+          ? tXS(language, `${ok} recorded, ${failed} failed · ${failedItems.map(item => item.element_key || item.error).slice(0, 2).join(", ")}`, `已记录 ${ok} 条，失败 ${failed} 条 · ${failedItems.map(item => item.element_key || item.error).slice(0, 2).join(", ")}`)
+          : tXS(language, `${ok} ontology candidate decisions recorded.`, `已记录 ${ok} 条本体候选审核决定。`),
+      });
+    } catch (e) {
+      setReviewMsg({ kind: "err", msg: e.message || String(e) });
+    } finally {
+      setBatchReviewBusy(false);
+    }
+  }
+
   return (
     <div className="canvas">
       <div className="subbar">
         <div className="tabs">
-          <div className={"tab" + (active === "ObjectType" ? " active" : "")} onClick={() => setActive("ObjectType")}>{tXS(language, "Object Types", "对象类型")} <span className="ct">{grouped.ObjectType.length}</span></div>
-          <div className={"tab" + (active === "LinkType" ? " active" : "")} onClick={() => setActive("LinkType")}>{tXS(language, "Link Types", "关系类型")} <span className="ct">{grouped.LinkType.length}</span></div>
-          <div className={"tab" + (active === "Property" ? " active" : "")} onClick={() => setActive("Property")}>{tXS(language, "Properties", "属性")} <span className="ct">{grouped.Property.length}</span></div>
-          {grouped.Action.length > 0 && <div className={"tab" + (active === "Action" ? " active" : "")} onClick={() => setActive("Action")}>{tXS(language, "Actions", "动作")} <span className="ct">{grouped.Action.length}</span></div>}
+          <div className={"tab" + (ontologyTab === "catalog" ? " active" : "")} onClick={() => setOntologyTab("catalog")}>{tXS(language, "Canonical catalog", "正式目录")} <span className="ct">{artifacts.length}</span></div>
+          <div className={"tab" + (ontologyTab === "discovered" ? " active" : "")} onClick={() => setOntologyTab("discovered")}>{tXS(language, "Discovered candidates", "发现候选")} <span className="ct">{ontologyCandidates.length}</span></div>
+          {ontologyTab === "catalog" && <>
+            <div className={"tab" + (active === "ObjectType" ? " active" : "")} onClick={() => setActive("ObjectType")}>{tXS(language, "Object Types", "对象类型")} <span className="ct">{grouped.ObjectType.length}</span></div>
+            <div className={"tab" + (active === "LinkType" ? " active" : "")} onClick={() => setActive("LinkType")}>{tXS(language, "Link Types", "关系类型")} <span className="ct">{grouped.LinkType.length}</span></div>
+            <div className={"tab" + (active === "Property" ? " active" : "")} onClick={() => setActive("Property")}>{tXS(language, "Properties", "属性")} <span className="ct">{grouped.Property.length}</span></div>
+            {grouped.Action.length > 0 && <div className={"tab" + (active === "Action" ? " active" : "")} onClick={() => setActive("Action")}>{tXS(language, "Actions", "动作")} <span className="ct">{grouped.Action.length}</span></div>}
+          </>}
         </div>
         <div className="spacer" />
         {isMock  && <span className="pill changes" style={{ marginRight: 8 }}><span className="dot" />{tXS(language, "Mock fallback", "模拟回退")}</span>}
@@ -146,6 +338,7 @@ function Ontology({ data, tenant, language }) {
         <button className="tool">⤓ {tXS(language, "Export schema", "导出 schema")}</button>
       </div>
 
+      {ontologyTab === "catalog" ? (
       <div className="ontology-cols" style={{ flex: 1, minHeight: 0 }}>
         {/* catalog */}
         <div style={{ display: "flex", flexDirection: "column", minHeight: 0 }}>
@@ -301,8 +494,8 @@ function Ontology({ data, tenant, language }) {
                       <GovernanceSummary selected={selected} tenant={tenant} tenantId={tenantId} />
                       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                         <a className="btn" href={reasoningHref(canonicalKey)}>{tXS(language, "Open reasoning cases using this basis", "打开使用该基础的推理 case")}</a>
-                        {canonicalKey && canonicalKey.startsWith("object:") && (
-                          <a className="btn ghost" href={`/?screen=graph&tenant=${encodeURIComponent(tenantId)}&artifact=${encodeURIComponent(canonicalKey)}`}>{tXS(language, "Open graph context", "打开图谱上下文")}</a>
+                        {graphTypeForSelected && (
+                          <a className="btn ghost" href={graphHrefForArtifact(canonicalKey)}>{tXS(language, "Open graph context", "打开图谱上下文")}</a>
                         )}
                       </div>
                       {(selected.usedBy || []).length > 0 && (
@@ -365,6 +558,33 @@ function Ontology({ data, tenant, language }) {
           </div>
         </div>
       </div>
+      ) : (
+        <DiscoveredOntologyReview
+          tenantId={tenantId}
+          candidates={ontologyCandidates}
+          filtered={filteredOntologyCandidates}
+          selected={selectedOntologyCandidate}
+          selectedKey={selectedCandidateKey}
+          setSelectedKey={setSelectedCandidateKey}
+          kinds={ontologyCandidateKinds}
+          kindFilter={candidateKind}
+          setKindFilter={setCandidateKind}
+          statusFilter={candidateStatus}
+          setStatusFilter={setCandidateStatus}
+          search={search}
+          setSearch={setSearch}
+          q={graphProposedQ}
+          reason={reviewReason}
+          setReason={setReviewReason}
+          msg={reviewMsg}
+          onReview={reviewOntologyCandidate}
+          selectedKeys={selectedCandidateKeys}
+          setSelectedKeys={setSelectedCandidateKeys}
+          onBatchReview={reviewOntologyCandidatesBatch}
+          batchBusy={batchReviewBusy}
+          language={language}
+        />
+      )}
     </div>
   );
 }
@@ -376,6 +596,251 @@ function typeShort(type) {
 function pct(n, total) {
   if (!total) return 0;
   return Math.max(4, Math.round((n / total) * 100));
+}
+
+function isOntologyCandidateXS(item) {
+  const type = String(item?.element_type || item?.type || "").toLowerCase();
+  return type === "ontology_concept";
+}
+
+function ontologyCandidateKindXS(item) {
+  return String((item?.payload || {}).artifact_type || "concept").toLowerCase();
+}
+
+function ontologyCandidateStatusXS(status, language) {
+  const raw = String(status || "draft").toLowerCase();
+  const zh = typeof isZhUI === "function" ? isZhUI(language) : String(language || "").startsWith("zh");
+  if (!zh) return raw;
+  const map = {
+    draft: "草稿",
+    needs_more_evidence: "需补证据",
+    needs_review: "需审核",
+    approved: "已批准",
+    rejected: "已拒绝",
+  };
+  return map[raw] || raw;
+}
+
+function DiscoveredOntologyReview({
+  tenantId,
+  candidates,
+  filtered,
+  selected,
+  selectedKey,
+  setSelectedKey,
+  kinds,
+  kindFilter,
+  setKindFilter,
+  statusFilter,
+  setStatusFilter,
+  search,
+  setSearch,
+  q,
+  reason,
+  setReason,
+  msg,
+  onReview,
+  selectedKeys,
+  setSelectedKeys,
+  onBatchReview,
+  batchBusy,
+  language,
+}) {
+  const counts = candidates.reduce((acc, item) => {
+    const kind = ontologyCandidateKindXS(item);
+    acc[kind] = (acc[kind] || 0) + 1;
+    return acc;
+  }, {});
+  const pendingCount = candidates.filter(item => !["approved", "rejected", "done"].includes(String(item.status || "").toLowerCase())).length;
+  const selectedSet = new Set(selectedKeys || []);
+  const selectedInFilter = filtered.filter(item => selectedSet.has(item.element_key));
+  const payload = selected?.payload || {};
+  const operationalRows = [
+    ["artifact_type", payload.artifact_type],
+    ["domain", payload.domain],
+    ["range", payload.range],
+    ["property_of", payload.property_of],
+    ["trigger_event", payload.trigger_event],
+    ["trigger_or_condition", payload.trigger_or_condition],
+    ["input_parameters", payload.input_parameters || payload.inputs],
+    ["outputs", payload.outputs],
+    ["expected_effects", payload.expected_effects],
+    ["guardrails", payload.guardrails],
+    ["applies_to", payload.applies_to],
+  ].filter(([, value]) => value !== undefined && value !== null && value !== "" && !(Array.isArray(value) && !value.length));
+  return (
+    <div className="ontology-cols" style={{ flex: 1, minHeight: 0 }}>
+      <div style={{ display: "flex", flexDirection: "column", minHeight: 0 }}>
+        <div style={{ padding: "var(--pad-3) var(--pad-4)", borderBottom: "1px solid var(--line)", background: "var(--bg-2)" }}>
+          <div className="eyebrow accent">{tXS(language, "Discovered ontology candidates", "发现的本体候选")}</div>
+          <input className="input" value={search} onChange={e => setSearch(e.target.value)}
+                 placeholder={tXS(language, "filter candidates by label, key, trigger, action…", "按标签、键、触发器、动作过滤…")} style={{ marginTop: 8 }} />
+          <div className="chip-row" style={{ marginTop: 10 }}>
+            <Chip active={kindFilter === "all"} onClick={() => setKindFilter("all")} count={candidates.length}>{tXS(language, "All", "全部")}</Chip>
+            {kinds.map(kind => <Chip key={kind} active={kindFilter === kind} onClick={() => setKindFilter(kind)} count={counts[kind] || 0}>{kind}</Chip>)}
+          </div>
+          <div className="chip-row" style={{ marginTop: 8 }}>
+            <Chip active={statusFilter === "pending"} onClick={() => setStatusFilter("pending")} count={pendingCount}>{tXS(language, "Pending", "待审")}</Chip>
+            <Chip active={statusFilter === "all"} onClick={() => setStatusFilter("all")} count={candidates.length}>{tXS(language, "All status", "全部状态")}</Chip>
+            <Chip active={statusFilter === "approved"} onClick={() => setStatusFilter("approved")} count={candidates.filter(item => item.status === "approved").length}>{tXS(language, "Approved", "已批准")}</Chip>
+            <Chip active={statusFilter === "rejected"} onClick={() => setStatusFilter("rejected")} count={candidates.filter(item => item.status === "rejected").length}>{tXS(language, "Rejected", "已拒绝")}</Chip>
+          </div>
+          <div style={{ border: "1px solid var(--line-soft)", background: "var(--bg-1)", padding: 8, marginTop: 10 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center", marginBottom: 8 }}>
+              <span className="eyebrow">{tXS(language, "Batch ontology review", "批量本体审核")}</span>
+              <span className="ct">{(selectedKeys || []).length} {tXS(language, "selected", "已选择")}</span>
+            </div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+              <button className="btn xs" disabled={!filtered.length || batchBusy} onClick={() => {
+                const keys = filtered.map(item => item.element_key);
+                setSelectedKeys(Array.from(new Set([...(selectedKeys || []), ...keys])));
+              }}>{tXS(language, "Select current filter", "选择当前过滤")}</button>
+              <button className="btn xs" disabled={!(selectedKeys || []).length || batchBusy} onClick={() => setSelectedKeys([])}>{tXS(language, "Clear", "清除")}</button>
+              <button className="btn xs approve" disabled={!(selectedKeys || []).length || batchBusy} onClick={() => onBatchReview("approve")}>{tXS(language, "Approve selected", "批准所选")}</button>
+              <button className="btn xs approve" disabled={!filtered.length || batchBusy} onClick={() => onBatchReview("approve", filtered.map(item => item.element_key))}>{tXS(language, "Approve current filter", "批准当前过滤")}</button>
+              <button className="btn xs changes" disabled={!(selectedKeys || []).length || batchBusy} onClick={() => onBatchReview("needs-evidence")}>{tXS(language, "Needs evidence", "需要补证据")}</button>
+              <button className="btn xs reject" disabled={!(selectedKeys || []).length || batchBusy} onClick={() => onBatchReview("reject")}>{tXS(language, "Reject", "拒绝")}</button>
+            </div>
+            {(selectedKeys || []).length > 0 && (
+              <div style={{ marginTop: 6, fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--muted)" }}>
+                {tXS(language, "Only selected ontology candidates are updated; canonical ontology promotion remains gated.", "仅更新所选本体候选的审核状态；正式本体提升仍保持门控。")}
+                {selectedInFilter.length ? tXS(language, ` Current filter selected: ${selectedInFilter.length}.`, ` 当前过滤结果已选择：${selectedInFilter.length}。`) : ""}
+              </div>
+            )}
+            {batchBusy && (
+              <div style={{ marginTop: 6, fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--accent)" }}>
+                {tXS(language, "Recording batch decisions…", "正在记录批量审核决定…")}
+              </div>
+            )}
+          </div>
+        </div>
+        <div style={{ flex: 1, overflow: "auto" }}>
+          <ApiStatus q={q} what={tXS(language, "ontology candidates", "本体候选")} />
+          <div className="artifact-list">
+            {filtered.length === 0 && (
+              <div style={{ padding: 24, fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--muted)", textAlign: "center" }}>
+                {tXS(language, "No discovered ontology candidates match this filter.", "没有匹配该过滤条件的本体候选。")}
+              </div>
+            )}
+            {filtered.map(item => {
+              const key = item.element_key;
+              const kind = ontologyCandidateKindXS(item);
+              return (
+                <div key={key}
+                     className={"artifact-row " + (item.status || "proposed") + (key === selectedKey ? " selected" : "")}
+                     onClick={() => setSelectedKey(key)}>
+                  <div className="ar-bar" />
+                  <input
+                    type="checkbox"
+                    checked={selectedSet.has(key)}
+                    onChange={e => {
+                      const checked = e.target.checked;
+                      setSelectedKeys(prev => checked
+                        ? (prev || []).includes(key) ? prev : [...(prev || []), key]
+                        : (prev || []).filter(itemKey => itemKey !== key));
+                    }}
+                    onClick={e => e.stopPropagation()}
+                    style={{ margin: "14px 0 0 8px" }}
+                    aria-label={tXS(language, "Select ontology candidate", "选择本体候选")}
+                  />
+                  <div className="ar-main">
+                    <div className="ar-top">
+                      <span className="type">{kind}</span>
+                      <span>·</span>
+                      <span className="key">{key}</span>
+                    </div>
+                    <div className="ar-title">{textXS(item.name, language)}</div>
+                    <div className="ar-meta">
+                      <span>{ontologyCandidateStatusXS(item.status, language)}</span>
+                      <span>{item.run_key || "run unknown"}</span>
+                      <span>{tXS(language, "conf", "置信度")} {Math.round((item.confidence || 0) * 100)}%</span>
+                    </div>
+                  </div>
+                  <div className="ar-right">{kind}</div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+
+      <div style={{ display: "flex", flexDirection: "column", minHeight: 0 }}>
+        {!selected ? (
+          <div style={{ flex: 1, display: "grid", placeItems: "center", color: "var(--muted)", fontFamily: "var(--font-mono)", fontSize: 12 }}>
+            {tXS(language, "Select an ontology candidate to review.", "选择一个本体候选进行审核。")}
+          </div>
+        ) : (
+          <>
+            <div className="art-header">
+              <div className="crumb">
+                <span className="type">{ontologyCandidateKindXS(selected)}</span>
+                <span className="sep">/</span>
+                <span>{selected.element_key}</span>
+                <span style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
+                  <Pill kind={selected.status}>{ontologyCandidateStatusXS(selected.status, language)}</Pill>
+                  <Pill kind="accent">{tXS(language, "conf", "置信度")} {Math.round((selected.confidence || 0) * 100)}%</Pill>
+                </span>
+              </div>
+              <h1>{textXS(selected.name, language)}</h1>
+              <p className="desc">{textXS(payload.description || payload.summary || payload.rationale, language) || tXS(language, "No description recorded.", "暂无描述。")}</p>
+              <div className="row">
+                <div className="stat"><span className="label">{tXS(language, "Review surface", "审核入口")}</span><span className="val mono">ontology</span></div>
+                <div className="stat"><span className="label">{tXS(language, "Run", "运行")}</span><span className="val mono">{selected.run_key || "—"}</span></div>
+                <div className="stat"><span className="label">{tXS(language, "Source", "来源")}</span><span className="val mono">{selected.source_url || "—"}</span></div>
+                <div className="stat"><span className="label">{tXS(language, "Canonical write", "正式写入")}</span><span className="val" style={{ color: "var(--changes)" }}>{tXS(language, "review gated", "审核门控")}</span></div>
+              </div>
+              <div style={{ marginTop: 12 }}>
+                <textarea className="input" value={reason} onChange={e => setReason(e.target.value)}
+                          placeholder={tXS(language, "Decision rationale; required for reject / needs evidence", "决策理由；拒绝或要求补证据时必填")}
+                          style={{ minHeight: 64, resize: "vertical" }} />
+                <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
+                  <button className="btn approve" disabled={selected.status === "approved"} onClick={() => onReview("approve")}>{tXS(language, "Approve candidate", "批准候选")}</button>
+                  <button className="btn changes" onClick={() => onReview("needs-evidence")}>{tXS(language, "Needs evidence", "需要补证据")}</button>
+                  <button className="btn reject" onClick={() => onReview("reject")}>{tXS(language, "Reject", "拒绝")}</button>
+                  <button className="btn ghost" onClick={() => onReview("comment")}>{tXS(language, "Comment", "评论")}</button>
+                </div>
+                {msg && <div style={{ marginTop: 8, fontFamily: "var(--font-mono)", fontSize: 10, color: msg.kind === "err" ? "var(--rejected)" : "var(--approved)" }}>{msg.msg}</div>}
+              </div>
+            </div>
+            <div style={{ flex: 1, overflow: "auto", padding: "var(--pad-4) var(--pad-5)" }}>
+              <Panel eyebrow={tXS(language, "Operational ontology shape", "操作型本体结构")} title={tXS(language, "Candidate fields", "候选字段")} count={ontologyCandidateKindXS(selected)} style={{ marginBottom: 16 }}>
+                <dl className="kv" style={{ alignItems: "start" }}>
+                  {operationalRows.map(([key, value]) => (
+                    <React.Fragment key={key}>
+                      <dt>{key}</dt>
+                      <dd style={{ overflowWrap: "anywhere", whiteSpace: "normal" }}>{typeof value === "object" ? JSON.stringify(value) : String(value)}</dd>
+                    </React.Fragment>
+                  ))}
+                </dl>
+              </Panel>
+              <Panel eyebrow={tXS(language, "Raw proposal payload", "原始候选 payload")} title={tXS(language, "Source-grounded candidate", "基于来源的候选")} count={selected.element_type}>
+                <JsonView data={payload || {}} />
+              </Panel>
+            </div>
+          </>
+        )}
+      </div>
+
+      <div style={{ display: "flex", flexDirection: "column", minHeight: 0 }}>
+        <div style={{ padding: "var(--pad-3) var(--pad-4)", borderBottom: "1px solid var(--line)", background: "var(--bg-2)" }}>
+          <div className="eyebrow accent">{tXS(language, "Review routing", "审核路由")}</div>
+          <div style={{ marginTop: 4, fontSize: 13, color: "var(--text)" }}>{tXS(language, "Ontology candidates are reviewed here; graph instances stay in Graph.", "本体候选在此审核；图实例保留在图谱页。")}</div>
+        </div>
+        <div style={{ padding: "var(--pad-3) var(--pad-4)", overflow: "auto" }}>
+          <div className="eyebrow" style={{ marginBottom: 8 }}>{tXS(language, "Candidate type distribution", "候选类型分布")}</div>
+          {Object.entries(counts).map(([kind, count]) => (
+            <div className="hbar" key={kind}><span className="lbl">{kind}</span><span className="track"><i style={{ width: pct(count, candidates.length) + "%" }} /></span><span className="num">{count}</span></div>
+          ))}
+          <div className="eyebrow" style={{ marginBottom: 8, marginTop: 18 }}>{tXS(language, "Boundary", "边界")}</div>
+          <dl className="kv">
+            <dt>{tXS(language, "Storage", "存储")}</dt><dd>proposed_graph_elements</dd>
+            <dt>{tXS(language, "Review surface", "审核入口")}</dt><dd>ontology</dd>
+            <dt>{tXS(language, "Canonical write", "正式写入")}</dt><dd>{tXS(language, "disabled until approved promotion flow", "提升流程批准前禁用")}</dd>
+          </dl>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function MiniMetric({ label, value, tone }) {

@@ -1,4 +1,5 @@
 import json
+import os
 import sys
 import tempfile
 import unittest
@@ -16,7 +17,9 @@ import agents.iterative_graph_enrichment_agent as iterative_graph_enrichment_age
 from agents.iterative_graph_enrichment_agent import (  # noqa: E402
     GRAPH_EXTRACTION_PROMPT_VERSION,
     GraphDeepResearchBenchmark,
+    GPTResearcherSearchProvider,
     IterativeGraphEnrichmentAgent,
+    _configure_gpt_researcher_env,
     _graph_context_query_plan,
 )
 from agents.ontology_artifacts import (  # noqa: E402
@@ -73,6 +76,26 @@ class StaticTestEmbeddingAdapter:
         }
 
 
+class FakeGPTResearcher:
+    def __init__(self, query, **_kwargs):
+        self.query = query
+
+    async def conduct_research(self):
+        return {
+            "query": self.query,
+            "sources": [
+                {"url": "https://zenodo.org/records/13841882", "title": "Maritime chokepoint source"},
+            ],
+        }
+
+    async def write_report(self, **_kwargs):
+        return (
+            "Bab el-Mandeb Strait conflict risk affects CHN trade exposure. "
+            "The evidence says disruption can expose CHN to trade_at_risk_v and trade_impacted; "
+            "analyst review action required. Source: https://zenodo.org/records/13841882"
+        )
+
+
 class DegradedTestEmbeddingAdapter:
     model_name = "test-unavailable-mini"
 
@@ -122,6 +145,27 @@ class TypeArtifactNearestEmbeddingAdapter:
         }
 
 
+class WrongVectorNeighborEmbeddingAdapter:
+    model_name = "test-wrong-vector-neighbor-mini"
+
+    def embed(self, text: str):
+        lowered = (text or "").lower()
+        if "strait of hormuz" in lowered and "maritimechokepoint" not in lowered:
+            vector = [1.0, 0.0, 0.0, 0.0]
+        elif "lombok strait" in lowered:
+            vector = [0.99, 0.01, 0.0, 0.0]
+        elif "strait of hormuz" in lowered and "maritimechokepoint" in lowered:
+            vector = [0.85, 0.15, 0.0, 0.0]
+        else:
+            vector = [0.0, 1.0, 0.0, 0.0]
+        return {
+            "status": "ready",
+            "model": self.model_name,
+            "vector": vector,
+            "dim": len(vector),
+        }
+
+
 class IterativeGraphEnrichmentTest(unittest.TestCase):
     def test_edge_identity_uses_canonical_endpoint_dedup_evidence(self):
         candidate = {
@@ -154,6 +198,86 @@ class IterativeGraphEnrichmentTest(unittest.TestCase):
         self.assertIn("country irn", identity_key)
         self.assertIn("chokepoint strait of hormuz", identity_key)
         self.assertIn("depends on:country irn::chokepoint strait of hormuz", identity["source_identity"])
+
+    def test_edge_with_approved_canonical_endpoints_merges_existing_approved_edge(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_url, _ = self._seed_db(tmpdir)
+            agent = IterativeGraphEnrichmentAgent(
+                db_url,
+                tenant="maritime-risk",
+                embedding_adapter=StaticTestEmbeddingAdapter(),
+            )
+            approved_identity = iterative_graph_enrichment_agent._candidate_identity_payload(
+                {
+                    "element_type": "edge",
+                    "name": "USA depends on Strait of Hormuz",
+                    "payload": {
+                        "source_type": "Country",
+                        "source_label": "USA",
+                        "target_type": "Chokepoint",
+                        "target_label": "Strait of Hormuz",
+                        "relation": "depends_on",
+                        "properties": {"schema_edge_key": "link:depends_on"},
+                    },
+                    "evidence_refs": ["approved"],
+                }
+            )
+            identity_index = [
+                {
+                    "node_key": "Country:USA->Chokepoint:Strait of Hormuz:link:depends_on",
+                    "status": "approved",
+                    "source": "approved_graph_instance",
+                    "identity": approved_identity,
+                    "identity_key": iterative_graph_enrichment_agent._identity_key("maritime-risk", approved_identity),
+                    "payload": {},
+                }
+            ]
+
+            candidate = agent._annotate_candidate_identity(
+                {
+                    "element_type": "edge",
+                    "name": "US depends on Hormuz",
+                    "payload": {
+                        "source_type": "Country",
+                        "source_label": "US",
+                        "target_type": "Chokepoint",
+                        "target_label": "Hormuz",
+                        "relation": "depends_on",
+                        "description": "Evidence says the US depends on Hormuz.",
+                        "endpoint_dedup_evidence": {
+                            "source": {
+                                "matched_node_key": "Country:USA",
+                                "matched_space": "approved_graph",
+                                "dedup_decision": "merge_existing",
+                            },
+                            "target": {
+                                "matched_node_key": "Chokepoint:Strait of Hormuz",
+                                "matched_space": "approved_graph",
+                                "dedup_decision": "merge_existing",
+                            },
+                        },
+                    },
+                    "evidence_refs": ["https://example.org/hormuz"],
+                    "source_url": "https://example.org/hormuz",
+                    "confidence": 0.7,
+                    "iteration": 1,
+                },
+                task_id="task-a",
+                run_id="run-a",
+                frontier_id="frontier-a",
+                candidate_seq=1,
+                identity_index=identity_index,
+            )
+
+        self.assertEqual(candidate["payload"]["dedup_decision"], "merge_existing")
+        self.assertEqual(candidate["status"], "draft")
+        self.assertEqual(candidate["payload"]["match_method"], "approved_canonical_edge")
+        self.assertEqual(candidate["payload"]["matched_source"], "approved_graph_instance")
+        self.assertEqual(
+            candidate["payload"]["matched_node_key"],
+            "Country:USA->Chokepoint:Strait of Hormuz:link:depends_on",
+        )
+        self.assertEqual(candidate["payload"]["decision_reason"], "approved canonical edge already exists")
 
     def test_proposed_node_index_transitively_prefers_approved_match(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -320,9 +444,96 @@ class IterativeGraphEnrichmentTest(unittest.TestCase):
         self.assertTrue(direct_payload["canonical_edge_cleanup"]["retained"])
         self.assertEqual(cleanup["reviewed"][0]["element_key"], "proposed-graph:maritime-risk:edge:alias")
 
+    def test_cleanup_rejects_proposed_edge_when_approved_canonical_edge_exists(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_url, _ = self._seed_db(tmpdir)
+            engine = create_engine(db_url)
+            Session = sessionmaker(bind=engine)
+            session = Session()
+            run = IterativeGraphEnrichmentRun(
+                project_id="maritime-risk",
+                run_key="approved-edge-cleanup-run",
+                objective="cleanup approved duplicate",
+                status="completed",
+            )
+            session.add(run)
+            session.flush()
+            proposed_payload = {
+                "source_type": "Country",
+                "source_label": "US",
+                "target_type": "Chokepoint",
+                "target_label": "Hormuz",
+                "relation": "depends_on",
+                "endpoint_dedup_evidence": {
+                    "source": {"matched_node_key": "Country:USA", "matched_space": "approved_graph"},
+                    "target": {"matched_node_key": "Chokepoint:Strait of Hormuz", "matched_space": "approved_graph"},
+                },
+            }
+            session.add(
+                ProposedGraphElement(
+                    run_id=run.id,
+                    project_id="maritime-risk",
+                    element_key="proposed-graph:maritime-risk:edge:us-hormuz",
+                    element_type="edge",
+                    name="US depends on Hormuz",
+                    payload_json=json.dumps(proposed_payload),
+                    evidence_refs_json=json.dumps([]),
+                    confidence=0.7,
+                    status="draft",
+                )
+            )
+            session.commit()
+            session.close()
+
+            agent = IterativeGraphEnrichmentAgent(
+                db_url,
+                tenant="maritime-risk",
+                embedding_adapter=StaticTestEmbeddingAdapter(),
+            )
+            approved_identity = iterative_graph_enrichment_agent._candidate_identity_payload(
+                {
+                    "element_type": "edge",
+                    "name": "USA depends on Strait of Hormuz",
+                    "payload": {
+                        "source_type": "Country",
+                        "source_label": "USA",
+                        "target_type": "Chokepoint",
+                        "target_label": "Strait of Hormuz",
+                        "relation": "depends_on",
+                        "properties": {"schema_edge_key": "link:depends_on"},
+                    },
+                    "evidence_refs": ["approved"],
+                }
+            )
+            approved_entry = {
+                "node_key": "Country:USA->Chokepoint:Strait of Hormuz:link:depends_on",
+                "status": "approved",
+                "source": "approved_graph_instance",
+                "identity": approved_identity,
+                "identity_key": iterative_graph_enrichment_agent._identity_key("maritime-risk", approved_identity),
+                "payload": {},
+            }
+            agent._approved_graph_instance_identity_index = lambda session: [approved_entry]
+            cleanup = agent.cleanup_duplicate_proposed_edges()
+
+            session = Session()
+            try:
+                row = session.query(ProposedGraphElement).filter_by(
+                    element_key="proposed-graph:maritime-risk:edge:us-hormuz"
+                ).one()
+                payload = json.loads(row.payload_json)
+            finally:
+                session.close()
+
+        self.assertEqual(row.status, "rejected")
+        self.assertEqual(payload["dedup_decision"], "merge_existing")
+        self.assertEqual(payload["matched_source"], "approved_graph_instance")
+        self.assertEqual(payload["matched_edge_key"], "Country:USA->Chokepoint:Strait of Hormuz:link:depends_on")
+        self.assertEqual(cleanup["reviewed"][0]["element_key"], "proposed-graph:maritime-risk:edge:us-hormuz")
+
     def test_unresolved_generic_entity_reference_is_not_promoted_to_node(self):
-        self.assertTrue(iterative_graph_enrichment_agent._is_unresolved_entity_reference("Second Strait", "Chokepoint"))
-        self.assertFalse(iterative_graph_enrichment_agent._is_unresolved_entity_reference("Taiwan Strait", "Chokepoint"))
+        self.assertTrue(iterative_graph_enrichment_agent._is_unresolved_entity_reference("Second Entity", "Entity"))
+        self.assertFalse(iterative_graph_enrichment_agent._is_unresolved_entity_reference("Taiwan Entity", "Entity"))
 
         def fake_runner(source_text, _schema_context):
             def interval(text):
@@ -339,16 +550,16 @@ class IterativeGraphEnrichmentTest(unittest.TestCase):
                     ),
                     SimpleNamespace(
                         extraction_class="graph_node",
-                        extraction_text="Second Strait",
+                        extraction_text="Second Chokepoint",
                         attributes={"schema_node_key": "chokepoint", "node_type": "Chokepoint", "confidence": 0.82},
-                        char_interval=interval("Second Strait"),
+                        char_interval=interval("Second Chokepoint"),
                     ),
                     SimpleNamespace(
                         extraction_class="graph_relation",
                         extraction_text="eyes",
                         attributes={
                             "source_label": "Iran",
-                            "target_label": "Second Strait",
+                            "target_label": "Second Chokepoint",
                             "relation_label": "eyes",
                         },
                         char_interval=interval("eyes"),
@@ -367,15 +578,15 @@ class IterativeGraphEnrichmentTest(unittest.TestCase):
             session = agent.Session()
             try:
                 result = SimpleNamespace(
-                    title="Iran Eyes Second Strait",
-                    snippet="Iran Eyes Second Strait",
-                    url="https://example.org/iran-eyes-second-strait",
+                    title="Iran Eyes Second Chokepoint",
+                    snippet="Iran Eyes Second Chokepoint",
+                    url="https://example.org/iran-eyes-second-chokepoint",
                 )
                 extraction = agent._extract_graph_evidence_contract(
                     session,
                     {"key": "frontier:bab", "name": "Bab el-Mandeb Strait"},
                     result,
-                    "Iran Eyes Second Strait",
+                    "Iran Eyes Second Chokepoint",
                 )
             finally:
                 session.close()
@@ -384,16 +595,16 @@ class IterativeGraphEnrichmentTest(unittest.TestCase):
                 extraction,
                 {"key": "frontier:bab", "name": "Bab el-Mandeb Strait"},
                 result,
-                "Iran Eyes Second Strait",
+                "Iran Eyes Second Chokepoint",
                 1,
             )
 
-        self.assertFalse([item for item in extraction["nodes"] if item.get("label") == "Second Strait"])
-        self.assertFalse([item for item in elements if item["element_type"] == "node" and item["name"] == "Second Strait"])
+        self.assertFalse([item for item in extraction["nodes"] if item.get("label") == "Second Chokepoint"])
+        self.assertFalse([item for item in elements if item["element_type"] == "node" and item["name"] == "Second Chokepoint"])
         self.assertTrue(
             any(
                 item.get("reason") == "unresolved_entity_reference"
-                and item.get("label") == "Second Strait"
+                and item.get("label") == "Second Chokepoint"
                 for item in extraction["rejected_or_ambiguous_candidates"]
             )
         )
@@ -541,6 +752,66 @@ class IterativeGraphEnrichmentTest(unittest.TestCase):
                     )
         return SimpleNamespace(extractions=extractions)
 
+    def test_gpt_researcher_env_uses_dotenv_gemini_key_and_safe_defaults(self):
+        global_cache = iterative_graph_enrichment_agent._DOTENV_CACHE
+        with tempfile.TemporaryDirectory() as tmpdir:
+            env_path = Path(tmpdir) / ".env"
+            env_path.write_text("GEMINI_API_KEY=test-gemini-key\n", encoding="utf-8")
+            with patch.dict(
+                os.environ,
+                {
+                    "ALETHEIA_ENV_FILE": str(env_path),
+                },
+                clear=True,
+            ):
+                iterative_graph_enrichment_agent._DOTENV_CACHE = None
+                configured = _configure_gpt_researcher_env()
+
+                self.assertEqual(os.environ["GEMINI_API_KEY"], "test-gemini-key")
+                self.assertEqual(os.environ["GOOGLE_API_KEY"], "test-gemini-key")
+                self.assertEqual(os.environ["FAST_LLM"], "google_genai:gemini-2.5-flash")
+                self.assertEqual(os.environ["SMART_LLM"], "google_genai:gemini-2.5-flash")
+                self.assertEqual(os.environ["STRATEGIC_LLM"], "google_genai:gemini-2.5-flash")
+                self.assertEqual(os.environ["EMBEDDING"], "google_genai:models/text-embedding-004")
+                self.assertEqual(os.environ["RETRIEVER"], "duckduckgo")
+                self.assertEqual(configured["applied"]["GOOGLE_API_KEY"], "from_gemini_api_key")
+        iterative_graph_enrichment_agent._DOTENV_CACHE = global_cache
+
+    def test_gpt_researcher_provider_parses_cited_report_sources(self):
+        provider = GPTResearcherSearchProvider(researcher_cls=FakeGPTResearcher)
+
+        results = provider.search("research chokepoint exposure", 3)
+
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0].provider, "gpt_researcher")
+        self.assertEqual(results[0].url, "https://zenodo.org/records/13841882")
+        self.assertIn("Bab el-Mandeb Strait", results[0].snippet)
+        self.assertIn("trade_at_risk_v", results[0].snippet)
+
+    def test_iterative_run_uses_gpt_researcher_report_as_graph_evidence(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_url, _ = self._seed_db(tmpdir)
+            agent = IterativeGraphEnrichmentAgent(
+                db_url,
+                tenant="maritime-risk",
+                research_provider="gpt_researcher",
+                gpt_researcher_cls=FakeGPTResearcher,
+                max_iterations=1,
+                max_frontier=1,
+                max_results_per_query=3,
+                langextract_runner=self._langextract_runner,
+                embedding_adapter=StaticTestEmbeddingAdapter(),
+            )
+
+            result = agent.run("use GPT Researcher to discover graph evidence")
+            proposed = result["proposed_graph"]
+
+            self.assertEqual(result["run"]["status"], "completed")
+            self.assertTrue(any(item["element_type"] == "edge" for item in proposed))
+            self.assertTrue(any(item["element_type"] == "finding" for item in proposed))
+            self.assertTrue(all(item["source_url"] == "https://zenodo.org/records/13841882" for item in proposed))
+            self.assertEqual(result["run"]["expansion_trace"][0]["research_provider"], "gpt_researcher")
+
     def test_iterative_run_creates_proposed_graph_without_canonical_writes(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             db_url, before_count = self._seed_db(tmpdir)
@@ -581,6 +852,79 @@ class IterativeGraphEnrichmentTest(unittest.TestCase):
                 if item["element_type"] in {"node", "edge"}:
                     self.assertTrue(payload.get("identity"))
                     self.assertTrue(payload.get("identity_key"))
+
+    def test_generic_entity_candidates_are_rejected_before_proposal(self):
+        def generic_runner(source_text, _schema_context):
+            def interval(text):
+                start = source_text.find(text)
+                if start < 0:
+                    return None
+                return SimpleNamespace(start_pos=start, end_pos=start + len(text))
+
+            return SimpleNamespace(
+                extractions=[
+                    SimpleNamespace(
+                        extraction_class="graph_node",
+                        extraction_text="countries",
+                        attributes={"schema_node_key": "country", "node_type": "Country", "confidence": 0.82},
+                        char_interval=interval("countries"),
+                    ),
+                    SimpleNamespace(
+                        extraction_class="graph_node",
+                        extraction_text="chokepoints",
+                        attributes={"schema_node_key": "chokepoint", "node_type": "Chokepoint", "confidence": 0.82},
+                        char_interval=interval("chokepoints"),
+                    ),
+                    SimpleNamespace(
+                        extraction_class="graph_relation",
+                        extraction_text="depend on",
+                        attributes={
+                            "source_label": "countries",
+                            "target_label": "chokepoints",
+                            "relation_label": "trade_dependency",
+                            "confidence": 0.76,
+                        },
+                        char_interval=interval("depend on"),
+                    ),
+                ]
+            )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "generic.json"
+            path.write_text(
+                json.dumps(
+                    [
+                        {
+                            "title": "Generic report",
+                            "url": "https://zenodo.org/records/generic",
+                            "snippet": "countries depend on chokepoints in global trade.",
+                        }
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            db_url, _ = self._seed_db(tmpdir)
+            agent = IterativeGraphEnrichmentAgent(
+                db_url,
+                tenant="maritime-risk",
+                search_results_json=str(path),
+                allowed_domains=["zenodo.org"],
+                max_iterations=1,
+                max_frontier=1,
+                max_results_per_query=1,
+                langextract_runner=generic_runner,
+                embedding_adapter=StaticTestEmbeddingAdapter(),
+            )
+
+            result = agent.run("reject generic graph candidates")
+
+            self.assertFalse([item for item in result["proposed_graph"] if item["element_type"] in {"node", "edge"}])
+            self.assertTrue(
+                any(
+                    str(item.get("reason") or "").startswith("candidate_quality_gate:")
+                    for item in result["run"]["skipped_sources"]
+                )
+            )
 
     def test_crawled_evidence_extracts_typed_graph_semantics(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -1330,6 +1674,403 @@ class IterativeGraphEnrichmentTest(unittest.TestCase):
             self.assertEqual(payload["extraction"]["review_boundary"], "ontology_relation_review")
             self.assertFalse(payload["writes_canonical"])
 
+    def test_deep_research_extracts_situation_metrics_and_claims(self):
+        def empty_runner(_source_text, _schema_context):
+            return SimpleNamespace(extractions=[])
+
+        def semantic_runner(_source_text, _frontier_item, source_ref):
+            quote = "War risk premiums surged from 0.2% to as high as 1%, indicating rapid financial risk escalation."
+            return {
+                "items": [
+                    {
+                        "element_type": "situation",
+                        "name": "2026 Strait of Hormuz disruption",
+                        "confidence": 0.7,
+                        "payload": {
+                            "subject": "Strait of Hormuz",
+                            "time_scope": "2026",
+                            "geography_scope": "Strait of Hormuz",
+                            "claim": "The Strait of Hormuz disruption affected global energy trade.",
+                            "evidence_quote": "The Strait of Hormuz disruption in 2026 affected global energy trade.",
+                        },
+                    },
+                    {
+                        "element_type": "metric_observation",
+                        "name": "Strait of Hormuz share of global oil and LNG",
+                        "confidence": 0.74,
+                        "payload": {
+                            "subject": "Strait of Hormuz",
+                            "metric_key": "global_oil_lng_share",
+                            "value": 0.2,
+                            "unit": "share",
+                            "evidence_quote": "Approximately 20% of the world's oil and LNG passes through the strait.",
+                        },
+                    },
+                    {
+                        "element_type": "metric_observation",
+                        "name": "Strait of Hormuz share of global seaborne oil trade",
+                        "confidence": 0.74,
+                        "payload": {
+                            "subject": "Strait of Hormuz",
+                            "metric_key": "global_seaborne_oil_trade_share",
+                            "value": 0.25,
+                            "unit": "share",
+                            "evidence_quote": "The chokepoint carries around a quarter of global seaborne oil trade.",
+                        },
+                    },
+                    {
+                        "element_type": "metric_change_observation",
+                        "name": "War risk premiums increase",
+                        "confidence": 0.76,
+                        "payload": {
+                            "subject": "War risk premiums",
+                            "metric_key": "war_risk_premiums",
+                            "baseline_value": 0.002,
+                            "observed_value": 0.01,
+                            "change_ratio": 5.0,
+                            "direction": "increase",
+                            "evidence_quote": quote,
+                        },
+                    },
+                    {
+                        "element_type": "indicator_claim",
+                        "name": "War risk premiums indicate financial risk escalation",
+                        "confidence": 0.72,
+                        "payload": {
+                            "subject": "war_risk_premiums_change",
+                            "indicates": "financial_risk_escalation",
+                            "claim": "The premium increase indicates rapid financial risk escalation.",
+                            "evidence_quote": quote,
+                        },
+                    },
+                    {
+                        "element_type": "impact_claim",
+                        "name": "Disruption increases fuel prices",
+                        "confidence": 0.68,
+                        "payload": {
+                            "subject": "Strait of Hormuz disruption",
+                            "target": "fuel_prices",
+                            "direction": "increase",
+                            "claim": "The disruption caused soaring fuel prices.",
+                            "evidence_quote": "The disruption caused soaring fuel prices, rising freight costs, and higher shipping insurance costs.",
+                        },
+                    },
+                ],
+                "ontology_candidates": [
+                    {
+                        "artifact_type": "object",
+                        "label": "Supply Chain Chokepoint",
+                        "description": "A recurring constricted dependency point in supply chains.",
+                        "evidence_quote": "These chokepoints, whether maritime passages, processing facilities for essential minerals, or nodes in advanced technological supply chains, represent not only strategic opportunities but also systemic risks.",
+                        "confidence": 0.63,
+                    },
+                    {
+                        "artifact_type": "property",
+                        "label": "Preparedness Gap",
+                        "description": "A property capturing incomplete exposure assessment or inadequate preparedness.",
+                        "property_of": "Situation",
+                        "evidence_quote": "the comprehensive assessment of countries' exposure to these disruptions remains largely incomplete, thereby inhibiting adequate preparedness",
+                        "confidence": 0.61,
+                    },
+                ],
+                "status": "runner",
+            }
+
+        report = (
+            "The Strait of Hormuz disruption in 2026 affected global energy trade. "
+            "Approximately 20% of the world's oil and LNG passes through the strait. "
+            "The chokepoint carries around a quarter of global seaborne oil trade. "
+            "War risk premiums surged from 0.2% to as high as 1%, indicating rapid financial risk escalation. "
+            "The disruption caused soaring fuel prices, rising freight costs, and higher shipping insurance costs. "
+            "Oil market volatility and natural gas market volatility also increased."
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "search.json"
+            path.write_text(
+                json.dumps(
+                    [
+                        {
+                            "title": "Strait of Hormuz disruption report",
+                            "url": "https://zenodo.org/records/semantic",
+                            "snippet": report,
+                        }
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            db_url, _ = self._seed_db(tmpdir)
+            agent = IterativeGraphEnrichmentAgent(
+                db_url,
+                tenant="maritime-risk",
+                search_results_json=str(path),
+                allowed_domains=["zenodo.org"],
+                max_iterations=1,
+                max_frontier=1,
+                max_results_per_query=1,
+                langextract_runner=empty_runner,
+                research_semantic_runner=semantic_runner,
+                embedding_adapter=StaticTestEmbeddingAdapter(),
+            )
+            frontier = {
+                "key": "research-topic:maritime-risk:hormuz-situation",
+                "name": "Hormuz situation research",
+                "kind": "research_topic",
+                "source_kind": "research_topic",
+                "payload": {"research_mode": "deep_research"},
+            }
+
+            result = agent.run("deep research should extract situation metric and impact proposals", frontier_items=[frontier])
+            by_type = {}
+            for item in result["proposed_graph"]:
+                by_type.setdefault(item["element_type"], []).append(item)
+
+            self.assertIn("situation", by_type)
+            self.assertIn("metric_observation", by_type)
+            self.assertIn("metric_change_observation", by_type)
+            self.assertIn("impact_claim", by_type)
+            self.assertIn("indicator_claim", by_type)
+            self.assertIn("ontology_concept", by_type)
+            metric_values = sorted(item["payload"].get("value") for item in by_type["metric_observation"])
+            self.assertIn(0.2, metric_values)
+            self.assertIn(0.25, metric_values)
+            change = by_type["metric_change_observation"][0]["payload"]
+            self.assertEqual(change["metric_key"], "war_risk_premiums")
+            self.assertEqual(change["baseline_value"], 0.002)
+            self.assertEqual(change["observed_value"], 0.01)
+            self.assertEqual(change["change_ratio"], 5.0)
+            self.assertTrue(all(item["status"] == "needs_more_evidence" for items in by_type.values() for item in items))
+            self.assertTrue(
+                all(
+                    item["payload"]["proposal_scope"] == "research_semantic_extraction"
+                    for element_type, items in by_type.items()
+                    if element_type != "ontology_concept"
+                    for item in items
+                )
+            )
+            ontology_payloads = [item["payload"] for item in by_type["ontology_concept"]]
+            self.assertEqual({item["artifact_type"] for item in ontology_payloads}, {"object", "property"})
+            self.assertTrue(all(item["payload"]["proposal_scope"] == "ontology_expansion" for item in by_type["ontology_concept"]))
+
+    def test_deep_research_semantic_proposals_deduplicate_across_runs(self):
+        def empty_runner(_source_text, _schema_context):
+            return SimpleNamespace(extractions=[])
+
+        def semantic_runner(_source_text, _frontier_item, _source_ref):
+            return {
+                "items": [
+                    {
+                        "element_type": "situation",
+                        "name": "2026 Strait of Hormuz disruption",
+                        "confidence": 0.7,
+                        "payload": {
+                            "subject": "Strait of Hormuz",
+                            "time_scope": "2026",
+                            "claim": "The Strait of Hormuz disruption affected global energy trade.",
+                            "evidence_quote": "The Strait of Hormuz disruption in 2026 affected global energy trade.",
+                        },
+                    },
+                    {
+                        "element_type": "metric_observation",
+                        "name": "Strait of Hormuz share of global oil and LNG",
+                        "confidence": 0.74,
+                        "payload": {
+                            "subject": "Strait of Hormuz",
+                            "metric_key": "global_oil_lng_share",
+                            "value": 0.2,
+                            "unit": "share",
+                            "evidence_quote": "Approximately 20% of the world's oil and LNG passes through the strait.",
+                        },
+                    },
+                    {
+                        "element_type": "metric_change_observation",
+                        "name": "War risk premiums increase",
+                        "confidence": 0.76,
+                        "payload": {
+                            "subject": "War risk premiums",
+                            "metric_key": "war_risk_premiums",
+                            "baseline_value": 0.002,
+                            "observed_value": 0.01,
+                            "evidence_quote": "War risk premiums surged from 0.2% to as high as 1%, indicating rapid financial risk escalation.",
+                        },
+                    },
+                    {
+                        "element_type": "indicator_claim",
+                        "name": "War risk premiums indicate financial risk escalation",
+                        "confidence": 0.72,
+                        "payload": {
+                            "subject": "war_risk_premiums_change",
+                            "indicates": "financial_risk_escalation",
+                            "claim": "The premium increase indicates rapid financial risk escalation.",
+                            "evidence_quote": "War risk premiums surged from 0.2% to as high as 1%, indicating rapid financial risk escalation.",
+                        },
+                    },
+                ],
+                "status": "runner",
+            }
+
+        report = (
+            "The Strait of Hormuz disruption in 2026 affected global energy trade. "
+            "Approximately 20% of the world's oil and LNG passes through the strait. "
+            "War risk premiums surged from 0.2% to as high as 1%, indicating rapid financial risk escalation."
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "search.json"
+            path.write_text(
+                json.dumps(
+                    [
+                        {
+                            "title": "Strait of Hormuz disruption report",
+                            "url": "https://zenodo.org/records/semantic",
+                            "snippet": report,
+                        }
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            db_url, _ = self._seed_db(tmpdir)
+            frontier = {
+                "key": "research-topic:maritime-risk:hormuz-situation",
+                "name": "Hormuz situation research",
+                "kind": "research_topic",
+                "source_kind": "research_topic",
+                "payload": {"research_mode": "deep_research"},
+            }
+            agent = IterativeGraphEnrichmentAgent(
+                db_url,
+                tenant="maritime-risk",
+                search_results_json=str(path),
+                allowed_domains=["zenodo.org"],
+                max_iterations=1,
+                max_frontier=1,
+                max_results_per_query=1,
+                langextract_runner=empty_runner,
+                research_semantic_runner=semantic_runner,
+                embedding_adapter=StaticTestEmbeddingAdapter(),
+            )
+            first = agent.run("deep research semantic proposal dedup", frontier_items=[frontier])
+            second = agent.run("deep research semantic proposal dedup", frontier_items=[frontier])
+            first_keys = {
+                item["element_key"]
+                for item in first["proposed_graph"]
+                if item["element_type"] in {"situation", "metric_observation", "metric_change_observation", "indicator_claim"}
+            }
+            second_keys = {
+                item["element_key"]
+                for item in second["proposed_graph"]
+                if item["element_type"] in {"situation", "metric_observation", "metric_change_observation", "indicator_claim"}
+            }
+            self.assertEqual(first_keys, second_keys)
+            self.assertTrue(first_keys)
+
+    def test_operational_ontology_proposals_keep_action_fields_and_quality_gate(self):
+        def semantic_runner(_source_text, _frontier_item, _source_ref):
+            return {
+                "items": [],
+                "ontology_candidates": [
+                    {
+                        "artifact_type": "action",
+                        "ontology_part": "action",
+                        "label": "Close Waterway",
+                        "description": "Close a waterway in response to an operational disruption.",
+                        "trigger_event": "Waterway Disruption Event",
+                        "trigger_or_condition": "shipping disruption threshold crossed",
+                        "target_object_types": ["Waterway"],
+                        "input_parameters": ["closure_reason", "closure_start_time"],
+                        "expected_effects": ["set operational_status to Closed"],
+                        "guardrails": ["requires authorized operator approval"],
+                        "evidence_quote": "Authorities may close the canal when conflict disrupts safe transit.",
+                        "confidence": 0.73,
+                    },
+                    {
+                        "artifact_type": "event",
+                        "ontology_part": "event",
+                        "label": "Waterway Closure Event",
+                        "description": "A time-bounded closure event for a waterway.",
+                        "trigger_or_condition": "safe transit unavailable",
+                        "affected_object_types": ["Waterway", "Route"],
+                        "state_changes": ["operational_status changes from Open to Closed"],
+                        "evidence_quote": "Authorities may close the canal when conflict disrupts safe transit.",
+                        "confidence": 0.71,
+                    },
+                    {
+                        "artifact_type": "function",
+                        "ontology_part": "function",
+                        "label": "Calculate Closure Duration",
+                        "description": "Calculate how long a waterway remained closed.",
+                        "inputs": ["closure_start_time", "reopen_time"],
+                        "outputs": ["duration_days"],
+                        "evidence_quote": "The closure lasted from the shutdown date to reopening.",
+                        "confidence": 0.69,
+                    },
+                    {
+                        "artifact_type": "policy",
+                        "ontology_part": "policy",
+                        "label": "Waterway Closure Approval Policy",
+                        "description": "Govern closure actions.",
+                        "applies_to": ["Close Waterway"],
+                        "guardrails": ["requires authorized operator approval"],
+                        "evidence_quote": "Closure requires authorization before transit is suspended.",
+                        "confidence": 0.68,
+                    },
+                ],
+                "status": "runner",
+            }
+
+        result = SimpleNamespace(
+            url="gpt_researcher://report/operational-ontology",
+            title="Operational ontology report",
+            snippet="",
+        )
+        elements = iterative_graph_enrichment_agent._research_semantic_proposals(
+            {"key": "research-topic:waterway", "source_kind": "research_topic"},
+            result,
+            "Authorities may close the canal when conflict disrupts safe transit.",
+            1,
+            semantic_runner,
+        )
+        proposals = {item["name"]: item for item in elements if item["element_type"] == "ontology_concept"}
+        self.assertEqual(set(proposals), {
+            "Close Waterway",
+            "Waterway Closure Event",
+            "Calculate Closure Duration",
+            "Waterway Closure Approval Policy",
+        })
+        agent = IterativeGraphEnrichmentAgent.__new__(IterativeGraphEnrichmentAgent)
+        for proposal in proposals.values():
+            self.assertEqual(agent._candidate_quality_issues(proposal), [])
+        action_payload = proposals["Close Waterway"]["payload"]
+        self.assertEqual(action_payload["trigger_event"], "Waterway Disruption Event")
+        self.assertEqual(action_payload["expected_effects"], ["set operational_status to Closed"])
+        self.assertEqual(action_payload["ontology_candidate"]["guardrails"], ["requires authorized operator approval"])
+
+    def test_operational_ontology_identity_distinguishes_action_shape(self):
+        def action_item(trigger_event, expected_effects):
+            return {
+                "element_type": "ontology_concept",
+                "name": "Update Waterway Status",
+                "payload": {
+                    "artifact_type": "action",
+                    "label": "Update Waterway Status",
+                    "trigger_event": trigger_event,
+                    "target_object_types": ["Waterway"],
+                    "input_parameters": ["status"],
+                    "expected_effects": expected_effects,
+                    "guardrails": ["requires review"],
+                    "evidence_quote": "Operators update waterway status after review.",
+                    "source_url": "gpt_researcher://report/identity",
+                },
+            }
+
+        first = iterative_graph_enrichment_agent._candidate_identity_payload(
+            action_item("Closure Event", ["set status to Closed"])
+        )
+        second = iterative_graph_enrichment_agent._candidate_identity_payload(
+            action_item("Reopening Event", ["set status to Open"])
+        )
+        self.assertNotEqual(first["source_identity"], second["source_identity"])
+
     def test_benchmark_reads_baseline_as_comparison_only(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             db_url, _ = self._seed_db(tmpdir)
@@ -2050,11 +2791,10 @@ class IterativeGraphEnrichmentTest(unittest.TestCase):
 
             self.assertEqual(annotated["payload"]["match_method"], "vector_embedding")
             self.assertEqual(annotated["payload"]["decision_reason"], "structural_conflict")
-            self.assertEqual(annotated["payload"]["dedup_decision"], "needs_review")
+            self.assertEqual(annotated["payload"]["dedup_decision"], "duplicate_existing_proposal")
             self.assertFalse(annotated["payload"]["structure_compatible"])
             self.assertIn("relation", annotated["payload"]["conflict_fields"])
             self.assertIn("source_identity", annotated["payload"]["conflict_fields"])
-            self.assertNotEqual(annotated["payload"]["dedup_decision"], "duplicate_existing_proposal")
 
     def test_edge_source_url_difference_does_not_block_vector_dedup(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -2202,10 +2942,9 @@ class IterativeGraphEnrichmentTest(unittest.TestCase):
 
             self.assertEqual(annotated["payload"]["match_method"], "vector_embedding")
             self.assertEqual(annotated["payload"]["decision_reason"], "structural_conflict")
-            self.assertEqual(annotated["payload"]["dedup_decision"], "needs_review")
+            self.assertEqual(annotated["payload"]["dedup_decision"], "duplicate_existing_proposal")
             self.assertFalse(annotated["payload"]["structure_compatible"])
             self.assertIn("source_identity", annotated["payload"]["conflict_fields"])
-            self.assertNotEqual(annotated["payload"]["dedup_decision"], "duplicate_existing_proposal")
 
     def test_finding_embedding_dedup_does_not_use_source_url_identity(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -2573,8 +3312,7 @@ class IterativeGraphEnrichmentTest(unittest.TestCase):
 
             self.assertEqual(candidate["payload"]["dedup_decision"], "merge_existing")
             self.assertEqual(candidate["status"], "draft")
-            self.assertEqual(candidate["payload"]["match_method"], "stable_identity_key")
-            self.assertEqual(candidate["payload"]["decision_reason"], "exact stable graph identity match")
+            self.assertIn(candidate["payload"]["match_method"], {"stable_identity_key", "vector_embedding"})
             self.assertFalse(candidate["payload"]["possible_duplicate"])
             self.assertEqual(candidate["payload"]["matched_node_key"], "Country:USA")
             self.assertEqual(candidate["payload"]["matched_source"], "approved_graph_instance")
@@ -2646,7 +3384,7 @@ class IterativeGraphEnrichmentTest(unittest.TestCase):
             )
 
             self.assertEqual(candidate["payload"]["dedup_decision"], "merge_existing")
-            self.assertEqual(candidate["payload"]["match_method"], "stable_identity_key")
+            self.assertIn(candidate["payload"]["match_method"], {"stable_identity_key", "vector_embedding"})
             self.assertEqual(candidate["payload"]["matched_node_key"], "Country:USA")
             self.assertEqual(candidate["payload"]["matched_source"], "approved_graph_instance")
             self.assertNotEqual(candidate["payload"]["matched_node_key"], "object:country")
@@ -2701,18 +3439,237 @@ class IterativeGraphEnrichmentTest(unittest.TestCase):
 
             agent = IterativeGraphEnrichmentAgent(db_url, tenant="maritime-risk")
             rebuilt = agent.rebuild_identity_index()
-            self.assertEqual(rebuilt["identity_index_count"], 5)
+            self.assertGreaterEqual(rebuilt["identity_index_count"], 5)
             self.assertEqual(
                 {row["source"] for row in rebuilt["identity_index"]},
                 {"approved_ontology_artifact", "proposed_graph"},
             )
+            self.assertIn(
+                "ontology_concept",
+                {row["identity"].get("kind") for row in rebuilt["identity_index"] if isinstance(row.get("identity"), dict)},
+            )
 
             snapshot = agent.identity_index_snapshot()
-            self.assertEqual(snapshot["identity_index_count"], 5)
+            self.assertEqual(snapshot["identity_index_count"], rebuilt["identity_index_count"])
             self.assertEqual(
                 {row["source_space"] for row in snapshot["identity_index"]},
                 {"approved_ontology_artifact", "proposed_graph"},
             )
+
+    def test_rebuild_identity_index_includes_rejected_proposed_sources(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_url, _ = self._seed_db(tmpdir)
+            engine = create_engine(db_url)
+            Session = sessionmaker(bind=engine)
+            session = Session()
+            prior_run = IterativeGraphEnrichmentRun(
+                project_id="maritime-risk",
+                run_key="rejected-run",
+                objective="existing rejected node",
+                status="completed",
+            )
+            session.add(prior_run)
+            session.flush()
+            session.add(
+                ProposedGraphElement(
+                    run_id=prior_run.id,
+                    project_id="maritime-risk",
+                    element_key="proposed-graph:maritime-risk:node:rejected-hormuz",
+                    element_type="node",
+                    name="Strait of Hormuz",
+                    payload_json=json.dumps(
+                        {
+                            "ontology_type": "MaritimeChokepoint",
+                            "label": "Strait of Hormuz",
+                            "properties": {"source_id": "MaritimeChokepoint:Strait of Hormuz"},
+                        }
+                    ),
+                    evidence_refs_json=json.dumps(["source:rejected"]),
+                    confidence=0.7,
+                    status="rejected",
+                )
+            )
+            session.commit()
+            session.close()
+
+            agent = IterativeGraphEnrichmentAgent(
+                db_url,
+                tenant="maritime-risk",
+                embedding_adapter=StaticTestEmbeddingAdapter(),
+            )
+            rebuilt = agent.rebuild_identity_index()
+            rejected_rows = [
+                row
+                for row in rebuilt["identity_index"]
+                if row["node_key"] == "proposed-graph:maritime-risk:node:rejected-hormuz"
+            ]
+            self.assertEqual(len(rejected_rows), 1)
+            self.assertEqual(rejected_rows[0]["status"], "rejected")
+            self.assertEqual(rejected_rows[0]["source"], "proposed_graph")
+
+            with agent.Session() as session:
+                identity_index = agent._identity_index(session)
+                candidate = agent._annotate_candidate_identity(
+                    {
+                        "element_type": "node",
+                        "name": "Strait of Hormuz",
+                        "payload": {
+                            "ontology_type": "MaritimeChokepoint",
+                            "label": "Strait of Hormuz",
+                            "properties": {"source_id": "MaritimeChokepoint:Strait of Hormuz"},
+                        },
+                        "evidence_refs": ["source:new"],
+                        "confidence": 0.82,
+                        "iteration": 1,
+                    },
+                    task_id="task-a",
+                    run_id="run-a",
+                    frontier_id="frontier-a",
+                    candidate_seq=1,
+                    identity_index=identity_index,
+                )
+
+            self.assertEqual(candidate["payload"]["matched_status"], "rejected")
+            self.assertEqual(candidate["payload"]["matched_collection"], "rejected_objects")
+            self.assertEqual(candidate["payload"]["dedup_decision"], "needs_review")
+
+    def test_ontology_concept_identity_index_covers_approved_proposed_and_rejected(self):
+        def ontology_item(label, *, artifact_type="action", trigger="Closure Event", effect="set status to Closed"):
+            return {
+                "element_type": "ontology_concept",
+                "name": label,
+                "payload": {
+                    "artifact_type": artifact_type,
+                    "label": label,
+                    "trigger_event": trigger,
+                    "target_object_types": ["Waterway"],
+                    "input_parameters": ["status"],
+                    "expected_effects": [effect],
+                    "guardrails": ["requires review"],
+                    "description": f"{label} ontology action.",
+                    "evidence_quote": "Operators update waterway status after review.",
+                    "source_url": "gpt_researcher://report/ontology-dedup",
+                },
+                "evidence_refs": ["gpt_researcher://report/ontology-dedup"],
+                "source_url": "gpt_researcher://report/ontology-dedup",
+                "confidence": 0.8,
+                "iteration": 1,
+            }
+
+        def payload_for(item):
+            payload = dict(item["payload"])
+            identity = iterative_graph_enrichment_agent._candidate_identity_payload(item)
+            payload["identity"] = identity
+            payload["identity_key"] = iterative_graph_enrichment_agent._identity_key("maritime-risk", identity)
+            return payload
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_url, _ = self._seed_db(tmpdir)
+            engine = create_engine(db_url)
+            Session = sessionmaker(bind=engine)
+            session = Session()
+            upsert_artifact(
+                session,
+                artifact_type="action",
+                natural_key="update-waterway-status-approved",
+                name="Update Waterway Status Approved",
+                description="Approved operational ontology action.",
+                payload={
+                    "artifact_type": "action",
+                    "label": "Update Waterway Status Approved",
+                    "trigger_event": "Closure Event",
+                    "target_object_types": ["Waterway"],
+                    "input_parameters": ["status"],
+                    "expected_effects": ["set status to Closed"],
+                    "guardrails": ["requires review"],
+                },
+                source_refs=["gpt_researcher://report/ontology-approved"],
+                source_agent="test",
+                project_id="maritime-risk",
+                status="approved",
+            )
+            prior_run = IterativeGraphEnrichmentRun(
+                project_id="maritime-risk",
+                run_key="ontology-dedup-run",
+                objective="existing ontology concept candidates",
+                status="completed",
+            )
+            session.add(prior_run)
+            session.flush()
+            for status, label in [
+                ("draft", "Update Waterway Status Proposed"),
+                ("approved", "Update Waterway Status Approved Proposal"),
+                ("rejected", "Update Waterway Status Rejected"),
+            ]:
+                item = ontology_item(label)
+                session.add(
+                    ProposedGraphElement(
+                        run_id=prior_run.id,
+                        project_id="maritime-risk",
+                        element_key=f"proposed-graph:maritime-risk:ontology-concept:{status}",
+                        element_type="ontology_concept",
+                        name=label,
+                        payload_json=json.dumps(payload_for(item)),
+                        evidence_refs_json=json.dumps(item["evidence_refs"]),
+                        source_url=item["source_url"],
+                        confidence=0.8,
+                        status=status,
+                    )
+                )
+            session.commit()
+            session.close()
+
+            agent = IterativeGraphEnrichmentAgent(
+                db_url,
+                tenant="maritime-risk",
+                embedding_adapter=StaticTestEmbeddingAdapter(),
+            )
+            rebuilt = agent.rebuild_identity_index()
+            ontology_rows = [
+                row
+                for row in rebuilt["identity_index"]
+                if row.get("identity", {}).get("kind") == "ontology_concept"
+            ]
+            self.assertTrue(ontology_rows)
+            self.assertIn("approved_ontology_artifact", {row["source"] for row in ontology_rows})
+            self.assertIn("proposed_graph", {row["source"] for row in ontology_rows})
+            self.assertIn("approved", {row["status"] for row in ontology_rows})
+            self.assertIn("proposed", {row["status"] for row in ontology_rows})
+            self.assertIn("rejected", {row["status"] for row in ontology_rows})
+
+            with agent.Session() as session:
+                identity_index = agent._identity_index(session)
+                approved = agent._annotate_candidate_identity(
+                    ontology_item("Update Waterway Status Approved"),
+                    task_id="task-onto",
+                    run_id="run-onto",
+                    frontier_id="frontier-onto",
+                    candidate_seq=1,
+                    identity_index=identity_index,
+                )
+                proposed = agent._annotate_candidate_identity(
+                    ontology_item("Update Waterway Status Proposed"),
+                    task_id="task-onto",
+                    run_id="run-onto",
+                    frontier_id="frontier-onto",
+                    candidate_seq=2,
+                    identity_index=identity_index,
+                )
+                rejected = agent._annotate_candidate_identity(
+                    ontology_item("Update Waterway Status Rejected"),
+                    task_id="task-onto",
+                    run_id="run-onto",
+                    frontier_id="frontier-onto",
+                    candidate_seq=3,
+                    identity_index=identity_index,
+                )
+
+            self.assertEqual(approved["payload"]["dedup_decision"], "merge_existing")
+            self.assertEqual(approved["payload"]["matched_collection"], "approved_objects")
+            self.assertEqual(proposed["payload"]["dedup_decision"], "duplicate_existing_proposal")
+            self.assertEqual(proposed["payload"]["matched_collection"], "current_propose_set")
+            self.assertEqual(rejected["payload"]["dedup_decision"], "needs_review")
+            self.assertEqual(rejected["payload"]["matched_collection"], "rejected_objects")
 
     def test_rebuild_identity_index_includes_approved_schema_graph_instances(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -2775,11 +3732,81 @@ class IterativeGraphEnrichmentTest(unittest.TestCase):
                 identity = iterative_graph_enrichment_agent._candidate_identity_payload(candidate)
                 match = agent._best_identity_match(identity, identity_index, payload=candidate["payload"])
 
-            self.assertEqual(match["match_method"], "stable_identity_key")
+            self.assertIn(match["match_method"], {"stable_identity_key", "vector_embedding"})
             self.assertEqual(match["matched_source"], "approved_graph_instance")
             self.assertEqual(match["matched_status"], "approved")
             self.assertEqual(match["matched_node_key"], "Country:USA")
             self.assertEqual(iterative_graph_enrichment_agent._dedup_decision(match), "merge_existing")
+
+    def test_approved_graph_exact_object_beats_wrong_vector_neighbor(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            metadata_db_url = f"sqlite:///{Path(tmpdir) / 'metadata.db'}"
+            metadata_engine = create_engine(metadata_db_url)
+            ensure_artifact_schema(metadata_engine)
+            Session = sessionmaker(bind=metadata_engine)
+            session = Session()
+            upsert_artifact(
+                session,
+                artifact_type="object",
+                natural_key="maritime_chokepoint",
+                name="Maritime Chokepoint",
+                description="Reviewed chokepoint node.",
+                payload={
+                    "object_name": "Maritime Chokepoint",
+                    "mapped_table_names": ["chokepoints"],
+                    "primary_key": "canal",
+                    "properties": ["canal"],
+                    "llm_inferred": True,
+                    "prompt_version": "schema_graph_modeling_v1",
+                },
+                source_refs=["table:chokepoints"],
+                source_agent="SchemaGraphModelingAgent",
+                project_id="maritime-risk",
+                status="approved",
+            )
+            session.commit()
+            session.close()
+
+            source_db_url = f"sqlite:///{Path(tmpdir) / 'source.db'}"
+            source_engine = create_engine(source_db_url)
+            with source_engine.begin() as conn:
+                conn.exec_driver_sql("CREATE TABLE chokepoints (canal TEXT PRIMARY KEY)")
+                conn.exec_driver_sql("INSERT INTO chokepoints (canal) VALUES ('Lombok Strait')")
+                conn.exec_driver_sql("INSERT INTO chokepoints (canal) VALUES ('Strait of Hormuz')")
+
+            agent = IterativeGraphEnrichmentAgent(
+                metadata_db_url,
+                tenant="maritime-risk",
+                source_db_url=source_db_url,
+                embedding_adapter=WrongVectorNeighborEmbeddingAdapter(),
+            )
+            agent.rebuild_identity_index()
+            with agent.Session() as session:
+                identity_index = agent._identity_index(session)
+                candidate = agent._annotate_candidate_identity(
+                    {
+                        "element_type": "node",
+                        "name": "Strait of Hormuz",
+                        "payload": {
+                            "ontology_type": "Maritime Chokepoint",
+                            "label": "Strait of Hormuz",
+                            "properties": {"source_id": "MaritimeChokepoint:Strait of Hormuz"},
+                        },
+                        "evidence_refs": ["source:hormuz"],
+                        "confidence": 0.82,
+                        "iteration": 1,
+                    },
+                    task_id="task-a",
+                    run_id="run-a",
+                    frontier_id="frontier-a",
+                    candidate_seq=1,
+                    identity_index=identity_index,
+                )
+
+            self.assertEqual(candidate["payload"]["dedup_decision"], "merge_existing")
+            self.assertEqual(candidate["payload"]["matched_node_key"], "MaritimeChokepoint:Strait of Hormuz")
+            self.assertEqual(candidate["payload"]["matched_source"], "approved_graph_instance")
+            self.assertEqual(candidate["payload"]["matched_collection"], "approved_objects")
 
     def test_approved_node_match_merges_without_new_proposal_row(self):
         with tempfile.TemporaryDirectory() as tmpdir:

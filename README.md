@@ -217,38 +217,20 @@ npx --yes esbuild web/app/reasoning.jsx --bundle --outfile=/tmp/aletheia-reasoni
 python scripts/import_maritime_risk_dataset.py --tenant maritime-risk
 ```
 
-### Web enrichment
+### Enrichment
 
-Web enrichment collects external evidence for ontology candidates. It is
-draft-only and review-gated:
-
-- writes `WebEnrichment` draft artifacts and `web_source` evidence
-- records query, URL, retrieval time, summary, confidence, robots/license risk,
-  and field-level provenance
-- blocks localhost/private-network URLs and secret-bearing URLs; public source
-  domains are not allowlisted during development/test enrichment
-- never auto-approves ontology artifacts and never writes the formal graph
-
-Offline fixture mode is the recommended CI path:
+Enrichment uses GPT Researcher as the only retrieval provider. Legacy fixture,
+seed URL, DuckDuckGo, and standalone crawler paths are removed from the active
+enrichment flow.
 
 ```bash
-python agents/web_enrichment_agent.py \
+python agents/iterative_graph_enrichment_agent.py \
   --tenant maritime-risk \
-  --artifact object:chokepoint \
-  --search-results-json datasets/maritime_web_enrichment_fixture.json \
-  --json
-```
-
-Live search must be explicitly enabled and bounded:
-
-```bash
-python agents/web_enrichment_agent.py \
-  --tenant maritime-risk \
-  --artifact object:chokepoint \
-  --enable-live-search \
-  --max-artifacts 1 \
+  --objective "Deep research maritime chokepoint risk and extract evidence-backed findings, metrics, situations, claims, and reviewable graph proposals" \
+  --max-iterations 1 \
+  --max-frontier 2 \
   --max-results-per-query 2 \
-  --max-crawl-pages 1
+  --json
 ```
 
 ## Test Case Map

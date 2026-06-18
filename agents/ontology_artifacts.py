@@ -335,7 +335,7 @@ class ProposedGraphElement(Base):
 class GraphIdentityIndex(Base):
     __tablename__ = "aletheia_graph_identity_index"
     __table_args__ = (
-        UniqueConstraint("project_id", "source_space", "source_key", name="uq_aletheia_graph_identity_project_source_key"),
+        UniqueConstraint("project_id", "source_space", "source_key", "element_kind", name="uq_aletheia_graph_identity_project_source_kind"),
         UniqueConstraint("project_id", "source_space", "identity_key", name="uq_aletheia_graph_identity_project_space_identity"),
         Index("ix_aletheia_graph_identity_lookup", "project_id", "element_kind", "identity_key"),
     )
@@ -628,7 +628,8 @@ def ensure_artifact_schema(engine) -> None:
             for column, column_type in sqlite_columns.items():
                 if column not in columns:
                     conn.execute(text(f"ALTER TABLE aletheia_graph_identity_index ADD COLUMN {column} {column_type}"))
-            conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_aletheia_graph_identity_project_source_key ON aletheia_graph_identity_index (project_id, source_space, source_key)"))
+            conn.execute(text("DROP INDEX IF EXISTS uq_aletheia_graph_identity_project_source_key"))
+            conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_aletheia_graph_identity_project_source_kind ON aletheia_graph_identity_index (project_id, source_space, source_key, element_kind)"))
             conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_aletheia_graph_identity_project_space_identity ON aletheia_graph_identity_index (project_id, source_space, identity_key)"))
             conn.execute(text("CREATE INDEX IF NOT EXISTS ix_aletheia_graph_identity_lookup ON aletheia_graph_identity_index (project_id, element_kind, identity_key)"))
         return
@@ -662,7 +663,9 @@ def ensure_artifact_schema(engine) -> None:
         conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_aletheia_iterative_graph_runs_project_key ON aletheia_iterative_graph_enrichment_runs (project_id, run_key)"))
         conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_aletheia_proposed_graph_elements_project_key ON aletheia_proposed_graph_elements (project_id, element_key)"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_aletheia_proposed_graph_run ON aletheia_proposed_graph_elements (project_id, run_id, iteration)"))
-        conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_aletheia_graph_identity_project_source_key ON aletheia_graph_identity_index (project_id, source_space, source_key)"))
+        conn.execute(text("ALTER TABLE aletheia_graph_identity_index DROP CONSTRAINT IF EXISTS uq_aletheia_graph_identity_project_source_key"))
+        conn.execute(text("DROP INDEX IF EXISTS uq_aletheia_graph_identity_project_source_key"))
+        conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_aletheia_graph_identity_project_source_kind ON aletheia_graph_identity_index (project_id, source_space, source_key, element_kind)"))
         conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_aletheia_graph_identity_project_space_identity ON aletheia_graph_identity_index (project_id, source_space, identity_key)"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_aletheia_graph_identity_lookup ON aletheia_graph_identity_index (project_id, element_kind, identity_key)"))
         conn.execute(text("ALTER TABLE aletheia_graph_identity_index ADD COLUMN IF NOT EXISTS dedup_text TEXT"))

@@ -248,6 +248,11 @@ Ontology policy for this system:
 - Preserve source information even when you reject an event/fact/measurement table as an ontology object: map non-identity columns to node properties, edge properties, graph/fact treatment notes, or rejected_candidates. Do not silently drop source columns.
 - For association/fact tables that connect two durable objects, put quantitative metrics, risk scores, statuses, timestamps, likelihoods, severities, and provenance columns in edge_type.properties. The edge is the relationship; those columns are facts about that relationship.
 - For measurement/result tables keyed by the same durable object pair, prefer edge_type.properties over creating separate ontology objects. If multiple source tables support the same object pair, create separate relationship/fact edge types or explicitly record the table in rejected_candidates with its suggested graph treatment and property columns.
+- Keep the durable ontology small. Do not create a separate ontology object for every metric, score, result row, claim, finding, or analytic conclusion.
+- Situational claims, observations, metric changes, impact claims, indicator claims, evidence records, and recommendations are graph/fact proposal types, not durable ontology object types, unless the physical schema shows they are managed business objects with their own lifecycle and stable identity.
+- When a source table primarily represents a measurement/result/observation over durable objects, model the durable objects and relationship first. Put observed values and derived quantities in edge_type.properties, and add rejected_candidates entries that describe the suggested graph/fact proposal treatment in plain language without using a fixed ontology class name.
+- Relation names should describe business semantics derived from schema evidence, not table mechanics or cardinality. Prefer concise verb phrases only when the schema supports a durable predicate. Do not use "N:M", "join", "row", "result", or table names as relation semantics.
+- If multiple tables describe the same durable object pair with different measurements, do not create duplicate object types for each table. Either add a separate edge type only when the relationship meaning differs, or keep the additional columns as properties/evidence on the same relationship and document the treatment.
 
 Decision tests before creating each node_type:
 1. Does this candidate maintain identity beyond a single timestamped occurrence or assertion?
@@ -255,6 +260,13 @@ Decision tests before creating each node_type:
 3. Can it own state, receive events/facts, participate in actions, or be responsible for actions?
 4. Is there schema evidence for a stable key, master table, foreign-key target, or durable lifecycle/status?
 If the answer is mostly no, do not create node_type; place the concept in rejected_candidates with the reason and suggested graph/fact treatment.
+
+Decision tests before creating each edge_type:
+1. Are both endpoints durable ontology object types?
+2. Does the relation express a stable business relationship rather than one row's measurement or analytic result?
+3. Is there schema evidence from keys, joins, repeated columns, or table purpose?
+4. Are metrics and derived values represented as edge properties rather than separate object types?
+If the relation is only a measurement/assertion/claim, put it in rejected_candidates with suggested graph/fact treatment instead of inventing a durable ontology link.
 
 Return a GraphModelDraft JSON object with:
 - node_types

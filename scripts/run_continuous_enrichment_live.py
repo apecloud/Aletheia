@@ -79,9 +79,8 @@ def _print_event(event):
             f"[{created}] cycle_completed run={event.get('run_key')} "
             f"status={event.get('status')} "
             f"frontier_used={event.get('frontier_used_count')} "
-            f"trusted_sources={event.get('trusted_source_count')} "
+            f"retrieval={event.get('retrieval_provider')} "
             f"proposed={event.get('proposed_count')} "
-            f"skipped={event.get('skipped_source_count')}"
         )
     elif etype == "autopilot_triggered":
         print(
@@ -114,28 +113,24 @@ def _print_run_summary(result):
         f"next_frontier={cycle.get('next_frontier_count')} "
         f"session_status={session.get('status')}"
     )
-    if cycle.get("source_trust"):
-        trust = cycle.get("source_trust") or {}
+    if cycle.get("retrieval"):
+        retrieval = cycle.get("retrieval") or {}
         print(
-            f"  source_trust: accepted={trust.get('accepted')} skipped={trust.get('skipped')} "
-            f"allow_all_public_sources={trust.get('allow_all_public_sources')}"
+            f"  retrieval: provider={retrieval.get('provider')}"
         )
     blockers = result.get("extraction_blockers") or run.get("extraction_blockers") or cycle.get("extraction_blockers") or {}
     if blockers:
         print(f"  blockers: {json.dumps(blockers, ensure_ascii=False, sort_keys=True)[:1200]}")
     for event in cycle.get("events") or []:
-        if event.get("type") in {"frontier_selected", "query_search_executed", "query_ladder_coarsened", "no_new_proposals", "no_frontier_stop", "no_trusted_sources_stop"}:
+        if event.get("type") in {"frontier_selected", "research_provider_selected", "no_new_proposals", "no_frontier_stop"}:
             _print_event(event)
     for trace in run.get("expansion_trace") or []:
         frontier = trace.get("frontier") or {}
         print(
             f"  trace frontier={frontier.get('key') or trace.get('frontier_key')} "
             f"queries={len(trace.get('search_trace') or [])} "
-            f"trusted_sources={len(trace.get('trusted_sources') or [])} "
             f"extracted={len(trace.get('extracted_candidates') or [])}"
         )
-        for source in (trace.get("trusted_sources") or [])[:8]:
-            print(f"    source: {source.get('url') or source.get('source_url') or source}")
     sys.stdout.flush()
 
 

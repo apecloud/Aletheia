@@ -13,6 +13,7 @@ from server.aletheia_server import (
     _dedup_audit_from_payload,
     _is_current_graph_proposal,
 )
+from agents.ontology_artifacts import ensure_artifact_schema
 from agents.iterative_graph_enrichment_agent import _graph_context_query_plan
 from tenant_registry import TenantConfig, TenantRegistry
 
@@ -34,6 +35,96 @@ class ContinuousEnrichmentFrontierTest(unittest.TestCase):
         )
         repo = InstanceRepository(TenantRegistry([tenant], "tenant-a"))
         return repo, tenant
+
+    def test_approving_ontology_concept_promotes_to_catalog(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo, tenant = self._sqlite_tenant_repo(tmpdir)
+            engine = repo.metadata_engine_for(tenant)
+            ensure_artifact_schema(engine)
+            payload = {
+                "artifact_type": "event",
+                "label": "PortClosureEvent",
+                "description": "A port closure that should trigger operational response.",
+                "trigger_event": "Port closure announced",
+                "target_object_types": ["Port"],
+                "expected_effects": ["Port.operational_status -> closed"],
+                "evidence_quote": "The port was closed after the announcement.",
+            }
+            with engine.begin() as conn:
+                run_result = conn.execute(
+                    text(
+                        """
+                        INSERT INTO aletheia_iterative_graph_enrichment_runs
+                            (project_id, run_key, source_agent, status, objective,
+                             frontier_json, expansion_trace_json, safety_profile_json,
+                             budget_json, skipped_sources_json, proposed_count,
+                             pruned_count, finding_count, started_at)
+                        VALUES
+                            (:project_id, :run_key, 'IterativeGraphEnrichmentAgent',
+                             'completed', 'test ontology promotion', '[]', '[]',
+                             '{}', '{}', '[]', 1, 0, 0, :started_at)
+                        """
+                    ),
+                    {
+                        "project_id": tenant.tenant_id,
+                        "run_key": "ontology-promotion-test",
+                        "started_at": datetime.utcnow(),
+                    },
+                )
+                run_id = run_result.lastrowid
+                conn.execute(
+                    text(
+                        """
+                        INSERT INTO aletheia_proposed_graph_elements
+                            (run_id, project_id, element_key, element_type, name,
+                             payload_json, evidence_refs_json, source_url,
+                             confidence, status, iteration, created_at)
+                        VALUES
+                            (:run_id, :project_id, :element_key, 'ontology_concept',
+                             :name, :payload_json, :evidence_refs_json, :source_url,
+                             0.88, 'draft', 1, :created_at)
+                        """
+                    ),
+                    {
+                        "run_id": run_id,
+                        "project_id": tenant.tenant_id,
+                        "element_key": "proposed-graph:tenant-a:ontology-concept:port-closure-event",
+                        "name": "PortClosureEvent",
+                        "payload_json": json.dumps(payload),
+                        "evidence_refs_json": json.dumps(["gpt_researcher://report/port-closure"]),
+                        "source_url": "gpt_researcher://report/port-closure",
+                        "created_at": datetime.utcnow(),
+                    },
+                )
+
+            result = repo.review_proposed_graph_element(
+                tenant,
+                "proposed-graph:tenant-a:ontology-concept:port-closure-event",
+                "approve",
+                {"reviewer": "M. Aoki", "reason": "test promotion", "review_surface": "ontology"},
+            )
+
+            self.assertEqual(result["element"]["status"], "approved")
+            self.assertTrue(result["write_boundary"]["canonical_write"])
+            self.assertEqual(result["write_boundary"]["target"], "ontology_catalog")
+            self.assertEqual(result["promoted_artifact"]["artifact_type"], "action")
+
+            with engine.connect() as conn:
+                row = conn.execute(
+                    text(
+                        """
+                        SELECT artifact_type, name, status, payload_json
+                        FROM aletheia_ontology_artifacts
+                        WHERE project_id = :project_id AND name = 'PortClosureEvent'
+                        """
+                    ),
+                    {"project_id": tenant.tenant_id},
+                ).mappings().one()
+            artifact_payload = json.loads(row["payload_json"])
+            self.assertEqual(row["artifact_type"], "action")
+            self.assertEqual(row["status"], "approved")
+            self.assertEqual(artifact_payload["source_artifact_type"], "event")
+            self.assertEqual(artifact_payload["source_proposed_graph_element_key"], "proposed-graph:tenant-a:ontology-concept:port-closure-event")
 
     def test_default_continuous_session_objective_is_optional_empty(self):
         with tempfile.TemporaryDirectory() as tmpdir:

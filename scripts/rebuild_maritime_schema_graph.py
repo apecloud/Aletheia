@@ -209,9 +209,6 @@ def main() -> None:
 
     source_before = source_table_counts(source_engine)
     metadata_before = metadata_counts(metadata_engine, args.tenant)
-    deleted: dict[str, int] = {}
-    if not args.dry_run:
-        deleted = cleanup_tenant_metadata(metadata_engine, args.tenant)
 
     agent = SchemaGraphModelingAgent(
         source_db_url=args.source,
@@ -219,12 +216,18 @@ def main() -> None:
         model_name=args.model,
         project_id=args.tenant,
     )
-    result = agent.run(
+    schema_dump = agent.inspect_source_schema(
         include_tables=SOURCE_TABLES,
         include_profile=True,
         sample_size=args.sample_size,
-        persist=not args.dry_run,
     )
+    draft = agent.infer_graph_model_with_llm(schema_dump)
+
+    deleted: dict[str, int] = {}
+    artifacts: list[str] = []
+    if not args.dry_run:
+        deleted = cleanup_tenant_metadata(metadata_engine, args.tenant)
+        artifacts = agent.persist_draft_artifacts(draft)
 
     source_after = source_table_counts(source_engine)
     metadata_after = metadata_counts(metadata_engine, args.tenant)
@@ -241,9 +244,9 @@ def main() -> None:
         "deleted_metadata_rows": deleted,
         "metadata_counts_after": metadata_after,
         "prompt_version": agent.prompt_version,
-        "schema_evidence": result.schema,
-        "draft": result.draft.model_dump(),
-        "persisted_artifacts": result.artifacts,
+        "schema_evidence": schema_dump,
+        "draft": draft.model_dump(),
+        "persisted_artifacts": artifacts,
         "artifact_summary": summary,
         "boundaries": {
             "used_schema_graph_modeling_agent": True,
@@ -252,6 +255,7 @@ def main() -> None:
             "canonical_write": False,
             "formal_graph_write": False,
             "review_gate": "draft_only_until_human_review",
+            "cleanup_after_successful_inference": True,
         },
     }
     if args.report_json:

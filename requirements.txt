@@ -20,3 +20,5 @@ huggingface_hub>=0.20.0
 
 # Web enrichment and import helpers
 requests>=2.32.3
+gpt-researcher>=0.10.0
+ddgs>=9.0.0
