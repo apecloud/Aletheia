@@ -131,6 +131,8 @@ DEDUP_AUDIT_FIELDS = (
     "source_fingerprint",
     "evidence_fingerprint",
     "llm_merge_decision_allowed",
+    "llm_duplicate_verdict",
+    "llm_dedup_decision_override",
 )
 
 

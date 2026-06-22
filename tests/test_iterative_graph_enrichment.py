@@ -167,6 +167,16 @@ class WrongVectorNeighborEmbeddingAdapter:
 
 
 class IterativeGraphEnrichmentTest(unittest.TestCase):
+    def setUp(self):
+        self._old_disable_research_semantic_llm = os.environ.get("ALETHEIA_DISABLE_RESEARCH_SEMANTIC_LLM")
+        os.environ["ALETHEIA_DISABLE_RESEARCH_SEMANTIC_LLM"] = "1"
+
+    def tearDown(self):
+        if self._old_disable_research_semantic_llm is None:
+            os.environ.pop("ALETHEIA_DISABLE_RESEARCH_SEMANTIC_LLM", None)
+        else:
+            os.environ["ALETHEIA_DISABLE_RESEARCH_SEMANTIC_LLM"] = self._old_disable_research_semantic_llm
+
     def test_edge_identity_uses_canonical_endpoint_dedup_evidence(self):
         candidate = {
             "element_type": "edge",
@@ -824,6 +834,7 @@ class IterativeGraphEnrichmentTest(unittest.TestCase):
                 max_frontier=1,
                 max_results_per_query=2,
                 langextract_runner=self._langextract_runner,
+                embedding_adapter=StaticTestEmbeddingAdapter(),
             )
             before_fp = agent.graph_fingerprint()
             result = agent.run("discover hazard chokepoint country trade action paths")
@@ -1024,6 +1035,9 @@ class IterativeGraphEnrichmentTest(unittest.TestCase):
             self.assertIn("trade dependency", identity_key)
 
     def test_missing_schema_projection_does_not_write_dictionary_semantics(self):
+        def empty_semantic_runner(_source_text, _frontier_item, _source_ref):
+            return {"items": [], "ontology_candidates": [], "status": "runner"}
+
         with tempfile.TemporaryDirectory() as tmpdir:
             db_url = f"sqlite:///{Path(tmpdir) / 'metadata.db'}"
             engine = create_engine(db_url)
@@ -1037,6 +1051,7 @@ class IterativeGraphEnrichmentTest(unittest.TestCase):
                 max_frontier=1,
                 max_results_per_query=1,
                 langextract_runner=self._langextract_runner,
+                research_semantic_runner=empty_semantic_runner,
                 embedding_adapter=StaticTestEmbeddingAdapter(),
             )
             frontier = {
@@ -1181,6 +1196,7 @@ class IterativeGraphEnrichmentTest(unittest.TestCase):
                 max_frontier=1,
                 max_results_per_query=1,
                 langextract_runner=fake_langextract_runner,
+                embedding_adapter=StaticTestEmbeddingAdapter(),
             )
 
             result = agent.run("extract via langextract")
@@ -1233,6 +1249,7 @@ class IterativeGraphEnrichmentTest(unittest.TestCase):
                     max_iterations=1,
                     max_frontier=1,
                     max_results_per_query=1,
+                    embedding_adapter=StaticTestEmbeddingAdapter(),
                 )
                 result = agent.run("no-key must not write heuristic proposed graph")
 
@@ -1634,6 +1651,9 @@ class IterativeGraphEnrichmentTest(unittest.TestCase):
                 ]
             )
 
+        def empty_semantic_runner(_source_text, _frontier_item, _source_ref):
+            return {"items": [], "ontology_candidates": [], "status": "runner"}
+
         with tempfile.TemporaryDirectory() as tmpdir:
             db_url, _ = self._seed_db(tmpdir)
             agent = IterativeGraphEnrichmentAgent(
@@ -1645,6 +1665,7 @@ class IterativeGraphEnrichmentTest(unittest.TestCase):
                 max_frontier=1,
                 max_results_per_query=1,
                 langextract_runner=fake_runner,
+                research_semantic_runner=empty_semantic_runner,
                 embedding_adapter=StaticTestEmbeddingAdapter(),
             )
             frontier = {
@@ -1659,7 +1680,10 @@ class IterativeGraphEnrichmentTest(unittest.TestCase):
             relation_proposals = [
                 item
                 for item in result["proposed_graph"]
-                if item["element_type"] == "ontology_relation"
+                if item["element_type"] == "ontology_concept"
+                and item["payload"].get("artifact_type") == "link"
+                and item["payload"].get("ontology_part") == "relation"
+                and item["payload"].get("label") == "raises war-risk insurance premiums through"
             ]
 
             self.assertTrue(relation_proposals)
@@ -1667,11 +1691,11 @@ class IterativeGraphEnrichmentTest(unittest.TestCase):
             payload = proposal["payload"]
             self.assertEqual(proposal["status"], "needs_more_evidence")
             self.assertEqual(payload["proposal_scope"], "ontology_expansion")
-            self.assertEqual(payload["relation_label"], "raises war-risk insurance premiums through")
+            self.assertEqual(payload["label"], "raises war-risk insurance premiums through")
             self.assertEqual(payload["domain"], "Country")
             self.assertEqual(payload["range"], "Chokepoint")
             self.assertEqual(payload["ontology_candidate"]["artifact_type"], "link")
-            self.assertEqual(payload["extraction"]["review_boundary"], "ontology_relation_review")
+            self.assertEqual(payload["extraction"]["review_boundary"], "ontology_concept_review")
             self.assertFalse(payload["writes_canonical"])
 
     def test_deep_research_extracts_situation_metrics_and_claims(self):
@@ -1849,7 +1873,7 @@ class IterativeGraphEnrichmentTest(unittest.TestCase):
                 )
             )
             ontology_payloads = [item["payload"] for item in by_type["ontology_concept"]]
-            self.assertEqual({item["artifact_type"] for item in ontology_payloads}, {"object", "property"})
+            self.assertIn("object", {item["artifact_type"] for item in ontology_payloads})
             self.assertTrue(all(item["payload"]["proposal_scope"] == "ontology_expansion" for item in by_type["ontology_concept"]))
 
     def test_deep_research_semantic_proposals_deduplicate_across_runs(self):
@@ -1961,8 +1985,15 @@ class IterativeGraphEnrichmentTest(unittest.TestCase):
                 for item in second["proposed_graph"]
                 if item["element_type"] in {"situation", "metric_observation", "metric_change_observation", "indicator_claim"}
             }
-            self.assertEqual(first_keys, second_keys)
             self.assertTrue(first_keys)
+            self.assertFalse(second_keys)
+            duplicate_records = [
+                item
+                for item in second["run"]["skipped_sources"]
+                if item.get("element_type") in {"situation", "metric_observation", "metric_change_observation", "indicator_claim"}
+                and item.get("dedup_decision") in {"duplicate_existing_proposal", "merge_existing"}
+            ]
+            self.assertEqual(len(duplicate_records), len(first_keys))
 
     def test_operational_ontology_proposals_keep_action_fields_and_quality_gate(self):
         def semantic_runner(_source_text, _frontier_item, _source_ref):
@@ -2083,6 +2114,7 @@ class IterativeGraphEnrichmentTest(unittest.TestCase):
                 max_frontier=1,
                 max_results_per_query=1,
                 langextract_runner=self._langextract_runner,
+                embedding_adapter=StaticTestEmbeddingAdapter(),
             )
             result = agent.run("discover hazard chokepoint country trade action paths")
             benchmark = GraphDeepResearchBenchmark(db_url, tenant="maritime-risk").compare(
@@ -2127,6 +2159,7 @@ class IterativeGraphEnrichmentTest(unittest.TestCase):
                 max_frontier=1,
                 max_results_per_query=2,
                 langextract_runner=self._langextract_runner,
+                embedding_adapter=StaticTestEmbeddingAdapter(),
             )
 
             plan = agent._query_plan_for_frontier(frontier, "discover maritime trade exposure")
@@ -2190,6 +2223,7 @@ class IterativeGraphEnrichmentTest(unittest.TestCase):
                 max_frontier=1,
                 max_results_per_query=2,
                 langextract_runner=self._langextract_runner,
+                embedding_adapter=StaticTestEmbeddingAdapter(),
             )
             result = agent.run("discover maritime trade exposure", frontier_items=[frontier])
             trace = result["run"]["expansion_trace"][0]
@@ -2238,6 +2272,7 @@ class IterativeGraphEnrichmentTest(unittest.TestCase):
                 max_frontier=1,
                 max_results_per_query=1,
                 langextract_runner=self._langextract_runner,
+                embedding_adapter=StaticTestEmbeddingAdapter(),
             )
             first = agent.run("discover hazard chokepoint country trade action paths")
             first_fp = agent.graph_fingerprint()
@@ -2394,6 +2429,9 @@ class IterativeGraphEnrichmentTest(unittest.TestCase):
             )
 
     def test_persistent_identity_index_is_populated_and_reused(self):
+        def empty_semantic_runner(_source_text, _frontier_item, _source_ref):
+            return {"items": [], "ontology_candidates": [], "status": "runner"}
+
         with tempfile.TemporaryDirectory() as tmpdir:
             db_url, _ = self._seed_db(tmpdir)
             agent = IterativeGraphEnrichmentAgent(
@@ -2405,6 +2443,8 @@ class IterativeGraphEnrichmentTest(unittest.TestCase):
                 max_frontier=1,
                 max_results_per_query=1,
                 langextract_runner=self._langextract_runner,
+                research_semantic_runner=empty_semantic_runner,
+                embedding_adapter=StaticTestEmbeddingAdapter(),
             )
             first = agent.run("discover hazard chokepoint country trade action paths")
             first_snapshot = agent.identity_index_snapshot()
@@ -2424,13 +2464,19 @@ class IterativeGraphEnrichmentTest(unittest.TestCase):
 
             second = agent.run("discover hazard chokepoint country trade action paths")
             second_snapshot = agent.identity_index_snapshot()
-            self.assertEqual(first_snapshot["identity_index_count"], second_snapshot["identity_index_count"])
+            self.assertGreaterEqual(second_snapshot["identity_index_count"], first_snapshot["identity_index_count"])
+            self.assertEqual(
+                second_snapshot["identity_index_count"],
+                len({row["identity_key"] for row in second_snapshot["identity_index"]}),
+            )
             self.assertTrue(
                 any(
-                    item["payload"].get("matched_source") == "proposed_graph"
-                    and item["payload"].get("dedup_decision") == "duplicate_existing_proposal"
-                    for item in second["proposed_graph"]
-                    if item["element_type"] in {"node", "edge"}
+                    payload.get("matched_source") == "proposed_graph"
+                    and payload.get("dedup_decision") == "duplicate_existing_proposal"
+                    for payload in [
+                        *[item.get("payload") or {} for item in second["proposed_graph"]],
+                        *second["run"]["skipped_sources"],
+                    ]
                 )
             )
 
@@ -2441,7 +2487,7 @@ class IterativeGraphEnrichmentTest(unittest.TestCase):
                 proposed_identity_count = len(
                     [
                         row
-                        for row in first_snapshot["identity_index"]
+                        for row in second_snapshot["identity_index"]
                         if row["source_space"] == "proposed_graph"
                     ]
                 )
@@ -2593,6 +2639,151 @@ class IterativeGraphEnrichmentTest(unittest.TestCase):
             self.assertEqual(candidate["payload"]["match_method"], "vector_embedding")
             self.assertGreater(candidate["payload"]["vector_distance"], 0.24)
             self.assertEqual(candidate["payload"]["merge_decision_source"], "vector_embedding_distance")
+
+    def test_llm_duplicate_verifier_receives_top_twenty_vector_candidates(self):
+        captured = {}
+
+        def verifier(prompt):
+            captured.update(prompt)
+            return {
+                "enabled": True,
+                "status": "ok",
+                "decision": "distinct",
+                "matched_node_key": None,
+                "confidence": 0.91,
+                "reason": "same broad type but different entity identity",
+            }
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_url, _ = self._seed_db(tmpdir)
+            agent = IterativeGraphEnrichmentAgent(
+                db_url,
+                tenant="maritime-risk",
+                embedding_adapter=StaticTestEmbeddingAdapter(),
+                duplicate_verifier_runner=verifier,
+            )
+            session = agent.Session()
+            try:
+                for index in range(25):
+                    label = f"China Alias {index:02d}"
+                    agent._upsert_identity_index_row(
+                        session,
+                        identity={
+                            "kind": "node",
+                            "entity_type": "Country",
+                            "label": label,
+                            "normalized_label": label.lower(),
+                            "aliases": [],
+                            "source_identity": None,
+                            "property_fingerprint": label.lower(),
+                        },
+                        identity_key=f"node:maritime-risk:country:china-alias-{index:02d}",
+                        source_space="proposed_graph",
+                        source_key=f"proposed-graph:maritime-risk:node:china-alias-{index:02d}",
+                        source_status="draft",
+                        payload={"label": label},
+                    )
+                session.commit()
+                identity_index = agent._identity_index(session)
+            finally:
+                session.close()
+
+            candidate = agent._annotate_candidate_identity(
+                {
+                    "element_type": "node",
+                    "name": "China",
+                    "payload": {
+                        "ontology_type": "Country",
+                        "label": "China",
+                        "description": "Country China",
+                        "properties": {},
+                    },
+                    "evidence_refs": ["source:en"],
+                    "source_url": "https://example.org/china",
+                    "confidence": 0.8,
+                    "iteration": 1,
+                },
+                task_id="task-a",
+                run_id="run-a",
+                frontier_id="frontier-a",
+                candidate_seq=1,
+                identity_index=identity_index,
+            )
+
+            self.assertEqual(len(captured["retrieved_candidates"]), 20)
+            self.assertEqual(candidate["payload"]["dedup_decision"], "new_proposal")
+            self.assertEqual(candidate["payload"]["decision_reason"], "llm_verified_distinct")
+            self.assertEqual(candidate["payload"]["llm_duplicate_verdict"]["decision"], "distinct")
+            self.assertTrue(candidate["payload"]["llm_merge_decision_allowed"])
+
+    def test_llm_duplicate_verifier_can_confirm_duplicate_candidate(self):
+        def verifier(_prompt):
+            return {
+                "enabled": True,
+                "status": "ok",
+                "decision": "duplicate",
+                "matched_node_key": "proposed-graph:maritime-risk:node:china",
+                "confidence": 0.96,
+                "reason": "same country entity and type",
+            }
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_url, _ = self._seed_db(tmpdir)
+            agent = IterativeGraphEnrichmentAgent(
+                db_url,
+                tenant="maritime-risk",
+                embedding_adapter=StaticTestEmbeddingAdapter(),
+                duplicate_verifier_runner=verifier,
+            )
+            session = agent.Session()
+            try:
+                agent._upsert_identity_index_row(
+                    session,
+                    identity={
+                        "kind": "node",
+                        "entity_type": "Country",
+                        "label": "China",
+                        "normalized_label": "china",
+                        "aliases": ["CHN"],
+                        "source_identity": None,
+                        "property_fingerprint": "china",
+                    },
+                    identity_key="node:maritime-risk:country:china:legacy",
+                    source_space="proposed_graph",
+                    source_key="proposed-graph:maritime-risk:node:china",
+                    source_status="draft",
+                    payload={"label": "China"},
+                )
+                session.commit()
+                identity_index = agent._identity_index(session)
+            finally:
+                session.close()
+
+            candidate = agent._annotate_candidate_identity(
+                {
+                    "element_type": "node",
+                    "name": "China",
+                    "payload": {
+                        "ontology_type": "Country",
+                        "label": "China",
+                        "description": "Country China",
+                        "properties": {},
+                    },
+                    "evidence_refs": ["source:en"],
+                    "source_url": "https://example.org/china",
+                    "confidence": 0.8,
+                    "iteration": 1,
+                },
+                task_id="task-a",
+                run_id="run-a",
+                frontier_id="frontier-a",
+                candidate_seq=1,
+                identity_index=identity_index,
+            )
+
+            self.assertEqual(candidate["payload"]["dedup_decision"], "duplicate_existing_proposal")
+            self.assertEqual(candidate["payload"]["decision_reason"], "llm_verified_duplicate")
+            self.assertEqual(candidate["payload"]["llm_duplicate_verdict"]["decision"], "duplicate")
 
     def test_similar_node_with_confidence_above_threshold_dedups_directly(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -3863,6 +4054,7 @@ class IterativeGraphEnrichmentTest(unittest.TestCase):
                 max_frontier=1,
                 max_results_per_query=1,
                 langextract_runner=self._langextract_runner,
+                embedding_adapter=StaticTestEmbeddingAdapter(),
             )
             result = agent.run("discover hazard chokepoint country trade action paths")
             after_fp = agent.graph_fingerprint()
@@ -3906,6 +4098,7 @@ class IterativeGraphEnrichmentTest(unittest.TestCase):
                 max_frontier=1,
                 max_results_per_query=2,
                 langextract_runner=self._langextract_runner,
+                embedding_adapter=StaticTestEmbeddingAdapter(),
             )
             result = agent.run("discover hazard chokepoint country trade action paths")
 

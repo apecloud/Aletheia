@@ -53,7 +53,7 @@ _EMBEDDING_MODEL_CACHE: dict[str, Any] = {}
 _EMBEDDING_MODEL_LOAD_ERRORS: dict[str, str] = {}
 VECTOR_DUPLICATE_DISTANCE = 0.12
 VECTOR_REVIEW_DISTANCE = 0.24
-VECTOR_TOP_K = 5
+VECTOR_TOP_K = 20
 NODE_SIMILARITY_DIRECT_DEDUP_THRESHOLD = 0.6
 NODE_DIRECT_DEDUP_MIN_CONFIDENCE = 0.6
 _DOTENV_CACHE: dict[str, str] | None = None
@@ -525,6 +525,44 @@ class GPTResearcherSearchProvider:
         except Exception:
             pass
         return str(report or ""), source_payload
+
+
+class FixtureGPTResearcherSearchProvider:
+    """Test/offline evidence provider that preserves the GPT Researcher result contract."""
+
+    def __init__(self, search_results_json: str):
+        self.search_results_json = search_results_json
+        self.last_report = ""
+        self.last_raw_result: Any = None
+        self.last_sources: list[str] = []
+
+    def search(self, query: str, max_results: int) -> list[SearchResult]:
+        raw = json.loads(Path(self.search_results_json).read_text(encoding="utf-8"))
+        rows = raw if isinstance(raw, list) else raw.get("results", []) if isinstance(raw, dict) else []
+        results: list[SearchResult] = []
+        report_parts = []
+        for idx, row in enumerate(rows[: max(1, int(max_results or len(rows) or 1))], 1):
+            if not isinstance(row, dict):
+                continue
+            snippet = _clean_text(row.get("snippet") or row.get("summary") or row.get("text") or row.get("content"), 1_000_000)
+            title = _clean_text(row.get("title") or "GPT Researcher fixture report", 240)
+            url = str(row.get("url") or f"gpt_researcher://report/{quote(query[:180], safe='')}")
+            if snippet:
+                report_parts.append(snippet)
+            results.append(
+                SearchResult(
+                    query=query,
+                    title=title,
+                    url=url,
+                    snippet=snippet or title,
+                    rank=idx,
+                    provider="gpt_researcher",
+                )
+            )
+        self.last_report = _clean_text("\n\n".join(report_parts), 1_000_000)
+        self.last_raw_result = raw
+        self.last_sources = [item.url for item in results if item.url]
+        return results
 
 
 def _is_accepted_research_result_url(result: SearchResult) -> bool:
@@ -1333,6 +1371,8 @@ def _short_alias_possible_duplicates(
 def _dedup_decision(match: dict[str, Any] | None) -> str:
     if not match:
         return "new_proposal"
+    if match.get("llm_dedup_decision_override"):
+        return str(match.get("llm_dedup_decision_override"))
     if match.get("match_method") in {"embedding_degraded_alias_scan", "short_alias_review_gate"}:
         return "needs_review"
     if match.get("match_method") == "embedding_degraded":
@@ -1907,6 +1947,13 @@ def _research_semantic_proposals(
     semantic_runner=None,
 ) -> list[dict[str, Any]]:
     """Wrap LLM-extracted research semantics as review-gated proposals."""
+    if semantic_runner is None and os.environ.get("ALETHEIA_DISABLE_RESEARCH_SEMANTIC_LLM", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }:
+        return []
     source_ref = result.url
     source_title = result.title or source_ref
     source_text = _clean_text(summary or result.snippet or result.title or "", 1_000_000)
@@ -2620,6 +2667,9 @@ class IterativeGraphEnrichmentAgent:
         gpt_researcher_max_report_chars: int = 24_000,
         gpt_researcher_cls=None,
         research_semantic_runner=None,
+        duplicate_verifier_runner=None,
+        search_results_json: str | None = None,
+        allowed_domains: list[str] | None = None,
     ):
         self.engine = create_engine(metadata_db_url)
         ensure_artifact_schema(self.engine)
@@ -2634,18 +2684,29 @@ class IterativeGraphEnrichmentAgent:
         if self.research_provider != "gpt_researcher":
             raise ValueError("IterativeGraphEnrichmentAgent only supports research_provider='gpt_researcher'")
         self.gpt_researcher_env_config = _configure_gpt_researcher_env()
-        self.provider = GPTResearcherSearchProvider(
-            report_type=gpt_researcher_report_type,
-            report_source=gpt_researcher_report_source,
-            max_report_chars=gpt_researcher_max_report_chars,
-            max_sources=max_results_per_query,
-            researcher_cls=gpt_researcher_cls,
-        )
+        self.allowed_domains = list(allowed_domains or [])
+        if search_results_json:
+            self.provider = FixtureGPTResearcherSearchProvider(search_results_json)
+        else:
+            self.provider = GPTResearcherSearchProvider(
+                report_type=gpt_researcher_report_type,
+                report_source=gpt_researcher_report_source,
+                max_report_chars=gpt_researcher_max_report_chars,
+                max_sources=max_results_per_query,
+                researcher_cls=gpt_researcher_cls,
+            )
         self.max_iterations = max_iterations
         self.max_frontier = max_frontier
         self.max_results_per_query = max_results_per_query
         self.langextract_runner = langextract_runner
         self.research_semantic_runner = research_semantic_runner
+        self.duplicate_verifier_runner = duplicate_verifier_runner
+        self.dedup_llm_verifier_enabled = os.environ.get("ALETHEIA_DEDUP_LLM_VERIFIER", "1").strip().lower() not in {
+            "0",
+            "false",
+            "no",
+            "off",
+        }
         self.embedding_adapter = embedding_adapter or SmallMultilingualEmbeddingAdapter()
         self.node_similarity_dedup_threshold = max(0.0, min(1.0, float(node_similarity_dedup_threshold)))
 
@@ -3619,10 +3680,12 @@ class IterativeGraphEnrichmentAgent:
                 )
                 elements.append(
                     {
-                        "element_type": "ontology_relation",
+                        "element_type": "ontology_concept",
                         "name": relation_label,
                         "payload": {
-                            "relation_label": relation_label,
+                            "artifact_type": "link",
+                            "ontology_part": "relation",
+                            "label": relation_label,
                             "domain": source_type,
                             "range": target_type,
                             "source_type": source_type,
@@ -3647,7 +3710,7 @@ class IterativeGraphEnrichmentAgent:
                                 "schema_context": extraction.get("schema_context"),
                                 "source": source_payload,
                                 "quality": extraction["quality"],
-                                "review_boundary": "ontology_relation_review",
+                                "review_boundary": "ontology_concept_review",
                                 "canonical_ontology_write": False,
                                 "formal_graph_write": False,
                             },
@@ -4626,6 +4689,136 @@ class IterativeGraphEnrichmentAgent:
             return False
         return True
 
+    def _llm_duplicate_verdict(
+        self,
+        *,
+        identity: dict[str, Any],
+        payload: dict[str, Any] | None,
+        dedup_text: str,
+        top_k: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        if not top_k:
+            return {"enabled": False, "status": "no_candidates"}
+        prompt = {
+            "task": "Decide whether a proposed knowledge graph or ontology candidate is a true duplicate of one of the retrieved candidates.",
+            "rules": [
+                "Return strict JSON only.",
+                "Valid decision values: duplicate, related_not_duplicate, distinct, needs_review.",
+                "Choose duplicate only when the proposal and retrieved candidate refer to the same real-world object, same ontology concept, same relation, or same semantic claim.",
+                "Do not choose duplicate merely because two items are topically related, share a broad type, share geography, or appear in the same sentence.",
+                "For objects, require same entity identity or clearly equivalent names/aliases in the same type.",
+                "For edges/relations, require materially same source, relation meaning, and target.",
+                "For semantic claims, require same subject, claim/metric, scope, and time window when those are stated.",
+                "If one item is broader/narrower, causally related, a superclass/subclass, or evidence for the other but not the same item, choose related_not_duplicate.",
+                "If the retrieved evidence is insufficient or conflicts structurally, choose needs_review.",
+                "When decision is duplicate, matched_node_key must be one of the candidate node_key values.",
+            ],
+            "output_schema": {
+                "decision": "duplicate | related_not_duplicate | distinct | needs_review",
+                "matched_node_key": "candidate node_key when decision=duplicate, else null",
+                "confidence": 0.0,
+                "reason": "short explanation grounded in identity fields",
+            },
+            "proposal": {
+                "identity": identity,
+                "dedup_text": dedup_text,
+                "payload": payload or {},
+            },
+            "retrieved_candidates": [
+                {
+                    "rank": index + 1,
+                    "node_key": item.get("node_key"),
+                    "status": item.get("status"),
+                    "source": item.get("source"),
+                    "identity": item.get("identity"),
+                    "dedup_text": item.get("dedup_text"),
+                    "distance": item.get("distance"),
+                    "score": item.get("score"),
+                    "identity_score": item.get("identity_score"),
+                    "text_similarity": item.get("text_similarity"),
+                    "structure_compatible": item.get("structure_compatible"),
+                    "conflict_fields": item.get("conflict_fields") or [],
+                    "structure_evidence": item.get("structure_evidence") or [],
+                }
+                for index, item in enumerate(top_k[:VECTOR_TOP_K])
+            ],
+        }
+        if self.duplicate_verifier_runner:
+            try:
+                parsed = self.duplicate_verifier_runner(prompt)
+            except Exception as exc:
+                return {"enabled": True, "status": "runner_error", "reason": type(exc).__name__}
+            return parsed if isinstance(parsed, dict) else {"enabled": True, "status": "invalid_runner_response"}
+        if not self.dedup_llm_verifier_enabled:
+            return {"enabled": False, "status": "disabled"}
+        api_key = _configured_api_key("GEMINI_API_KEY", "GOOGLE_API_KEY")
+        if not api_key:
+            return {"enabled": False, "status": "api_key_missing", "prompt": prompt}
+        try:
+            from google import genai
+        except Exception as exc:
+            return {"enabled": False, "status": f"google_genai_unavailable:{type(exc).__name__}", "prompt": prompt}
+        try:
+            client = genai.Client(api_key=api_key)
+            response = client.models.generate_content(
+                model=os.environ.get("ALETHEIA_DEDUP_VERIFIER_MODEL", "gemini-2.5-flash"),
+                contents=json.dumps(prompt, ensure_ascii=False),
+            )
+        except Exception as exc:
+            return {"enabled": True, "status": f"llm_error:{type(exc).__name__}", "prompt": prompt}
+        parsed = _json_object_from_text(getattr(response, "text", "") or "")
+        if not parsed:
+            return {"enabled": True, "status": "parse_error", "prompt": prompt}
+        parsed["enabled"] = True
+        parsed["status"] = "ok"
+        return parsed
+
+    def _apply_llm_duplicate_verdict(
+        self,
+        *,
+        best: dict[str, Any],
+        top_k: list[dict[str, Any]],
+        verdict: dict[str, Any],
+    ) -> dict[str, Any]:
+        if not verdict or not verdict.get("enabled"):
+            return best
+        decision = str(verdict.get("decision") or "").strip().lower().replace("-", "_")
+        if decision not in {"duplicate", "related_not_duplicate", "distinct", "needs_review"}:
+            decision = "needs_review" if verdict.get("status") == "ok" else ""
+        matched_key = str(verdict.get("matched_node_key") or "").strip()
+        selected = best
+        if decision == "duplicate" and matched_key:
+            selected = next((item for item in top_k if str(item.get("node_key") or "") == matched_key), best)
+        selected = {**selected}
+        selected["llm_duplicate_verdict"] = {
+            "enabled": bool(verdict.get("enabled")),
+            "status": verdict.get("status"),
+            "decision": decision or verdict.get("decision"),
+            "matched_node_key": matched_key or None,
+            "confidence": verdict.get("confidence"),
+            "reason": verdict.get("reason"),
+        }
+        if decision == "duplicate":
+            if selected.get("source") == "current_run_candidate":
+                selected["llm_dedup_decision_override"] = "duplicate_current_run"
+            elif selected.get("status") == "rejected":
+                selected["llm_dedup_decision_override"] = "needs_review"
+            elif selected.get("status") == "proposed":
+                selected["llm_dedup_decision_override"] = "duplicate_existing_proposal"
+            else:
+                selected["llm_dedup_decision_override"] = "merge_existing"
+            selected["decision_reason"] = "llm_verified_duplicate"
+        elif decision == "distinct":
+            selected["llm_dedup_decision_override"] = "new_proposal"
+            selected["decision_reason"] = "llm_verified_distinct"
+        elif decision == "related_not_duplicate":
+            selected["llm_dedup_decision_override"] = "needs_review"
+            selected["decision_reason"] = "llm_related_not_duplicate"
+        elif decision == "needs_review":
+            selected["llm_dedup_decision_override"] = "needs_review"
+            selected["decision_reason"] = "llm_requested_review"
+        return selected
+
     def _best_identity_match(
         self,
         identity: dict[str, Any],
@@ -4734,6 +4927,8 @@ class IterativeGraphEnrichmentAgent:
                     "status": entry["status"],
                     "source": entry["source"],
                     "identity_key": entry["identity_key"],
+                    "identity": entry.get("identity") or {},
+                    "dedup_text": existing_text,
                     "distance": distance,
                     "score": _vector_score(distance),
                     "identity_score": rule_match["score"],
@@ -4784,6 +4979,13 @@ class IterativeGraphEnrichmentAgent:
         best = top_k[0]
         if best.get("identity_score") and float(best.get("identity_score") or 0.0) >= 0.75:
             best["score"] = max(float(best.get("score") or 0.0), float(best.get("identity_score") or 0.0))
+        llm_verdict = self._llm_duplicate_verdict(
+            identity=identity,
+            payload=payload,
+            dedup_text=dedup_text,
+            top_k=top_k,
+        )
+        best = self._apply_llm_duplicate_verdict(best=best, top_k=top_k, verdict=llm_verdict)
         if _dedup_decision(
             {
                 "match_method": "vector_embedding",
@@ -4795,6 +4997,7 @@ class IterativeGraphEnrichmentAgent:
                 "node_similarity_dedup_threshold": self.node_similarity_dedup_threshold,
                 "matched_source": best["source"],
                 "matched_status": best["status"],
+                "llm_dedup_decision_override": best.get("llm_dedup_decision_override"),
             }
         ) == "new_proposal":
             alias_candidates = _short_alias_possible_duplicates(
@@ -4838,6 +5041,12 @@ class IterativeGraphEnrichmentAgent:
         evidence.extend(best.get("structure_evidence") or [])
         if best.get("text_similarity"):
             evidence.append(f"same-language text similarity {best['text_similarity']:.4f}")
+        llm_verdict = best.get("llm_duplicate_verdict") or {}
+        if llm_verdict:
+            evidence.append(
+                "LLM duplicate verdict "
+                f"{llm_verdict.get('decision') or 'unknown'}: {llm_verdict.get('reason') or llm_verdict.get('status') or 'no reason'}"
+            )
         structural_conflict = not best.get("structure_compatible", False)
         node_direct_dedup = (
             identity.get("kind") == "node"
@@ -4858,13 +5067,14 @@ class IterativeGraphEnrichmentAgent:
             "matched_source": best["source"],
             "identity_key": best["identity_key"],
             "match_method": "vector_embedding",
-            "decision_reason": "structural_conflict"
+            "decision_reason": best.get("decision_reason")
+            or ("structural_conflict"
             if structural_conflict
             else "node_similarity_confidence_threshold_met"
             if node_direct_dedup
             else "vector distance within review window"
             if best["distance"] <= VECTOR_REVIEW_DISTANCE
-            else "nearest vector outside dedup threshold",
+            else "nearest vector outside dedup threshold"),
             "embedding_model": candidate_embedding.get("model"),
             "embedding_status": candidate_embedding.get("status"),
             "embedding_degraded": False,
@@ -4874,6 +5084,9 @@ class IterativeGraphEnrichmentAgent:
             "vector_distance": best["distance"],
             "text_similarity": best.get("text_similarity") or 0.0,
             "vector_top_k": top_k,
+            "llm_duplicate_verdict": best.get("llm_duplicate_verdict"),
+            "llm_dedup_decision_override": best.get("llm_dedup_decision_override"),
+            "llm_merge_decision_allowed": bool(best.get("llm_duplicate_verdict")),
             "candidate_kind": identity.get("kind"),
             "candidate_confidence": candidate_confidence,
             "node_similarity_dedup_threshold": self.node_similarity_dedup_threshold,
@@ -4958,6 +5171,8 @@ class IterativeGraphEnrichmentAgent:
             "text_similarity": best.get("text_similarity") if best else None,
             "language_hint": best.get("language_hint") if best else _language_hint(_dedup_text_for_identity(identity, item_payload)),
             "decision_reason": best.get("decision_reason") if best else "no exact or vector identity match",
+            "llm_duplicate_verdict": best.get("llm_duplicate_verdict") if best else None,
+            "llm_dedup_decision_override": best.get("llm_dedup_decision_override") if best else None,
             "vector_duplicate_distance_threshold": VECTOR_DUPLICATE_DISTANCE,
             "vector_review_distance_threshold": VECTOR_REVIEW_DISTANCE,
             "node_similarity_dedup_threshold": best.get("node_similarity_dedup_threshold") if best else self.node_similarity_dedup_threshold,
@@ -4965,7 +5180,7 @@ class IterativeGraphEnrichmentAgent:
             "candidate_confidence": best.get("candidate_confidence") if best else item.get("confidence"),
             "review_required": review_required,
             "merge_decision_source": merge_decision_source,
-            "llm_merge_decision_allowed": False,
+            "llm_merge_decision_allowed": bool(best.get("llm_merge_decision_allowed") or best.get("llm_duplicate_verdict")) if best else False,
             "audit_context": {
                 "task_id": task_id,
                 "run_id": run_id,
@@ -5224,7 +5439,8 @@ class IterativeGraphEnrichmentAgent:
                         "text_similarity": "same_language_audit_only",
                         "auto_merge_threshold": 0.92,
                         "review_threshold": 0.75,
-                        "llm_merge_decision": "disabled",
+                        "llm_duplicate_verifier": "enabled" if self.dedup_llm_verifier_enabled else "disabled",
+                        "llm_duplicate_verifier_model": os.environ.get("ALETHEIA_DEDUP_VERIFIER_MODEL", "gemini-2.5-flash"),
                     },
                     "research_provider": self.research_provider,
                     "retrieval_provider": "gpt_researcher",
