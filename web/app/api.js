@@ -198,12 +198,15 @@
       draft: "proposed",
     };
     const isWebEnrichment = String(a.artifact_type || "").toLowerCase() === "webenrichment";
+    const ontologyPart = String((a.payload || {}).ontology_part || "").toLowerCase();
     const title = isWebEnrichment ? webEnrichmentArtifactTitle(a) : (a.name || a.canonical_key || "Untitled");
     const desc = isWebEnrichment ? webEnrichmentArtifactDescription(a) : (a.description || "");
     return {
       id: a.canonical_key || a.id,
       canonical_key: a.canonical_key || a.id,
-      type: typeMap[a.artifact_type] || a.artifact_type || "ObjectType",
+      type: String(a.artifact_type || "").toLowerCase() === "object" && ontologyPart === "concrete_object"
+        ? "Object"
+        : typeMap[a.artifact_type] || a.artifact_type || "ObjectType",
       key: a.name || a.canonical_key || "",
       title,
       desc,
@@ -334,17 +337,30 @@
       return data;
     },
 
+    async ontologyModelGraph(tenant, { limit = 300 } = {}) {
+      const data = await fetchJson(withTenantQs("/api/graph/ontology-model", tenant, {
+        limit: String(limit),
+      }));
+      return data;
+    },
+
     async graphNodeDetail(tenant, nodeKey) {
       const data = await fetchJson(withTenantQs(`/api/graph/node/${encodeURIComponent(nodeKey)}`, tenant));
       return data.node || data;
     },
 
-    async graphProposedElements(tenant, { runKey = "", limit = null, status = "pending" } = {}) {
+    async graphProposedElements(tenant, { runKey = "", limit = null, status = "pending", elementType = "", compact = false } = {}) {
+      return await window.AL_API.knowledgeCandidates(tenant, { runKey, limit, status, elementType, compact });
+    },
+
+    async knowledgeCandidates(tenant, { runKey = "", limit = null, status = "pending", elementType = "", compact = false } = {}) {
       const qs = {};
       if (limit !== null && limit !== undefined && limit !== "") qs.limit = String(limit);
       if (runKey) qs.run_key = runKey;
       if (status) qs.status = status;
-      const data = await fetchJson(withTenantQs("/api/graph/proposed-elements", tenant, qs));
+      if (elementType) qs.element_type = elementType;
+      if (compact) qs.compact = "1";
+      const data = await fetchJson(withTenantQs("/api/knowledge/candidates", tenant, qs));
       return data || { runs: [], elements: [] };
     },
 
@@ -354,15 +370,23 @@
     },
 
     async reviewGraphProposedElement(tenant, elementKey, action, body = {}) {
+      return await window.AL_API.reviewKnowledgeCandidate(tenant, elementKey, action, body);
+    },
+
+    async reviewKnowledgeCandidate(tenant, elementKey, action, body = {}) {
       return await fetchJson(withTenantQs(
-        `/api/graph/proposed-elements/${encodeURIComponent(elementKey)}/${encodeURIComponent(action)}`, tenant), {
+        `/api/knowledge/candidates/${encodeURIComponent(elementKey)}/${encodeURIComponent(action)}`, tenant), {
         method: "POST",
         body: JSON.stringify(body || {}),
       });
     },
 
     async reviewGraphProposedElementsBatch(tenant, elementKeys, action, body = {}) {
-      return await fetchJson(withTenantQs("/api/graph/proposed-elements/batch-review", tenant), {
+      return await window.AL_API.reviewKnowledgeCandidatesBatch(tenant, elementKeys, action, body);
+    },
+
+    async reviewKnowledgeCandidatesBatch(tenant, elementKeys, action, body = {}) {
+      return await fetchJson(withTenantQs("/api/knowledge/candidates/batch-review", tenant), {
         method: "POST",
         body: JSON.stringify({ ...(body || {}), element_keys: elementKeys || [], action }),
       });

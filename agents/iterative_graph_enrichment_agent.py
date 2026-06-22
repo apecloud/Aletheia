@@ -26,11 +26,6 @@ from urllib.parse import quote, urlparse
 from sqlalchemy import create_engine, func, inspect, text
 from sqlalchemy.orm import sessionmaker
 
-try:
-    import pycountry
-except Exception:  # pragma: no cover - optional dependency fallback
-    pycountry = None
-
 from ontology_artifacts import (
     GraphIdentityIndex,
     GraphDeepResearchBenchmarkRun,
@@ -585,68 +580,18 @@ def _source_identity(value: dict[str, Any]) -> str | None:
     return None
 
 
-def _country_from_identity_surface(value: Any):
-    text = str(value or "").strip()
-    if not text:
-        return None
-    if "=" in text:
-        key, raw_value = text.split("=", 1)
-        if key.strip().lower() in {"iso3", "alpha_3", "country_code"}:
-            text = raw_value.strip()
-    if text.lower().startswith("country:"):
-        text = text.split(":", 1)[1].strip()
-    if pycountry is None:
-        return None
-    upper = text.upper()
-    if re.fullmatch(r"[A-Z]{3}", upper):
-        country = pycountry.countries.get(alpha_3=upper)
-        if country is not None:
-            return country
-    if re.fullmatch(r"[A-Z]{2}", upper):
-        country = pycountry.countries.get(alpha_2=upper)
-        if country is not None:
-            return country
-    try:
-        matches = pycountry.countries.search_fuzzy(text)
-    except LookupError:
-        return None
-    return matches[0] if matches else None
-
-
-def _country_identity_normalization(
+def _generic_identity_normalization(
     entity_type: Any,
     label: Any,
     properties: dict[str, Any],
     payload: dict[str, Any],
     source_identity: str | None,
 ) -> dict[str, Any]:
-    if _normalize_identity_text(entity_type) != "country":
-        return {"normalized_label": _normalize_identity_text(label), "aliases": [], "source_identity": source_identity}
-    surfaces = [
-        label,
-        properties.get("iso3"),
-        properties.get("country_code"),
-        properties.get("source_pk"),
-        payload.get("source_pk"),
-        source_identity,
-    ]
-    country = next((match for surface in surfaces if (match := _country_from_identity_surface(surface))), None)
-    if country is None:
-        return {"normalized_label": _normalize_identity_text(label), "aliases": [], "source_identity": source_identity}
-    alias_values = {
-        country.alpha_2,
-        country.alpha_3,
-        country.name,
-        str(label or ""),
-    }
-    for attr in ("official_name", "common_name"):
-        value = getattr(country, attr, None)
-        if value:
-            alias_values.add(value)
+    alias_values = [label, properties.get("source_pk"), payload.get("source_pk"), source_identity]
     return {
-        "normalized_label": _normalize_identity_text(country.alpha_3),
+        "normalized_label": _normalize_identity_text(label),
         "aliases": sorted({_normalize_identity_text(alias) for alias in alias_values if _normalize_identity_text(alias)}),
-        "source_identity": f"iso3={country.alpha_3}",
+        "source_identity": source_identity,
     }
 
 
@@ -728,7 +673,7 @@ def _node_identity_payload(item: dict[str, Any]) -> dict[str, Any]:
     entity_type = payload.get("ontology_type") or payload.get("type") or item.get("element_type")
     source_identity = _source_identity(properties) or _source_identity(payload)
     normalized_label = _normalize_identity_text(label)
-    type_normalization = _country_identity_normalization(entity_type, label, properties, payload, source_identity)
+    type_normalization = _generic_identity_normalization(entity_type, label, properties, payload, source_identity)
     normalized_label = type_normalization["normalized_label"]
     normalized_aliases = sorted(
         {
@@ -930,6 +875,16 @@ def _candidate_identity_payload(item: dict[str, Any]) -> dict[str, Any]:
         "source_identity": None,
         "property_fingerprint": _digest({"type": item.get("element_type"), "name": item.get("name")}, 16),
     }
+
+
+def _ontology_proposal_is_concrete_object(payload: dict[str, Any] | None, element_type: Any = None) -> bool:
+    if str(element_type or "").strip() not in ONTOLOGY_PROPOSAL_ELEMENT_TYPES:
+        return False
+    payload = payload or {}
+    ontology_candidate = payload.get("ontology_candidate") if isinstance(payload.get("ontology_candidate"), dict) else {}
+    artifact_type = str(payload.get("artifact_type") or ontology_candidate.get("artifact_type") or "").strip().lower()
+    ontology_part = str(payload.get("ontology_part") or ontology_candidate.get("ontology_part") or "").strip().lower()
+    return artifact_type in {"object", "entity", "instance"} and ontology_part in {"concrete_object", "object_instance", "instance"}
 
 
 def _identity_key(tenant: str, identity: dict[str, Any]) -> str:
@@ -1427,22 +1382,21 @@ def _dedup_decision(match: dict[str, Any] | None) -> str:
 
 def _extract_terms(text: str) -> dict[str, list[str]]:
     """Extract low-risk query terms without tenant/domain dictionaries."""
-    country_terms: list[str] = []
+    code_terms: list[str] = []
     metric_terms: list[str] = []
     entity_terms: list[str] = []
     for term in re.findall(r"\b[A-Z]{3}\b", text or ""):
-        if _country_from_identity_surface(term):
-            _append_unique(country_terms, term)
+        _append_unique(code_terms, term)
     for term in re.findall(r"\b[A-Za-z][A-Za-z0-9_]{3,}\b", text or ""):
         if "_" in term:
             _append_unique(metric_terms, term)
     for match in re.finditer(r"\b[A-Z][A-Za-z0-9-]*(?:\s+[A-Z][A-Za-z0-9-]*){0,4}\b", text or ""):
         phrase = match.group(0).strip()
-        if phrase and phrase not in country_terms:
+        if phrase and phrase not in code_terms:
             _append_unique(entity_terms, phrase)
     return {
         "entities": entity_terms[:8],
-        "countries": country_terms[:8],
+        "codes": code_terms[:8],
         "metrics": metric_terms[:8],
     }
 
@@ -2180,7 +2134,17 @@ _SEARCH_INSTRUCTION_TERMS = {
     "public",
     "evidence",
     "researcher",
+    "gpt",
     "extract",
+    "expand",
+    "expanding",
+    "coverage",
+    "using",
+    "prioritize",
+    "produce",
+    "provider",
+    "summaries",
+    "summary",
     "reviewable",
     "candidate",
     "candidates",
@@ -2214,6 +2178,8 @@ def _search_surface_term(value: Any) -> str:
         return ""
     normalized = text.replace("_", " ").replace("-", " ")
     compact = normalized.lower().strip()
+    if "gpt researcher" in compact:
+        return ""
     if re.search(r"\b(use|find|extract|reviewable|candidate|candidates)\b", compact) and re.search(
         r"\b(researcher|evidence|proposal|proposals|graph)\b", compact
     ):
@@ -2288,17 +2254,14 @@ def _graph_context_query_plan(item: dict[str, Any], objective: str, tenant: str)
     )
     extracted = _extract_terms(context_text)
     excluded_terms: list[dict[str, str]] = []
-    country_terms: list[str] = []
+    code_terms: list[str] = []
     node_terms: list[str] = []
     relation_terms: list[str] = []
     metric_terms: list[str] = []
     domain_terms: list[str] = []
 
-    for term in extracted["countries"]:
-        _append_unique(country_terms, term)
-        country = _country_from_identity_surface(term)
-        if country is not None:
-            _append_unique(country_terms, getattr(country, "name", None))
+    for term in extracted["codes"]:
+        _append_unique(code_terms, term)
     for term in extracted["entities"]:
         _append_unique(node_terms, term)
     for raw in [item.get("name"), payload.get("source_label"), payload.get("target_label"), payload.get("label")]:
@@ -2315,7 +2278,7 @@ def _graph_context_query_plan(item: dict[str, Any], objective: str, tenant: str)
     objective_terms = [] if is_research_topic else _objective_search_hints(objective)
 
     query_terms = {
-        "countries": country_terms[:4],
+        "codes": code_terms[:4],
         "nodes": node_terms[:6],
         "relations": relation_terms[:5],
         "metrics": metric_terms[:6],
@@ -2323,7 +2286,7 @@ def _graph_context_query_plan(item: dict[str, Any], objective: str, tenant: str)
         "objective": objective_terms[:6],
     }
     flat_terms: list[str] = []
-    for group in ("countries", "nodes", "relations", "metrics", "domain", "objective"):
+    for group in ("codes", "nodes", "relations", "metrics", "domain", "objective"):
         for term in query_terms[group]:
             _append_unique(flat_terms, term, excluded=excluded_terms)
     query = " ".join(flat_terms[:18]).strip() or _query_from_search_terms([[topic_label]], excluded=excluded_terms, limit=8) or str(topic_label or "").strip()
@@ -2973,7 +2936,7 @@ class IterativeGraphEnrichmentAgent:
             for value in (frontier_item.get("key"), frontier_item.get("name"), frontier_item.get("artifact_type"))
         )
         labels: list[str] = []
-        looks_like_code_type = any(token in schema_text for token in ("iso", "code", "country", "economy"))
+        looks_like_code_type = any(token in schema_text for token in ("iso", "code", "economy"))
         if looks_like_code_type:
             for entity in entities:
                 if re.fullmatch(r"[A-Z0-9]{2,5}", entity):
@@ -3483,7 +3446,7 @@ class IterativeGraphEnrichmentAgent:
                 )
             evidence_chain.extend(
                 [
-                    {"kind": "dependent_countries", "metric": "iso3", "value": [{"iso3": edge.source_label}], "source_ref": source_ref},
+                    {"kind": "dependent_entities", "metric": "source_label", "value": [{"source_label": edge.source_label}], "source_ref": source_ref},
                     {"kind": edge.target_type, "metric": edge.target_type, "value": edge.target_label, "source_ref": source_ref},
                     {"kind": "relation", "metric": edge.relation, "value": edge.relation, "source_ref": source_ref},
                 ]
@@ -3788,43 +3751,6 @@ class IterativeGraphEnrichmentAgent:
                     "payload": concept_payload,
                 }
             )
-            if artifact.artifact_type in {"object", "node", "graph_node"}:
-                item = {
-                    "element_type": "node",
-                    "name": artifact.name,
-                    "payload": {
-                        "ontology_type": payload.get("graph_label") or payload.get("name") or artifact.name,
-                        "label": payload.get("label") or payload.get("name") or artifact.name,
-                        "properties": payload,
-                    },
-                    "evidence_refs": _json_load(artifact.source_refs_json, []),
-                }
-            elif artifact.artifact_type in {"link", "edge", "graph_edge"}:
-                item = {
-                    "element_type": "edge",
-                    "name": artifact.name,
-                    "payload": {
-                        "source_type": payload.get("source_node_key") or payload.get("source_object_key") or payload.get("domain"),
-                        "target_type": payload.get("target_node_key") or payload.get("target_object_key") or payload.get("range"),
-                        "source_label": payload.get("source_label") or payload.get("source_node_key") or payload.get("source_object_key"),
-                        "target_label": payload.get("target_label") or payload.get("target_node_key") or payload.get("target_object_key"),
-                        "relation": payload.get("graph_edge_name") or payload.get("relation") or payload.get("link_type") or artifact.name,
-                        "properties": payload,
-                    },
-                    "evidence_refs": _json_load(artifact.source_refs_json, []),
-                }
-            else:
-                continue
-            identity = _candidate_identity_payload(item)
-            index.append(
-                {
-                    "node_key": artifact.canonical_key,
-                    "status": "approved",
-                    "source": "approved_ontology_artifact",
-                    "identity": identity,
-                    "identity_key": _identity_key(self.tenant, identity),
-                }
-            )
         return index
 
     def _schema_graph_node_type(self, artifact: OntologyArtifact) -> str:
@@ -4034,6 +3960,8 @@ class IterativeGraphEnrichmentAgent:
         )
         for row in rows:
             payload = _json_load(row.payload_json, {})
+            if row.status in {"approved", "rejected"} and _ontology_proposal_is_concrete_object(payload, row.element_type):
+                continue
             identity = payload.get("identity")
             if not isinstance(identity, dict):
                 identity = _candidate_identity_payload(
@@ -4686,6 +4614,18 @@ class IterativeGraphEnrichmentAgent:
                 }
         return None
 
+    def _identity_match_allowed(self, identity: dict[str, Any], entry: dict[str, Any]) -> bool:
+        source = str(entry.get("source") or "")
+        candidate_kind = str(identity.get("kind") or "")
+        existing_kind = str((entry.get("identity") or {}).get("kind") or "")
+        if candidate_kind != existing_kind:
+            return False
+        if candidate_kind in {"node", "edge"} and source == "approved_ontology_artifact":
+            return False
+        if candidate_kind in ONTOLOGY_PROPOSAL_ELEMENT_TYPES and source == "approved_graph_instance":
+            return False
+        return True
+
     def _best_identity_match(
         self,
         identity: dict[str, Any],
@@ -4698,6 +4638,8 @@ class IterativeGraphEnrichmentAgent:
         if approved_edge_match:
             return approved_edge_match
         for entry in index:
+            if not self._identity_match_allowed(identity, entry):
+                continue
             if entry.get("identity_key") == candidate_identity_key:
                 return {
                     "score": 1.0,
@@ -4773,9 +4715,7 @@ class IterativeGraphEnrichmentAgent:
         candidate_vector = candidate_embedding.get("vector")
         candidate_language = _language_hint(dedup_text)
         for entry in index:
-            if identity.get("kind") != (entry.get("identity") or {}).get("kind"):
-                continue
-            if identity.get("kind") == "node" and entry.get("source") == "approved_ontology_artifact":
+            if not self._identity_match_allowed(identity, entry):
                 continue
             existing_vector = entry.get("embedding")
             distance = _cosine_distance(candidate_vector, existing_vector if isinstance(existing_vector, list) else None)

@@ -186,6 +186,20 @@ function NodePropertiesTableGX({ node, detail, loading, language }) {
   );
 }
 
+function isOntologyModelNodeGX(node) {
+  const raw = node?._raw || node || {};
+  return String(raw.projection_source || "") === "OntologyModelGraph"
+    || String(raw.id || node?.id || "").startsWith("ontology:")
+    || ["OntologyObject", "OntologyProperty", "OntologyAction", "OntologyLink", "SemanticItem"].includes(String(raw.type || node?.type || ""));
+}
+
+function ontologyCatalogHrefGX(tenantId, node) {
+  const raw = node?._raw || node || {};
+  const canonicalKey = raw.canonical_key || raw.properties?.canonical_key || "";
+  if (!canonicalKey) return "";
+  return `/?screen=ontology&tenant=${encodeURIComponent(tenantId)}&artifact=${encodeURIComponent(canonicalKey)}&ontology_tab=catalog`;
+}
+
 function endpointDedupEvidenceGX(item) {
   const payload = item?.payload || {};
   const evidence = payload.endpoint_dedup_evidence || payload.endpoint_dedup || {};
@@ -368,18 +382,16 @@ function resolveCenterInputGX(input, centerType, candidates) {
       .map(v => normalizeCenterInputGX(v));
     return { ...c, id, shortId, label, searchTerms };
   });
-  const displayedCountryCode = raw.match(/\(([A-Za-z]{3})\)\s*$/);
-  const directCountry = String(centerType || "").toLowerCase() === "country"
-    ? (displayedCountryCode ? displayedCountryCode[1].toUpperCase() : /^[a-z]{3}$/i.test(raw) ? raw.toUpperCase() : "")
-    : "";
-  if (directCountry) {
-    const code = normalizeCenterInputGX(directCountry);
-    const countryMatch = matches.find(c =>
+  const displayedShortCode = raw.match(/\(([A-Za-z0-9_-]{2,16})\)\s*$/);
+  const directShortId = displayedShortCode ? displayedShortCode[1] : (/^[a-z0-9_-]{2,16}$/i.test(raw) ? raw : "");
+  if (directShortId) {
+    const code = normalizeCenterInputGX(directShortId);
+    const directMatch = matches.find(c =>
       normalizeCenterInputGX(c.shortId) === code ||
-      normalizeCenterInputGX(c.id) === normalizeCenterInputGX(`${centerType}:${directCountry}`) ||
+      normalizeCenterInputGX(c.id) === normalizeCenterInputGX(`${centerType}:${directShortId}`) ||
       (c.searchTerms || []).some(term => term === normalized || term === code || term.includes(`(${code})`))
     );
-    return countryMatch ? countryMatch.shortId : "";
+    return directMatch ? directMatch.shortId : "";
   }
   const exact = matches.find(c =>
     (c.searchTerms || []).some(term => term === normalized)
@@ -396,8 +408,13 @@ function GraphExplorer({ data, tenant, language }) {
     try { return new URLSearchParams(location.search); } catch { return new URLSearchParams(); }
   }, []);
   const tenantId = tenant ? tenant.id : "default";
+  const debugGraphCandidates = ["1", "true", "yes", "debug"].includes(String(initialParams.get("debug_graph_candidates") || "").toLowerCase());
   const requestedGraphTab = initialParams.get("graph_tab") || "approved";
-  const normalizeGraphTab = (tab) => ["approved", "proposed", "saved"].includes(tab) ? tab : (tab === "runs" ? "proposed" : "approved");
+  const normalizeGraphTab = (tab) => {
+    if (["approved", "ontology", "saved"].includes(tab)) return tab;
+    if (debugGraphCandidates && (tab === "proposed" || tab === "runs")) return "proposed";
+    return "approved";
+  };
   const graphView = "all";
   const requestedTenantId = initialParams.get("tenant") || "";
   const requestedCenterType = initialParams.get("type") || "";
@@ -434,10 +451,11 @@ function GraphExplorer({ data, tenant, language }) {
   const centerCandidateUniverse = allCandidates.length ? allCandidates : candidates;
   const visibleCandidates = candidates.length || centerSearch.trim() ? candidates : allCandidates;
   const proposedQ = useApiData("graphProposedElements", [tenantId, {}], {
+    enabled: debugGraphCandidates,
     fallback: { runs: [], elements: [] },
   });
   const proposed = proposedQ.data || { runs: [], elements: [] };
-  const proposedGraphReviewCount = (proposed.elements || []).filter(item => !isOntologyReviewElementGX(item)).length;
+  const proposedGraphDebugCount = debugGraphCandidates ? (proposed.elements || []).filter(item => !isOntologyReviewElementGX(item)).length : 0;
   const selectGraphTab = (tab) => {
     setLeftTab(normalizeGraphTab(tab));
   };
@@ -524,20 +542,31 @@ function GraphExplorer({ data, tenant, language }) {
       url.searchParams.set("depth", String(depth));
       url.searchParams.set("limit", String(limit));
       url.searchParams.set("graph_tab", leftTab);
+      if (debugGraphCandidates) url.searchParams.set("debug_graph_candidates", "1");
+      else url.searchParams.delete("debug_graph_candidates");
       url.searchParams.delete("artifact");
-      if (focusElementKey) url.searchParams.set("proposed_key", focusElementKey); else url.searchParams.delete("proposed_key");
+      if (debugGraphCandidates && focusElementKey) url.searchParams.set("proposed_key", focusElementKey); else url.searchParams.delete("proposed_key");
       history.replaceState(null, "", url.toString());
     } catch {}
-  }, [tenantId, centerType, centerNodeId, depth, limit, leftTab, focusElementKey, graphView]);
+  }, [tenantId, centerType, centerNodeId, depth, limit, leftTab, focusElementKey, graphView, debugGraphCandidates]);
 
   const graphQ = useApiData(
     "graphContext",
     [tenantId, { type: centerType, id: centerNodeId, depth, limit, view: graphView }],
     { enabled: typesLoaded, fallback: null }
   );
-  const isStaleG = graphQ.source === "live-stale";
-  const isMockG  = graphQ.source === "mock";
-  const graph = useMemoGX(() => normalizeGraph(graphQ.data, { nodes: [], edges: [] }, language), [graphQ.data, language]);
+  const ontologyGraphQ = useApiData(
+    "ontologyModelGraph",
+    [tenantId, { limit }],
+    { enabled: true, fallback: null }
+  );
+  const activeGraphQ = leftTab === "ontology" ? ontologyGraphQ : graphQ;
+  const isStaleG = activeGraphQ.source === "live-stale";
+  const isMockG  = activeGraphQ.source === "mock";
+  const approvedGraph = useMemoGX(() => normalizeGraph(graphQ.data, { nodes: [], edges: [] }, language), [graphQ.data, language]);
+  const ontologyGraph = useMemoGX(() => normalizeGraph(ontologyGraphQ.data, { nodes: [], edges: [] }, language), [ontologyGraphQ.data, language]);
+  const graph = useMemoGX(() => normalizeGraph(activeGraphQ.data, { nodes: [], edges: [] }, language), [activeGraphQ.data, language]);
+  const ontologyScope = (ontologyGraphQ.data && ontologyGraphQ.data.scope) || {};
 
   const [selected, setSelected] = useStateGX(null);
   const [trailNodeIds, setTrailNodeIds] = useStateGX([]);
@@ -553,10 +582,11 @@ function GraphExplorer({ data, tenant, language }) {
   const [pendingCenterFocus, setPendingCenterFocus] = useStateGX("");
   const [focusMessage, setFocusMessage] = useStateGX("");
   const [initialGraphSelectionApplied, setInitialGraphSelectionApplied] = useStateGX(false);
+  const selectedIsOntologyModel = isOntologyModelNodeGX(selected);
   const selectedNodeDetailQ = useApiData(
     "graphNodeDetail",
     [tenantId, selected?.id || ""],
-    { enabled: !!selected?.id, fallback: null }
+    { enabled: !!selected?.id && !selectedIsOntologyModel, fallback: null }
   );
   const selectedNodeDetail = selectedNodeDetailQ.data || selected?._raw || null;
   useEffectGX(() => {
@@ -829,7 +859,7 @@ function GraphExplorer({ data, tenant, language }) {
         <div className="spacer" />
         {isMockG  && <span className="pill changes" style={{ marginRight: 8 }}><span className="dot" />{tGX(language, "Mock fallback", "模拟回退")}</span>}
         {isStaleG && <span className="pill changes" style={{ marginRight: 8 }}><span className="dot" />{tGX(language, "Stale · last fetch failed", "数据陈旧 · 最近拉取失败")}</span>}
-        {graphQ.loading && graphQ.data && <span className="pill"><span className="dot" />{tGX(language, "Refreshing…", "刷新中…")}</span>}
+        {activeGraphQ.loading && activeGraphQ.data && <span className="pill"><span className="dot" />{tGX(language, "Refreshing…", "刷新中…")}</span>}
         <button className="tool" onClick={() => window.dispatchEvent(new CustomEvent("aletheia:retry"))}>⟲ {tGX(language, "Reload", "重新加载")}</button>
         <button className="tool">⤓ {tGX(language, "Snapshot", "快照")}</button>
         <button className="tool primary">↗ {tGX(language, "Open reasoning", "打开推理")}</button>
@@ -845,11 +875,16 @@ function GraphExplorer({ data, tenant, language }) {
             </div>
             <div className="side-tabs" style={{ marginTop: 10 }}>
               <button className={"side-tab" + (leftTab === "approved" ? " active" : "")} onClick={() => selectGraphTab("approved")}>
-                {tGX(language, "Approved graph", "已批准图谱")} <span className="ct">{graphWithPositions.nodes.length}</span>
+                {tGX(language, "Approved graph", "已批准图谱")} <span className="ct">{approvedGraph.nodes.length}</span>
               </button>
-              <button className={"side-tab" + (leftTab === "proposed" ? " active" : "")} onClick={() => selectGraphTab("proposed")}>
-                {tGX(language, "Proposed graph", "候选图谱")} <span className="ct">{proposedGraphReviewCount}</span>
+              <button className={"side-tab" + (leftTab === "ontology" ? " active" : "")} onClick={() => selectGraphTab("ontology")}>
+                {tGX(language, "Ontology model", "本体模型")} <span className="ct">{ontologyScope.node_count || ontologyGraph.nodes.length || 0}</span>
               </button>
+              {debugGraphCandidates && (
+                <button className={"side-tab" + (leftTab === "proposed" ? " active" : "")} onClick={() => selectGraphTab("proposed")}>
+                  {tGX(language, "Raw candidate projection", "原始候选投影")} <span className="ct">{proposedGraphDebugCount}</span>
+                </button>
+              )}
               <button className={"side-tab" + (leftTab === "saved" ? " active" : "")} onClick={() => selectGraphTab("saved")}>
                 {tGX(language, "Saved views", "保存视图")} <span className="ct">0</span>
               </button>
@@ -984,9 +1019,44 @@ function GraphExplorer({ data, tenant, language }) {
           </div>
           </>}
 
+          {leftTab === "ontology" && (
+            <div style={{ flex: 1, overflow: "auto" }}>
+              <div style={{ padding: "var(--pad-3) var(--pad-4)", borderBottom: "1px solid var(--line)" }}>
+                <div className="eyebrow accent">{tGX(language, "Ontology Model Graph", "本体模型图")}</div>
+                <div style={{ marginTop: 6, fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--muted)", lineHeight: 1.45 }}>
+                  {tGX(language,
+                    "Approved ontology artifacts are model nodes. Semantic items are evidence nodes linked by support, mention, target, and governance relations.",
+                    "已批准本体是模型节点。semantic items 是证据节点，通过 support、mention、target、governance 等关系连接。")}
+                </div>
+              </div>
+              <div style={{ padding: "var(--pad-3) var(--pad-4)", borderBottom: "1px solid var(--line)" }}>
+                <div className="eyebrow" style={{ marginBottom: 8 }}>{tGX(language, "Projection scope", "投影范围")}</div>
+                <dl className="kv">
+                  <dt>{tGX(language, "Nodes", "节点")}</dt><dd>{ontologyScope.node_count ?? graphWithPositions.nodes.length}</dd>
+                  <dt>{tGX(language, "Edges", "边")}</dt><dd>{ontologyScope.edge_count ?? graphWithPositions.edges.length}</dd>
+                  <dt>{tGX(language, "Ontology artifacts", "本体 artifact")}</dt><dd>{ontologyScope.ontology_artifact_count ?? "—"}</dd>
+                  <dt>{tGX(language, "Semantic items", "语义项")}</dt><dd>{ontologyScope.semantic_item_count ?? "—"}</dd>
+                  <dt>{tGX(language, "Projection", "投影")}</dt><dd>{ontologyScope.projection_source || "OntologyModelGraph"}</dd>
+                </dl>
+              </div>
+              <div style={{ padding: "var(--pad-3) var(--pad-4)", borderBottom: "1px solid var(--line)" }}>
+                <div className="eyebrow" style={{ marginBottom: 8 }}>{tGX(language, "Relation types", "关系类型")}</div>
+                <div className="chip-row">
+                  {Object.keys(edgeCounts).length === 0 && <Chip count={0}>{tGX(language, "none", "无")}</Chip>}
+                  {Object.entries(edgeCounts).map(([kind, count]) => <Chip key={kind} active count={count}>{kind}</Chip>)}
+                </div>
+              </div>
+              <div style={{ padding: "var(--pad-3) var(--pad-4)", fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--muted)", lineHeight: 1.45 }}>
+                {tGX(language,
+                  "This graph is read-only. Ontology approval updates the model catalog; formal instance graph writes remain separate.",
+                  "该图是只读投影。批准本体会更新模型目录；正式实例图写入仍然独立。")}
+              </div>
+            </div>
+          )}
+
           {leftTab === "proposed" && (
             <div style={{ flex: 1, minHeight: 0, overflow: "auto" }}>
-              <ProposedGraphPanel tenantId={tenantId} proposed={proposed} loading={proposedQ.loading} source={proposedQ.source} focusElementKey={focusElementKey} onReviewed={proposedQ.refetch} compact language={language} />
+              <ProposedGraphPanel tenantId={tenantId} proposed={proposed} loading={proposedQ.loading} source={proposedQ.source} focusElementKey={focusElementKey} onReviewed={proposedQ.refetch} compact readOnly debugOnly language={language} />
             </div>
           )}
 
@@ -1000,9 +1070,9 @@ function GraphExplorer({ data, tenant, language }) {
         {/* CENTER — canvas */}
         <div className="col" style={{ overflow: "hidden" }}>
           <div className="graph-canvas">
-            {graphQ.source === "error" || graphQ.source === "loading" ? (
+            {activeGraphQ.source === "error" || activeGraphQ.source === "loading" ? (
               <div style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center" }}>
-                <ApiStatus q={graphQ} what="graph context" />
+                <ApiStatus q={activeGraphQ} what={leftTab === "ontology" ? "ontology model graph" : "graph context"} />
               </div>
             ) : graphWithPositions.nodes.length === 0 ? (
               <div style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", color: "var(--muted)", fontFamily: "var(--font-mono)", fontSize: 12 }}>
@@ -1040,7 +1110,7 @@ function GraphExplorer({ data, tenant, language }) {
                 <div><span style={{ color: "var(--dim)" }}>{tGX(language, "VISIBLE", "可见")}</span><span className="v">{hideUnrelated && selected ? tGX(language, "TRAIL", "路径") : tGX(language, "ALL", "全部")}</span></div>
                 {hideUnrelated && selected && <div><span style={{ color: "var(--dim)" }}>{tGX(language, "EDGES", "边")}</span><span className="v">{tGX(language, "LIMITED", "已限制")}</span></div>}
                 {hideUnrelated && selected && <div><span style={{ color: "var(--dim)" }}>{tGX(language, "CANVAS", "画布")}</span><span className="v">{canvasCandidateEdges.length}/{connectedEdgesAll.length}</span></div>}
-                <div><span style={{ color: "var(--dim)" }}>SOURCE</span><span className="v" style={{ color: graphQ.source === "live" ? GRAPH_ROLE_COLORS_GX.approved : graphQ.source === "live-stale" ? GRAPH_ROLE_COLORS_GX.candidate : GRAPH_ROLE_COLORS_GX.conflict }}>{graphQ.source === "live" ? "LIVE" : graphQ.source === "live-stale" ? "STALE" : graphQ.source === "loading" ? "…" : "NONE"}</span></div>
+                <div><span style={{ color: "var(--dim)" }}>SOURCE</span><span className="v" style={{ color: activeGraphQ.source === "live" ? GRAPH_ROLE_COLORS_GX.approved : activeGraphQ.source === "live-stale" ? GRAPH_ROLE_COLORS_GX.candidate : GRAPH_ROLE_COLORS_GX.conflict }}>{activeGraphQ.source === "live" ? "LIVE" : activeGraphQ.source === "live-stale" ? "STALE" : activeGraphQ.source === "loading" ? "…" : "NONE"}</span></div>
               </div>
             </div>
 
@@ -1112,7 +1182,9 @@ function GraphExplorer({ data, tenant, language }) {
         <div className="col inspector">
           {!selected ? (
             <div style={{ padding: 24, fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--muted)" }}>
-              {tGX(language, "All approved tenant graph nodes are visible. Select a node to focus its local context; selected nodes can be dragged to rearrange the canvas.", "当前显示该租户全部已批准图节点。选择节点可聚焦本地上下文；选中节点可拖拽重新布局。")}
+              {leftTab === "ontology"
+                ? tGX(language, "Approved ontology model nodes and semantic evidence nodes are visible. Select a node to inspect its catalog key, source evidence, and linked model context.", "当前显示已批准本体模型节点和语义证据节点。选择节点可查看目录键、来源证据以及相连模型上下文。")
+                : tGX(language, "All approved tenant graph nodes are visible. Select a node to focus its local context; selected nodes can be dragged to rearrange the canvas.", "当前显示该租户全部已批准图节点。选择节点可聚焦本地上下文；选中节点可拖拽重新布局。")}
             </div>
           ) : (
           <>
@@ -1128,12 +1200,32 @@ function GraphExplorer({ data, tenant, language }) {
                 <div style={{ color: "var(--muted)", fontFamily: "var(--font-mono)", fontSize: 11 }}>{labelGX(selected.label, language)}</div>
               </div>
               <div style={{ marginTop: 14 }}>
-                <dl className="kv">
-                  <dt>{tGX(language, "Status", "状态")}</dt><dd>{selectedNodeDetail?.status || selected._raw?.status || "approved"}</dd>
-                  <dt>{tGX(language, "Source row", "来源行")}</dt><dd>{selectedNodeDetail?.source_table || selected._raw?.source_table || "source"}#{selectedNodeDetail?.source_pk || selected._raw?.source_pk || selected.id.split(":").slice(1).join(":")}</dd>
-                  <dt>{tGX(language, "Edges in", "入边")}</dt><dd>{connectedEdgesAll.filter(e => e.t === selected.id).length}</dd>
-                  <dt>{tGX(language, "Edges out", "出边")}</dt><dd>{connectedEdgesAll.filter(e => e.s === selected.id).length}</dd>
-                </dl>
+                {isOntologyModelNodeGX(selected) ? (
+                  <>
+                    <dl className="kv">
+                      <dt>{tGX(language, "Status", "状态")}</dt><dd>{selected._raw?.status || "approved"}</dd>
+                      <dt>{tGX(language, "Artifact type", "Artifact 类型")}</dt><dd>{selected._raw?.artifact_type || selected.type || "—"}</dd>
+                      <dt>{tGX(language, "Canonical key", "正式键")}</dt><dd>{selected._raw?.canonical_key || selected._raw?.properties?.canonical_key || "—"}</dd>
+                      <dt>{tGX(language, "Graph-space key", "图空间键")}</dt><dd>{selected._raw?.graph_space_element_key || selected._raw?.properties?.graph_space_element_key || "—"}</dd>
+                      <dt>{tGX(language, "Source", "来源")}</dt><dd>{selected._raw?.source_url || "—"}</dd>
+                      <dt>{tGX(language, "Evidence", "证据")}</dt><dd>{selected._raw?.evidence_quote || "—"}</dd>
+                      <dt>{tGX(language, "Edges in", "入边")}</dt><dd>{connectedEdgesAll.filter(e => e.t === selected.id).length}</dd>
+                      <dt>{tGX(language, "Edges out", "出边")}</dt><dd>{connectedEdgesAll.filter(e => e.s === selected.id).length}</dd>
+                    </dl>
+                    {ontologyCatalogHrefGX(tenantId, selected) && (
+                      <div style={{ marginTop: 10 }}>
+                        <a className="btn ghost" href={ontologyCatalogHrefGX(tenantId, selected)}>{tGX(language, "Open in ontology catalog", "在本体目录中打开")}</a>
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <dl className="kv">
+                    <dt>{tGX(language, "Status", "状态")}</dt><dd>{selectedNodeDetail?.status || selected._raw?.status || "approved"}</dd>
+                    <dt>{tGX(language, "Source row", "来源行")}</dt><dd>{selectedNodeDetail?.source_table || selected._raw?.source_table || "source"}#{selectedNodeDetail?.source_pk || selected._raw?.source_pk || selected.id.split(":").slice(1).join(":")}</dd>
+                    <dt>{tGX(language, "Edges in", "入边")}</dt><dd>{connectedEdgesAll.filter(e => e.t === selected.id).length}</dd>
+                    <dt>{tGX(language, "Edges out", "出边")}</dt><dd>{connectedEdgesAll.filter(e => e.s === selected.id).length}</dd>
+                  </dl>
+                )}
               </div>
               <NodePropertiesTableGX
                 node={selected}
@@ -1231,7 +1323,7 @@ function GraphExplorer({ data, tenant, language }) {
   );
 }
 
-function ProposedGraphPanel({ tenantId, proposed, loading, source, focusElementKey, onReviewed, language }) {
+function ProposedGraphPanel({ tenantId, proposed, loading, source, focusElementKey, onReviewed, readOnly = false, debugOnly = false, language }) {
   const [selectedElement, setSelectedElement] = useStateGX(null);
   const [kindFilter, setKindFilter] = useStateGX("all");
   const [selectedKeys, setSelectedKeys] = useStateGX([]);
@@ -1265,6 +1357,7 @@ function ProposedGraphPanel({ tenantId, proposed, loading, source, focusElementK
   const selectedSet = new Set(selectedKeys);
   const selectedInFilter = filteredElements.filter(item => selectedSet.has(item.element_key));
   const selectedIsReviewed = ["approved", "rejected"].includes(String(selectedElement?.status || "").toLowerCase());
+  const reviewUrl = `/?screen=workbench&tenant=${encodeURIComponent(tenantId)}&workspace_tab=workqueue&agent_tab=enrichment`;
   useEffectGX(() => {
     if (!selectedElement) return;
     const latest = elements.find(item => item.element_key === selectedElement.element_key);
@@ -1312,7 +1405,7 @@ function ProposedGraphPanel({ tenantId, proposed, loading, source, focusElementK
   async function reviewSelected(action) {
     const reason = reviewReason.trim();
     if (selectedKeys.length === 0) {
-      setReviewMessage({ kind: "error", text: tGX(language, "Select at least one proposed graph element.", "请至少选择一个候选图元素。") });
+      setReviewMessage({ kind: "error", text: tGX(language, "Select at least one knowledge candidate.", "请至少选择一个知识候选。") });
       return;
     }
     if ((action === "reject" || action === "needs-evidence") && !reason) {
@@ -1322,7 +1415,7 @@ function ProposedGraphPanel({ tenantId, proposed, loading, source, focusElementK
     setReviewBusy(true);
     setReviewMessage(null);
     try {
-      const result = await window.AL_API.reviewGraphProposedElementsBatch(tenantId, selectedKeys, action, {
+      const result = await window.AL_API.reviewKnowledgeCandidatesBatch(tenantId, selectedKeys, action, {
         reason,
         reviewer: "Itachi",
       });
@@ -1363,7 +1456,7 @@ function ProposedGraphPanel({ tenantId, proposed, loading, source, focusElementK
     setReviewBusy(true);
     setReviewMessage(null);
     try {
-      const result = await window.AL_API.reviewGraphProposedElement(tenantId, selectedElement.element_key, action, {
+      const result = await window.AL_API.reviewKnowledgeCandidate(tenantId, selectedElement.element_key, action, {
         reason,
         reviewer: "Saskue",
       });
@@ -1394,7 +1487,7 @@ function ProposedGraphPanel({ tenantId, proposed, loading, source, focusElementK
   return (
     <div className="section">
       <div className="section-head">
-        <span>{tGX(language, "Proposed graph space", "候选图空间")}</span>
+        <span>{debugOnly ? tGX(language, "Raw candidate projection", "原始候选投影") : tGX(language, "Knowledge candidate browser", "知识候选浏览")}</span>
         <span className="ct">
           {loading
             ? tGX(language, "loading", "加载中")
@@ -1419,6 +1512,14 @@ function ProposedGraphPanel({ tenantId, proposed, loading, source, focusElementK
             </a>
           </div>
         )}
+        {readOnly ? (
+          <div style={{ border: "1px solid var(--line-soft)", background: "var(--bg-2)", padding: 8, marginBottom: 10, fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--muted)", lineHeight: 1.45 }}>
+            {debugOnly
+              ? tGX(language, "Debug view only: these rows are storage-layer graph projections. Product review belongs to Ontology and Workbench queues.", "仅调试视图：这些记录是存储层图投影。产品审核属于本体和工作台队列。")
+              : tGX(language, "Graph space is a read-only browsing and retrieval projection. Review candidate knowledge in the Workbench queue.", "图空间仅作为只读浏览和检索投影。请在工作台队列中审核知识候选。")}{" "}
+            <a href={reviewUrl} style={{ color: "var(--accent)" }}>{tGX(language, "Open review queue", "打开审核队列")}</a>
+          </div>
+        ) : (
         <div style={{ border: "1px solid var(--line-soft)", background: "var(--bg-2)", padding: 8, marginBottom: 10 }}>
           <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center", marginBottom: 8 }}>
             <span className="eyebrow">{tGX(language, "Batch review", "批量审核")}</span>
@@ -1442,7 +1543,7 @@ function ProposedGraphPanel({ tenantId, proposed, loading, source, focusElementK
             />
           )}
           <div style={{ marginTop: 6, fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--muted)" }}>
-            {tGX(language, "Scope: selected proposed graph elements only · review decision only · formal graph write disabled.", "范围：仅所选候选图元素 · 只记录审核决定 · formal graph 写入禁用。")}
+            {tGX(language, "Scope: selected knowledge candidates only · review decision only · graph space remains a browse/search projection.", "范围：仅所选知识候选 · 只记录审核决定 · 图空间保持浏览/检索投影。")}
             {selectedInFilter.length > 0 ? tGX(language, ` Current filter selected: ${selectedInFilter.length}.`, ` 当前过滤结果已选择：${selectedInFilter.length}。`) : ""}
           </div>
           {reviewMessage && (
@@ -1451,6 +1552,7 @@ function ProposedGraphPanel({ tenantId, proposed, loading, source, focusElementK
             </div>
           )}
         </div>
+        )}
         {latestRun ? (
           <dl className="kv" style={{ marginBottom: 12 }}>
             <dt>{tGX(language, "Run", "运行")}</dt><dd>{latestRun.run_key}</dd>
@@ -1460,8 +1562,8 @@ function ProposedGraphPanel({ tenantId, proposed, loading, source, focusElementK
         ) : (
           <div style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--muted)", marginBottom: 12 }}>
             {rawTotalCount > 0
-              ? tGX(language, "No current pending proposals. Historical proposed graph records exist outside the pending review queue.", "当前没有待处理候选；历史候选图记录仍存在，但不在待审队列中。")
-              : tGX(language, "No proposed graph elements for this tenant.", "该租户暂无候选图元素。")}
+              ? tGX(language, "No current pending candidates. Historical candidate records exist outside the pending review queue.", "当前没有待处理候选；历史候选记录仍存在，但不在待审队列中。")
+              : tGX(language, "No knowledge candidates for this tenant.", "该租户暂无知识候选。")}
             {rawStatusSummary ? ` ${tGX(language, "Status", "状态")}: ${rawStatusSummary}` : ""}
           </div>
         )}
@@ -1483,7 +1585,7 @@ function ProposedGraphPanel({ tenantId, proposed, loading, source, focusElementK
           );
         })}
         <div style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--muted)", marginBottom: 8 }}>
-          {tGX(language, "Showing", "显示")} {kindFilter === "all" ? tGX(language, "all proposed graph elements", "全部候选图元素") : `${kindFilter} ${tGX(language, "proposals", "候选")}`} · {tGX(language, "click an item to review.", "点击条目进行审核。")}
+          {tGX(language, "Showing", "显示")} {kindFilter === "all" ? (debugOnly ? tGX(language, "all raw projection rows", "全部原始投影记录") : tGX(language, "all knowledge candidates", "全部知识候选")) : `${kindFilter} ${debugOnly ? tGX(language, "projection rows", "投影记录") : tGX(language, "candidates", "候选")}`} · {readOnly ? tGX(language, "click an item to inspect.", "点击条目查看详情。") : tGX(language, "click an item to review.", "点击条目进行审核。")}
         </div>
         <div style={{ maxHeight: 220, overflow: "auto", display: "flex", flexDirection: "column", gap: 6 }}>
           {filteredElements.map(item => {
@@ -1497,15 +1599,17 @@ function ProposedGraphPanel({ tenantId, proposed, loading, source, focusElementK
                  style={{ border: selectedItem ? `1px solid ${itemColor}` : "1px solid var(--line-soft)", borderLeft: `3px solid ${itemColor}`, padding: 8, background: selectedItem ? GRAPH_ROLE_COLORS_GX.selectedBg : "transparent", textAlign: "left", cursor: "pointer" }}>
               <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
                 <span style={{ color: "var(--text)", fontSize: 12, display: "flex", gap: 6, alignItems: "center" }}>
-                  <input
-                    type="checkbox"
-                    checked={selectedSet.has(item.element_key)}
-                    onClick={e => e.stopPropagation()}
-                    onChange={e => toggleSelection(item.element_key, e.target.checked)}
-                  />
+                  {!readOnly && (
+                    <input
+                      type="checkbox"
+                      checked={selectedSet.has(item.element_key)}
+                      onClick={e => e.stopPropagation()}
+                      onChange={e => toggleSelection(item.element_key, e.target.checked)}
+                    />
+                  )}
                   {labelGX(item.name, language)}
                 </span>
-                <span className="ct" style={{ color: itemColor }}>{item.element_type}</span>
+                <span className="ct" style={{ color: itemColor }}>{labelGX(item.knowledge_kind || item.element_type, language)}</span>
               </div>
               <div style={{ fontFamily: "var(--font-mono)", color: "var(--muted)", fontSize: 10 }}>
                 <span style={{ color: statusColor }}>{statusLabelGraphGX(item.status, language)}</span> · {item.source_url || tGX(language, "source unknown", "来源未知")}
@@ -1521,8 +1625,8 @@ function ProposedGraphPanel({ tenantId, proposed, loading, source, focusElementK
           {filteredElements.length === 0 && (
             <div style={{ fontFamily: "var(--font-mono)", color: "var(--muted)", fontSize: 10, border: "1px solid var(--line-soft)", padding: 8 }}>
               {rawTotalCount > 0
-                ? tGX(language, "No current pending proposals match this filter.", "当前待审队列中没有匹配该过滤条件的候选。")
-                : `${tGX(language, "No", "没有")} ${kindFilter} ${tGX(language, "proposed graph elements.", "候选图元素。")}`}
+                ? (debugOnly ? tGX(language, "No raw projection rows match this filter.", "没有匹配该过滤条件的原始投影记录。") : tGX(language, "No current pending proposals match this filter.", "当前待审队列中没有匹配该过滤条件的候选。"))
+                : `${tGX(language, "No", "没有")} ${kindFilter} ${debugOnly ? tGX(language, "projection rows.", "投影记录。") : tGX(language, "knowledge candidates.", "知识候选。")}`}
             </div>
           )}
         </div>
@@ -1533,13 +1637,16 @@ function ProposedGraphPanel({ tenantId, proposed, loading, source, focusElementK
             setReason={setReviewReason}
             busy={reviewBusy}
             message={reviewMessage}
-            onReview={reviewElement}
+            onReview={readOnly ? null : reviewElement}
+            readOnly={readOnly}
+            debugOnly={debugOnly}
+            reviewUrl={reviewUrl}
             language={language}
           />
         )}
         {source === "error" && (
           <div style={{ marginTop: 8, fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--rejected)" }}>
-            {tGX(language, "Proposed graph API unavailable.", "候选图 API 不可用。")}
+            {tGX(language, "Knowledge candidate API unavailable.", "知识候选 API 不可用。")}
           </div>
         )}
       </div>
@@ -1554,7 +1661,7 @@ function isOntologyReviewElementGX(item) {
   return type.includes("ontology") && ["class", "object", "property", "link", "event", "action", "function", "policy"].includes(artifactType);
 }
 
-function ProposedGraphDetail({ item, reason, setReason, busy, message, onReview, language }) {
+function ProposedGraphDetail({ item, reason, setReason, busy, message, onReview, readOnly = false, debugOnly = false, reviewUrl = "", language }) {
   const payload = item.payload || {};
   const profile = payload.deep_graph_profile || {};
   const reviewEvents = payload.review_events || [];
@@ -1570,7 +1677,7 @@ function ProposedGraphDetail({ item, reason, setReason, busy, message, onReview,
   const endpointEvidence = endpointDedupEvidenceGX(item);
   return (
     <div style={{ marginTop: 14, borderTop: "1px solid var(--line)", paddingTop: 12 }}>
-      <div className="eyebrow accent">{tGX(language, "Review selected", "审核选中的")} {tGX(language, item.element_type, item.element_type === "node" ? "节点" : item.element_type === "edge" ? "边" : item.element_type === "finding" ? "发现" : item.element_type)}</div>
+      <div className="eyebrow accent">{debugOnly ? tGX(language, "Inspect projection row", "查看投影记录") : (readOnly ? tGX(language, "Inspect candidate", "查看候选") : tGX(language, "Review selected", "审核选中的"))} {labelGX(item.knowledge_kind || item.element_type, language)}</div>
       <div style={{ color: "var(--text)", fontWeight: 600, marginTop: 4 }}>{labelGX(item.name, language)}</div>
       <dl className="kv" style={{ marginTop: 10 }}>
         <dt>{tGX(language, "Key", "键")}</dt><dd>{item.element_key}</dd>
@@ -1672,6 +1779,14 @@ function ProposedGraphDetail({ item, reason, setReason, busy, message, onReview,
           </div>
         </div>
       )}
+      {readOnly ? (
+        <div style={{ marginTop: 12, border: "1px solid var(--line-soft)", background: "var(--bg-2)", padding: 10, fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--muted)", lineHeight: 1.45 }}>
+          {debugOnly
+            ? tGX(language, "This is a raw storage projection inspection surface. Do not approve or reject from Graph; use Ontology for model proposals and Workbench for semantic knowledge.", "这是原始存储投影检查界面。不要在 Graph 中批准或拒绝；模型候选在本体页审核，语义知识在工作台审核。")
+            : tGX(language, "This graph view is read-only. Review and promotion decisions belong to the Workbench or Ontology review surface.", "该图视图是只读的。审核和提升决策属于工作台或本体审核界面。")}{" "}
+          {reviewUrl && <a href={reviewUrl} style={{ color: "var(--accent)" }}>{tGX(language, "Open review queue", "打开审核队列")}</a>}
+        </div>
+      ) : (
       <div style={{ marginTop: 12 }}>
         <div className="eyebrow" style={{ marginBottom: 6 }}>{tGX(language, "Review note", "审核说明")}</div>
         <textarea className="input" value={reason} onChange={e => setReason(e.target.value)}
@@ -1689,6 +1804,7 @@ function ProposedGraphDetail({ item, reason, setReason, busy, message, onReview,
           </div>
         )}
       </div>
+      )}
       {reviewEvents.length > 0 && (
         <div style={{ marginTop: 12 }}>
           <div className="eyebrow" style={{ marginBottom: 6 }}>{tGX(language, "Review history", "审核历史")}</div>

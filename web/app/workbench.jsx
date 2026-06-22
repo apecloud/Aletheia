@@ -152,10 +152,12 @@ function itemTypeLabelWB(type, language) {
   if (!isZhWB(language)) return type || "Work item";
   const map = {
     "Ontology proposal": "本体候选",
-    "Graph node": "图节点",
-    "Graph edge": "图边",
-    "Graph proposal": "图候选",
+    "Knowledge object": "知识对象",
+    "Knowledge relation": "知识关系",
+    "Knowledge claim": "知识断言",
+    "Knowledge finding": "知识发现",
     "Candidate finding": "候选发现",
+    "Ontology candidate": "本体候选",
   };
   return map[type] || type || "工作项";
 }
@@ -165,8 +167,8 @@ function nextActionLabelWB(text, language) {
   const map = {
     "Resolve review feedback in Ontology": "在本体审核中处理反馈",
     "Approve, reject, or request changes in Ontology": "在本体审核中批准、拒绝或要求修改",
-    "Review evidence gap or rejection reason in Graph": "在图谱审核中处理证据缺口或拒绝原因",
-    "Review proposed graph element": "审核候选图元素",
+    "Review evidence gap or rejection reason in Workbench": "在工作台中处理证据缺口或拒绝原因",
+    "Review knowledge candidate": "审核知识候选",
     "Add evidence or mark as rejected in Reasoning": "在推理中补充证据或标记拒绝",
     "Approve, reject, or request evidence in Reasoning": "在推理中批准、拒绝或要求补证据",
   };
@@ -177,7 +179,7 @@ function reviewLinkLabelWB(label, language) {
   if (!isZhWB(language)) return label;
   const map = {
     "Open in Ontology": "打开本体审核",
-    "Open in Graph": "打开图谱审核",
+    "Open in Workbench": "打开工作台审核",
     "Open in Reasoning": "打开推理审核",
   };
   return map[label] || label;
@@ -294,7 +296,7 @@ function Workbench({ data, tenant, language }) {
         needs: "needs-changes",
         comment: "comment",
       },
-      graph: {
+      knowledge: {
         approve: "approve",
         reject: "reject",
         needs: "needs-evidence",
@@ -323,8 +325,8 @@ function Workbench({ data, tenant, language }) {
     try {
       if (selected.reviewKind === "ontology") {
         await AL_API.reviewAction(selected.id, apiAction, body, tenantId);
-      } else if (selected.reviewKind === "graph") {
-        await AL_API.reviewGraphProposedElement(tenantId, selected.id, apiAction, body);
+      } else if (selected.reviewKind === "knowledge") {
+        await AL_API.reviewKnowledgeCandidate(tenantId, selected.id, apiAction, body);
       } else if (selected.reviewKind === "autopilot_candidate") {
         await AL_API.reviewAutopilotCandidate(selected.id, apiAction, body, tenantId);
       } else if (selected.reviewKind === "reasoning_finding") {
@@ -369,7 +371,7 @@ function Workbench({ data, tenant, language }) {
           <div style={{ padding: "12px 14px", borderBottom: "1px solid var(--line)", background: "var(--bg-2)" }}>
             <div className="eyebrow accent">{tWB(language, "Work Queue", "工作队列")}</div>
             <div style={{ marginTop: 5, color: "var(--text-dim)", fontSize: 12, lineHeight: 1.45 }}>
-              {tWB(language, "Review objects waiting for a human decision: ontology proposals, proposed graph nodes or edges, and candidate findings.", "集中处理等待人工决策的对象：本体候选、候选图节点/边，以及候选发现。")}
+              {tWB(language, "Review objects waiting for a human decision: ontology model proposals, knowledge candidates, and candidate findings.", "集中处理等待人工决策的对象：本体模型候选、知识候选，以及候选发现。")}
             </div>
             <div style={{ position: "relative", marginTop: 10 }}>
               <input className="input" value={search} onChange={e => setSearch(e.target.value)}
@@ -393,7 +395,7 @@ function Workbench({ data, tenant, language }) {
           <div style={{ flex: 1, overflow: "auto" }}>
             <ApiStatus q={tasksQ} what="cases" />
             <ApiStatus q={artifactsQ} what="ontology proposals" />
-            <ApiStatus q={graphProposedQ} what="proposed graph" />
+            <ApiStatus q={graphProposedQ} what="knowledge candidates" />
             <ApiStatus q={agentRunsQ} what="agent findings" />
             <div className="artifact-list">
               {filtered.length === 0 && (
@@ -497,7 +499,7 @@ function Workbench({ data, tenant, language }) {
                     <button className="btn ghost" disabled={reviewBusy} onClick={() => submitInlineReview("comment")}>{tWB(language, "Comment", "评论")}</button>
                   </div>
                   <div style={{ marginTop: 10, color: "var(--muted)", fontFamily: "var(--font-mono)", fontSize: 11, lineHeight: 1.5 }}>
-                    {tWB(language, "Inline review calls the owning review gate. It does not create a second workflow and does not bypass canonical ontology, formal graph, or finding evidence boundaries.", "工作台内审核仍调用原有审核入口，不创建第二套流程，也不会绕过 canonical ontology、formal graph 或 finding 证据边界。")}
+                    {tWB(language, "Inline review calls the owning review gate. It does not create a second workflow and does not bypass ontology catalog, graph-space projection, or finding evidence boundaries.", "工作台内审核仍调用所属审核入口，不创建第二套流程，也不会绕过本体目录、图空间投影或 finding 证据边界。")}
                   </div>
                 </Panel>
 
@@ -546,7 +548,7 @@ function Workbench({ data, tenant, language }) {
             <div className="section-body" style={{ display: "flex", flexDirection: "column", gap: 6 }}>
               <a className="btn ghost" style={{ justifyContent: "flex-start" }} href={`/?screen=reasoning&tenant=${encodeURIComponent(tenantId)}`}>{tWB(language, "Open reasoning queue", "打开推理队列")}</a>
               <a className="btn ghost" style={{ justifyContent: "flex-start" }} href={`/?screen=ontology&tenant=${encodeURIComponent(tenantId)}`}>{tWB(language, "Open ontology catalog", "打开本体目录")}</a>
-              <a className="btn ghost" style={{ justifyContent: "flex-start" }} href={`/?screen=graph&tenant=${encodeURIComponent(tenantId)}&graph_tab=proposed`}>{tWB(language, "Open proposed graph", "打开候选图谱")}</a>
+              <a className="btn ghost" style={{ justifyContent: "flex-start" }} href={`/?screen=graph&tenant=${encodeURIComponent(tenantId)}&graph_tab=approved`}>{tWB(language, "Browse graph-space projection", "浏览图空间投影")}</a>
             </div>
           </div>
         </div>
@@ -575,6 +577,7 @@ function AgentRunsWorkspace({ tenantId, query, artifacts = [], graphElements = [
   const [settingsOpen, setSettingsOpen] = useStateWB(false);
   const [agentParams, setAgentParams] = useStateWB({
     scope: "",
+    researchTopic: "",
     budget: "3",
     cadence: "manual",
     customInterval: "60",
@@ -582,6 +585,9 @@ function AgentRunsWorkspace({ tenantId, query, artifacts = [], graphElements = [
     autoReviewSimilarProposals: false,
     autoReviewLlmVerifier: true,
     autoRejectSimilarityThreshold: "0.92",
+    autoApproveLowDuplicateProposals: true,
+    autoApproveMinConfidence: "0.8",
+    autoApproveMaxDuplicateScore: "0.5",
     stopCondition: "pause, stop, budget exhausted, or no new frontier",
     safety: "GPT Researcher + proposed-only writes",
   });
@@ -630,6 +636,10 @@ function AgentRunsWorkspace({ tenantId, query, artifacts = [], graphElements = [
   const nodeSimilarityThreshold = Number.isFinite(parsedNodeSimilarityThreshold) ? parsedNodeSimilarityThreshold : 0.6;
   const parsedAutoRejectSimilarityThreshold = Number(agentParams.autoRejectSimilarityThreshold);
   const autoRejectSimilarityThreshold = Number.isFinite(parsedAutoRejectSimilarityThreshold) ? parsedAutoRejectSimilarityThreshold : 0.92;
+  const parsedAutoApproveMinConfidence = Number(agentParams.autoApproveMinConfidence);
+  const autoApproveMinConfidence = Number.isFinite(parsedAutoApproveMinConfidence) ? parsedAutoApproveMinConfidence : 0.8;
+  const parsedAutoApproveMaxDuplicateScore = Number(agentParams.autoApproveMaxDuplicateScore);
+  const autoApproveMaxDuplicateScore = Number.isFinite(parsedAutoApproveMaxDuplicateScore) ? parsedAutoApproveMaxDuplicateScore : 0.5;
   const latestBlockerParts = latestExtractionBlockers ? [
     ...Object.entries(latestExtractionBlockers.extraction_engine_status_counts || {}).map(([key, count]) => `${key}:${count}`),
     ...Object.entries(latestExtractionBlockers.rejected_candidate_reason_counts || {}).map(([key, count]) => `${key}:${count}`),
@@ -661,6 +671,7 @@ function AgentRunsWorkspace({ tenantId, query, artifacts = [], graphElements = [
     setAgentParams(prev => ({
       ...prev,
       scope: session.objective || session.config.scope || prev.scope,
+      researchTopic: session.config.research_topic || session.config.last_research_topic || prev.researchTopic || session.objective || session.config.scope || "",
       cadence: session.config.cadence || prev.cadence,
       customInterval: String(session.config.custom_interval_minutes || prev.customInterval || "60"),
       budget: String(session.config.max_frontier || prev.budget || "3"),
@@ -668,6 +679,9 @@ function AgentRunsWorkspace({ tenantId, query, artifacts = [], graphElements = [
       autoReviewSimilarProposals: Boolean(session.config.auto_review_similar_proposals ?? prev.autoReviewSimilarProposals),
       autoReviewLlmVerifier: Boolean(session.config.auto_review_llm_verifier ?? prev.autoReviewLlmVerifier ?? true),
       autoRejectSimilarityThreshold: String(session.config.auto_reject_similarity_threshold ?? prev.autoRejectSimilarityThreshold ?? "0.92"),
+      autoApproveLowDuplicateProposals: Boolean(session.config.auto_approve_low_duplicate_proposals ?? prev.autoApproveLowDuplicateProposals ?? true),
+      autoApproveMinConfidence: String(session.config.auto_approve_min_confidence ?? prev.autoApproveMinConfidence ?? "0.8"),
+      autoApproveMaxDuplicateScore: String(session.config.auto_approve_max_duplicate_score ?? prev.autoApproveMaxDuplicateScore ?? "0.5"),
       stopCondition: session.config.stop_condition || prev.stopCondition,
     }));
   }, [session?.session_key, JSON.stringify(session?.config || {})]);
@@ -749,6 +763,8 @@ function AgentRunsWorkspace({ tenantId, query, artifacts = [], graphElements = [
       const result = await AL_API.runContinuousEnrichmentCycle(tenantId, session.session_key, {
         created_by: "workspace",
         objective: agentParams.scope,
+        execution_goal: "Expand ontology and semantic knowledge coverage; route candidates to review without canonical graph writes.",
+        research_topic: agentParams.researchTopic || agentParams.scope,
         scope: agentParams.scope,
         budget: Number(agentParams.budget) || 3,
         cadence: agentParams.cadence,
@@ -757,6 +773,9 @@ function AgentRunsWorkspace({ tenantId, query, artifacts = [], graphElements = [
         auto_review_similar_proposals: Boolean(agentParams.autoReviewSimilarProposals),
         auto_review_llm_verifier: Boolean(agentParams.autoReviewLlmVerifier),
         auto_reject_similarity_threshold: autoRejectSimilarityThreshold,
+        auto_approve_low_duplicate_proposals: Boolean(agentParams.autoApproveLowDuplicateProposals),
+        auto_approve_min_confidence: autoApproveMinConfidence,
+        auto_approve_max_duplicate_score: autoApproveMaxDuplicateScore,
         stop_condition: agentParams.stopCondition,
         trigger_autopilot: true,
       });
@@ -797,6 +816,8 @@ function AgentRunsWorkspace({ tenantId, query, artifacts = [], graphElements = [
     try {
       await AL_API.configureContinuousEnrichmentSession(tenantId, session.session_key, {
         objective: agentParams.scope,
+        execution_goal: "Expand ontology and semantic knowledge coverage; route candidates to review without canonical graph writes.",
+        research_topic: agentParams.researchTopic || agentParams.scope,
         cadence: agentParams.cadence,
         custom_interval_minutes: Number(agentParams.customInterval) || 60,
         budget: Number(agentParams.budget) || 3,
@@ -804,6 +825,9 @@ function AgentRunsWorkspace({ tenantId, query, artifacts = [], graphElements = [
         auto_review_similar_proposals: Boolean(agentParams.autoReviewSimilarProposals),
         auto_review_llm_verifier: Boolean(agentParams.autoReviewLlmVerifier),
         auto_reject_similarity_threshold: autoRejectSimilarityThreshold,
+        auto_approve_low_duplicate_proposals: Boolean(agentParams.autoApproveLowDuplicateProposals),
+        auto_approve_min_confidence: autoApproveMinConfidence,
+        auto_approve_max_duplicate_score: autoApproveMaxDuplicateScore,
         stop_condition: agentParams.stopCondition,
       });
       setMessage({ kind: "ok", text: tWB(language, "Auto enriching settings saved.", "自动信息增益设置已保存。") });
@@ -945,12 +969,16 @@ function AgentRunsWorkspace({ tenantId, query, artifacts = [], graphElements = [
             {settingsOpen ? (
               <div style={{ display: "grid", gridTemplateColumns: "1fr 120px", gap: 10 }}>
                 <label>
-                  <div className="eyebrow" style={{ marginBottom: 4 }}>{tWB(language, "Objective (optional)", "Objective（可选）")}</div>
-                  <input className="input" value={agentParams.scope} onChange={e => updateAgentParam("scope", e.target.value)} placeholder={tWB(language, "Leave empty to search from frontier only", "留空则只根据 frontier 检索")} />
+                  <div className="eyebrow" style={{ marginBottom: 4 }}>{tWB(language, "Research topic", "检索主题")}</div>
+                  <input className="input" value={agentParams.researchTopic} onChange={e => updateAgentParam("researchTopic", e.target.value)} placeholder={tWB(language, "Only factual search terms, e.g. maritime chokepoint disruption risks", "只填写事实检索词，例如 maritime chokepoint disruption risks")} />
                 </label>
                 <label>
                   <div className="eyebrow" style={{ marginBottom: 4 }}>{tWB(language, "Budget", "预算")}</div>
                   <input className="input" value={agentParams.budget} onChange={e => updateAgentParam("budget", e.target.value)} />
+                </label>
+                <label style={{ gridColumn: "1 / -1" }}>
+                  <div className="eyebrow" style={{ marginBottom: 4 }}>{tWB(language, "Execution objective", "执行目标")}</div>
+                  <input className="input" value={agentParams.scope} onChange={e => updateAgentParam("scope", e.target.value)} placeholder={tWB(language, "Workflow goal; does not need provider/tool names", "流程目标；不需要包含 provider/tool 名称")} />
                 </label>
                 <label>
                   <div className="eyebrow" style={{ marginBottom: 4 }}>{tWB(language, "Cadence", "频率")}</div>
@@ -991,6 +1019,23 @@ function AgentRunsWorkspace({ tenantId, query, artifacts = [], graphElements = [
                   <div className="eyebrow" style={{ marginBottom: 4 }}>{tWB(language, "Auto reject threshold", "自动拒绝阈值")}</div>
                   <input className="input" type="number" min="0" max="1" step="0.01" value={agentParams.autoRejectSimilarityThreshold} onChange={e => updateAgentParam("autoRejectSimilarityThreshold", e.target.value)} />
                 </label>
+                <label style={{ display: "flex", alignItems: "center", gap: 8, border: "1px solid var(--line-soft)", background: "var(--bg-2)", padding: "8px 10px" }}>
+                  <input type="checkbox" checked={Boolean(agentParams.autoApproveLowDuplicateProposals)} onChange={e => updateAgentParam("autoApproveLowDuplicateProposals", e.target.checked)} />
+                  <span>
+                    <div className="eyebrow">{tWB(language, "Auto approve low-duplicate", "自动批准低重复候选")}</div>
+                    <div style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--muted)", marginTop: 3 }}>
+                      {tWB(language, "Approve low-duplicate knowledge candidates when confidence and duplicate thresholds pass.", "当置信度和重复度达标时自动批准低重复知识候选。")}
+                    </div>
+                  </span>
+                </label>
+                <label>
+                  <div className="eyebrow" style={{ marginBottom: 4 }}>{tWB(language, "Auto approve confidence", "自动批准置信度")}</div>
+                  <input className="input" type="number" min="0" max="1" step="0.01" value={agentParams.autoApproveMinConfidence} onChange={e => updateAgentParam("autoApproveMinConfidence", e.target.value)} />
+                </label>
+                <label>
+                  <div className="eyebrow" style={{ marginBottom: 4 }}>{tWB(language, "Max duplicate score", "最大重复度")}</div>
+                  <input className="input" type="number" min="0" max="1" step="0.01" value={agentParams.autoApproveMaxDuplicateScore} onChange={e => updateAgentParam("autoApproveMaxDuplicateScore", e.target.value)} />
+                </label>
                 <label>
                   <div className="eyebrow" style={{ marginBottom: 4 }}>{tWB(language, "Stop condition", "停止条件")}</div>
                   <input className="input" value={agentParams.stopCondition} onChange={e => updateAgentParam("stopCondition", e.target.value)} />
@@ -998,7 +1043,7 @@ function AgentRunsWorkspace({ tenantId, query, artifacts = [], graphElements = [
               </div>
             ) : (
               <div style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--muted)", overflowWrap: "anywhere" }}>
-                {tWB(language, "Settings collapsed", "设置已折叠")} · {tWB(language, "scope", "范围")} {compactTextWB(agentParams.scope, 70)} · {tWB(language, "budget", "预算")} {agentParams.budget} · {tWB(language, "node dedup", "节点去重")} {agentParams.nodeSimilarityThreshold} · {tWB(language, "auto review", "自动审核")} {agentParams.autoReviewSimilarProposals ? tWB(language, "on", "开启") : tWB(language, "off", "关闭")} · {tWB(language, "cadence", "频率")} {agentParams.cadence}
+                {tWB(language, "Settings collapsed", "设置已折叠")} · {tWB(language, "research", "检索")} {compactTextWB(agentParams.researchTopic || agentParams.scope, 70)} · {tWB(language, "budget", "预算")} {agentParams.budget} · {tWB(language, "node dedup", "节点去重")} {agentParams.nodeSimilarityThreshold} · {tWB(language, "auto approve", "自动批准")} {agentParams.autoApproveLowDuplicateProposals ? `${agentParams.autoApproveMinConfidence}/${agentParams.autoApproveMaxDuplicateScore}` : tWB(language, "off", "关闭")} · {tWB(language, "auto review", "自动审核")} {agentParams.autoReviewSimilarProposals ? tWB(language, "on", "开启") : tWB(language, "off", "关闭")} · {tWB(language, "cadence", "频率")} {agentParams.cadence}
               </div>
             )}
             <div style={{ marginTop: 10, fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--muted)" }}>
@@ -1015,7 +1060,7 @@ function AgentRunsWorkspace({ tenantId, query, artifacts = [], graphElements = [
               <button className="btn ghost" disabled={busy || (agentTab !== "autopilot" && !session)} onClick={toggleSession}>
                 {agentTab === "autopilot" ? tWB(language, "Pause / Resume", "暂停 / 恢复") : (["running", "active", "idle"].includes(String(session?.status || "").toLowerCase()) ? tWB(language, "Pause", "暂停") : tWB(language, "Resume", "恢复"))}
               </button>
-              <a className="btn" href={`/?screen=graph&tenant=${encodeURIComponent(tenantId)}&graph_tab=proposed`}>{tWB(language, "Open results", "打开结果")}</a>
+              <a className="btn" href={`/?screen=workbench&tenant=${encodeURIComponent(tenantId)}&workspace_tab=workqueue`}>{tWB(language, "Open results", "打开结果")}</a>
               <a className="btn ghost" href={`/?screen=workbench&tenant=${encodeURIComponent(tenantId)}&workspace_tab=agents&agent_tab=${encodeURIComponent(agentTab)}`}>{tWB(language, "Full run log", "完整运行日志")}</a>
               <a className="btn ghost" href={`/?screen=reasoning&tenant=${encodeURIComponent(tenantId)}`}>{tWB(language, "Open reasoning", "打开推理")}</a>
             </div>
@@ -1145,7 +1190,7 @@ function AgentRunsWorkspace({ tenantId, query, artifacts = [], graphElements = [
           <div className="section-head"><span>{tWB(language, "Write boundary", "写入边界")}</span></div>
           <div className="section-body" style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             <CaseField label={tWB(language, "Ontology candidates", "本体候选")} value={tWB(language, "review required", "需要审核")} />
-            <CaseField label={tWB(language, "Graph facts", "图事实")} value={tWB(language, "proposed graph space", "候选图空间")} />
+            <CaseField label={tWB(language, "Knowledge candidates", "知识候选")} value={tWB(language, "review queue; graph space is projection", "审核队列；图空间仅为投影")} />
             <CaseField label={tWB(language, "Findings", "发现")} value={tWB(language, "candidate / reviewed only", "仅候选 / 已审核")} />
             <CaseField label={tWB(language, "Canonical writes", "正式写入")} value={tWB(language, "disabled", "禁用")} />
           </div>
@@ -1153,7 +1198,8 @@ function AgentRunsWorkspace({ tenantId, query, artifacts = [], graphElements = [
         <div className="section">
           <div className="section-head"><span>{tWB(language, "Quick links", "快捷入口")}</span></div>
           <div className="section-body" style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-            <a className="btn ghost" style={{ justifyContent: "flex-start" }} href={`/?screen=graph&tenant=${encodeURIComponent(tenantId)}&graph_tab=proposed`}>{tWB(language, "Review pending graph proposals", "审核待处理图候选")}</a>
+            <a className="btn ghost" style={{ justifyContent: "flex-start" }} href={`/?screen=workbench&tenant=${encodeURIComponent(tenantId)}&workspace_tab=workqueue`}>{tWB(language, "Review knowledge candidates", "审核知识候选")}</a>
+            <a className="btn ghost" style={{ justifyContent: "flex-start" }} href={`/?screen=graph&tenant=${encodeURIComponent(tenantId)}&graph_tab=approved`}>{tWB(language, "Browse graph-space projection", "浏览图空间投影")}</a>
             <a className="btn ghost" style={{ justifyContent: "flex-start" }} href={`/?screen=ontology&tenant=${encodeURIComponent(tenantId)}`}>{tWB(language, "Review ontology candidates", "审核本体候选")}</a>
             <a className="btn ghost" style={{ justifyContent: "flex-start" }} href={`/?screen=reasoning&tenant=${encodeURIComponent(tenantId)}`}>{tWB(language, "Review candidate findings", "审核候选 findings")}</a>
           </div>
@@ -1200,37 +1246,38 @@ function buildWorkspaceReviewItems({ tenantId, artifacts, graphElements, agentRu
       const ontologyCandidate = isOntologyConceptProposalWB(e);
       const status = String(e.status || "draft").toLowerCase();
       const blocked = ["needs_evidence", "rejected", "failed", "blocked"].includes(status);
+      const knowledgeKind = String(e.knowledge_kind || "").trim();
       const itemType =
         ontologyCandidate ? "Ontology candidate" :
-        type.includes("edge") ? "Graph edge" :
+        knowledgeKind ? `Knowledge ${knowledgeKind}` :
         type.includes("finding") ? "Candidate finding" :
-        type.includes("node") ? "Graph node" :
-        "Graph proposal";
-      const title = e.title || e.name || e.label || e.element_key || "Proposed graph element";
+        type.includes("edge") ? "Knowledge relation" :
+        "Knowledge object";
+      const title = e.title || e.name || e.label || e.element_key || "Knowledge candidate";
       items.push({
         id: e.element_key || e.canonical_key || title,
         title,
-        summary: e.summary || e.description || "Proposed graph fact or finding waiting for graph review.",
+        summary: e.summary || e.description || "Knowledge candidate waiting for review.",
         itemType,
         tenantId,
         statusGroup: blocked ? "blocked" : "active",
         statusLabel: status,
         tone: blocked ? "changes" : "proposed",
-        sourceRun: compactTextWB(e.run_key || e.source || "proposed graph", 64),
+        sourceRun: compactTextWB(e.run_key || e.source || "knowledge candidate", 64),
         updated: e.updated_at || e.created_at || "",
         updatedLabel: fmtCaseTime(e.updated_at || e.created_at),
         confidenceLabel: e.confidence != null ? String(e.confidence) : "—",
         nextAction: ontologyCandidate
           ? "Review discovered ontology candidate"
-          : blocked ? "Review evidence gap or rejection reason in Graph" : "Review proposed graph element",
+          : blocked ? "Review evidence gap or rejection reason in Workbench" : "Review knowledge candidate",
         reviewHref: ontologyCandidate
           ? ontologyCandidateHrefWB(tenantId, e)
-          : `/?screen=graph&tenant=${encodeURIComponent(tenantId)}&graph_tab=proposed&proposed_key=${encodeURIComponent(e.element_key || "")}`,
-        reviewLabel: ontologyCandidate ? "Open in Ontology" : "Open in Graph",
-        reviewKind: ontologyCandidate ? "ontology_candidate" : "graph",
-        reviewKindLabel: ontologyCandidate ? "Ontology candidate review gate" : "Proposed graph review gate",
+          : `/?screen=workbench&tenant=${encodeURIComponent(tenantId)}&workspace_tab=workqueue&workspace_item=${encodeURIComponent(e.element_key || "")}`,
+        reviewLabel: ontologyCandidate ? "Open in Ontology" : "Open in Workbench",
+        reviewKind: ontologyCandidate ? "ontology_candidate" : "knowledge",
+        reviewKindLabel: ontologyCandidate ? "Ontology candidate review gate" : "Knowledge candidate review gate",
         runHref: e.run_key ? `/?screen=workbench&tenant=${encodeURIComponent(tenantId)}&workspace_tab=agents&agent_tab=enrichment&run_key=${encodeURIComponent(e.run_key)}` : "",
-        boundary: "proposed graph space; formal graph writes disabled",
+        boundary: "knowledge candidate; graph space is browse/search projection",
         dedupAudit: dedupAuditWB(e),
         raw: e,
       });
@@ -1412,11 +1459,12 @@ function workspaceBoundaryFacts(item) {
       "target: ontology artifact review",
     ];
   }
-  if (item?.reviewKind === "graph") {
+  if (item?.reviewKind === "knowledge") {
     return [
       "canonical ontology write: false",
       "formal graph write: false",
-      "target: proposed_graph_space",
+      "graph-space projection: browse/search only",
+      "target: knowledge candidate review",
     ];
   }
   return [
@@ -1644,7 +1692,7 @@ function buildAgentOutputGroups({ agentTab, tenantId, runs, artifacts, graphElem
         description: "Reviewed or graph-level findings surfaced for comparison.",
         items: findings.filter(item => ["approved", "done"].includes(String(item.status || "").toLowerCase())),
         href: item => String(item.element_key || "").startsWith("proposed-graph:")
-          ? `/?screen=graph&tenant=${encodeURIComponent(tenantId)}&graph_tab=proposed&proposed_key=${encodeURIComponent(item.element_key || "")}`
+          ? `/?screen=workbench&tenant=${encodeURIComponent(tenantId)}&workspace_tab=workqueue&workspace_item=${encodeURIComponent(item.element_key || "")}`
           : `/?screen=reasoning&tenant=${encodeURIComponent(tenantId)}&active_tab=autopilot`,
       },
     ];
@@ -1665,24 +1713,24 @@ function buildAgentOutputGroups({ agentTab, tenantId, runs, artifacts, graphElem
     },
     {
       key: "nodes",
-      title: "Proposed nodes",
-      description: "Current graph node proposals visible in Graph Proposed review.",
+      title: "Knowledge objects",
+      description: "Current object-shaped knowledge candidates awaiting review.",
       items: activeGraphItems.filter(item => String(item.element_type || item.type || "").toLowerCase().includes("node")),
-      href: item => `/?screen=graph&tenant=${encodeURIComponent(tenantId)}&graph_tab=proposed&proposed_key=${encodeURIComponent(item.element_key || "")}`,
+      href: item => `/?screen=workbench&tenant=${encodeURIComponent(tenantId)}&workspace_tab=workqueue&workspace_item=${encodeURIComponent(item.element_key || "")}`,
     },
     {
       key: "edges",
-      title: "Proposed edges",
-      description: "Current graph edge proposals visible in Graph Proposed review.",
+      title: "Knowledge relations",
+      description: "Current relation-shaped knowledge candidates awaiting review.",
       items: activeGraphItems.filter(item => String(item.element_type || item.type || "").toLowerCase().includes("edge")),
-      href: item => `/?screen=graph&tenant=${encodeURIComponent(tenantId)}&graph_tab=proposed&proposed_key=${encodeURIComponent(item.element_key || "")}`,
+      href: item => `/?screen=workbench&tenant=${encodeURIComponent(tenantId)}&workspace_tab=workqueue&workspace_item=${encodeURIComponent(item.element_key || "")}`,
     },
     {
       key: "graph_findings",
-      title: "Proposed graph findings",
-      description: "Current graph findings visible in Graph Proposed review.",
+      title: "Candidate findings",
+      description: "Current finding candidates awaiting review.",
       items: activeGraphItems.filter(item => String(item.element_type || item.type || "").toLowerCase().includes("finding")),
-      href: item => `/?screen=graph&tenant=${encodeURIComponent(tenantId)}&graph_tab=proposed&proposed_key=${encodeURIComponent(item.element_key || "")}`,
+      href: item => `/?screen=workbench&tenant=${encodeURIComponent(tenantId)}&workspace_tab=workqueue&workspace_item=${encodeURIComponent(item.element_key || "")}`,
     },
     {
       key: "graph_ontology_proposals",
@@ -1694,15 +1742,15 @@ function buildAgentOutputGroups({ agentTab, tenantId, runs, artifacts, graphElem
       }),
       href: item => isOntologyConceptProposalWB(item)
         ? ontologyCandidateHrefWB(tenantId, item)
-        : `/?screen=graph&tenant=${encodeURIComponent(tenantId)}&graph_tab=proposed&proposed_key=${encodeURIComponent(item.element_key || "")}`,
+        : `/?screen=workbench&tenant=${encodeURIComponent(tenantId)}&workspace_tab=workqueue&workspace_item=${encodeURIComponent(item.element_key || "")}`,
     },
     {
       key: "duplicate_outputs",
       title: "Duplicate candidates",
-      description: "Candidates that match existing graph proposals and still need review handling.",
+      description: "Candidates that match existing knowledge candidates and still need review handling.",
       items: duplicateGraphItems,
       duplicateOnly: true,
-      href: item => `/?screen=graph&tenant=${encodeURIComponent(tenantId)}&graph_tab=proposed&proposed_key=${encodeURIComponent(item.element_key || "")}`,
+      href: item => `/?screen=workbench&tenant=${encodeURIComponent(tenantId)}&workspace_tab=workqueue&workspace_item=${encodeURIComponent(item.element_key || "")}`,
     },
     {
       key: "history_outputs",
@@ -1710,7 +1758,7 @@ function buildAgentOutputGroups({ agentTab, tenantId, runs, artifacts, graphElem
       description: "Rejected, blocked, or filtered outputs kept for audit history.",
       items: historyGraphItems,
       historyOnly: true,
-      href: item => `/?screen=graph&tenant=${encodeURIComponent(tenantId)}&graph_tab=proposed&proposed_key=${encodeURIComponent(item.element_key || "")}`,
+      href: item => `/?screen=graph&tenant=${encodeURIComponent(tenantId)}&graph_tab=proposed&debug_graph_candidates=1&proposed_key=${encodeURIComponent(item.element_key || "")}`,
     },
   ];
 }
@@ -1883,9 +1931,9 @@ function agentOutputGroupTitleWB(title, language) {
     "Proposed findings": "候选 findings",
     "Findings": "已审核 findings",
     "Proposed ontologies": "候选本体",
-    "Proposed nodes": "候选节点",
-    "Proposed edges": "候选边",
-    "Proposed graph findings": "候选图发现",
+    "Knowledge objects": "知识对象",
+    "Knowledge relations": "知识关系",
+    "Candidate findings": "候选发现",
     "Duplicate candidates": "去重命中候选",
     "Rejected / filtered history": "已拒绝 / 已过滤历史",
   };
@@ -1898,12 +1946,10 @@ function agentOutputGroupDescriptionWB(description, language) {
     "Candidate findings generated by reasoning runs, sorted by confidence and detail.": "自动推理生成的候选 findings，按置信度和详情排序。",
     "Reviewed or graph-level findings surfaced for comparison.": "用于对比的已审核或图谱级 findings。",
     "Ontology candidates and web enrichment proposals that still require ontology review.": "仍需本体审核的本体候选和网页信息增益候选。",
-    "Graph node proposals generated by enrichment runs.": "信息增益运行生成的候选图节点。",
-    "Graph edge proposals generated by enrichment runs.": "信息增益运行生成的候选图边。",
-    "Current graph node proposals visible in Graph Proposed review.": "当前 Graph 候选审核页可见的候选图节点。",
-    "Current graph edge proposals visible in Graph Proposed review.": "当前 Graph 候选审核页可见的候选图边。",
-    "Current graph findings visible in Graph Proposed review.": "当前 Graph 候选审核页可见的候选图发现。",
-    "Candidates that match existing graph proposals and still need review handling.": "命中已有图候选、仍需审核处理的候选。",
+    "Current object-shaped knowledge candidates awaiting review.": "当前等待审核的对象型知识候选。",
+    "Current relation-shaped knowledge candidates awaiting review.": "当前等待审核的关系型知识候选。",
+    "Current finding candidates awaiting review.": "当前等待审核的候选发现。",
+    "Candidates that match existing knowledge candidates and still need review handling.": "命中已有知识候选、仍需审核处理的候选。",
     "Rejected, blocked, or filtered outputs kept for audit history.": "已拒绝、已阻塞或已过滤输出，仅保留为审计历史。",
   };
   return map[description] || description;

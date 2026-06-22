@@ -311,6 +311,100 @@ def _proposal_match_summary(row):
     return summary
 
 
+def _knowledge_candidate_profile(element_type, payload):
+    payload = payload or {}
+    raw_type = str(element_type or "").strip().lower()
+    graph_space = payload.get("graph_space") if isinstance(payload.get("graph_space"), dict) else {}
+    artifact_type = str(payload.get("artifact_type") or payload.get("ontology_artifact_type") or "").strip().lower()
+    has_relation_shape = any(payload.get(field) for field in ("source_label", "target_label", "source_key", "target_key", "relation", "relation_label"))
+    has_observation_shape = any(payload.get(field) for field in ("metric", "value", "unit", "change", "baseline", "time_window"))
+    has_action_shape = any(payload.get(field) for field in ("action", "trigger", "preconditions", "effects", "target_object_type"))
+    has_model_shape = bool(artifact_type or graph_space.get("space") == "ontology_model")
+
+    type_tokens = set(filter(None, raw_type.replace("-", "_").split("_")))
+    if has_model_shape:
+        knowledge_kind = "model_concept"
+        product_surface = "ontology"
+    elif "claim" in type_tokens:
+        knowledge_kind = "claim"
+        product_surface = "knowledge"
+    elif "observation" in type_tokens:
+        knowledge_kind = "observation"
+        product_surface = "knowledge"
+    elif type_tokens.intersection({"action", "recommendation"}) or has_action_shape:
+        knowledge_kind = "actionable_object"
+        product_surface = "ontology"
+    elif raw_type == "edge" or has_relation_shape:
+        knowledge_kind = "relation"
+        product_surface = "knowledge"
+    elif raw_type == "finding":
+        knowledge_kind = "finding"
+        product_surface = "reasoning"
+    elif has_observation_shape:
+        knowledge_kind = "observation"
+        product_surface = "knowledge"
+    else:
+        knowledge_kind = "object"
+        product_surface = "knowledge"
+
+    if graph_space.get("space"):
+        storage_projection = graph_space.get("space")
+    elif raw_type == "edge" or has_relation_shape:
+        storage_projection = "candidate_relation_projection"
+    elif has_model_shape:
+        storage_projection = "ontology_model_projection"
+    else:
+        storage_projection = "candidate_object_projection"
+
+    return {
+        "knowledge_kind": knowledge_kind,
+        "product_surface": product_surface,
+        "storage_projection": storage_projection,
+        "review_surface": product_surface,
+    }
+
+
+def _compact_candidate_payload(payload):
+    if not isinstance(payload, dict):
+        return {}
+    keep_keys = {
+        "artifact_type",
+        "label",
+        "description",
+        "domain",
+        "range",
+        "property_of",
+        "source_artifact_type",
+        "ontology_part",
+        "trigger_event",
+        "trigger_or_condition",
+        "target_object_types",
+        "affected_object_types",
+        "expected_effects",
+        "input_parameters",
+        "inputs",
+        "outputs",
+        "guardrails",
+        "applies_to",
+        "evidence_quote",
+        "source_url",
+        "review_boundary",
+        "governance",
+        "instance_resolution",
+        "promotion",
+    }
+    compact = {key: payload.get(key) for key in keep_keys if key in payload}
+    for nested_key in ("ontology_candidate", "identity"):
+        nested = payload.get(nested_key)
+        if isinstance(nested, dict):
+            compact[nested_key] = {
+                key: nested.get(key)
+                for key in ("artifact_type", "label", "normalized_label", "description", "domain", "range", "property_of")
+                if key in nested
+            }
+    return compact
+
+
 def _attach_proposal_match_summaries(payload, proposal_match_lookup):
     if not proposal_match_lookup:
         return payload
@@ -1545,6 +1639,7 @@ class InstanceRepository:
         for column in label_columns:
             conditions.append(f"CAST({table}.{column} AS CHAR) LIKE :like_query")
         where = " OR ".join(conditions)
+        params = {"query": query, "like_query": f"%{query}%", "limit": limit}
         with self.source_engine_for(tenant).connect() as conn:
             rows = conn.execute(
                 text(
@@ -1553,7 +1648,7 @@ class InstanceRepository:
                     f"WHERE (:query = '' OR {where}) "
                     f"ORDER BY {table}.{pk} LIMIT :limit"
                 ),
-                {"query": query, "like_query": f"%{query}%", "limit": limit},
+                params,
             ).mappings().all()
         return {
             "instances": [
@@ -1861,6 +1956,13 @@ class InstanceRepository:
                 seen_nodes.add(node["id"])
             return node
 
+        def remember_edge(edge):
+            if not edge or not edge.get("id") or edge["id"] in seen_edges:
+                return False
+            seen_edges.add(edge["id"])
+            edges.append(edge)
+            return True
+
         try:
             source_engine = self.source_engine_for(tenant)
             inspector = inspect(source_engine)
@@ -1874,6 +1976,16 @@ class InstanceRepository:
                 reason=exc,
             )
         per_type_limit = max(1, min(40, limit // max(len(objects), 1) + 1))
+
+        center = None
+        if object_type and instance_id:
+            center_graph = self._schema_graph_neighborhood(tenant, object_type, instance_id, depth=1, limit=limit)
+            if center_graph and center_graph.get("approved"):
+                center = center_graph.get("center")
+                for node in center_graph.get("nodes") or []:
+                    remember_node(node)
+                for edge in center_graph.get("edges") or []:
+                    remember_edge(edge)
 
         try:
             with source_engine.connect() as conn:
@@ -1940,9 +2052,6 @@ class InstanceRepository:
                         source_node = remember_node(self._schema_graph_node(tenant, source_artifact, source_table, row["source_pk"]))
                         target_node = remember_node(self._schema_graph_node(tenant, target_artifact, target_table, row["target_pk"]))
                         edge_id = f"{source_node['id']}->{target_node['id']}:{link['canonical_key']}"
-                        if edge_id in seen_edges:
-                            continue
-                        seen_edges.add(edge_id)
                         edge = {
                             "id": edge_id,
                             "tenant_id": tenant.tenant_id,
@@ -1956,7 +2065,7 @@ class InstanceRepository:
                         edge_properties = self._schema_graph_edge_properties_from_row(row, edge_property_columns)
                         if edge_properties:
                             edge["properties"] = edge_properties
-                        edges.append(edge)
+                        remember_edge(edge)
                         if len(edges) >= limit * 3:
                             break
         except (SQLAlchemyError, OSError) as exc:
@@ -1967,8 +2076,7 @@ class InstanceRepository:
                 limit=requested_limit,
                 reason=exc,
             )
-        center = None
-        if object_type and instance_id:
+        if object_type and instance_id and not center:
             compact_type = re.sub(r"[^0-9A-Za-z]", "", str(object_type)).lower()
             for artifact in objects.values():
                 if re.sub(r"[^0-9A-Za-z]", "", artifact["name"]).lower() == compact_type:
@@ -2041,6 +2149,271 @@ class InstanceRepository:
         if schema_graph is not None:
             return schema_graph
         return None
+
+    def ontology_model_graph(self, tenant, limit=300):
+        requested_limit = int(limit or 300)
+        limit = max(1, min(requested_limit, 600))
+        semantic_types = {
+            "situation",
+            "metric_observation",
+            "metric_change_observation",
+            "impact_claim",
+            "indicator_claim",
+            "recommendation",
+        }
+        nodes = []
+        edges = []
+        seen_nodes = set()
+        seen_edges = set()
+
+        def normalize(value):
+            return re.sub(r"[^a-z0-9]+", " ", str(value or "").lower()).strip()
+
+        def compact(value):
+            return re.sub(r"[^a-z0-9]+", "", str(value or "").lower())
+
+        def add_node(node):
+            node_id = node.get("id")
+            if not node_id or node_id in seen_nodes or len(nodes) >= limit:
+                return False
+            seen_nodes.add(node_id)
+            nodes.append(node)
+            return True
+
+        def add_edge(source, target, label, **extra):
+            if not source or not target or source == target or len(edges) >= limit * 3:
+                return
+            edge_id = extra.pop("id", None) or f"{source}->{target}:{label}"
+            if edge_id in seen_edges:
+                return
+            seen_edges.add(edge_id)
+            edges.append(
+                {
+                    "id": edge_id,
+                    "source": source,
+                    "target": target,
+                    "label": label,
+                    "kind": label,
+                    "status": extra.pop("status", "approved"),
+                    "projection_source": "OntologyModelGraph",
+                    **extra,
+                }
+            )
+
+        with self.metadata_engine_for(tenant).connect() as conn:
+            artifact_rows = conn.execute(
+                text(
+                    """
+                    SELECT canonical_key, artifact_type, name, description, payload_json,
+                           confidence, source_refs_json, status, source_agent,
+                           created_at, updated_at
+                    FROM aletheia_ontology_artifacts
+                    WHERE project_id = :tenant_id AND status = 'approved'
+                    ORDER BY updated_at DESC NULLS LAST, created_at DESC NULLS LAST, id DESC
+                    LIMIT :limit
+                    """
+                ),
+                {"tenant_id": tenant.tenant_id, "limit": limit},
+            ).mappings().all()
+            proposed_rows = conn.execute(
+                text(
+                    """
+                    SELECT element_key, element_type, name, payload_json, evidence_refs_json,
+                           source_url, confidence, status, created_at
+                    FROM aletheia_proposed_graph_elements
+                    WHERE project_id = :tenant_id
+                      AND element_type IN ('situation', 'metric_observation', 'metric_change_observation',
+                                           'impact_claim', 'indicator_claim', 'recommendation')
+                    ORDER BY created_at DESC NULLS LAST, id DESC
+                    LIMIT :limit
+                    """
+                ),
+                {"tenant_id": tenant.tenant_id, "limit": limit},
+            ).mappings().all()
+
+        artifact_by_key = {}
+        artifact_by_label = {}
+        artifact_by_source_element = {}
+        artifact_by_source_url = {}
+        artifact_by_quote = {}
+        artifact_type_label = {
+            "object": "OntologyObject",
+            "link": "OntologyLink",
+            "property": "OntologyProperty",
+            "action": "OntologyAction",
+        }
+        for row in artifact_rows:
+            payload = _load_json(row["payload_json"], {})
+            node_id = f"ontology:{row['canonical_key']}"
+            artifact_by_key[row["canonical_key"]] = {"row": row, "payload": payload, "node_id": node_id}
+            labels = [
+                row["name"],
+                payload.get("label"),
+                payload.get("source_artifact_type"),
+                payload.get("ontology_part"),
+            ]
+            for label in labels:
+                normalized = normalize(label)
+                if normalized:
+                    artifact_by_label.setdefault(normalized, node_id)
+                    artifact_by_label.setdefault(compact(label), node_id)
+            source_element = payload.get("source_proposed_graph_element_key") or (payload.get("promotion") or {}).get("source_element_key")
+            graph_space_element_key = self._ontology_graph_space_element_key(tenant.tenant_id, row["canonical_key"])
+            if source_element:
+                artifact_by_source_element[source_element] = node_id
+            source_url = payload.get("source_url") or next((ref for ref in _load_json(row["source_refs_json"], []) if str(ref).startswith("gpt_researcher://")), "")
+            if source_url:
+                artifact_by_source_url.setdefault(source_url, []).append(node_id)
+            quote = normalize(payload.get("evidence_quote"))
+            if quote:
+                artifact_by_quote.setdefault(quote[:180], []).append(node_id)
+            add_node(
+                {
+                    "id": node_id,
+                    "type": artifact_type_label.get(row["artifact_type"], "OntologyArtifact"),
+                    "label": row["name"] or row["canonical_key"],
+                    "status": row["status"],
+                    "canonical_key": row["canonical_key"],
+                    "artifact_type": row["artifact_type"],
+                    "ontology_part": payload.get("ontology_part"),
+                    "source_artifact_type": payload.get("source_artifact_type"),
+                    "source_agent": row["source_agent"],
+                    "graph_space_element_key": graph_space_element_key,
+                    "confidence": row["confidence"],
+                    "description": row["description"],
+                    "source_url": source_url,
+                    "evidence_quote": payload.get("evidence_quote"),
+                    "projection_source": "OntologyModelGraph",
+                    "properties": {
+                        "canonical_key": row["canonical_key"],
+                        "artifact_type": row["artifact_type"],
+                        "ontology_part": payload.get("ontology_part"),
+                        "source_artifact_type": payload.get("source_artifact_type"),
+                        "source_proposed_graph_element_key": source_element,
+                        "graph_space_element_key": graph_space_element_key,
+                    },
+                }
+            )
+
+        def node_for_label(label):
+            if not label:
+                return None
+            return artifact_by_label.get(normalize(label)) or artifact_by_label.get(compact(label))
+
+        for item in artifact_by_key.values():
+            row = item["row"]
+            payload = item["payload"]
+            source_id = item["node_id"]
+            if row["artifact_type"] == "property":
+                target_id = node_for_label(payload.get("property_of") or payload.get("domain"))
+                add_edge(source_id, target_id, "property_of")
+            if row["artifact_type"] == "link":
+                add_edge(source_id, node_for_label(payload.get("domain")), "domain")
+                add_edge(source_id, node_for_label(payload.get("range")), "range")
+            for label in payload.get("target_object_types") or []:
+                add_edge(source_id, node_for_label(label), "targets")
+            for label in payload.get("affected_object_types") or []:
+                add_edge(source_id, node_for_label(label), "affects")
+            for label in payload.get("applies_to") or []:
+                add_edge(source_id, node_for_label(label), "applies_to")
+            trigger_id = node_for_label(payload.get("trigger_event") or payload.get("trigger_or_condition"))
+            add_edge(source_id, trigger_id, "triggered_by")
+
+        semantic_nodes = []
+        ontology_candidate_nodes = {}
+        for row in proposed_rows:
+            payload = _load_json(row["payload_json"], {})
+            if row["element_type"] not in semantic_types:
+                continue
+            node_id = f"semantic:{row['element_key']}"
+            quote = payload.get("evidence_quote") or ""
+            source_url = payload.get("source_url") or row["source_url"]
+            added = add_node(
+                {
+                    "id": node_id,
+                    "type": "SemanticItem",
+                    "label": row["name"] or row["element_type"],
+                    "status": row["status"],
+                    "element_key": row["element_key"],
+                    "element_type": row["element_type"],
+                    "source_url": source_url,
+                    "evidence_quote": quote,
+                    "confidence": row["confidence"],
+                    "projection_source": "OntologyModelGraph",
+                    "properties": {
+                        "element_key": row["element_key"],
+                        "element_type": row["element_type"],
+                        "source_url": source_url,
+                        "metric_key": payload.get("metric_key"),
+                        "subject": payload.get("subject"),
+                        "target": payload.get("target"),
+                    },
+                }
+            )
+            if added:
+                semantic_nodes.append({"row": row, "payload": payload, "node_id": node_id, "quote": quote, "source_url": source_url})
+
+        for item in semantic_nodes:
+            semantic_id = item["node_id"]
+            payload = item["payload"]
+            source_url = item["source_url"]
+            quote = normalize(item["quote"])
+            linked = set()
+            for candidate_key in payload.get("related_ontology_candidates") or payload.get("supports_ontology_candidates") or []:
+                target_id = ontology_candidate_nodes.get(candidate_key) or artifact_by_source_element.get(candidate_key)
+                if target_id:
+                    linked.add(target_id)
+                    add_edge(semantic_id, target_id, "supports", status="needs_review", evidence_quote=item["quote"])
+            for target_id in artifact_by_source_url.get(source_url, [])[:12]:
+                linked.add(target_id)
+                add_edge(semantic_id, target_id, "co_sourced_with", status="needs_review", evidence_quote=item["quote"], match_method="same_source")
+            if quote:
+                for artifact_quote, target_ids in artifact_by_quote.items():
+                    if artifact_quote and (artifact_quote in quote or quote[:120] in artifact_quote):
+                        for target_id in target_ids[:4]:
+                            linked.add(target_id)
+                            add_edge(semantic_id, target_id, "supports", status="needs_review", evidence_quote=item["quote"], match_method="quote_overlap")
+            for field, label in (
+                ("subject", payload.get("subject")),
+                ("target", payload.get("target")),
+                ("recommended_action", payload.get("recommended_action")),
+                ("metric_key", payload.get("metric_key")),
+            ):
+                target_id = node_for_label(label)
+                if target_id and target_id not in linked:
+                    add_edge(semantic_id, target_id, f"mentions_{field}", status="needs_review")
+
+        return {
+            "approved": True,
+            "tenant": tenant.public_dict(),
+            "graph_database": tenant.graph_database,
+            "limit": limit,
+            "center": nodes[0] if nodes else None,
+            "nodes": nodes[:limit],
+            "edges": edges[: limit * 3],
+            "scope": {
+                "tenant_id": tenant.tenant_id,
+                "view": "ontology_model",
+                "approved_only": False,
+                "projection_source": "OntologyModelGraph",
+                "node_count": len(nodes),
+                "edge_count": len(edges),
+                "ontology_artifact_count": len(artifact_rows),
+                "semantic_item_count": len(semantic_nodes),
+                "edge_semantics": [
+                    "supports",
+                    "co_sourced_with",
+                    "property_of",
+                    "domain",
+                    "range",
+                    "targets",
+                    "affects",
+                    "applies_to",
+                    "triggered_by",
+                    "mentions_*",
+                ],
+            },
+        }
 
     def edge_detail(self, tenant, source, target):
         if ":" not in source or ":" not in target:
@@ -2156,11 +2529,17 @@ class InstanceRepository:
             "frontier_selector_model": "gemini-3.5-flash",
             "frontier_selector_shortlist": 20,
             "frontier_max_per_cluster": 2,
+            "instance_coverage_min_edges": 0,
+            "instance_coverage_min_enrichment_items": 2,
+            "instance_coverage_per_type_limit": 75,
             "node_similarity_dedup_threshold": 0.6,
             "auto_review_similar_proposals": False,
             "auto_review_llm_verifier": True,
             "auto_review_model": "gemini-3.5-flash",
             "auto_reject_similarity_threshold": 0.92,
+            "auto_approve_low_duplicate_proposals": True,
+            "auto_approve_min_confidence": 0.8,
+            "auto_approve_max_duplicate_score": 0.5,
             "auto_review_reviewer": "Continuous Enrichment Agent",
             "budget": {
                 "max_frontier_per_cycle": 4,
@@ -2495,6 +2874,16 @@ class InstanceRepository:
 
     def _continuous_update_config(self, config, body):
         config = dict(config or {})
+        config.setdefault("auto_approve_low_duplicate_proposals", True)
+        config.setdefault("auto_approve_min_confidence", 0.8)
+        config.setdefault("auto_approve_max_duplicate_score", 0.5)
+        for key in ("research_topic", "execution_goal"):
+            if key in body:
+                value = re.sub(r"\s+", " ", str(body.get(key) or "").strip())
+                if value:
+                    config[key] = value
+                else:
+                    config.pop(key, None)
         if "cadence" in body:
             cadence = (body.get("cadence") or "manual").strip()
             if cadence not in {"manual", "hourly", "daily", "custom"}:
@@ -2554,6 +2943,13 @@ class InstanceRepository:
             config["frontier_selector_shortlist"] = max(1, min(int(body.get("frontier_selector_shortlist") or 20), 100))
         if "frontier_max_per_cluster" in body:
             config["frontier_max_per_cluster"] = max(1, min(int(body.get("frontier_max_per_cluster") or 2), 10))
+        for key, upper_bound in (
+            ("instance_coverage_min_edges", 50),
+            ("instance_coverage_min_enrichment_items", 50),
+            ("instance_coverage_per_type_limit", 500),
+        ):
+            if key in body:
+                config[key] = max(0, min(int(body.get(key) or 0), upper_bound))
         if "budget" in body:
             raw_budget = body.get("budget") or config.get("max_frontier") or 4
             budget_config = dict(config.get("budget") or {})
@@ -2605,6 +3001,20 @@ class InstanceRepository:
             except (TypeError, ValueError):
                 raise ValueError("auto_reject_similarity_threshold must be a number between 0 and 1")
             config["auto_reject_similarity_threshold"] = round(max(0.0, min(threshold, 1.0)), 4)
+        if "auto_approve_low_duplicate_proposals" in body:
+            config["auto_approve_low_duplicate_proposals"] = bool(body.get("auto_approve_low_duplicate_proposals"))
+        if "auto_approve_min_confidence" in body:
+            try:
+                threshold = float(body.get("auto_approve_min_confidence"))
+            except (TypeError, ValueError):
+                raise ValueError("auto_approve_min_confidence must be a number between 0 and 1")
+            config["auto_approve_min_confidence"] = round(max(0.0, min(threshold, 1.0)), 4)
+        if "auto_approve_max_duplicate_score" in body:
+            try:
+                threshold = float(body.get("auto_approve_max_duplicate_score"))
+            except (TypeError, ValueError):
+                raise ValueError("auto_approve_max_duplicate_score must be a number between 0 and 1")
+            config["auto_approve_max_duplicate_score"] = round(max(0.0, min(threshold, 1.0)), 4)
         if "auto_review_reviewer" in body:
             reviewer = str(body.get("auto_review_reviewer") or "").strip()
             if reviewer:
@@ -2628,6 +3038,48 @@ class InstanceRepository:
             backoff["max_seconds"] = max(backoff["base_seconds"], min(int(backoff.get("max_seconds") or 3600), 604800))
             config["backoff"] = backoff
         return config
+
+    def _continuous_retrieval_objective(self, row_objective, config, body):
+        research_topic = re.sub(
+            r"\s+",
+            " ",
+            str(body.get("research_topic") or (config or {}).get("research_topic") or "").strip(),
+        )
+        execution_goal = re.sub(
+            r"\s+",
+            " ",
+            str(body.get("execution_goal") or (config or {}).get("execution_goal") or body.get("objective") or row_objective or "").strip(),
+        )
+        if research_topic:
+            return research_topic, execution_goal
+        fallback = str(body.get("objective") or row_objective or "").strip()
+        terms = []
+        for term in re.split(r"[^A-Za-z0-9_/-]+", fallback):
+            value = term.strip()
+            if len(value) < 4:
+                continue
+            lowered = value.lower().replace("_", " ").replace("-", " ")
+            if lowered in {
+                "gpt",
+                "researcher",
+                "expand",
+                "using",
+                "coverage",
+                "summaries",
+                "summary",
+                "provider",
+                "produce",
+                "prioritize",
+                "candidate",
+                "candidates",
+                "reviewable",
+                "semantic",
+                "ontology",
+                "knowledge",
+            }:
+                continue
+            terms.append(value)
+        return " ".join(terms[:8]).strip(), execution_goal
 
     def _continuous_budget(self, config):
         budget = dict((config or {}).get("budget") or {})
@@ -2875,6 +3327,10 @@ class InstanceRepository:
             ontology_type = str(payload.get("ontology_type") or payload.get("type") or item.get("ontology_type") or "").strip().lower()
             if label:
                 return f"node:{ontology_type}:{label}"
+        if item.get("source_kind") == "instance_coverage":
+            identity = payload.get("identity_key") or payload.get("node_id") or item.get("target_key")
+            if identity:
+                return f"node:{str(identity).strip().lower()}"
         return key
 
     def _continuous_frontier_name(self, item):
@@ -2885,6 +3341,7 @@ class InstanceRepository:
             "new_graph_node": 100,
             "new_graph_edge": 100,
             "research_topic": 120,
+            "instance_coverage": 70,
             "user_question_scope": 80,
             "reasoning_finding_seed": 60,
             "graph_coverage": 20,
@@ -2895,6 +3352,7 @@ class InstanceRepository:
             "new_graph_node": "new proposed graph node has not been enriched yet",
             "new_graph_edge": "new proposed graph edge/path has not been enriched yet",
             "research_topic": "open-ended deep research topic should discover new developments and expert analysis",
+            "instance_coverage": "approved instance has sparse or missing relation coverage",
             "user_question_scope": "user scoped reasoning question is an active research focus",
             "reasoning_finding_seed": "reasoning finding suggests a path that needs more evidence or expansion",
             "graph_coverage": "coverage fallback is rotating through graph items after higher-priority seeds",
@@ -3048,6 +3506,175 @@ class InstanceRepository:
                 source_kind = "graph_coverage"
             items.append(self._continuous_row_to_frontier_item(row, source_kind))
         return items
+
+    def _continuous_instance_coverage_frontier(self, tenant, config=None, limit=50):
+        config = config or {}
+        min_relation_edges = max(0, int(config.get("instance_coverage_min_edges") or 0))
+        min_enrichment_items = max(0, int(config.get("instance_coverage_min_enrichment_items") or 2))
+        per_type_limit = max(1, min(int(config.get("instance_coverage_per_type_limit") or limit or 50), 200))
+        try:
+            type_rows = self.types(tenant, include_draft=False).get("types") or []
+        except Exception:
+            return []
+        instance_records = []
+        for type_info in type_rows:
+            object_type = type_info.get("type")
+            if not object_type:
+                continue
+            try:
+                instances = self.search(tenant, object_type, "", limit=per_type_limit, include_draft=False).get("instances") or []
+            except Exception:
+                instances = []
+            for instance in instances:
+                node_id = str(instance.get("id") or "").strip()
+                if not node_id:
+                    continue
+                instance_id = node_id.split(":", 1)[1] if ":" in node_id else str(instance.get("source_pk") or "").split("=", 1)[-1]
+                relation_count = 0
+                relations_summary = {}
+                if min_relation_edges > 0:
+                    try:
+                        detail = self.detail(tenant, object_type, instance_id) if instance_id else None
+                        relations_summary = (detail or {}).get("relations_summary") if isinstance((detail or {}).get("relations_summary"), dict) else {}
+                        relation_count = int(relations_summary.get("edges") or 0)
+                    except Exception:
+                        relation_count = 0
+                        relations_summary = {}
+                label = str(instance.get("label") or instance.get("name") or instance_id or node_id)
+                instance_records.append(
+                    {
+                        "type_info": type_info,
+                        "object_type": object_type,
+                        "instance": instance,
+                        "node_id": node_id,
+                        "instance_id": instance_id,
+                        "label": label,
+                        "relation_count": relation_count,
+                        "relations_summary": relations_summary,
+                    }
+                )
+        enrichment_counts = self._continuous_instance_enrichment_counts(tenant, instance_records)
+        candidates = []
+        for record in instance_records:
+            type_info = record["type_info"]
+            object_type = record["object_type"]
+            instance = record["instance"]
+            node_id = record["node_id"]
+            instance_id = record["instance_id"]
+            label = record["label"]
+            relation_count = record["relation_count"]
+            relations_summary = record["relations_summary"]
+            enrichment_count = enrichment_counts.get(node_id, 0)
+            relation_gap = max(0, min_relation_edges - relation_count)
+            enrichment_gap = max(0, min_enrichment_items - enrichment_count)
+            if relation_gap <= 0 and enrichment_gap <= 0:
+                continue
+            source_pk = instance.get("source_pk") or (f"id={instance_id}" if instance_id else "")
+            candidates.append(
+                self._continuous_normalize_frontier_item(
+                    {
+                        "key": f"instance-coverage:{node_id}",
+                        "name": f"{label} {object_type} enrichment coverage",
+                        "artifact_type": "approved_instance_coverage_gap",
+                        "kind": "approved_instance_coverage_gap",
+                        "source": "approved_graph_instance",
+                        "source_kind": "instance_coverage",
+                        "priority": 70 + min((relation_gap + enrichment_gap) * 8, 32),
+                        "reason": "approved instance has fewer reviewed relations or enrichment outputs than the configured coverage threshold",
+                        "depth": 0,
+                        "ontology_type": object_type,
+                        "target_key": node_id,
+                        "payload": {
+                            "label": label,
+                            "ontology_type": object_type,
+                            "identity_key": node_id,
+                            "node_id": node_id,
+                            "source_table": instance.get("source_table") or type_info.get("table"),
+                            "source_pk": source_pk,
+                            "ontology_artifact": instance.get("ontology_artifact") or type_info.get("ontology_artifact"),
+                            "relation_count": relation_count,
+                            "enrichment_count": enrichment_count,
+                            "min_relation_edges": min_relation_edges,
+                            "min_enrichment_items": min_enrichment_items,
+                            "relation_coverage_gap": relation_gap,
+                            "enrichment_coverage_gap": enrichment_gap,
+                            "coverage_gap": relation_gap + enrichment_gap,
+                            "relations_summary": relations_summary,
+                            "selection_policy": "approved_instance_relation_or_enrichment_gap_coverage",
+                        },
+                    },
+                    source_kind="instance_coverage",
+                )
+            )
+        candidates.sort(
+            key=lambda item: (
+                int((item.get("payload") or {}).get("relation_count") or 0),
+                str(item.get("ontology_type") or ""),
+                str((item.get("payload") or {}).get("label") or item.get("name") or ""),
+            )
+        )
+        return candidates[: max(0, int(limit or 50))]
+
+    def _continuous_instance_enrichment_counts(self, tenant, instance_records):
+        needle_sets = {}
+        unique_needles = []
+        seen_needles = set()
+        for record in instance_records or []:
+            node_id = record.get("node_id")
+            label = record.get("label")
+            object_type = record.get("object_type")
+            needles = {
+                str(node_id or "").strip().lower(),
+                str(label or "").strip().lower(),
+                f"{str(object_type or '').strip().lower()}:{str(label or '').strip().lower()}",
+            }
+            needles = {value for value in needles if value and len(value) >= 3}
+            if not node_id or not needles:
+                continue
+            needle_sets[node_id] = needles
+            for needle in needles:
+                if needle not in seen_needles:
+                    seen_needles.add(needle)
+                    unique_needles.append(needle)
+        if not unique_needles:
+            return {}
+        clauses = []
+        params = {"tenant_id": tenant.tenant_id}
+        for index, needle in enumerate(unique_needles[:500]):
+            key = f"needle_{index}"
+            clauses.append(f"LOWER(CAST(payload_json AS TEXT)) LIKE :{key}")
+            params[key] = f"%{needle}%"
+        try:
+            with self.metadata_engine_for(tenant).connect() as conn:
+                rows = conn.execute(
+                    text(
+                        f"""
+                        SELECT element_key, LOWER(CAST(payload_json AS TEXT)) AS payload_text
+                        FROM aletheia_proposed_graph_elements
+                        WHERE project_id = :tenant_id
+                          AND element_type NOT IN ('node', 'edge', 'finding')
+                          AND COALESCE(status, '') NOT IN ('rejected', 'duplicate')
+                          AND ({' OR '.join(clauses)})
+                        """
+                    ),
+                    params,
+                ).mappings().all()
+        except Exception:
+            return {}
+        matches = {node_id: set() for node_id in needle_sets}
+        for row in rows:
+            payload_text = row.get("payload_text") or ""
+            element_key = row.get("element_key")
+            for node_id, needles in needle_sets.items():
+                if any(needle in payload_text for needle in needles):
+                    matches.setdefault(node_id, set()).add(element_key)
+        return {node_id: len(keys) for node_id, keys in matches.items()}
+
+    def _continuous_instance_enrichment_count(self, tenant, node_id, label, object_type):
+        return self._continuous_instance_enrichment_counts(
+            tenant,
+            [{"node_id": node_id, "label": label, "object_type": object_type}],
+        ).get(node_id, 0)
 
     def _continuous_graph_coverage_frontier(self, tenant, config=None, limit=50):
         items = []
@@ -3313,6 +3940,7 @@ class InstanceRepository:
         candidates.extend(self._continuous_proposed_graph_frontier(tenant, config, limit=75))
         candidates.extend(self._continuous_question_scope_frontier(tenant, limit=10))
         candidates.extend(self._continuous_reasoning_finding_frontier(tenant, limit=20))
+        candidates.extend(self._continuous_instance_coverage_frontier(tenant, config=config, limit=75))
         candidates.extend(self._continuous_graph_coverage_frontier(tenant, config=config, limit=50))
         deduped = {}
         identities = {}
@@ -3389,6 +4017,25 @@ class InstanceRepository:
         searchability, penalties = self._continuous_frontier_searchability_score(item)
         score += searchability
         reasons.append({"feature": "searchability", "value": round(searchability, 3)})
+        objective_text = str((config or {}).get("_frontier_selection_objective") or "").lower()
+        if objective_text:
+            affinity_terms = [
+                item.get("name"),
+                item.get("key"),
+                payload.get("label"),
+                payload.get("identity_key"),
+                payload.get("node_id"),
+                payload.get("source_label"),
+                payload.get("target_label"),
+            ]
+            affinity_terms = [
+                str(value or "").strip().lower()
+                for value in affinity_terms
+                if str(value or "").strip()
+            ]
+            if any(term and len(term) >= 3 and term in objective_text for term in affinity_terms):
+                score += 30
+                reasons.append({"feature": "objective_affinity", "value": 30})
         ladder_state = (config or {}).get("query_ladder_state") or {}
         key = self._continuous_frontier_key(item)
         state = ladder_state.get(key) if isinstance(ladder_state.get(key), dict) else {}
@@ -3500,6 +4147,7 @@ class InstanceRepository:
         now_ts = time.time()
         selected = []
         visited = set((config or {}).get("visited_frontier_keys") or [])
+        objective_text = str((config or {}).get("_frontier_selection_objective") or "").strip()
         stored_candidates = []
         stored_seen = set()
         for item in stored_frontier or []:
@@ -3515,17 +4163,27 @@ class InstanceRepository:
             stored_seen.add(identity)
             if self._continuous_frontier_available(normalized, config, now_ts):
                 stored_candidates.append(normalized)
+        dynamic_candidates = [
+            item
+            for item in (self._continuous_normalize_frontier_item(item) for item in self._continuous_frontier_candidates(tenant, [], config))
+            if self._continuous_frontier_key(item) not in visited
+            and self._continuous_frontier_identity(item) not in visited
+            and self._continuous_frontier_key(item) not in stored_seen
+            and self._continuous_frontier_identity(item) not in stored_seen
+        ]
         if stored_frontier:
             candidates = stored_candidates
+            if len(stored_candidates) < max_frontier or objective_text:
+                candidates = [*stored_candidates, *dynamic_candidates]
         else:
-            candidates = [
-                item
-                for item in (self._continuous_normalize_frontier_item(item) for item in self._continuous_frontier_candidates(tenant, stored_frontier, config))
-                if self._continuous_frontier_key(item) not in visited and self._continuous_frontier_identity(item) not in visited
-            ]
+            candidates = dynamic_candidates
         available_candidates = [item for item in candidates if self._continuous_frontier_available(item, config, now_ts)]
-        if not available_candidates and not stored_frontier:
-            available_candidates = [item for item in candidates if item.get("source_kind") == "graph_coverage"]
+        if not available_candidates:
+            available_candidates = [
+                item
+                for item in candidates
+                if item.get("source_kind") in {"instance_coverage", "graph_coverage"}
+            ]
         for item in available_candidates:
             item["_frontier_score"] = self._continuous_frontier_score(item, config)
             item["_frontier_cluster"] = self._continuous_frontier_cluster_key(item)
@@ -3537,7 +4195,7 @@ class InstanceRepository:
                 self._continuous_frontier_key(item),
             ),
         )
-        if not stored_frontier:
+        if not stored_frontier or objective_text:
             available_candidates = score_ranked_candidates
         shortlist_size = max(int(max_frontier), min(int((config or {}).get("frontier_selector_shortlist") or 20), 100))
         shortlist = score_ranked_candidates[:shortlist_size]
@@ -3547,7 +4205,15 @@ class InstanceRepository:
             available_candidates = reranked + [item for item in available_candidates if self._continuous_frontier_key(item) not in selected_keys]
         config["_frontier_selection_trace"] = {
             **(selector_trace or {"planner": "deterministic", "reason": "not_run"}),
-            "candidate_source": "stored_frontier" if stored_frontier else "dynamic_frontier",
+            "candidate_source": (
+                "stored_frontier_with_dynamic_backfill"
+                if stored_frontier and (len(stored_candidates) < max_frontier or objective_text)
+                else "stored_frontier"
+                if stored_frontier
+                else "dynamic_frontier"
+            ),
+            "stored_candidate_count": len(stored_candidates),
+            "dynamic_candidate_count": len(dynamic_candidates),
             "shortlist_count": len(shortlist),
             "candidate_count": len(available_candidates),
             "top_scores": [
@@ -3854,6 +4520,9 @@ class InstanceRepository:
         config.setdefault("auto_review_llm_verifier", True)
         config.setdefault("auto_review_model", "gemini-3.5-flash")
         config.setdefault("auto_reject_similarity_threshold", 0.92)
+        config.setdefault("auto_approve_low_duplicate_proposals", True)
+        config.setdefault("auto_approve_min_confidence", 0.8)
+        config.setdefault("auto_approve_max_duplicate_score", 0.5)
         config.setdefault("auto_review_reviewer", "Continuous Enrichment Agent")
         frontier = _load_json(row["frontier_json"], [])
         return {
@@ -4257,8 +4926,10 @@ class InstanceRepository:
                     "autopilot_auto_approve": False,
                 },
             }
-        objective = body.get("objective") or row["objective"]
-        config["_frontier_selection_objective"] = objective
+        retrieval_objective, execution_goal = self._continuous_retrieval_objective(row["objective"], config, body)
+        config["_frontier_selection_objective"] = execution_goal or retrieval_objective
+        config["last_research_topic"] = retrieval_objective
+        config["last_execution_goal"] = execution_goal
         stored_frontier = _load_json(row["frontier_json"], [])
         if self._continuous_research_mode(config) == "deep_research":
             stored_frontier = []
@@ -4281,6 +4952,8 @@ class InstanceRepository:
                 "selected_count": len(frontier_items),
                 "selected_keys": [self._continuous_frontier_key(item) for item in frontier_items],
                 "selection_trace": config.pop("_frontier_selection_trace", None),
+                "research_topic": retrieval_objective,
+                "execution_goal": execution_goal,
                 "created_at": datetime.utcnow().isoformat(),
             }
         )
@@ -4332,6 +5005,7 @@ class InstanceRepository:
                 "type": "research_provider_selected",
                 "provider": "gpt_researcher",
                 "reason": "GPT Researcher is the only enrichment retrieval provider",
+                "research_topic": retrieval_objective,
                 "created_at": datetime.utcnow().isoformat(),
             }
         )
@@ -4361,7 +5035,7 @@ class InstanceRepository:
                 gpt_researcher_report_type=str(config.get("gpt_researcher_report_type") or "research_report"),
                 gpt_researcher_report_source=config.get("gpt_researcher_report_source") or None,
                 gpt_researcher_max_report_chars=int(config.get("gpt_researcher_max_report_chars") or 24000),
-            ).run(objective, artifact_keys=body.get("artifact_keys") or None, frontier_items=frontier_items or None)
+            ).run(retrieval_objective, artifact_keys=body.get("artifact_keys") or None, frontier_items=frontier_items or None)
             config = self._continuous_clear_backoff(config)
         except Exception as exc:
             config, backoff = self._continuous_schedule_backoff(config, exc)
@@ -4413,6 +5087,25 @@ class InstanceRepository:
                     "threshold": float(config.get("auto_reject_similarity_threshold") or 0.92),
                     "created_at": datetime.utcnow().isoformat(),
                     "canonical_write": False,
+                    "formal_graph_write": False,
+                    "target": "proposed_graph_review_gate",
+                }
+            )
+        auto_approve_result = self._continuous_auto_approve_low_duplicate_proposals(tenant, proposed_graph, config)
+        if auto_approve_result.get("enabled"):
+            events.append(
+                {
+                    "type": "auto_approve_low_duplicate_proposals",
+                    "run_key": run_key,
+                    "reviewed_count": len(auto_approve_result.get("reviewed") or []),
+                    "skipped_count": len(auto_approve_result.get("skipped") or []),
+                    "reviewed": (auto_approve_result.get("reviewed") or [])[:20],
+                    "skipped": (auto_approve_result.get("skipped") or [])[:20],
+                    "min_confidence": float(config.get("auto_approve_min_confidence") or 0.8),
+                    "max_duplicate_score": float(config.get("auto_approve_max_duplicate_score") or 0.5),
+                    "created_at": datetime.utcnow().isoformat(),
+                    "canonical_write": False,
+                    "graph_space_write": True,
                     "formal_graph_write": False,
                     "target": "proposed_graph_review_gate",
                 }
@@ -4926,15 +5619,17 @@ class InstanceRepository:
             },
         }
 
-    def proposed_graph_elements(self, tenant, run_key=None, limit=None, status_filter="pending"):
-        limit = max(1, int(limit)) if limit is not None else None
+    def proposed_graph_elements(self, tenant, run_key=None, limit=None, status_filter="pending", element_type=None, compact=False):
+        limit = max(1, min(int(limit), 500)) if limit is not None else 250
         where = "e.project_id = :tenant_id"
         params = {"tenant_id": tenant.tenant_id}
-        if limit is not None:
-            params["limit"] = limit
+        params["limit"] = limit
         if run_key:
             where += " AND r.run_key = :run_key"
             params["run_key"] = run_key
+        if element_type:
+            where += " AND e.element_type = :element_type"
+            params["element_type"] = str(element_type).strip()
         raw_where = where
         raw_params = dict(params)
         status_filter = (status_filter or "pending").replace("-", "_").lower()
@@ -5040,36 +5735,39 @@ class InstanceRepository:
                     JOIN aletheia_iterative_graph_enrichment_runs r ON r.id = e.run_id
                     WHERE {where}
                     ORDER BY r.started_at DESC, e.iteration ASC, e.element_type ASC, e.name ASC
-                    {"LIMIT :limit" if limit is not None else ""}
+                    LIMIT :limit
                     """
                 ),
                 params,
             ).mappings().all()
-            identity_rows = [
-                {
-                    "source_space": row["source_space"],
-                    "source_key": row["source_key"],
-                    "source_status": row["source_status"],
-                    "identity_key": row["identity_key"],
-                    "identity": _load_json(row["identity_json"], {}),
-                    "dedup_text": row["dedup_text"],
-                }
-                for row in conn.execute(
-                    text(
-                        """
-                        SELECT source_space, source_key, source_status, identity_key,
-                               identity_json, dedup_text
-                        FROM aletheia_graph_identity_index
-                        WHERE project_id = :tenant_id
-                          AND element_kind = 'node'
-                        """
-                    ),
-                    {"tenant_id": tenant.tenant_id},
-                ).mappings().all()
-            ]
+            identity_rows = []
+            if not compact:
+                identity_rows = [
+                    {
+                        "source_space": row["source_space"],
+                        "source_key": row["source_key"],
+                        "source_status": row["source_status"],
+                        "identity_key": row["identity_key"],
+                        "identity": _load_json(row["identity_json"], {}),
+                        "dedup_text": row["dedup_text"],
+                    }
+                    for row in conn.execute(
+                        text(
+                            """
+                            SELECT source_space, source_key, source_status, identity_key,
+                                   identity_json, dedup_text
+                            FROM aletheia_graph_identity_index
+                            WHERE project_id = :tenant_id
+                              AND element_kind = 'node'
+                            """
+                        ),
+                        {"tenant_id": tenant.tenant_id},
+                    ).mappings().all()
+                ]
             proposal_match_keys = set()
-            for row in rows:
-                proposal_match_keys.update(_proposal_match_keys_from_payload(_load_json(row["payload_json"], {})))
+            if not compact:
+                for row in rows:
+                    proposal_match_keys.update(_proposal_match_keys_from_payload(_load_json(row["payload_json"], {})))
             proposal_match_lookup = {}
             if proposal_match_keys:
                 match_query = text(
@@ -5179,12 +5877,13 @@ class InstanceRepository:
                 },
             )
             filtered_type_counts[row["element_type"]] = filtered_type_counts.get(row["element_type"], 0) + 1
-            if limit is None or len(elements) < limit:
+            if len(elements) < limit:
+                response_payload = _compact_candidate_payload(payload) if compact else payload
                 element = {
                     "element_key": row["element_key"],
                     "element_type": row["element_type"],
                     "name": row["name"],
-                    "payload": payload,
+                    "payload": response_payload,
                     "dedup_audit": _dedup_audit_from_payload(payload),
                     "evidence_refs": _load_json(row["evidence_refs_json"], []),
                     "source_url": row["source_url"],
@@ -5194,8 +5893,11 @@ class InstanceRepository:
                     "created_at": _jsonable(row["created_at"]),
                     "run_key": run["run_key"],
                 }
+                element.update(_knowledge_candidate_profile(row["element_type"], payload))
                 element = _apply_edge_source_identity_presentation_guard(element)
-                elements.append(_apply_possible_duplicate_presentation_guard(element, identity_rows))
+                if not compact:
+                    element = _apply_possible_duplicate_presentation_guard(element, identity_rows)
+                elements.append(element)
         return {
             "tenant": tenant.public_dict(),
             "runs": list(runs.values()),
@@ -5230,7 +5932,7 @@ class InstanceRepository:
             row = session.execute(
                 text(
                     """
-                    SELECT element_key, element_type, name, payload_json, evidence_refs_json,
+                    SELECT id, run_id, element_key, element_type, name, payload_json, evidence_refs_json,
                            source_url, confidence, status, iteration, created_at
                     FROM aletheia_proposed_graph_elements
                     WHERE project_id = :tenant_id AND element_key = :element_key
@@ -5247,6 +5949,8 @@ class InstanceRepository:
             should_promote_ontology = action == "approve" and str(row["element_type"] or "").lower() == "ontology_concept"
             if should_promote_ontology:
                 promoted_artifact = self._promote_ontology_candidate_to_catalog(tenant, session, row, payload, reviewer, reason, reviewed_at)
+            catalog_write = bool(promoted_artifact and promoted_artifact.get("artifact_type") != "object_instance" and promoted_artifact.get("catalog_write", True))
+            graph_space_write = bool(catalog_write and promoted_artifact and promoted_artifact.get("graph_space_element_key"))
             review_event = {
                 "decision": action,
                 "reviewer": reviewer,
@@ -5254,15 +5958,23 @@ class InstanceRepository:
                 "before_status": before_status,
                 "after_status": after_status,
                 "created_at": reviewed_at,
-                "canonical_write": bool(promoted_artifact),
+                "canonical_write": catalog_write,
+                "graph_space_write": graph_space_write,
                 "formal_graph_write": False,
                 "promoted_artifact": promoted_artifact,
             }
             payload.setdefault("review_events", []).append(review_event)
             payload["review_boundary"] = {
-                "writes_canonical": bool(promoted_artifact),
+                "writes_canonical": catalog_write,
+                "writes_graph_space": graph_space_write,
                 "writes_formal_graph": False,
-                "status_scope": "proposed_graph_element_and_ontology_catalog" if promoted_artifact else "proposed_graph_element_only",
+                "status_scope": (
+                    "ontology_candidate_and_catalog"
+                    if catalog_write
+                    else "ontology_candidate_and_existing_instance"
+                    if promoted_artifact and promoted_artifact.get("artifact_type") == "object_instance"
+                    else "ontology_candidate_only"
+                ),
                 "promoted_artifact": promoted_artifact,
             }
             session.execute(
@@ -5280,6 +5992,22 @@ class InstanceRepository:
                     "payload_json": _json_dump(payload),
                 },
             )
+            if (
+                str(row["element_type"] or "").lower() == "ontology_concept"
+                and after_status in {"approved", "rejected"}
+                and self._ontology_candidate_is_concrete_object(payload, payload.get("artifact_type"))
+            ):
+                session.execute(
+                    text(
+                        """
+                        DELETE FROM aletheia_graph_identity_index
+                        WHERE project_id = :tenant_id
+                          AND source_space = 'proposed_graph'
+                          AND source_key = :element_key
+                        """
+                    ),
+                    {"tenant_id": tenant.tenant_id, "element_key": element_key},
+                )
         element = {
             "element_key": row["element_key"],
             "element_type": row["element_type"],
@@ -5293,15 +6021,23 @@ class InstanceRepository:
             "iteration": row["iteration"],
             "created_at": _jsonable(row["created_at"]),
         }
+        element.update(_knowledge_candidate_profile(row["element_type"], payload))
         return {
             "tenant": tenant.public_dict(),
             "element": element,
             "review": review_event,
             "promoted_artifact": promoted_artifact,
             "write_boundary": {
-                "canonical_write": bool(promoted_artifact),
+                "canonical_write": catalog_write,
+                "graph_space_write": graph_space_write,
                 "formal_graph_write": False,
-                "target": "ontology_catalog" if promoted_artifact else "proposed_graph_space",
+                "target": (
+                    "ontology_catalog_and_graph_space"
+                    if catalog_write
+                    else "existing_graph_instance_match"
+                    if promoted_artifact and promoted_artifact.get("artifact_type") == "object_instance"
+                    else "ontology_candidate_review"
+                ),
             },
         }
 
@@ -5351,6 +6087,167 @@ class InstanceRepository:
         digest = hashlib.sha1(_json_dump(key_material).encode("utf-8")).hexdigest()[:12]
         return f"{_slug(artifact_type)}-{_slug(label)[:90]}-{digest}"
 
+    def _ontology_candidate_is_concrete_object(self, payload, artifact_type):
+        ontology_part = str(payload.get("ontology_part") or "").strip().lower()
+        source_type = str(payload.get("source_artifact_type") or artifact_type or "").strip().lower()
+        raw_type = str(artifact_type or payload.get("artifact_type") or "").strip().lower()
+        return raw_type in {"object", "entity", "instance"} and (
+            ontology_part in {"concrete_object", "object_instance", "instance"}
+            or source_type in {"entity", "instance"}
+        )
+
+    def _ontology_candidate_instance_queries(self, payload, label):
+        identity = payload.get("identity") if isinstance(payload.get("identity"), dict) else {}
+        values = [
+            payload.get("source_identity"),
+            payload.get("instance_id"),
+            identity.get("source_identity"),
+            identity.get("instance_id"),
+            identity.get("primary_key"),
+            identity.get("id"),
+            label,
+        ]
+        queries = []
+        for value in values:
+            text_value = str(value or "").strip()
+            if text_value and text_value not in queries:
+                queries.append(text_value)
+            if ":" in text_value:
+                suffix = text_value.split(":", 1)[1].strip()
+                if suffix and suffix not in queries:
+                    queries.append(suffix)
+        return queries
+
+    def _resolve_ontology_candidate_existing_instance(self, tenant, payload, *, catalog_type, artifact_type, label):
+        ontology_part = str(payload.get("ontology_part") or artifact_type or "").strip().lower()
+        raw_artifact_type = str(artifact_type or payload.get("source_artifact_type") or "").strip().lower()
+        if catalog_type != "object" or raw_artifact_type not in {"object", "entity", "instance"}:
+            return None
+        if ontology_part in {"class", "abstract_class"}:
+            return None
+        try:
+            object_types = self.types(tenant, include_draft=False).get("types") or []
+        except Exception:
+            object_types = []
+        for item in object_types:
+            candidate_type = item.get("type")
+            if not candidate_type:
+                continue
+            for query in self._ontology_candidate_instance_queries(payload, label):
+                try:
+                    matches = self.search(tenant, candidate_type, query, limit=5, include_draft=False).get("instances") or []
+                except Exception:
+                    matches = []
+                match = next((row for row in matches if str(row.get("id") or "").lower() == f"{candidate_type}:{query}".lower()), None)
+                match = match or (matches[0] if matches else None)
+                if not match:
+                    continue
+                instance_id = str(match.get("id") or f"{candidate_type}:{query}").split(":", 1)[1] if ":" in str(match.get("id") or "") else query
+                return {
+                    "id": None,
+                    "canonical_key": match.get("id") or f"{candidate_type}:{instance_id}",
+                    "artifact_type": "object_instance",
+                    "name": f"{label} ({instance_id})" if instance_id not in str(label) else label,
+                    "status": match.get("status") or "approved",
+                    "version": None,
+                    "graph_space_element_key": None,
+                    "ontology_artifact": match.get("ontology_artifact") or item.get("ontology_artifact"),
+                    "instance_type": candidate_type,
+                    "instance_id": instance_id,
+                    "matched_existing_instance": True,
+                    "match_method": "schema_exact_instance_query",
+                    "aliases": list(dict.fromkeys([label, query, match.get("label")])),
+                }
+        return None
+
+    def _ontology_graph_space_element_key(self, tenant_id, canonical_key):
+        digest = hashlib.sha1(str(canonical_key or "").encode("utf-8")).hexdigest()[:16]
+        return f"ontology-model:{tenant_id}:node:{digest}"
+
+    def _upsert_ontology_model_graph_node(self, tenant, session, row, payload, artifact, source_refs):
+        graph_key = self._ontology_graph_space_element_key(tenant.tenant_id, artifact.canonical_key)
+        graph_payload = {
+            "label": artifact.name,
+            "ontology_artifact": artifact.canonical_key,
+            "artifact_type": artifact.artifact_type,
+            "ontology_part": payload.get("ontology_part"),
+            "source_artifact_type": payload.get("source_artifact_type"),
+            "source_proposed_graph_element_key": payload.get("source_proposed_graph_element_key"),
+            "source_url": row["source_url"],
+            "source_refs": source_refs,
+            "evidence_quote": payload.get("evidence_quote"),
+            "description": artifact.description,
+            "projection_source": "OntologyModelGraph",
+            "graph_space": {
+                "space": "ontology_model",
+                "node_id": f"ontology:{artifact.canonical_key}",
+                "materialized_from": "approved_ontology_artifact",
+                "canonical_key": artifact.canonical_key,
+                "writes_formal_graph": False,
+            },
+            "review_boundary": {
+                "writes_canonical": False,
+                "writes_graph_space": True,
+                "writes_formal_graph": False,
+                "status_scope": "ontology_model_graph_space_projection",
+            },
+        }
+        existing = session.execute(
+            text(
+                """
+                SELECT id
+                FROM aletheia_proposed_graph_elements
+                WHERE project_id = :tenant_id AND element_key = :element_key
+                """
+            ),
+            {"tenant_id": tenant.tenant_id, "element_key": graph_key},
+        ).mappings().first()
+        params = {
+            "run_id": row["run_id"],
+            "tenant_id": tenant.tenant_id,
+            "element_key": graph_key,
+            "name": artifact.name,
+            "payload_json": _json_dump(graph_payload),
+            "evidence_refs_json": _json_dump(source_refs),
+            "source_url": row["source_url"],
+            "confidence": float(row["confidence"] or artifact.confidence or 0.0),
+        }
+        if existing:
+            session.execute(
+                text(
+                    """
+                    UPDATE aletheia_proposed_graph_elements
+                    SET run_id = :run_id,
+                        element_type = 'ontology_model_node',
+                        name = :name,
+                        payload_json = :payload_json,
+                        evidence_refs_json = :evidence_refs_json,
+                        source_url = :source_url,
+                        confidence = :confidence,
+                        status = 'approved'
+                    WHERE project_id = :tenant_id AND element_key = :element_key
+                    """
+                ),
+                params,
+            )
+        else:
+            session.execute(
+                text(
+                    """
+                    INSERT INTO aletheia_proposed_graph_elements
+                        (run_id, project_id, element_key, element_type, name,
+                         payload_json, evidence_refs_json, source_url,
+                         confidence, status, iteration, created_at)
+                    VALUES
+                        (:run_id, :tenant_id, :element_key, 'ontology_model_node', :name,
+                         :payload_json, :evidence_refs_json, :source_url,
+                         :confidence, 'approved', 1, CURRENT_TIMESTAMP)
+                    """
+                ),
+                params,
+            )
+        return graph_key
+
     def _promote_ontology_candidate_to_catalog(self, tenant, session, row, payload, reviewer, reason, reviewed_at):
         if str(row["element_type"] or "").lower() != "ontology_concept":
             return None
@@ -5361,6 +6258,30 @@ class InstanceRepository:
         description = str(payload.get("description") or ontology_candidate.get("description") or "").strip()
         source_refs = list(dict.fromkeys([*(_load_json(row["evidence_refs_json"], []) or []), row["source_url"] or ""]))
         source_refs = [ref for ref in source_refs if ref]
+        existing_instance = self._resolve_ontology_candidate_existing_instance(
+            tenant,
+            payload,
+            catalog_type=catalog_type,
+            artifact_type=artifact_type,
+            label=label,
+        )
+        if existing_instance:
+            payload["instance_resolution"] = {
+                "decision": "merge_existing_instance",
+                "canonical_key": existing_instance["canonical_key"],
+                "ontology_artifact": existing_instance.get("ontology_artifact"),
+                "match_method": existing_instance.get("match_method"),
+                "aliases": existing_instance.get("aliases") or [],
+                "resolved_at": reviewed_at,
+            }
+            return existing_instance
+        if catalog_type == "object" and self._ontology_candidate_is_concrete_object(payload, artifact_type):
+            payload["catalog_resolution"] = {
+                "decision": "not_promoted_to_ontology_catalog",
+                "reason": "concrete_object_is_instance_knowledge_not_schema",
+                "reviewed_at": reviewed_at,
+            }
+            return None
         reviewed_payload = {
             **payload,
             "artifact_type": catalog_type,
@@ -5391,6 +6312,7 @@ class InstanceRepository:
             status="approved",
         )
         session.flush()
+        graph_space_element_key = self._upsert_ontology_model_graph_node(tenant, session, row, reviewed_payload, artifact, source_refs)
         return {
             "id": artifact.id,
             "canonical_key": artifact.canonical_key,
@@ -5398,6 +6320,7 @@ class InstanceRepository:
             "name": artifact.name,
             "status": artifact.status,
             "version": artifact.version,
+            "graph_space_element_key": graph_space_element_key,
         }
 
     def _auto_review_similarity_score(self, payload):
@@ -5437,6 +6360,55 @@ class InstanceRepository:
         if decision == "needs_review" and matched_key and payload.get("match_method") in {"vector_embedding", "embedding_degraded_alias_scan"}:
             return True, "high_similarity_needs_review_duplicate", score
         return False, "not_duplicate_decision", score
+
+    def _proposal_duplicate_score(self, element):
+        payload = element.get("payload") or {}
+        audit = _dedup_audit_from_payload(payload)
+        score = self._auto_review_similarity_score({**payload, **audit})
+        if score:
+            return max(0.0, min(float(score), 1.0))
+        nearest = payload.get("nearest_proposal_match") if isinstance(payload.get("nearest_proposal_match"), dict) else {}
+        try:
+            if nearest.get("score") is not None:
+                return max(0.0, min(float(nearest.get("score")), 1.0))
+            if nearest.get("distance") is not None:
+                return max(0.0, min(1.0 - float(nearest.get("distance")), 1.0))
+        except (TypeError, ValueError):
+            pass
+        decision = str(payload.get("dedup_decision") or audit.get("dedup_decision") or "").replace("-", "_").lower()
+        if decision == "new_proposal":
+            return 0.0
+        if decision in {"duplicate_existing_proposal", "duplicate_current_run", "merge_existing", "needs_review"}:
+            return 1.0
+        return 0.0
+
+    def _should_auto_approve_low_duplicate_proposal(self, element, config):
+        if not (config or {}).get("auto_approve_low_duplicate_proposals", True):
+            return False, "disabled", 0.0
+        element_type = str(element.get("element_type") or "").lower()
+        if element_type in {"ontology_concept", "ontology_model_node"}:
+            return False, "ontology_review_or_projection_not_auto_approved", 0.0
+        status = str(element.get("status") or "").replace("-", "_").lower()
+        if status not in {"draft", "needs_review", "needs_more_evidence", "proposed"}:
+            return False, f"status_not_pending:{status or 'unknown'}", 0.0
+        payload = element.get("payload") or {}
+        if payload.get("decision_reason") == "structural_conflict" or payload.get("conflict_fields"):
+            return False, "structural_conflict_requires_human_review", self._proposal_duplicate_score(element)
+        try:
+            confidence = float(element.get("confidence") if element.get("confidence") is not None else payload.get("confidence") or 0.0)
+        except (TypeError, ValueError):
+            confidence = 0.0
+        min_confidence = float((config or {}).get("auto_approve_min_confidence") or 0.8)
+        if confidence < min_confidence:
+            return False, "below_confidence_threshold", self._proposal_duplicate_score(element)
+        duplicate_score = self._proposal_duplicate_score(element)
+        max_duplicate_score = float((config or {}).get("auto_approve_max_duplicate_score") or 0.5)
+        if duplicate_score > max_duplicate_score:
+            return False, "above_duplicate_threshold", duplicate_score
+        decision = str(payload.get("dedup_decision") or "").replace("-", "_").lower()
+        if decision in {"duplicate_existing_proposal", "duplicate_current_run", "merge_existing"}:
+            return False, "duplicate_decision_requires_human_or_reject_flow", duplicate_score
+        return True, "high_confidence_low_duplicate", duplicate_score
 
     def _continuous_llm_verify_auto_reject(self, element, score, reason, config):
         if not (config or {}).get("auto_review_llm_verifier", True):
@@ -5534,6 +6506,66 @@ class InstanceRepository:
                 reviewed.append({"element_key": element_key, "reason": reason, "similarity_score": round(score, 4), "verifier": verifier_trace})
         return {"enabled": True, "reviewed": reviewed, "skipped": skipped}
 
+    def _continuous_auto_approve_low_duplicate_proposals(self, tenant, proposed_graph, config):
+        if not (config or {}).get("auto_approve_low_duplicate_proposals", True):
+            return {"enabled": False, "reviewed": [], "skipped": []}
+        reviewed = []
+        skipped = []
+        reviewer = str((config or {}).get("auto_review_reviewer") or "Continuous Enrichment Agent")
+        min_confidence = float((config or {}).get("auto_approve_min_confidence") or 0.8)
+        max_duplicate_score = float((config or {}).get("auto_approve_max_duplicate_score") or 0.5)
+        for element in proposed_graph or []:
+            element_key = element.get("element_key") or element.get("key")
+            if not element_key:
+                continue
+            should_approve, reason, duplicate_score = self._should_auto_approve_low_duplicate_proposal(element, config)
+            confidence = element.get("confidence")
+            try:
+                confidence = float(confidence if confidence is not None else 0.0)
+            except (TypeError, ValueError):
+                confidence = 0.0
+            if not should_approve:
+                skipped.append(
+                    {
+                        "element_key": element_key,
+                        "reason": reason,
+                        "confidence": round(confidence, 4),
+                        "duplicate_score": round(duplicate_score, 4),
+                    }
+                )
+                continue
+            review_reason = (
+                f"Auto-approved by review settings: confidence {confidence:.4f} >= {min_confidence:.4f}; "
+                f"duplicate score {duplicate_score:.4f} <= {max_duplicate_score:.4f}; {reason}."
+            )
+            try:
+                result = self.review_proposed_graph_element(
+                    tenant,
+                    element_key,
+                    "approve",
+                    {"reviewer": reviewer, "reason": review_reason, "review_surface": "graph"},
+                )
+            except Exception as exc:
+                skipped.append(
+                    {
+                        "element_key": element_key,
+                        "reason": f"review_failed: {_safe_error_message(exc)}",
+                        "confidence": round(confidence, 4),
+                        "duplicate_score": round(duplicate_score, 4),
+                    }
+                )
+                continue
+            if result:
+                reviewed.append(
+                    {
+                        "element_key": element_key,
+                        "reason": reason,
+                        "confidence": round(confidence, 4),
+                        "duplicate_score": round(duplicate_score, 4),
+                    }
+                )
+        return {"enabled": True, "reviewed": reviewed, "skipped": skipped}
+
     def review_proposed_graph_elements_batch(self, tenant, element_keys, action, body=None):
         action = (action or "").replace("_", "-").lower()
         body = body or {}
@@ -5625,8 +6657,8 @@ class InstanceRepository:
             "write_boundary": {
                 "canonical_write": False,
                 "formal_graph_write": False,
-                "target": "proposed_graph_space",
-                "scope": "selected_proposed_graph_elements",
+                "target": "knowledge_candidate_review",
+                "scope": "selected_knowledge_candidates",
             },
         }
 
@@ -10110,13 +11142,27 @@ class AletheiaServerHandler(BaseHTTPRequestHandler):
                     )
             self._send_json(graph)
             return
-        if parsed.path == "/api/graph/proposed-elements":
+        if parsed.path == "/api/graph/ontology-model":
+            query = parse_qs(parsed.query)
+            limit = int(query.get("limit", ["300"])[0])
+            self._send_json(self.instance_repository.ontology_model_graph(tenant, limit=limit))
+            return
+        if parsed.path in {"/api/graph/proposed-elements", "/api/knowledge/candidates"}:
             query = parse_qs(parsed.query)
             run_key = query.get("run_key", [""])[0] or None
             limit = int(query["limit"][0]) if query.get("limit", [""])[0] else None
             status_filter = query.get("status", ["pending"])[0]
+            element_type = (query.get("element_type", [""])[0] or "").strip() or None
+            compact = query.get("compact", ["0"])[0] in {"1", "true", "yes"}
             try:
-                self._send_json(self.instance_repository.proposed_graph_elements(tenant, run_key=run_key, limit=limit, status_filter=status_filter))
+                self._send_json(self.instance_repository.proposed_graph_elements(
+                    tenant,
+                    run_key=run_key,
+                    limit=limit,
+                    status_filter=status_filter,
+                    element_type=element_type,
+                    compact=compact,
+                ))
             except ValueError as exc:
                 self._send_error(HTTPStatus.BAD_REQUEST, str(exc))
             return
@@ -10241,7 +11287,7 @@ class AletheiaServerHandler(BaseHTTPRequestHandler):
         except (KeyError, ValueError) as exc:
             self._send_error(HTTPStatus.BAD_REQUEST, str(exc))
             return
-        if parsed.path == "/api/graph/proposed-elements/batch-review":
+        if parsed.path in {"/api/graph/proposed-elements/batch-review", "/api/knowledge/candidates/batch-review"}:
             try:
                 body = self._read_json()
                 result = self.instance_repository.review_proposed_graph_elements_batch(
@@ -10255,10 +11301,11 @@ class AletheiaServerHandler(BaseHTTPRequestHandler):
                 return
             self._send_json(result)
             return
-        if parsed.path.startswith("/api/graph/proposed-elements/"):
-            parts = parsed.path.removeprefix("/api/graph/proposed-elements/").split("/")
+        if parsed.path.startswith("/api/graph/proposed-elements/") or parsed.path.startswith("/api/knowledge/candidates/"):
+            prefix = "/api/knowledge/candidates/" if parsed.path.startswith("/api/knowledge/candidates/") else "/api/graph/proposed-elements/"
+            parts = parsed.path.removeprefix(prefix).split("/")
             if len(parts) != 2:
-                self._send_error(HTTPStatus.BAD_REQUEST, "Expected /api/graph/proposed-elements/{element_key}/{action}")
+                self._send_error(HTTPStatus.BAD_REQUEST, f"Expected {prefix}{{element_key}}/{{action}}")
                 return
             element_key, action = unquote(parts[0]), unquote(parts[1])
             try:

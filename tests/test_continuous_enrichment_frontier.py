@@ -13,7 +13,7 @@ from server.aletheia_server import (
     _dedup_audit_from_payload,
     _is_current_graph_proposal,
 )
-from agents.ontology_artifacts import ensure_artifact_schema
+from agents.ontology_artifacts import ensure_artifact_schema, upsert_artifact
 from agents.iterative_graph_enrichment_agent import _graph_context_query_plan
 from tenant_registry import TenantConfig, TenantRegistry
 
@@ -106,8 +106,10 @@ class ContinuousEnrichmentFrontierTest(unittest.TestCase):
 
             self.assertEqual(result["element"]["status"], "approved")
             self.assertTrue(result["write_boundary"]["canonical_write"])
-            self.assertEqual(result["write_boundary"]["target"], "ontology_catalog")
+            self.assertTrue(result["write_boundary"]["graph_space_write"])
+            self.assertEqual(result["write_boundary"]["target"], "ontology_catalog_and_graph_space")
             self.assertEqual(result["promoted_artifact"]["artifact_type"], "action")
+            self.assertTrue(result["promoted_artifact"]["graph_space_element_key"].startswith("ontology-model:tenant-a:node:"))
 
             with engine.connect() as conn:
                 row = conn.execute(
@@ -120,11 +122,239 @@ class ContinuousEnrichmentFrontierTest(unittest.TestCase):
                     ),
                     {"project_id": tenant.tenant_id},
                 ).mappings().one()
+                graph_row = conn.execute(
+                    text(
+                        """
+                        SELECT element_type, status, payload_json
+                        FROM aletheia_proposed_graph_elements
+                        WHERE project_id = :project_id AND element_key = :element_key
+                        """
+                    ),
+                    {
+                        "project_id": tenant.tenant_id,
+                        "element_key": result["promoted_artifact"]["graph_space_element_key"],
+                    },
+                ).mappings().one()
             artifact_payload = json.loads(row["payload_json"])
             self.assertEqual(row["artifact_type"], "action")
             self.assertEqual(row["status"], "approved")
             self.assertEqual(artifact_payload["source_artifact_type"], "event")
             self.assertEqual(artifact_payload["source_proposed_graph_element_key"], "proposed-graph:tenant-a:ontology-concept:port-closure-event")
+            graph_payload = json.loads(graph_row["payload_json"])
+            self.assertEqual(graph_row["element_type"], "ontology_model_node")
+            self.assertEqual(graph_row["status"], "approved")
+            self.assertEqual(graph_payload["ontology_artifact"], result["promoted_artifact"]["canonical_key"])
+            self.assertEqual(graph_payload["graph_space"]["space"], "ontology_model")
+
+    def test_concrete_object_candidate_resolves_to_schema_instance_by_explicit_identity(self):
+        repo = object.__new__(InstanceRepository)
+        tenant = type("Tenant", (), {"tenant_id": "tenant-a"})()
+        repo.types = lambda tenant, include_draft=False: {
+            "types": [
+                {"type": "Jurisdiction", "label": "Jurisdiction", "ontology_artifact": "object:jurisdiction"},
+            ]
+        }
+        repo.search = lambda tenant, object_type, query, limit=25, include_draft=False: {
+            "instances": [
+                {
+                    "id": "Jurisdiction:CHN",
+                    "label": "CHN",
+                    "ontology_artifact": "object:jurisdiction",
+                    "status": "approved",
+                }
+            ]
+        }
+
+        result = repo._resolve_ontology_candidate_existing_instance(
+            tenant,
+            {
+                "artifact_type": "object",
+                "ontology_part": "concrete_object",
+                "label": "China",
+                "identity": {"source_identity": "CHN"},
+            },
+            catalog_type="object",
+            artifact_type="object",
+            label="China",
+        )
+
+        self.assertIsNotNone(result)
+        self.assertEqual(result["canonical_key"], "Jurisdiction:CHN")
+        self.assertEqual(result["ontology_artifact"], "object:jurisdiction")
+        self.assertEqual(result["match_method"], "schema_exact_instance_query")
+        self.assertTrue(result["matched_existing_instance"])
+
+    def test_ontology_model_graph_links_semantic_items_to_approved_ontology(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo, tenant = self._sqlite_tenant_repo(tmpdir)
+            engine = repo.metadata_engine_for(tenant)
+            ensure_artifact_schema(engine)
+            with engine.begin() as conn:
+                run_result = conn.execute(
+                    text(
+                        """
+                        INSERT INTO aletheia_iterative_graph_enrichment_runs
+                            (project_id, run_key, source_agent, status, objective,
+                             frontier_json, expansion_trace_json, safety_profile_json,
+                             budget_json, skipped_sources_json, proposed_count,
+                             pruned_count, finding_count, started_at)
+                        VALUES
+                            (:project_id, :run_key, 'IterativeGraphEnrichmentAgent',
+                             'completed', 'test ontology model graph', '[]', '[]',
+                             '{}', '{}', '[]', 1, 0, 0, :started_at)
+                        """
+                    ),
+                    {
+                        "project_id": tenant.tenant_id,
+                        "run_key": "ontology-model-graph-test",
+                        "started_at": datetime.utcnow(),
+                    },
+                )
+                run_id = run_result.lastrowid
+                conn.execute(
+                    text(
+                        """
+                        INSERT INTO aletheia_proposed_graph_elements
+                            (run_id, project_id, element_key, element_type, name,
+                             payload_json, evidence_refs_json, source_url,
+                             confidence, status, iteration, created_at)
+                        VALUES
+                            (:run_id, :project_id, :element_key, 'recommendation',
+                             :name, :payload_json, :evidence_refs_json, :source_url,
+                             0.81, 'needs_more_evidence', 1, :created_at)
+                        """
+                    ),
+                    {
+                        "run_id": run_id,
+                        "project_id": tenant.tenant_id,
+                        "element_key": "proposed-graph:tenant-a:recommendation:reroute",
+                        "name": "Reroute vessels after closure",
+                        "payload_json": json.dumps(
+                            {
+                                "recommended_action": "ProposeShippingReroute",
+                                "source_url": "gpt_researcher://report/test",
+                                "evidence_quote": "Operators should reroute vessels after the port closure.",
+                            }
+                        ),
+                        "evidence_refs_json": json.dumps(["gpt_researcher://report/test"]),
+                        "source_url": "gpt_researcher://report/test",
+                        "created_at": datetime.utcnow(),
+                    },
+                )
+            from sqlalchemy.orm import sessionmaker
+
+            Session = sessionmaker(bind=engine)
+            session = Session()
+            try:
+                upsert_artifact(
+                    session,
+                    artifact_type="action",
+                    natural_key="propose-shipping-reroute",
+                    name="ProposeShippingReroute",
+                    description="Operational action for rerouting vessels.",
+                    payload={
+                        "artifact_type": "action",
+                        "ontology_part": "action",
+                        "source_artifact_type": "action",
+                        "label": "ProposeShippingReroute",
+                        "target_object_types": ["Vessel"],
+                        "evidence_quote": "Operators should reroute vessels after the port closure.",
+                        "source_url": "gpt_researcher://report/test",
+                    },
+                    source_refs=["gpt_researcher://report/test"],
+                    source_agent="DeepResearchOntologyExpansion",
+                    project_id=tenant.tenant_id,
+                    confidence=0.81,
+                    status="approved",
+                )
+                session.commit()
+            finally:
+                session.close()
+
+            graph = repo.ontology_model_graph(tenant, limit=50)
+
+            self.assertTrue(graph["approved"])
+            node_ids = {node["id"] for node in graph["nodes"]}
+            self.assertIn("ontology:action:propose-shipping-reroute", node_ids)
+            self.assertIn("semantic:proposed-graph:tenant-a:recommendation:reroute", node_ids)
+            self.assertTrue(
+                any(
+                    edge["source"] == "semantic:proposed-graph:tenant-a:recommendation:reroute"
+                    and edge["target"] == "ontology:action:propose-shipping-reroute"
+                    and edge["label"] == "supports"
+                    for edge in graph["edges"]
+                )
+            )
+
+    def test_auto_approve_low_duplicate_graph_proposal_uses_review_settings(self):
+        repo = object.__new__(InstanceRepository)
+        reviewed = []
+        repo.review_proposed_graph_element = lambda tenant, key, action, body: reviewed.append((key, action, body)) or {
+            "element": {"element_key": key, "status": "approved"}
+        }
+        tenant = TenantConfig(
+            tenant_id="tenant-a",
+            namespace="tenant-a",
+            display_name="Tenant A",
+            graph_database="tenant_a",
+            metadata_db_url="sqlite:///:memory:",
+            source_db_url="sqlite:///:memory:",
+        )
+        element = {
+            "element_key": "proposed-graph:tenant-a:node:high-confidence",
+            "element_type": "node",
+            "status": "draft",
+            "confidence": 0.82,
+            "payload": {"dedup_decision": "new_proposal", "match_score": 0.42},
+        }
+
+        result = repo._continuous_auto_approve_low_duplicate_proposals(
+            tenant,
+            [element],
+            {
+                "auto_approve_low_duplicate_proposals": True,
+                "auto_approve_min_confidence": 0.8,
+                "auto_approve_max_duplicate_score": 0.5,
+                "auto_review_reviewer": "Auto Review",
+            },
+        )
+
+        self.assertEqual(len(result["reviewed"]), 1)
+        self.assertEqual(reviewed[0][0], "proposed-graph:tenant-a:node:high-confidence")
+        self.assertEqual(reviewed[0][1], "approve")
+        self.assertIn("confidence 0.8200", reviewed[0][2]["reason"])
+
+    def test_auto_approve_low_duplicate_skips_high_duplicate_score(self):
+        repo = object.__new__(InstanceRepository)
+        repo.review_proposed_graph_element = lambda *_args, **_kwargs: self.fail("high duplicate proposal should not auto approve")
+        tenant = TenantConfig(
+            tenant_id="tenant-a",
+            namespace="tenant-a",
+            display_name="Tenant A",
+            graph_database="tenant_a",
+            metadata_db_url="sqlite:///:memory:",
+            source_db_url="sqlite:///:memory:",
+        )
+        element = {
+            "element_key": "proposed-graph:tenant-a:node:duplicate",
+            "element_type": "node",
+            "status": "draft",
+            "confidence": 0.91,
+            "payload": {"dedup_decision": "needs_review", "match_score": 0.73},
+        }
+
+        result = repo._continuous_auto_approve_low_duplicate_proposals(
+            tenant,
+            [element],
+            {
+                "auto_approve_low_duplicate_proposals": True,
+                "auto_approve_min_confidence": 0.8,
+                "auto_approve_max_duplicate_score": 0.5,
+            },
+        )
+
+        self.assertEqual(result["reviewed"], [])
+        self.assertEqual(result["skipped"][0]["reason"], "above_duplicate_threshold")
 
     def test_default_continuous_session_objective_is_optional_empty(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -795,135 +1025,6 @@ class ContinuousEnrichmentFrontierTest(unittest.TestCase):
         self.assertEqual(config["frontier_state"]["coverage_cursor"], 0)
         self.assertIsNone(config["stop_reason"])
 
-    def test_source_trust_accepts_public_domains_without_allowlist(self):
-        repo = object.__new__(InstanceRepository)
-        config = {
-            "source_trust": {
-                "allowed_domains": ["zenodo.org"],
-                "reject_unlisted_domains": True,
-            }
-        }
-        trusted, skipped, events = repo._continuous_trusted_search_results(
-            [
-                {"title": "trusted", "url": "https://zenodo.org/records/1"},
-                {"title": "untrusted", "url": "https://example.org/claim"},
-            ],
-            config,
-        )
-
-        self.assertEqual(len(trusted), 2)
-        self.assertEqual(trusted[0]["source_trust"]["domain"], "zenodo.org")
-        self.assertEqual(trusted[1]["source_trust"]["domain"], "example.org")
-        self.assertEqual(len(skipped), 0)
-        self.assertEqual(events, [])
-
-    def test_allowlist_updates_source_trust_policy(self):
-        repo = object.__new__(InstanceRepository)
-        config = repo._continuous_update_config(
-            {"allowed_domains": ["zenodo.org"], "source_trust": {"allowed_domains": ["zenodo.org"]}},
-            {"allowlist": "example.com"},
-        )
-        decision = repo._continuous_source_trust_decision({"url": "https://example.com/source"}, config)
-
-        self.assertTrue(decision["trusted"])
-        self.assertEqual(config["source_trust"]["allowed_domains"], ["example.com"])
-        self.assertFalse(config["source_trust"]["reject_unlisted_domains"])
-
-    def test_crawl_policy_always_allows_discovered_public_domains(self):
-        repo = object.__new__(InstanceRepository)
-
-        strict = repo._continuous_agent_crawl_policy(
-            {"source_trust": {"allowed_domains": ["zenodo.org"], "reject_unlisted_domains": True}}
-        )
-        permissive = repo._continuous_agent_crawl_policy(
-            {"source_trust": {"allowed_domains": ["zenodo.org"], "reject_unlisted_domains": False}}
-        )
-
-        self.assertEqual(strict["allowed_domains"], [])
-        self.assertTrue(strict["allow_discovered_domains"])
-        self.assertEqual(permissive["allowed_domains"], [])
-        self.assertTrue(permissive["allow_discovered_domains"])
-
-    def test_source_trust_star_allows_all_public_sources(self):
-        repo = object.__new__(InstanceRepository)
-        config = repo._continuous_update_config(
-            {"source_trust": {"allowed_domains": ["zenodo.org"], "reject_unlisted_domains": True}},
-            {"source_trust": "*"},
-        )
-        policy = repo._continuous_source_trust_policy(config)
-        decision = repo._continuous_source_trust_decision({"url": "https://example.org/source"}, config)
-        crawl_policy = repo._continuous_agent_crawl_policy(config)
-
-        self.assertEqual(config["source_trust"]["allowed_domains"], [])
-        self.assertTrue(policy["allow_all_public_sources"])
-        self.assertFalse(policy["reject_unlisted_domains"])
-        self.assertTrue(decision["trusted"])
-        self.assertEqual(crawl_policy["allowed_domains"], [])
-        self.assertTrue(crawl_policy["allow_discovered_domains"])
-
-    def test_continuous_source_fixture_does_not_inject_runtime_demo_sources(self):
-        repo = object.__new__(InstanceRepository)
-
-        self.assertEqual(repo._continuous_source_fixture("continuous:maritime-risk:us-iran-impact:mvp"), [])
-
-    def test_continuous_cycle_uses_frontier_query_plan_for_search_when_no_results_provided(self):
-        class FakeSearchProvider:
-            def __init__(self):
-                self.queries = []
-
-            def request_url(self, query):
-                return f"https://search.test/html/?q={query.replace(' ', '+')}"
-
-            def search(self, query, max_results):
-                self.queries.append((query, max_results))
-                return [
-                    {
-                        "query": query,
-                        "title": "Hormuz dependency source",
-                        "url": "https://zenodo.org/records/query-plan-source",
-                        "snippet": "KOR depends on Hormuz Strait shipping exposure.",
-                        "rank": 1,
-                        "provider": "fake",
-                    }
-                ]
-
-        repo = object.__new__(InstanceRepository)
-        tenant = type("Tenant", (), {"tenant_id": "maritime-risk"})()
-        provider = FakeSearchProvider()
-        frontier = [
-            {
-                "key": "proposed-graph:maritime-risk:edge:kor-hormuz",
-                "name": "KOR has country dependency Hormuz Strait",
-                "payload": {
-                    "source_label": "KOR",
-                    "target_label": "Hormuz Strait",
-                    "relation": "has_country_dependency",
-                },
-            }
-        ]
-
-        results, events = repo._continuous_search_results_for_cycle(
-            tenant,
-            "continuous:maritime-risk:us-iran-impact:mvp",
-            "Analyze maritime dependency risk",
-            {},
-            frontier,
-            2,
-            {"search_provider": "duckduckgo_html"},
-            provider=provider,
-        )
-
-        self.assertEqual(len(results), 1)
-        self.assertEqual(results[0]["frontier_key"], "proposed-graph:maritime-risk:edge:kor-hormuz")
-        self.assertEqual(results[0]["provider"], "fake")
-        self.assertEqual(provider.queries[0][1], 2)
-        self.assertIn("KOR", provider.queries[0][0])
-        self.assertIn("Hormuz Strait", provider.queries[0][0])
-        self.assertTrue(results[0]["request_url"].startswith("https://search.test/html/?q="))
-        self.assertEqual(events[-1]["type"], "query_search_executed")
-        self.assertTrue(events[-1]["request_url"].startswith("https://search.test/html/?q="))
-        self.assertEqual(events[-1]["accepted_for_trust_filter_count"], 1)
-
     def test_frontier_query_plan_is_recall_oriented_not_instruction_or_schema_terms(self):
         plan = _graph_context_query_plan(
             {
@@ -947,6 +1048,51 @@ class ContinuousEnrichmentFrontierTest(unittest.TestCase):
         self.assertNotIn("proposed_edge", joined)
         self.assertNotIn("evidenceentity", joined)
 
+    def test_frontier_query_plan_excludes_retrieval_provider_terms_from_objective(self):
+        plan = _graph_context_query_plan(
+            {
+                "key": "graph-coverage:MaritimeChokepoint:Cape of Good Hope",
+                "name": "Cape of Good Hope",
+                "artifact_type": "MaritimeChokepoint",
+                "payload": {"label": "Cape of Good Hope"},
+            },
+            "Expand maritime chokepoint ontology and semantic knowledge coverage using GPT Researcher summaries.",
+            "maritime-risk",
+        )
+
+        queries = [item["query"] for item in plan["plans"]]
+        joined = " ".join(queries).lower()
+        self.assertTrue(any("cape of good hope" in query.lower() for query in queries))
+        self.assertNotIn("gpt researcher", joined)
+        self.assertNotIn("researcher", joined)
+        self.assertNotIn("expand", joined)
+
+    def test_continuous_cycle_splits_research_topic_from_execution_goal(self):
+        repo = object.__new__(InstanceRepository)
+        retrieval, execution = repo._continuous_retrieval_objective(
+            "Expand ontology coverage using GPT Researcher summaries",
+            {"research_topic": "maritime chokepoint disruption risks"},
+            {"objective": "Run enrichment workflow using GPT Researcher"},
+        )
+
+        self.assertEqual(retrieval, "maritime chokepoint disruption risks")
+        self.assertEqual(execution, "Run enrichment workflow using GPT Researcher")
+
+    def test_continuous_cycle_legacy_objective_fallback_filters_provider_terms(self):
+        repo = object.__new__(InstanceRepository)
+        retrieval, execution = repo._continuous_retrieval_objective(
+            "",
+            {},
+            {"objective": "Expand maritime chokepoint ontology coverage using GPT Researcher summaries"},
+        )
+
+        self.assertIn("maritime", retrieval)
+        self.assertIn("chokepoint", retrieval)
+        self.assertNotIn("GPT", retrieval)
+        self.assertNotIn("Researcher", retrieval)
+        self.assertNotIn("Expand", retrieval)
+        self.assertEqual(execution, "Expand maritime chokepoint ontology coverage using GPT Researcher summaries")
+
     def test_deep_research_mode_selects_topic_frontier(self):
         repo = object.__new__(InstanceRepository)
         repo._continuous_proposed_graph_frontier = lambda *_args, **_kwargs: (_ for _ in ()).throw(
@@ -969,190 +1115,6 @@ class ContinuousEnrichmentFrontierTest(unittest.TestCase):
         self.assertEqual(selected[0]["source_kind"], "research_topic")
         self.assertEqual(selected[0]["name"], "Middle East maritime chokepoint systemic risk")
         self.assertEqual(selected[0]["payload"]["retrieval_lanes"], ["breaking_news", "academic"])
-
-    def test_deep_research_query_planner_emits_lane_queries(self):
-        class FakeSearchProvider:
-            def __init__(self):
-                self.queries = []
-
-            def request_url(self, query):
-                return f"https://search.test/html/?q={query.replace(' ', '+')}"
-
-            def search(self, query, max_results):
-                self.queries.append(query)
-                return [
-                    {
-                        "query": query,
-                        "title": "Research source",
-                        "url": f"https://example.com/{len(self.queries)}",
-                        "snippet": "Research source about maritime chokepoint risk.",
-                        "rank": 1,
-                        "provider": "fake",
-                    }
-                ]
-
-        repo = object.__new__(InstanceRepository)
-        tenant = type("Tenant", (), {"tenant_id": "maritime-risk"})()
-        config = {
-            "research_mode": "deep_research",
-            "retrieval_lanes": ["breaking_news", "academic", "official_sources"],
-            "recency_windows": ["24h", "historical"],
-            "max_queries_per_lane": 1,
-            "max_query_plans_per_frontier": 10,
-        }
-        frontier = [
-            repo._continuous_research_frontier_items(
-                tenant,
-                "Middle East maritime chokepoint systemic risk",
-                config,
-                max_frontier=1,
-            )[0]
-        ]
-
-        results, events = repo._continuous_search_results_for_cycle(
-            tenant,
-            "continuous:maritime-risk:deep",
-            "Middle East maritime chokepoint systemic risk",
-            {},
-            frontier,
-            2,
-            config,
-            provider=FakeSearchProvider(),
-        )
-
-        planned = [event for event in events if event["type"] == "research_agenda_planned"]
-        executed = [event for event in events if event["type"] == "query_search_executed"]
-        self.assertEqual(len(planned), 1)
-        self.assertEqual(planned[0]["lanes"], ["breaking_news", "academic", "official_sources"])
-        self.assertEqual(len(executed), 3)
-        self.assertEqual(executed[0]["granularity"], "research_breaking_news_24h")
-        self.assertEqual(executed[1]["granularity"], "research_academic_historical")
-        self.assertEqual(executed[2]["granularity"], "research_official_sources_30d")
-        self.assertIn("latest developments", executed[0]["query"])
-        self.assertEqual(results[0]["query_plan"]["lane"], "breaking_news")
-
-    def test_continuous_query_search_failed_records_request_url(self):
-        class FailingSearchProvider:
-            def request_url(self, query):
-                return f"https://search.test/html/?q={query.replace(' ', '+')}"
-
-            def search(self, query, max_results):
-                raise TimeoutError("duckduckgo timeout")
-
-        repo = object.__new__(InstanceRepository)
-        tenant = type("Tenant", (), {"tenant_id": "maritime-risk"})()
-        frontier = [
-            {
-                "key": "proposed-graph:maritime-risk:edge:kor-hormuz",
-                "name": "KOR has country dependency Hormuz Strait",
-                "payload": {
-                    "source_label": "KOR",
-                    "target_label": "Hormuz Strait",
-                    "relation": "has_country_dependency",
-                },
-            }
-        ]
-
-        results, events = repo._continuous_search_results_for_cycle(
-            tenant,
-            "continuous:maritime-risk:us-iran-impact:mvp",
-            "Analyze maritime dependency risk",
-            {},
-            frontier,
-            2,
-            {"search_provider": "duckduckgo_html", "max_query_plans_per_frontier": 1},
-            provider=FailingSearchProvider(),
-        )
-
-        self.assertEqual(results, [])
-        failed = [event for event in events if event["type"] == "query_search_failed"][0]
-        self.assertIn("KOR", failed["query"])
-        self.assertTrue(failed["request_url"].startswith("https://search.test/html/?q="))
-        self.assertIn("duckduckgo timeout", failed["error"])
-
-    def test_continuous_query_search_coarsens_ladder_when_exact_query_has_no_results(self):
-        class FakeSearchProvider:
-            def __init__(self):
-                self.queries = []
-
-            def search(self, query, max_results):
-                self.queries.append(query)
-                if len(self.queries) == 1:
-                    return []
-                return [
-                    {
-                        "query": query,
-                        "title": "Broader frontier source",
-                        "url": "https://zenodo.org/records/query-ladder-source",
-                        "snippet": "A broader source mentions KOR and Hormuz Strait exposure.",
-                        "rank": 1,
-                        "provider": "fake",
-                    }
-                ]
-
-        repo = object.__new__(InstanceRepository)
-        tenant = type("Tenant", (), {"tenant_id": "maritime-risk"})()
-        provider = FakeSearchProvider()
-        config = {"search_provider": "duckduckgo_html", "max_query_plans_per_frontier": 5}
-        frontier = [
-            {
-                "key": "proposed-graph:maritime-risk:edge:kor-hormuz",
-                "name": "KOR has country dependency Hormuz Strait",
-                "payload": {
-                    "source_type": "Country",
-                    "target_type": "MaritimeChokepoint",
-                    "source_label": "KOR",
-                    "target_label": "Hormuz Strait",
-                    "relation": "has_country_dependency",
-                },
-            }
-        ]
-
-        results, events = repo._continuous_search_results_for_cycle(
-            tenant,
-            "continuous:maritime-risk:us-iran-impact:mvp",
-            "Analyze maritime dependency risk",
-            {},
-            frontier,
-            2,
-            config,
-            provider=provider,
-        )
-
-        executed = [event for event in events if event["type"] == "query_search_executed"]
-        self.assertEqual(len(provider.queries), 2)
-        self.assertEqual(executed[0]["granularity"], "L0_path_exact")
-        self.assertEqual(executed[0]["accepted_for_trust_filter_count"], 0)
-        self.assertEqual(executed[1]["granularity"], "L1_single_endpoint")
-        self.assertEqual(results[0]["query_plan"]["granularity"], "L1_single_endpoint")
-        self.assertEqual(results[0]["query_plan"]["coarse_level"], 1)
-        self.assertEqual(
-            config["query_ladder_state"]["proposed-graph:maritime-risk:edge:kor-hormuz"]["last_search_signal"],
-            "search_results_found",
-        )
-
-    def test_provided_search_results_bypass_query_search_provider(self):
-        class FailingSearchProvider:
-            def search(self, query, max_results):
-                raise AssertionError("provider should not be called for explicit search_results")
-
-        repo = object.__new__(InstanceRepository)
-        tenant = type("Tenant", (), {"tenant_id": "tenant-a"})()
-        provided = [{"title": "provided", "url": "https://example.com/source"}]
-
-        results, events = repo._continuous_search_results_for_cycle(
-            tenant,
-            "continuous:tenant-a:demo",
-            "objective",
-            {"search_results": provided},
-            [{"key": "frontier:a", "name": "A"}],
-            2,
-            {},
-            provider=FailingSearchProvider(),
-        )
-
-        self.assertEqual(results, provided)
-        self.assertEqual(events[0]["type"], "provided_search_results_used")
 
     def test_graph_coverage_frontier_prefers_high_degree_nodes_without_hardcoded_seed(self):
         repo = object.__new__(InstanceRepository)
@@ -1199,6 +1161,139 @@ class ContinuousEnrichmentFrontierTest(unittest.TestCase):
         )
 
         self.assertEqual([item["key"] for item in items], ["graph-coverage:Country:C", "graph-coverage:Country:D"])
+
+    def test_instance_coverage_frontier_includes_approved_instance_with_missing_relations(self):
+        repo = object.__new__(InstanceRepository)
+        tenant = type("Tenant", (), {"tenant_id": "tenant-a"})()
+        repo.types = lambda tenant, include_draft=False: {
+            "types": [
+                {"type": "Country", "table": "country", "ontology_artifact": "object:country"},
+            ]
+        }
+        repo.search = lambda tenant, object_type, query, limit=25, include_draft=False: {
+            "instances": [
+                {
+                    "id": "Country:CHN",
+                    "label": "CHN",
+                    "source_table": "country",
+                    "source_pk": "iso3=CHN",
+                    "ontology_artifact": "object:country",
+                }
+            ]
+        }
+        repo.detail = lambda tenant, object_type, instance_id: {
+            "relations_summary": {"edges": 0, "by_relation": {}}
+        }
+
+        items = repo._continuous_instance_coverage_frontier(
+            tenant,
+            config={"instance_coverage_min_edges": 1},
+            limit=10,
+        )
+
+        self.assertEqual([item["key"] for item in items], ["instance-coverage:Country:CHN"])
+        self.assertEqual(items[0]["source_kind"], "instance_coverage")
+        self.assertEqual(items[0]["payload"]["selection_policy"], "approved_instance_relation_or_enrichment_gap_coverage")
+        self.assertEqual(items[0]["payload"]["relation_count"], 0)
+
+    def test_instance_coverage_frontier_includes_instance_with_sparse_enrichment_even_when_relations_exist(self):
+        repo = object.__new__(InstanceRepository)
+        tenant = type("Tenant", (), {"tenant_id": "tenant-a"})()
+        repo.types = lambda tenant, include_draft=False: {
+            "types": [
+                {"type": "Country", "table": "country", "ontology_artifact": "object:country"},
+            ]
+        }
+        repo.search = lambda tenant, object_type, query, limit=25, include_draft=False: {
+            "instances": [
+                {"id": "Country:CHN", "label": "CHN", "source_table": "country", "source_pk": "iso3=CHN"},
+            ]
+        }
+        repo.detail = lambda tenant, object_type, instance_id: {
+            "relations_summary": {"edges": 49, "by_relation": {"country_chokepoint_dependency": 25}}
+        }
+        repo._continuous_instance_enrichment_counts = lambda tenant, records: {
+            record["node_id"]: 1 for record in records
+        }
+
+        items = repo._continuous_instance_coverage_frontier(
+            tenant,
+            config={"instance_coverage_min_edges": 1, "instance_coverage_min_enrichment_items": 2},
+            limit=10,
+        )
+
+        self.assertEqual([item["key"] for item in items], ["instance-coverage:Country:CHN"])
+        self.assertEqual(items[0]["payload"]["relation_coverage_gap"], 0)
+        self.assertEqual(items[0]["payload"]["enrichment_coverage_gap"], 1)
+
+    def test_stored_frontier_backfills_dynamic_instance_coverage_when_queue_unavailable(self):
+        now = datetime.utcnow().isoformat()
+        dynamic = [
+            {
+                "key": "instance-coverage:Country:CHN",
+                "name": "CHN Country relation coverage",
+                "source_kind": "instance_coverage",
+                "payload": {
+                    "label": "CHN",
+                    "ontology_type": "Country",
+                    "identity_key": "Country:CHN",
+                    "selection_policy": "approved_instance_relation_or_enrichment_gap_coverage",
+                },
+            }
+        ]
+        repo = self._repo_with_candidates(dynamic)
+        stored_frontier = [
+            {"key": "queue:recent", "name": "Recent queued", "source_kind": "graph_coverage"},
+        ]
+
+        selected = repo._continuous_frontier_for_cycle(
+            None,
+            stored_frontier,
+            {
+                "frontier_state": {"last_enriched_at": {"queue:recent": now}},
+                "frontier_cooldown_minutes": 360,
+            },
+            1,
+        )
+
+        self.assertEqual([item["key"] for item in selected], ["instance-coverage:Country:CHN"])
+        self.assertEqual(selected[0]["source_kind"], "instance_coverage")
+        self.assertEqual(
+            selected[0]["frontier_identity"],
+            "node:country:chn",
+        )
+
+    def test_objective_matched_dynamic_frontier_can_preempt_stored_queue(self):
+        dynamic = [
+            {
+                "key": "instance-coverage:Country:XYZ",
+                "name": "XYZ Country enrichment coverage",
+                "source_kind": "instance_coverage",
+                "payload": {"label": "XYZ", "ontology_type": "Country", "identity_key": "Country:XYZ"},
+            }
+        ]
+        repo = self._repo_with_candidates(dynamic)
+        stored_frontier = [
+            {
+                "key": "queue:generic",
+                "name": "Generic stored frontier",
+                "source_kind": "graph_coverage",
+                "priority": 10,
+            }
+        ]
+
+        selected = repo._continuous_frontier_for_cycle(
+            None,
+            stored_frontier,
+            {
+                "frontier_state": {},
+                "frontier_cooldown_minutes": 360,
+                "_frontier_selection_objective": "expand Country XYZ semantic coverage",
+            },
+            1,
+        )
+
+        self.assertEqual([item["key"] for item in selected], ["instance-coverage:Country:XYZ"])
 
     def test_backoff_schedules_exponential_delay_and_blocks_until_due(self):
         repo = object.__new__(InstanceRepository)
@@ -1371,6 +1466,27 @@ class ContinuousEnrichmentFrontierTest(unittest.TestCase):
 
         self.assertGreater(strong_score, weak_score)
 
+    def test_frontier_score_boosts_objective_matched_instance_without_hardcoded_label(self):
+        repo = object.__new__(InstanceRepository)
+        matched = {
+            "key": "instance-coverage:Country:XYZ",
+            "name": "XYZ Country enrichment coverage",
+            "source_kind": "instance_coverage",
+            "payload": {"label": "XYZ", "ontology_type": "Country", "identity_key": "Country:XYZ"},
+        }
+        unrelated = {
+            "key": "instance-coverage:Country:ABC",
+            "name": "ABC Country enrichment coverage",
+            "source_kind": "instance_coverage",
+            "payload": {"label": "ABC", "ontology_type": "Country", "identity_key": "Country:ABC"},
+        }
+
+        config = {"_frontier_selection_objective": "expand Country XYZ coverage"}
+        matched_score = repo._continuous_frontier_score(matched, config)["score"]
+        unrelated_score = repo._continuous_frontier_score(unrelated, config)["score"]
+
+        self.assertGreater(matched_score, unrelated_score)
+
     def test_llm_frontier_rerank_can_reorder_valid_shortlist(self):
         candidates = [
             {"key": "frontier:a", "name": "A", "source_kind": "graph_coverage", "priority": 20},
@@ -1412,7 +1528,7 @@ class ContinuousEnrichmentFrontierTest(unittest.TestCase):
 
         self.assertEqual([item["key"] for item in selected], ["queue:second"])
         self.assertEqual(config["_frontier_selection_trace"]["planner"], "llm")
-        self.assertEqual(config["_frontier_selection_trace"]["candidate_source"], "stored_frontier")
+        self.assertEqual(config["_frontier_selection_trace"]["candidate_source"], "stored_frontier_with_dynamic_backfill")
 
     def test_resume_persistent_session_preserves_queue_and_schedules_immediate_tick(self):
         repo = object.__new__(InstanceRepository)

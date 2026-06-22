@@ -48,7 +48,7 @@ function Ontology({ data, tenant, language }) {
   const isStale = listQ.source === "live-stale";
   const tenantId = tenant ? tenant.id : "default";
   const instanceTypesQ = useApiData("instanceTypes", [tenantId, { includeDraft: true }], { fallback: [] });
-  const graphProposedQ = useApiData("graphProposedElements", [tenantId, { status: "all" }], { fallback: { runs: [], elements: [] } });
+  const graphProposedQ = useApiData("graphProposedElements", [tenantId, { status: candidateStatus, limit: 80, elementType: "ontology_concept", compact: true }], { fallback: { runs: [], elements: [] } });
   const ontologyCandidates = useMemoXS(() => {
     return ((graphProposedQ.data || {}).elements || []).filter(isOntologyCandidateXS);
   }, [JSON.stringify(((graphProposedQ.data || {}).elements || []).map(e => [e.element_key, e.status, e.element_type, (e.payload || {}).artifact_type]))]);
@@ -78,6 +78,7 @@ function Ontology({ data, tenant, language }) {
 
   const grouped = useMemoXS(() => ({
     ObjectType: artifacts.filter(a => a.type === "ObjectType"),
+    Object:     artifacts.filter(a => a.type === "Object"),
     LinkType:   artifacts.filter(a => a.type === "LinkType"),
     Property:   artifacts.filter(a => a.type === "Property"),
     Action:     artifacts.filter(a => a.type === "Action"),
@@ -246,7 +247,7 @@ function Ontology({ data, tenant, language }) {
       return;
     }
     try {
-      const result = await window.AL_API.reviewGraphProposedElement(
+      const result = await window.AL_API.reviewKnowledgeCandidate(
         tenantId,
         selectedOntologyCandidate.element_key,
         action,
@@ -256,7 +257,6 @@ function Ontology({ data, tenant, language }) {
       setReviewMsg({ kind: "ok", msg: tXS(language, `Ontology candidate ${action} recorded.`, `本体候选 ${action} 已记录。`) });
       if (graphProposedQ.refetch) await graphProposedQ.refetch();
       window.dispatchEvent(new CustomEvent("aletheia:retry"));
-      if (action === "approve") setCandidateStatus("all");
       const reviewedKey = result?.element?.element_key || selectedOntologyCandidate.element_key;
       const next = filteredOntologyCandidates.find(item => item.element_key !== reviewedKey);
       if (next) setSelectedCandidateKey(next.element_key);
@@ -283,7 +283,7 @@ function Ontology({ data, tenant, language }) {
       for (let i = 0; i < keys.length; i += 200) chunks.push(keys.slice(i, i + 200));
       const results = [];
       for (const chunk of chunks) {
-        const result = await window.AL_API.reviewGraphProposedElementsBatch(
+        const result = await window.AL_API.reviewKnowledgeCandidatesBatch(
           tenantId,
           chunk,
           action,
@@ -299,7 +299,6 @@ function Ontology({ data, tenant, language }) {
       if (!failed) {
         setSelectedCandidateKeys([]);
         setReviewReason("");
-        if (action === "approve") setCandidateStatus("all");
         const reviewed = new Set(keys);
         const next = filteredOntologyCandidates.find(item => !reviewed.has(item.element_key));
         setSelectedCandidateKey(next?.element_key || "");
@@ -325,6 +324,7 @@ function Ontology({ data, tenant, language }) {
           <div className={"tab" + (ontologyTab === "discovered" ? " active" : "")} onClick={() => setOntologyTab("discovered")}>{tXS(language, "Discovered candidates", "发现候选")} <span className="ct">{ontologyCandidates.length}</span></div>
           {ontologyTab === "catalog" && <>
             <div className={"tab" + (active === "ObjectType" ? " active" : "")} onClick={() => setActive("ObjectType")}>{tXS(language, "Object Types", "对象类型")} <span className="ct">{grouped.ObjectType.length}</span></div>
+            {grouped.Object.length > 0 && <div className={"tab" + (active === "Object" ? " active" : "")} onClick={() => setActive("Object")}>{tXS(language, "Objects", "对象")} <span className="ct">{grouped.Object.length}</span></div>}
             <div className={"tab" + (active === "LinkType" ? " active" : "")} onClick={() => setActive("LinkType")}>{tXS(language, "Link Types", "关系类型")} <span className="ct">{grouped.LinkType.length}</span></div>
             <div className={"tab" + (active === "Property" ? " active" : "")} onClick={() => setActive("Property")}>{tXS(language, "Properties", "属性")} <span className="ct">{grouped.Property.length}</span></div>
             {grouped.Action.length > 0 && <div className={"tab" + (active === "Action" ? " active" : "")} onClick={() => setActive("Action")}>{tXS(language, "Actions", "动作")} <span className="ct">{grouped.Action.length}</span></div>}
