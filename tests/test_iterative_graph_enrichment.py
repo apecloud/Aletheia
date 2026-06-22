@@ -2785,6 +2785,141 @@ class IterativeGraphEnrichmentTest(unittest.TestCase):
             self.assertEqual(candidate["payload"]["decision_reason"], "llm_verified_duplicate")
             self.assertEqual(candidate["payload"]["llm_duplicate_verdict"]["decision"], "duplicate")
 
+    def test_ontology_concrete_object_dedups_against_approved_graph_instance(self):
+        def verifier(_prompt):
+            return {
+                "enabled": True,
+                "status": "ok",
+                "decision": "duplicate",
+                "matched_node_key": "Country:CHN",
+                "confidence": 0.97,
+                "reason": "same concrete country object represented by approved source row",
+            }
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_url, _ = self._seed_db(tmpdir)
+            agent = IterativeGraphEnrichmentAgent(
+                db_url,
+                tenant="maritime-risk",
+                embedding_adapter=StaticTestEmbeddingAdapter(),
+                duplicate_verifier_runner=verifier,
+            )
+            approved_identity = {
+                "kind": "node",
+                "identity_role": "concrete_object",
+                "ontology_part": "concrete_object",
+                "entity_type": "Country",
+                "label": "CHN",
+                "normalized_label": "chn",
+                "aliases": ["china"],
+                "source_identity": "Country:CHN",
+                "source_refs": ["country.iso3=CHN"],
+                "property_fingerprint": "country-chn",
+            }
+            session = agent.Session()
+            try:
+                agent._upsert_identity_index_row(
+                    session,
+                    identity=approved_identity,
+                    identity_key=iterative_graph_enrichment_agent._identity_key("maritime-risk", approved_identity),
+                    source_space="approved_graph_instance",
+                    source_key="Country:CHN",
+                    source_status="approved",
+                    evidence_refs=["country.iso3=CHN"],
+                    payload={"ontology_type": "Country", "label": "CHN", "aliases": ["China"]},
+                )
+                session.commit()
+                identity_index = agent._identity_index(session)
+            finally:
+                session.close()
+
+            candidate = agent._annotate_candidate_identity(
+                {
+                    "element_type": "ontology_concept",
+                    "name": "China",
+                    "payload": {
+                        "artifact_type": "object",
+                        "ontology_part": "concrete_object",
+                        "object_type": "Country",
+                        "label": "China",
+                        "description": "Concrete country object China",
+                    },
+                    "evidence_refs": ["gpt_researcher://report/china"],
+                    "confidence": 0.7,
+                },
+                task_id="task-a",
+                run_id="run-a",
+                frontier_id="frontier-a",
+                candidate_seq=1,
+                identity_index=identity_index,
+            )
+
+            self.assertEqual(candidate["payload"]["identity"]["kind"], "node")
+            self.assertEqual(candidate["payload"]["identity"]["identity_role"], "concrete_object")
+            self.assertEqual(candidate["payload"]["dedup_decision"], "merge_existing")
+            self.assertEqual(candidate["payload"]["matched_source"], "approved_graph_instance")
+            self.assertEqual(candidate["payload"]["matched_node_key"], "Country:CHN")
+            self.assertEqual(candidate["payload"]["llm_duplicate_verdict"]["decision"], "duplicate")
+
+    def test_schema_ontology_concept_does_not_dedup_against_concrete_graph_instance(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_url, _ = self._seed_db(tmpdir)
+            agent = IterativeGraphEnrichmentAgent(
+                db_url,
+                tenant="maritime-risk",
+                embedding_adapter=StaticTestEmbeddingAdapter(),
+            )
+            approved_identity = {
+                "kind": "node",
+                "identity_role": "concrete_object",
+                "ontology_part": "concrete_object",
+                "entity_type": "Country",
+                "label": "CHN",
+                "normalized_label": "chn",
+                "aliases": ["china"],
+                "source_identity": "Country:CHN",
+                "property_fingerprint": "country-chn",
+            }
+            session = agent.Session()
+            try:
+                agent._upsert_identity_index_row(
+                    session,
+                    identity=approved_identity,
+                    identity_key=iterative_graph_enrichment_agent._identity_key("maritime-risk", approved_identity),
+                    source_space="approved_graph_instance",
+                    source_key="Country:CHN",
+                    source_status="approved",
+                    payload={"ontology_type": "Country", "label": "CHN", "aliases": ["China"]},
+                )
+                session.commit()
+                identity_index = agent._identity_index(session)
+            finally:
+                session.close()
+
+            candidate = agent._annotate_candidate_identity(
+                {
+                    "element_type": "ontology_concept",
+                    "name": "Country",
+                    "payload": {
+                        "artifact_type": "class",
+                        "ontology_part": "abstract_class",
+                        "label": "Country",
+                        "description": "Schema class for country objects",
+                    },
+                    "evidence_refs": ["gpt_researcher://report/country"],
+                    "confidence": 0.9,
+                },
+                task_id="task-a",
+                run_id="run-a",
+                frontier_id="frontier-a",
+                candidate_seq=1,
+                identity_index=identity_index,
+            )
+
+            self.assertEqual(candidate["payload"]["identity"]["kind"], "ontology_concept")
+            self.assertEqual(candidate["payload"]["dedup_decision"], "new_proposal")
+            self.assertIsNone(candidate["payload"]["matched_node_key"])
+
     def test_similar_node_with_confidence_above_threshold_dedups_directly(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             db_url, _ = self._seed_db(tmpdir)
@@ -3894,8 +4029,18 @@ class IterativeGraphEnrichmentTest(unittest.TestCase):
             source_db_url = f"sqlite:///{Path(tmpdir) / 'source.db'}"
             source_engine = create_engine(source_db_url)
             with source_engine.begin() as conn:
-                conn.exec_driver_sql("CREATE TABLE countries (iso3 TEXT PRIMARY KEY)")
-                conn.exec_driver_sql("INSERT INTO countries (iso3) VALUES ('USA')")
+                conn.exec_driver_sql(
+                    "CREATE TABLE countries ("
+                    "iso3 TEXT PRIMARY KEY, "
+                    "country_name TEXT, "
+                    "dependency_id TEXT, "
+                    "canal TEXT, "
+                    "trade_value REAL)"
+                )
+                conn.exec_driver_sql(
+                    "INSERT INTO countries (iso3, country_name, dependency_id, canal, trade_value) "
+                    "VALUES ('USA', 'United States', 'USA::Yucatan Channel', 'Yucatan Channel', 12345.67)"
+                )
 
             agent = IterativeGraphEnrichmentAgent(
                 metadata_db_url,
@@ -3911,6 +4056,9 @@ class IterativeGraphEnrichmentTest(unittest.TestCase):
             ]
             self.assertEqual(len(instance_rows), 1)
             self.assertEqual(instance_rows[0]["status"], "approved")
+            self.assertIn("united states", instance_rows[0]["identity"]["aliases"])
+            self.assertNotIn("yucatan channel", instance_rows[0]["identity"]["aliases"])
+            self.assertFalse(any("12345" in alias for alias in instance_rows[0]["identity"]["aliases"]))
 
             with agent.Session() as session:
                 identity_index = agent._identity_index(session)

@@ -318,14 +318,16 @@ def _knowledge_candidate_profile(element_type, payload):
     raw_type = str(element_type or "").strip().lower()
     graph_space = payload.get("graph_space") if isinstance(payload.get("graph_space"), dict) else {}
     artifact_type = str(payload.get("artifact_type") or payload.get("ontology_artifact_type") or "").strip().lower()
+    ontology_part = str(payload.get("ontology_part") or "").strip().lower()
     has_relation_shape = any(payload.get(field) for field in ("source_label", "target_label", "source_key", "target_key", "relation", "relation_label"))
     has_observation_shape = any(payload.get(field) for field in ("metric", "value", "unit", "change", "baseline", "time_window"))
     has_action_shape = any(payload.get(field) for field in ("action", "trigger", "preconditions", "effects", "target_object_type"))
     has_model_shape = bool(artifact_type or graph_space.get("space") == "ontology_model")
+    graph_element_kind = raw_type if raw_type in {"node", "edge"} else None
 
     type_tokens = set(filter(None, raw_type.replace("-", "_").split("_")))
     if has_model_shape:
-        knowledge_kind = "model_concept"
+        knowledge_kind = "object" if artifact_type == "object" and ontology_part == "concrete_object" else "model_concept"
         product_surface = "ontology"
     elif "claim" in type_tokens:
         knowledge_kind = "claim"
@@ -359,8 +361,10 @@ def _knowledge_candidate_profile(element_type, payload):
         storage_projection = "candidate_object_projection"
 
     return {
+        "graph_element_kind": graph_element_kind,
         "knowledge_kind": knowledge_kind,
         "product_surface": product_surface,
+        "review_domain": product_surface,
         "storage_projection": storage_projection,
         "review_surface": product_surface,
     }

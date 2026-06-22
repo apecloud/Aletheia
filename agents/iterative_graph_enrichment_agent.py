@@ -742,6 +742,70 @@ def _node_identity_payload(item: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _ontology_concrete_object_identity_payload(
+    item: dict[str, Any],
+    payload: dict[str, Any],
+    ontology_candidate: dict[str, Any],
+    *,
+    artifact_type: str,
+) -> dict[str, Any]:
+    properties = payload.get("properties") if isinstance(payload.get("properties"), dict) else {}
+    ontology_part = str(payload.get("ontology_part") or ontology_candidate.get("ontology_part") or "").strip()
+    label = str(
+        payload.get("relation_label")
+        or payload.get("label")
+        or ontology_candidate.get("label")
+        or ontology_candidate.get("name")
+        or item.get("name")
+        or ""
+    ).strip()
+    entity_type = str(
+        payload.get("object_type")
+        or payload.get("ontology_type")
+        or payload.get("type")
+        or ontology_candidate.get("object_type")
+        or ontology_candidate.get("ontology_type")
+        or ontology_candidate.get("type")
+        or ""
+    ).strip()
+    aliases = sorted(
+        {
+            _normalize_identity_text(alias)
+            for alias in [
+                *(payload.get("aliases") if isinstance(payload.get("aliases"), list) else []),
+                *(ontology_candidate.get("aliases") if isinstance(ontology_candidate.get("aliases"), list) else []),
+                *(properties.get("aliases") if isinstance(properties.get("aliases"), list) else []),
+            ]
+            if _normalize_identity_text(alias)
+        }
+    )
+    source_identity = payload.get("source_identity") or ontology_candidate.get("source_identity") or _source_identity(properties)
+    normalized_label = _normalize_identity_text(label)
+    return {
+        "kind": "node",
+        "identity_role": "concrete_object",
+        "origin_element_type": item.get("element_type"),
+        "artifact_type": artifact_type,
+        "ontology_part": ontology_part,
+        "entity_type": entity_type,
+        "label": label,
+        "normalized_label": normalized_label,
+        "aliases": aliases,
+        "source_identity": source_identity,
+        "source_refs": _stable_identity_values(item.get("evidence_refs") or []),
+        "property_fingerprint": _digest(
+            {
+                "role": "concrete_object",
+                "type": entity_type,
+                "label": normalized_label,
+                "aliases": aliases,
+                "source_identity": source_identity,
+            },
+            16,
+        ),
+    }
+
+
 def _edge_identity_payload(item: dict[str, Any]) -> dict[str, Any]:
     payload = item.get("payload") or {}
     properties = payload.get("properties") if isinstance(payload.get("properties"), dict) else {}
@@ -866,6 +930,13 @@ def _candidate_identity_payload(item: dict[str, Any]) -> dict[str, Any]:
         payload = item.get("payload") or {}
         ontology_candidate = payload.get("ontology_candidate") if isinstance(payload.get("ontology_candidate"), dict) else {}
         artifact_type = str(payload.get("artifact_type") or ontology_candidate.get("artifact_type") or "").strip()
+        if _ontology_proposal_is_concrete_object(payload, item.get("element_type")):
+            return _ontology_concrete_object_identity_payload(
+                item,
+                payload,
+                ontology_candidate,
+                artifact_type=artifact_type,
+            )
         relation_label = str(payload.get("relation_label") or payload.get("label") or item.get("name") or "").strip()
         domain = str(payload.get("domain") or payload.get("source_type") or "").strip()
         range_type = str(payload.get("range") or payload.get("target_type") or "").strip()
@@ -1006,6 +1077,31 @@ def _primitive_text_values(value: Any, *, limit: int = 16) -> list[str]:
     if text:
         values.append(text)
     return values
+
+
+_SOURCE_ROW_ALIAS_COLUMN_RE = re.compile(r"(?:^|_)(?:name|label|alias|code|iso[0-9]*)(?:_|$)")
+
+
+def _source_row_identity_aliases(row_payload: dict[str, Any], *, primary_key: str, label: str, limit: int = 16) -> list[str]:
+    aliases: set[str] = set()
+    for column, value in row_payload.items():
+        column_text = str(column or "").lower()
+        if column == primary_key or not _SOURCE_ROW_ALIAS_COLUMN_RE.search(column_text):
+            continue
+        if not isinstance(value, str):
+            continue
+        text_value = value.strip()
+        if not text_value or text_value == label:
+            continue
+        if "::" in text_value or "://" in text_value:
+            continue
+        if len(text_value) > 120:
+            continue
+        normalized = _normalize_identity_text(text_value)
+        if not normalized or not re.search(r"[a-z]", normalized):
+            continue
+        aliases.add(text_value)
+    return sorted(aliases)[:limit]
 
 
 def _language_hint(text: str) -> str:
@@ -3915,16 +4011,30 @@ class IterativeGraphEnrichmentAgent:
                     {"limit": limit},
                 ).mappings().all()
                 for row in rows:
-                    label = str(row["node_pk"])
+                    label = str(row["node_pk"] or "").strip()
+                    if not label:
+                        continue
+                    alias_values: list[str] = []
+                    alias_rows = conn.execute(
+                        text(f"SELECT * FROM {table} WHERE {table}.{pk} = :pk_value LIMIT 5"),
+                        {"pk_value": label},
+                    ).mappings().all()
+                    for alias_row in alias_rows:
+                        alias_values.extend(
+                            _source_row_identity_aliases(dict(alias_row), primary_key=pk, label=label, limit=limit)
+                        )
+                    alias_values = sorted(dict.fromkeys(alias_values))[:16]
                     payload = {
                         "ontology_type": type_name,
                         "label": label,
+                        "aliases": alias_values,
                         "properties": {
                             "source_pk": f"{pk}={label}",
                             "source_id": f"{type_name}:{label}",
                             "source_table": table,
                             "ontology_artifact": artifact.canonical_key,
                             "projection_source": "SchemaGraphModelingAgent",
+                            "source_row_aliases": alias_values,
                         },
                     }
                     identity = _candidate_identity_payload(
@@ -3935,6 +4045,9 @@ class IterativeGraphEnrichmentAgent:
                             "evidence_refs": [f"{table}.{pk}={label}"],
                         }
                     )
+                    identity["identity_role"] = "concrete_object"
+                    identity["ontology_part"] = "concrete_object"
+                    identity["ontology_artifact"] = artifact.canonical_key
                     index.append(
                         {
                             "node_key": f"{type_name}:{label}",
@@ -4685,8 +4798,6 @@ class IterativeGraphEnrichmentAgent:
             return False
         if candidate_kind in {"node", "edge"} and source == "approved_ontology_artifact":
             return False
-        if candidate_kind in ONTOLOGY_PROPOSAL_ELEMENT_TYPES and source == "approved_graph_instance":
-            return False
         return True
 
     def _llm_duplicate_verdict(
@@ -4707,6 +4818,7 @@ class IterativeGraphEnrichmentAgent:
                 "Choose duplicate only when the proposal and retrieved candidate refer to the same real-world object, same ontology concept, same relation, or same semantic claim.",
                 "Do not choose duplicate merely because two items are topically related, share a broad type, share geography, or appear in the same sentence.",
                 "For objects, require same entity identity or clearly equivalent names/aliases in the same type.",
+                "For concrete objects, treat canonical ids, source identities, stable external codes, and aliases as object identity evidence when they clearly name the same typed object.",
                 "For edges/relations, require materially same source, relation meaning, and target.",
                 "For semantic claims, require same subject, claim/metric, scope, and time window when those are stated.",
                 "If one item is broader/narrower, causally related, a superclass/subclass, or evidence for the other but not the same item, choose related_not_duplicate.",

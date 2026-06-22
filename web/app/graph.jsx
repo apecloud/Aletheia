@@ -116,6 +116,33 @@ function dedupDecisionLabelGX(decision, language) {
   return labels[key] || key || "—";
 }
 
+function knowledgeKindGX(item) {
+  const kind = String(item?.knowledge_kind || "").trim().toLowerCase();
+  if (kind) return kind;
+  const graphKind = String(item?.graph_element_kind || "").trim().toLowerCase();
+  if (graphKind === "node") return "object";
+  if (graphKind === "edge") return "relation";
+  const elementType = String(item?.element_type || item?.type || "").trim().toLowerCase();
+  if (elementType.includes("finding")) return "finding";
+  if (elementType.includes("edge")) return "relation";
+  if (elementType.includes("node")) return "object";
+  return elementType || "object";
+}
+
+function knowledgeKindLabelGX(kind, language) {
+  const key = String(kind || "").trim().toLowerCase();
+  const labels = {
+    object: tGX(language, "objects", "对象"),
+    relation: tGX(language, "relations", "关系"),
+    finding: tGX(language, "findings", "发现"),
+    claim: tGX(language, "claims", "断言"),
+    observation: tGX(language, "observations", "观测"),
+    actionable_object: tGX(language, "actions", "动作"),
+    model_concept: tGX(language, "model concepts", "模型概念"),
+  };
+  return labels[key] || labelGX(key, language);
+}
+
 function endpointNodeWriteLabelGX(data, language) {
   if (data?.proposed_node_created) return tGX(language, "created in this run", "本轮已创建");
   if (data?.matched_node_key) return tGX(language, "skipped; reused matched node", "未新建，复用命中节点");
@@ -1342,17 +1369,18 @@ function ProposedGraphPanel({ tenantId, proposed, loading, source, focusElementK
     .map(([status, count]) => `${statusLabelGraphGX(status, language)} ${count}`)
     .join(" · ");
   const counts = elements.reduce((acc, item) => {
-    acc[item.element_type] = (acc[item.element_type] || 0) + 1;
+    const kind = knowledgeKindGX(item);
+    acc[kind] = (acc[kind] || 0) + 1;
     return acc;
   }, {});
-  const primaryKinds = ["node", "edge", "finding"];
+  const primaryKinds = ["object", "relation", "finding"];
   const extraKinds = Object.keys(counts)
     .filter(kind => kind && !primaryKinds.includes(kind))
     .sort((left, right) => left.localeCompare(right));
   const latestRun = runs[0] || null;
   const filteredElements = kindFilter === "all"
     ? elements
-    : elements.filter(item => item.element_type === kindFilter);
+    : elements.filter(item => knowledgeKindGX(item) === kindFilter);
   const findings = filteredElements.filter(item => item.element_type === "finding");
   const selectedSet = new Set(selectedKeys);
   const selectedInFilter = filteredElements.filter(item => selectedSet.has(item.element_key));
@@ -1374,7 +1402,7 @@ function ProposedGraphPanel({ tenantId, proposed, loading, source, focusElementK
     const match = elements.find(item => item.element_key === focusElementKey);
     if (!match) return;
     setSelectedElement(match);
-    setKindFilter(match.element_type || "all");
+    setKindFilter(knowledgeKindGX(match) || "all");
     setReviewMessage(null);
   }, [focusElementKey, JSON.stringify(elements.map(item => item.element_key))]);
   function selectKind(nextKind) {
@@ -1382,7 +1410,7 @@ function ProposedGraphPanel({ tenantId, proposed, loading, source, focusElementK
     setReviewMessage(null);
     const nextItems = nextKind === "all"
       ? elements
-      : elements.filter(item => item.element_type === nextKind);
+      : elements.filter(item => knowledgeKindGX(item) === nextKind);
     if (!nextItems.some(item => item.element_key === selectedElement?.element_key)) {
       setSelectedElement(nextItems[0] || null);
     }
@@ -1497,11 +1525,11 @@ function ProposedGraphPanel({ tenantId, proposed, loading, source, focusElementK
       <div className="section-body">
         <div className="chip-row" style={{ marginBottom: 10 }}>
           <Chip active={kindFilter === "all"} onClick={() => selectKind("all")} count={totalCount}>{tGX(language, "all", "全部")}</Chip>
-          <Chip active={kindFilter === "node"} onClick={() => selectKind("node")} count={counts.node || 0}>{tGX(language, "nodes", "节点")}</Chip>
-          <Chip active={kindFilter === "edge"} onClick={() => selectKind("edge")} count={counts.edge || 0}>{tGX(language, "edges", "边")}</Chip>
+          <Chip active={kindFilter === "object"} onClick={() => selectKind("object")} count={counts.object || 0}>{knowledgeKindLabelGX("object", language)}</Chip>
+          <Chip active={kindFilter === "relation"} onClick={() => selectKind("relation")} count={counts.relation || 0}>{knowledgeKindLabelGX("relation", language)}</Chip>
           <Chip active={kindFilter === "finding"} onClick={() => selectKind("finding")} count={counts.finding || 0}>{tGX(language, "findings", "发现")}</Chip>
           {extraKinds.map(kind => (
-            <Chip key={kind} active={kindFilter === kind} onClick={() => selectKind(kind)} count={counts[kind] || 0}>{labelGX(kind, language)}</Chip>
+            <Chip key={kind} active={kindFilter === kind} onClick={() => selectKind(kind)} count={counts[kind] || 0}>{knowledgeKindLabelGX(kind, language)}</Chip>
           ))}
         </div>
         {movedOntologyCount > 0 && (
@@ -1585,7 +1613,7 @@ function ProposedGraphPanel({ tenantId, proposed, loading, source, focusElementK
           );
         })}
         <div style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--muted)", marginBottom: 8 }}>
-          {tGX(language, "Showing", "显示")} {kindFilter === "all" ? (debugOnly ? tGX(language, "all raw projection rows", "全部原始投影记录") : tGX(language, "all knowledge candidates", "全部知识候选")) : `${kindFilter} ${debugOnly ? tGX(language, "projection rows", "投影记录") : tGX(language, "candidates", "候选")}`} · {readOnly ? tGX(language, "click an item to inspect.", "点击条目查看详情。") : tGX(language, "click an item to review.", "点击条目进行审核。")}
+          {tGX(language, "Showing", "显示")} {kindFilter === "all" ? (debugOnly ? tGX(language, "all raw projection rows", "全部原始投影记录") : tGX(language, "all knowledge candidates", "全部知识候选")) : `${knowledgeKindLabelGX(kindFilter, language)} ${debugOnly ? tGX(language, "projection rows", "投影记录") : tGX(language, "candidates", "候选")}`} · {readOnly ? tGX(language, "click an item to inspect.", "点击条目查看详情。") : tGX(language, "click an item to review.", "点击条目进行审核。")}
         </div>
         <div style={{ maxHeight: 220, overflow: "auto", display: "flex", flexDirection: "column", gap: 6 }}>
           {filteredElements.map(item => {
@@ -1609,7 +1637,7 @@ function ProposedGraphPanel({ tenantId, proposed, loading, source, focusElementK
                   )}
                   {labelGX(item.name, language)}
                 </span>
-                <span className="ct" style={{ color: itemColor }}>{labelGX(item.knowledge_kind || item.element_type, language)}</span>
+                <span className="ct" style={{ color: itemColor }}>{knowledgeKindLabelGX(knowledgeKindGX(item), language)}</span>
               </div>
               <div style={{ fontFamily: "var(--font-mono)", color: "var(--muted)", fontSize: 10 }}>
                 <span style={{ color: statusColor }}>{statusLabelGraphGX(item.status, language)}</span> · {item.source_url || tGX(language, "source unknown", "来源未知")}
@@ -1626,7 +1654,7 @@ function ProposedGraphPanel({ tenantId, proposed, loading, source, focusElementK
             <div style={{ fontFamily: "var(--font-mono)", color: "var(--muted)", fontSize: 10, border: "1px solid var(--line-soft)", padding: 8 }}>
               {rawTotalCount > 0
                 ? (debugOnly ? tGX(language, "No raw projection rows match this filter.", "没有匹配该过滤条件的原始投影记录。") : tGX(language, "No current pending proposals match this filter.", "当前待审队列中没有匹配该过滤条件的候选。"))
-                : `${tGX(language, "No", "没有")} ${kindFilter} ${debugOnly ? tGX(language, "projection rows.", "投影记录。") : tGX(language, "knowledge candidates.", "知识候选。")}`}
+                : `${tGX(language, "No", "没有")} ${knowledgeKindLabelGX(kindFilter, language)} ${debugOnly ? tGX(language, "projection rows.", "投影记录。") : tGX(language, "knowledge candidates.", "知识候选。")}`}
             </div>
           )}
         </div>
@@ -1677,7 +1705,7 @@ function ProposedGraphDetail({ item, reason, setReason, busy, message, onReview,
   const endpointEvidence = endpointDedupEvidenceGX(item);
   return (
     <div style={{ marginTop: 14, borderTop: "1px solid var(--line)", paddingTop: 12 }}>
-      <div className="eyebrow accent">{debugOnly ? tGX(language, "Inspect projection row", "查看投影记录") : (readOnly ? tGX(language, "Inspect candidate", "查看候选") : tGX(language, "Review selected", "审核选中的"))} {labelGX(item.knowledge_kind || item.element_type, language)}</div>
+      <div className="eyebrow accent">{debugOnly ? tGX(language, "Inspect projection row", "查看投影记录") : (readOnly ? tGX(language, "Inspect candidate", "查看候选") : tGX(language, "Review selected", "审核选中的"))} {knowledgeKindLabelGX(knowledgeKindGX(item), language)}</div>
       <div style={{ color: "var(--text)", fontWeight: 600, marginTop: 4 }}>{labelGX(item.name, language)}</div>
       <dl className="kv" style={{ marginTop: 10 }}>
         <dt>{tGX(language, "Key", "键")}</dt><dd>{item.element_key}</dd>

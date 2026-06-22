@@ -12,6 +12,7 @@ from server.aletheia_server import (
     _apply_possible_duplicate_presentation_guard,
     _dedup_audit_from_payload,
     _is_current_graph_proposal,
+    _knowledge_candidate_profile,
 )
 from agents.ontology_artifacts import ensure_artifact_schema, upsert_artifact
 from agents.iterative_graph_enrichment_agent import _graph_context_query_plan
@@ -19,6 +20,20 @@ from tenant_registry import TenantConfig, TenantRegistry
 
 
 class ContinuousEnrichmentFrontierTest(unittest.TestCase):
+    def test_knowledge_candidate_profile_keeps_graph_kind_internal(self):
+        node_profile = _knowledge_candidate_profile("node", {"ontology_type": "Country", "label": "Iran"})
+        edge_profile = _knowledge_candidate_profile(
+            "edge",
+            {"source_label": "Iran", "relation": "depends_on", "target_label": "Strait of Hormuz"},
+        )
+
+        self.assertEqual(node_profile["graph_element_kind"], "node")
+        self.assertEqual(node_profile["knowledge_kind"], "object")
+        self.assertEqual(node_profile["review_domain"], "knowledge")
+        self.assertEqual(edge_profile["graph_element_kind"], "edge")
+        self.assertEqual(edge_profile["knowledge_kind"], "relation")
+        self.assertEqual(edge_profile["review_domain"], "knowledge")
+
     def _repo_with_candidates(self, candidates):
         repo = object.__new__(InstanceRepository)
         repo._continuous_frontier_candidates = lambda tenant, stored, config: candidates

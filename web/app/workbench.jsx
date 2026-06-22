@@ -162,6 +162,20 @@ function itemTypeLabelWB(type, language) {
   return map[type] || type || "工作项";
 }
 
+function knowledgeKindWB(item) {
+  const raw = item?.raw || item || {};
+  const kind = String(raw.knowledge_kind || item?.knowledge_kind || "").trim().toLowerCase();
+  if (kind) return kind;
+  const graphKind = String(raw.graph_element_kind || item?.graph_element_kind || "").trim().toLowerCase();
+  if (graphKind === "node") return "object";
+  if (graphKind === "edge") return "relation";
+  const elementType = String(raw.element_type || item?.element_type || item?.type || "").trim().toLowerCase();
+  if (elementType.includes("finding")) return "finding";
+  if (elementType.includes("edge")) return "relation";
+  if (elementType.includes("node")) return "object";
+  return elementType || "object";
+}
+
 function nextActionLabelWB(text, language) {
   if (!isZhWB(language)) return text || "—";
   const map = {
@@ -994,7 +1008,7 @@ function AgentRunsWorkspace({ tenantId, query, artifacts = [], graphElements = [
                   <input className="input" value={agentParams.customInterval} onChange={e => updateAgentParam("customInterval", e.target.value)} />
                 </label>
                 <label>
-                  <div className="eyebrow" style={{ marginBottom: 4 }}>{tWB(language, "Node dedup threshold", "节点去重阈值")}</div>
+                  <div className="eyebrow" style={{ marginBottom: 4 }}>{tWB(language, "Object dedup threshold", "对象去重阈值")}</div>
                   <input className="input" type="number" min="0" max="1" step="0.01" value={agentParams.nodeSimilarityThreshold} onChange={e => updateAgentParam("nodeSimilarityThreshold", e.target.value)} />
                 </label>
                 <label style={{ display: "flex", alignItems: "center", gap: 8, border: "1px solid var(--line-soft)", background: "var(--bg-2)", padding: "8px 10px" }}>
@@ -1043,7 +1057,7 @@ function AgentRunsWorkspace({ tenantId, query, artifacts = [], graphElements = [
               </div>
             ) : (
               <div style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--muted)", overflowWrap: "anywhere" }}>
-                {tWB(language, "Settings collapsed", "设置已折叠")} · {tWB(language, "research", "检索")} {compactTextWB(agentParams.researchTopic || agentParams.scope, 70)} · {tWB(language, "budget", "预算")} {agentParams.budget} · {tWB(language, "node dedup", "节点去重")} {agentParams.nodeSimilarityThreshold} · {tWB(language, "auto approve", "自动批准")} {agentParams.autoApproveLowDuplicateProposals ? `${agentParams.autoApproveMinConfidence}/${agentParams.autoApproveMaxDuplicateScore}` : tWB(language, "off", "关闭")} · {tWB(language, "auto review", "自动审核")} {agentParams.autoReviewSimilarProposals ? tWB(language, "on", "开启") : tWB(language, "off", "关闭")} · {tWB(language, "cadence", "频率")} {agentParams.cadence}
+                {tWB(language, "Settings collapsed", "设置已折叠")} · {tWB(language, "research", "检索")} {compactTextWB(agentParams.researchTopic || agentParams.scope, 70)} · {tWB(language, "budget", "预算")} {agentParams.budget} · {tWB(language, "object dedup", "对象去重")} {agentParams.nodeSimilarityThreshold} · {tWB(language, "auto approve", "自动批准")} {agentParams.autoApproveLowDuplicateProposals ? `${agentParams.autoApproveMinConfidence}/${agentParams.autoApproveMaxDuplicateScore}` : tWB(language, "off", "关闭")} · {tWB(language, "auto review", "自动审核")} {agentParams.autoReviewSimilarProposals ? tWB(language, "on", "开启") : tWB(language, "off", "关闭")} · {tWB(language, "cadence", "频率")} {agentParams.cadence}
               </div>
             )}
             <div style={{ marginTop: 10, fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--muted)" }}>
@@ -1246,7 +1260,7 @@ function buildWorkspaceReviewItems({ tenantId, artifacts, graphElements, agentRu
       const ontologyCandidate = isOntologyConceptProposalWB(e);
       const status = String(e.status || "draft").toLowerCase();
       const blocked = ["needs_evidence", "rejected", "failed", "blocked"].includes(status);
-      const knowledgeKind = String(e.knowledge_kind || "").trim();
+      const knowledgeKind = knowledgeKindWB(e);
       const itemType =
         ontologyCandidate ? "Ontology candidate" :
         knowledgeKind ? `Knowledge ${knowledgeKind}` :
@@ -1715,21 +1729,21 @@ function buildAgentOutputGroups({ agentTab, tenantId, runs, artifacts, graphElem
       key: "nodes",
       title: "Knowledge objects",
       description: "Current object-shaped knowledge candidates awaiting review.",
-      items: activeGraphItems.filter(item => String(item.element_type || item.type || "").toLowerCase().includes("node")),
+      items: activeGraphItems.filter(item => knowledgeKindWB(item) === "object"),
       href: item => `/?screen=workbench&tenant=${encodeURIComponent(tenantId)}&workspace_tab=workqueue&workspace_item=${encodeURIComponent(item.element_key || "")}`,
     },
     {
       key: "edges",
       title: "Knowledge relations",
       description: "Current relation-shaped knowledge candidates awaiting review.",
-      items: activeGraphItems.filter(item => String(item.element_type || item.type || "").toLowerCase().includes("edge")),
+      items: activeGraphItems.filter(item => knowledgeKindWB(item) === "relation"),
       href: item => `/?screen=workbench&tenant=${encodeURIComponent(tenantId)}&workspace_tab=workqueue&workspace_item=${encodeURIComponent(item.element_key || "")}`,
     },
     {
       key: "graph_findings",
       title: "Candidate findings",
       description: "Current finding candidates awaiting review.",
-      items: activeGraphItems.filter(item => String(item.element_type || item.type || "").toLowerCase().includes("finding")),
+      items: activeGraphItems.filter(item => knowledgeKindWB(item) === "finding"),
       href: item => `/?screen=workbench&tenant=${encodeURIComponent(tenantId)}&workspace_tab=workqueue&workspace_item=${encodeURIComponent(item.element_key || "")}`,
     },
     {
