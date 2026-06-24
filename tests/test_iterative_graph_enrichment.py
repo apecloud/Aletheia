@@ -177,6 +177,88 @@ class IterativeGraphEnrichmentTest(unittest.TestCase):
         else:
             os.environ["ALETHEIA_DISABLE_RESEARCH_SEMANTIC_LLM"] = self._old_disable_research_semantic_llm
 
+    def test_openrouter_semantic_provider_parses_json_response(self):
+        class FakeResponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def read(self):
+                return json.dumps(
+                    {
+                        "choices": [
+                            {
+                                "message": {
+                                    "content": json.dumps(
+                                        {
+                                            "items": [
+                                                {
+                                                    "element_type": "situation",
+                                                    "name": "Hormuz disruption risk",
+                                                    "confidence": 0.8,
+                                                    "payload": {
+                                                        "claim": "Hormuz traffic is disrupted",
+                                                        "evidence_quote": "traffic through the Strait remains unstable",
+                                                    },
+                                                }
+                                            ],
+                                            "ontology_candidates": [],
+                                        }
+                                    )
+                                }
+                            }
+                        ]
+                    }
+                ).encode("utf-8")
+
+        with patch.dict(
+            os.environ,
+            {
+                "OPENROUTER_API_KEY": "test-key",
+                "ALETHEIA_RESEARCH_SEMANTIC_LLM_PROVIDER": "openrouter",
+                "ALETHEIA_RESEARCH_SEMANTIC_OPENROUTER_MODEL": "openrouter/free",
+            },
+            clear=False,
+        ), patch.object(iterative_graph_enrichment_agent.urllib.request, "urlopen", return_value=FakeResponse()) as urlopen_mock:
+            result = iterative_graph_enrichment_agent._run_research_semantic_llm(
+                "traffic through the Strait remains unstable",
+                {"key": "frontier:test"},
+                "gpt_researcher://report/test",
+            )
+
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(result["provider"], "openrouter")
+        self.assertEqual(result["model"], "openrouter/free")
+        self.assertEqual(result["items"][0]["element_type"], "situation")
+        request = urlopen_mock.call_args.args[0]
+        self.assertIn("Bearer test-key", request.headers["Authorization"])
+
+    def test_openrouter_semantic_provider_reports_missing_key(self):
+        old_cache = iterative_graph_enrichment_agent._DOTENV_CACHE
+        try:
+            iterative_graph_enrichment_agent._DOTENV_CACHE = None
+            with patch.dict(
+                os.environ,
+                {
+                    "ALETHEIA_RESEARCH_SEMANTIC_LLM_PROVIDER": "openrouter",
+                    "ALETHEIA_DISABLE_DOTENV_API_KEYS": "1",
+                },
+                clear=False,
+            ):
+                os.environ.pop("OPENROUTER_API_KEY", None)
+                result = iterative_graph_enrichment_agent._run_research_semantic_llm(
+                    "traffic through the Strait remains unstable",
+                    {"key": "frontier:test"},
+                    "gpt_researcher://report/test",
+                )
+        finally:
+            iterative_graph_enrichment_agent._DOTENV_CACHE = old_cache
+
+        self.assertEqual(result["status"], "openrouter_api_key_missing")
+        self.assertEqual(result["provider"], "openrouter")
+
     def test_edge_identity_uses_canonical_endpoint_dedup_evidence(self):
         candidate = {
             "element_type": "edge",
@@ -2075,6 +2157,122 @@ class IterativeGraphEnrichmentTest(unittest.TestCase):
         self.assertEqual(action_payload["trigger_event"], "Waterway Disruption Event")
         self.assertEqual(action_payload["expected_effects"], ["set operational_status to Closed"])
         self.assertEqual(action_payload["ontology_candidate"]["guardrails"], ["requires authorized operator approval"])
+
+    def test_research_ontology_classes_require_concrete_object_support(self):
+        def semantic_runner(_source_text, _frontier_item, _source_ref):
+            return {
+                "items": [],
+                "ontology_candidates": [
+                    {
+                        "artifact_type": "class",
+                        "ontology_part": "abstract_class",
+                        "label": "GlobalTrade",
+                        "description": "A broad macro topic without a named instance in this source.",
+                        "evidence_quote": "global trade may be affected",
+                        "confidence": 0.7,
+                    },
+                    {
+                        "artifact_type": "class",
+                        "ontology_part": "abstract_class",
+                        "label": "Waterway",
+                        "description": "A class for named water bodies and navigable passages.",
+                        "evidence_quote": "the Red Sea connects to the Gulf of Aden",
+                        "confidence": 0.74,
+                    },
+                    {
+                        "artifact_type": "object",
+                        "ontology_part": "concrete_object",
+                        "label": "Red Sea",
+                        "object_type": "Waterway",
+                        "description": "A named body of water explicitly mentioned in the source.",
+                        "evidence_quote": "the Red Sea connects to the Gulf of Aden",
+                        "confidence": 0.82,
+                    },
+                ],
+                "status": "runner",
+            }
+
+        result = SimpleNamespace(
+            url="gpt_researcher://report/waterway",
+            title="Waterway report",
+            snippet="",
+        )
+        elements = iterative_graph_enrichment_agent._research_semantic_proposals(
+            {"key": "research-topic:waterway", "source_kind": "research_topic"},
+            result,
+            "The Red Sea connects to the Gulf of Aden, and global trade may be affected.",
+            1,
+            semantic_runner,
+        )
+        proposals = {item["name"]: item for item in elements if item["element_type"] == "ontology_concept"}
+
+        self.assertNotIn("GlobalTrade", proposals)
+        self.assertIn("Waterway", proposals)
+        self.assertIn("Red Sea", proposals)
+        self.assertTrue(proposals["Waterway"]["payload"]["instance_backed"])
+        self.assertEqual(proposals["Waterway"]["payload"]["supporting_concrete_objects"], ["Red Sea"])
+        self.assertEqual(proposals["Red Sea"]["payload"]["object_type"], "Waterway")
+
+    def test_research_ontology_relation_instances_keep_endpoints(self):
+        def semantic_runner(_source_text, _frontier_item, _source_ref):
+            return {
+                "items": [],
+                "ontology_candidates": [
+                    {
+                        "artifact_type": "class",
+                        "ontology_part": "abstract_class",
+                        "label": "Gulf",
+                        "description": "Named bodies of water.",
+                        "evidence_quote": "The Red Sea connects to the Gulf of Aden.",
+                    },
+                    {
+                        "artifact_type": "object",
+                        "ontology_part": "concrete_object",
+                        "label": "Red Sea",
+                        "object_type": "Gulf",
+                        "description": "Named body of water.",
+                        "evidence_quote": "The Red Sea connects to the Gulf of Aden.",
+                    },
+                    {
+                        "artifact_type": "object",
+                        "ontology_part": "concrete_object",
+                        "label": "Gulf of Aden",
+                        "object_type": "Gulf",
+                        "description": "Named body of water.",
+                        "evidence_quote": "The Red Sea connects to the Gulf of Aden.",
+                    },
+                    {
+                        "artifact_type": "link",
+                        "ontology_part": "relation",
+                        "label": "connects_to",
+                        "relation": "connects_to",
+                        "source_label": "Red Sea",
+                        "source_object_type": "Gulf",
+                        "target_label": "Gulf of Aden",
+                        "target_object_type": "Gulf",
+                        "description": "The source names both endpoints of the connection.",
+                        "evidence_quote": "The Red Sea connects to the Gulf of Aden.",
+                    },
+                ],
+                "status": "runner",
+            }
+
+        result = SimpleNamespace(url="gpt_researcher://report/red-sea", title="Red Sea report", snippet="")
+        elements = iterative_graph_enrichment_agent._research_semantic_proposals(
+            {"key": "research-topic:red-sea", "source_kind": "research_topic"},
+            result,
+            "The Red Sea connects to the Gulf of Aden.",
+            1,
+            semantic_runner,
+        )
+        proposals = {item["name"]: item for item in elements if item["element_type"] == "ontology_concept"}
+
+        relation = proposals["connects_to"]["payload"]
+        self.assertEqual(relation["source_label"], "Red Sea")
+        self.assertEqual(relation["source_object_type"], "Gulf")
+        self.assertEqual(relation["target_label"], "Gulf of Aden")
+        self.assertEqual(relation["target_object_type"], "Gulf")
+        self.assertEqual(relation["relation"], "connects_to")
 
     def test_operational_ontology_identity_distinguishes_action_shape(self):
         def action_item(trigger_event, expected_effects):

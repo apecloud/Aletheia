@@ -15,6 +15,9 @@ import math
 import os
 import re
 import sys
+import time
+import urllib.error
+import urllib.request
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
@@ -1585,6 +1588,84 @@ RESEARCH_ONTOLOGY_MAX_CANDIDATES = int(os.environ.get("ALETHEIA_RESEARCH_ONTOLOG
 RESEARCH_SEMANTIC_CHUNK_CHARS = int(os.environ.get("ALETHEIA_RESEARCH_SEMANTIC_CHUNK_CHARS", "4200"))
 RESEARCH_SEMANTIC_MAX_CHUNKS = int(os.environ.get("ALETHEIA_RESEARCH_SEMANTIC_MAX_CHUNKS", "8"))
 RESEARCH_SEMANTIC_CHUNK_WORKERS = int(os.environ.get("ALETHEIA_RESEARCH_SEMANTIC_CHUNK_WORKERS", "3"))
+RESEARCH_SEMANTIC_TIMEOUT_MS = int(os.environ.get("ALETHEIA_RESEARCH_SEMANTIC_TIMEOUT_MS", "45000"))
+DEFAULT_OPENROUTER_SEMANTIC_MODEL = "qwen/qwen3-next-80b-a3b-instruct:free"
+DEFAULT_OPENROUTER_DEDUP_MODEL = "openai/gpt-oss-20b:free"
+
+
+def _research_ontology_candidate_norm(value: Any) -> str:
+    return re.sub(r"[^a-z0-9]+", "", _normalize_identity_text(value))
+
+
+def _research_ontology_candidate_values(value: Any) -> list[str]:
+    if isinstance(value, list):
+        return [str(item or "").strip() for item in value if str(item or "").strip()]
+    text_value = str(value or "").strip()
+    return [text_value] if text_value else []
+
+
+def _research_ontology_class_object_support(ontology_candidates: list[dict[str, Any]]) -> dict[str, set[str]]:
+    supported_by: dict[str, set[str]] = {}
+    for candidate in ontology_candidates:
+        if not isinstance(candidate, dict):
+            continue
+        artifact_type = str(candidate.get("artifact_type") or "").strip().lower()
+        ontology_part = str(candidate.get("ontology_part") or "").strip().lower()
+        if artifact_type not in {"object", "entity", "instance"} or ontology_part not in {"concrete_object", "object_instance", "instance"}:
+            continue
+        label = str(candidate.get("label") or "").strip()
+        for class_label in [
+            *(_research_ontology_candidate_values(candidate.get("object_type"))),
+            *(_research_ontology_candidate_values(candidate.get("ontology_type"))),
+            *(_research_ontology_candidate_values(candidate.get("class_label"))),
+            *(_research_ontology_candidate_values(candidate.get("class"))),
+            *(_research_ontology_candidate_values(candidate.get("type"))),
+        ]:
+            normalized = _research_ontology_candidate_norm(class_label)
+            if not normalized:
+                continue
+            supported_by.setdefault(normalized, set()).add(label)
+    return supported_by
+
+
+def _filter_instance_backed_ontology_classes(ontology_candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    support = _research_ontology_class_object_support(ontology_candidates)
+    filtered_by_key: dict[str, dict[str, Any]] = {}
+    order: list[str] = []
+
+    def endpoint_label_score(candidate: dict[str, Any]) -> int:
+        label = _normalize_identity_text(candidate.get("label"))
+        score = 0
+        for endpoint in [candidate.get("source_label"), candidate.get("target_label")]:
+            endpoint_text = _normalize_identity_text(endpoint)
+            if endpoint_text and endpoint_text in label:
+                score += 1
+        return score
+
+    for candidate in ontology_candidates:
+        if not isinstance(candidate, dict):
+            continue
+        artifact_type = str(candidate.get("artifact_type") or "").strip().lower()
+        ontology_part = str(candidate.get("ontology_part") or "").strip().lower()
+        if artifact_type == "class" or ontology_part in {"abstract_class", "class"}:
+            normalized_label = _research_ontology_candidate_norm(candidate.get("label"))
+            object_labels = sorted(support.get(normalized_label, set()))
+            if not object_labels:
+                continue
+            candidate = {
+                **candidate,
+                "instance_backed": True,
+                "supporting_concrete_objects": object_labels[:12],
+            }
+        key = _ontology_candidate_key(candidate)
+        existing = filtered_by_key.get(key)
+        if existing is None:
+            order.append(key)
+            filtered_by_key[key] = candidate
+            continue
+        if endpoint_label_score(candidate) > endpoint_label_score(existing):
+            filtered_by_key[key] = candidate
+    return [filtered_by_key[key] for key in order]
 
 
 def _research_semantic_identity_payload(item: dict[str, Any]) -> dict[str, Any]:
@@ -1666,14 +1747,62 @@ def _json_object_from_text(text: str) -> dict[str, Any]:
     return {}
 
 
-def _run_research_semantic_llm(source_text: str, frontier_item: dict[str, Any], source_ref: str) -> dict[str, Any]:
-    api_key = _configured_api_key("GEMINI_API_KEY", "GOOGLE_API_KEY")
+def _openrouter_chat_json(prompt: dict[str, Any], *, model: str, timeout_ms: int) -> dict[str, Any]:
+    api_key = _configured_api_key("OPENROUTER_API_KEY")
     if not api_key:
-        return {"items": [], "status": "api_key_missing"}
+        return {"_status": "openrouter_api_key_missing"}
+    request_payload = {
+        "model": model,
+        "messages": [
+            {
+                "role": "system",
+                "content": "Return strict JSON only. Do not wrap the JSON in markdown.",
+            },
+            {
+                "role": "user",
+                "content": json.dumps(prompt, ensure_ascii=False),
+            },
+        ],
+        "response_format": {"type": "json_object"},
+    }
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+        "HTTP-Referer": os.environ.get("OPENROUTER_SITE_URL", "http://127.0.0.1:8772"),
+        "X-Title": os.environ.get("OPENROUTER_APP_NAME", "Aletheia"),
+    }
+    request = urllib.request.Request(
+        os.environ.get("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1/chat/completions"),
+        data=json.dumps(request_payload, ensure_ascii=False).encode("utf-8"),
+        headers=headers,
+        method="POST",
+    )
     try:
-        from google import genai
+        with urllib.request.urlopen(request, timeout=max(1.0, timeout_ms / 1000.0)) as response:
+            response_payload = json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        detail = ""
+        try:
+            detail = exc.read().decode("utf-8")[:500]
+        except Exception:
+            detail = str(exc)
+        return {"_status": f"openrouter_http_error:{exc.code}", "_detail": detail}
     except Exception as exc:
-        return {"items": [], "status": f"google_genai_unavailable:{type(exc).__name__}"}
+        return {"_status": f"openrouter_error:{type(exc).__name__}", "_detail": str(exc)[:500]}
+    choices = response_payload.get("choices") if isinstance(response_payload, dict) else []
+    content = ""
+    if choices and isinstance(choices[0], dict):
+        message = choices[0].get("message") if isinstance(choices[0].get("message"), dict) else {}
+        content = str(message.get("content") or "")
+    parsed = _json_object_from_text(content)
+    if not parsed:
+        return {"_status": "openrouter_parse_error", "_raw": content[:1000]}
+    parsed["_status"] = "ok"
+    parsed["_model"] = model
+    return parsed
+
+
+def _run_research_semantic_llm(source_text: str, frontier_item: dict[str, Any], source_ref: str) -> dict[str, Any]:
     prompt = {
         "task": "Extract reviewable research-semantic candidates and propose an operational ontology from the source text.",
         "allowed_element_types": sorted(RESEARCH_SEMANTIC_ELEMENT_TYPES),
@@ -1688,8 +1817,12 @@ def _run_research_semantic_llm(source_text: str, frontier_item: dict[str, Any], 
             "Semantic elements: object types, concrete objects, properties, metrics, links, and states.",
             "Operational elements: events that change object state, actions that users or agents can take, functions/computations that derive values, and policies/constraints that govern actions.",
             "Ontology extraction has mandatory parts when supported by the source: abstract_classes, concrete_objects, links, properties, events, actions, functions, and policies.",
-            "For abstract_classes, propose reusable modeling classes implied by repeated sentence patterns, risk types, metric families, mechanisms, claims, operational states, or dependencies in the source text.",
-            "For concrete_objects, propose named real-world entities, assets, places, organizations, routes, chokepoints, projects, instruments, or systems explicitly mentioned by the source text.",
+            "For abstract_classes, propose only instance-backed reusable modeling classes. A class is valid only when this same response also emits at least one concrete_object whose object_type/class_label is exactly that class.",
+            "Do not propose theme-only, macro-topic, metric-family, claim-family, or process nouns as classes unless the source names at least one concrete object instance of that class. Examples to avoid when unsupported by objects: GlobalTrade, SupplyChain, EnergySecurity, PriceStability, RiskFactorType.",
+            "For concrete_objects, propose named real-world entities, assets, places, organizations, routes, chokepoints, projects, instruments, treaties, systems, or named initiatives explicitly mentioned by the source text, and set object_type to an emitted abstract class label.",
+            "If you cannot name at least one concrete object for a candidate class, do not emit that class. Represent the text as a semantic item, property, function, event, action, or policy instead.",
+            "For links/relations, distinguish relation definitions from relation instances. If the source sentence names concrete endpoints, emit a relation candidate with source_label, source_object_type, target_label, target_object_type, and relation. Do not emit only the abstract link type when endpoint objects are present.",
+            "When a sentence says A connects to B, A leads to B, A is located in B, A borders B, A is part of B, A depends on B, A affects B, or A governs B, emit a concrete relation instance between A and B.",
             "For events, propose business/world events or incidents in the source that create, update, degrade, disrupt, close, reopen, reroute, delay, threaten, or otherwise change objects.",
             "For actions, propose operational responses that a human or agent could execute against objects in response to events or states, including required inputs, target object types, expected object/property/link changes, and guardrails.",
             "For functions, propose computations or derived indicators needed to evaluate state, risk, impact, priority, capacity, exposure, cost, or recommendation logic.",
@@ -1699,6 +1832,8 @@ def _run_research_semantic_llm(source_text: str, frontier_item: dict[str, Any], 
             "Coverage gate: if a sentence mentions percentage, revenue, length, capacity, cost, time, trade share, reduction, risk level, vulnerability, preparedness, or impact magnitude, emit at least one function or property ontology candidate that can compute or store that value.",
             "Coverage gate: if an action changes an object state, emit the event that triggers it and the target object types, input parameters, expected effects, and guardrails for the action.",
             "Coverage gate: if an action has safety, legal, approval, security, environmental, or review implications, emit at least one policy ontology candidate governing that action.",
+            "Coverage gate: every abstract_class in coverage.abstract_classes must be referenced by object_type/class_label from at least one item in coverage.concrete_objects or ontology_candidates.",
+            "Coverage gate: every clause that names two concrete objects and a relation between them must emit a relation instance candidate with endpoint labels.",
             "Do not treat recommendations as final ontology. Recommendations are semantic observations; actions are executable ontology elements with inputs, targets, effects, and guardrails.",
             "Do not treat events as mere text labels. Events should describe object state changes and downstream operational consequences.",
             "Do not emit placeholder actions. An action candidate must be executable enough to support a form/API: it needs target_object_types, input_parameters, expected_effects, and guardrails.",
@@ -1759,8 +1894,9 @@ def _run_research_semantic_llm(source_text: str, frontier_item: dict[str, Any], 
                     {
                         "artifact_type": "class",
                         "ontology_part": "abstract_class",
-                        "label": "class candidate inferred from repeated source clauses",
-                        "description": "why this class is needed",
+                        "label": "class candidate with at least one concrete object instance in this same output",
+                        "description": "why this class is needed and which concrete objects instantiate it",
+                        "example_objects": ["labels of concrete_objects in this same output"],
                         "evidence_quote": "exact supporting clause or sentence",
                         "confidence": 0.0,
                     }
@@ -1770,7 +1906,23 @@ def _run_research_semantic_llm(source_text: str, frontier_item: dict[str, Any], 
                         "artifact_type": "object",
                         "ontology_part": "concrete_object",
                         "label": "named object candidate explicitly mentioned",
+                        "object_type": "label of an emitted abstract_class this object instantiates",
                         "description": "why this object should be modeled",
+                        "evidence_quote": "exact supporting clause or sentence",
+                        "confidence": 0.0,
+                    }
+                ],
+                "relations": [
+                    {
+                        "artifact_type": "link",
+                        "ontology_part": "relation",
+                        "label": "relation type label",
+                        "relation": "stable relation key or verb phrase",
+                        "source_label": "source concrete object label explicitly mentioned",
+                        "source_object_type": "source object's emitted class/object_type",
+                        "target_label": "target concrete object label explicitly mentioned",
+                        "target_object_type": "target object's emitted class/object_type",
+                        "description": "why this concrete relation should be modeled",
                         "evidence_quote": "exact supporting clause or sentence",
                         "confidence": 0.0,
                     }
@@ -1832,6 +1984,13 @@ def _run_research_semantic_llm(source_text: str, frontier_item: dict[str, Any], 
                     "artifact_type": "class | object | link | property | event | action | function | policy",
                     "ontology_part": "abstract_class | concrete_object | relation | property | event | action | function | policy",
                     "label": "candidate ontology label",
+                    "object_type": "for concrete_object only: label of an emitted abstract_class this object instantiates",
+                    "class_label": "for concrete_object only: same meaning as object_type if used by the model",
+                    "relation": "for relation/link only: stable relation key or verb phrase",
+                    "source_label": "for relation/link instances: source concrete object label",
+                    "source_object_type": "for relation/link instances: source object type/class",
+                    "target_label": "for relation/link instances: target concrete object label",
+                    "target_object_type": "for relation/link instances: target object type/class",
                     "description": "why this ontology concept is needed",
                     "domain": "source/domain type for link or property when known",
                     "range": "target/range type for link or property when known",
@@ -1853,8 +2012,54 @@ def _run_research_semantic_llm(source_text: str, frontier_item: dict[str, Any], 
             ],
         },
     }
+    provider = os.environ.get("ALETHEIA_RESEARCH_SEMANTIC_LLM_PROVIDER", "gemini").strip().lower()
+    timeout_ms = max(1_000, int(os.environ.get("ALETHEIA_RESEARCH_SEMANTIC_TIMEOUT_MS", str(RESEARCH_SEMANTIC_TIMEOUT_MS)) or RESEARCH_SEMANTIC_TIMEOUT_MS))
+    if provider == "openrouter":
+        model = os.environ.get("ALETHEIA_RESEARCH_SEMANTIC_OPENROUTER_MODEL") or os.environ.get("OPENROUTER_MODEL") or DEFAULT_OPENROUTER_SEMANTIC_MODEL
+        parsed = _openrouter_chat_json(prompt, model=model, timeout_ms=timeout_ms)
+        status = parsed.pop("_status", "ok")
+        model_used = parsed.pop("_model", model)
+        if status != "ok":
+            return {"items": [], "ontology_candidates": [], "status": status, "provider": "openrouter", "model": model_used}
+        items = parsed.get("items") if isinstance(parsed, dict) else []
+        ontology_candidates = parsed.get("ontology_candidates") if isinstance(parsed, dict) else []
+        coverage = parsed.get("coverage") if isinstance(parsed, dict) else {}
+        if isinstance(coverage, dict):
+            coverage_candidates = []
+            for key in ("abstract_classes", "concrete_objects", "relations", "events", "actions", "functions", "policies"):
+                values = coverage.get(key)
+                if isinstance(values, list):
+                    coverage_candidates.extend(item for item in values if isinstance(item, dict))
+            if isinstance(ontology_candidates, list):
+                ontology_candidates = [*ontology_candidates, *coverage_candidates]
+            else:
+                ontology_candidates = coverage_candidates
+        if isinstance(ontology_candidates, list):
+            ontology_candidates = _filter_instance_backed_ontology_classes(ontology_candidates)
+        return {
+            "items": items if isinstance(items, list) else [],
+            "ontology_candidates": ontology_candidates if isinstance(ontology_candidates, list) else [],
+            "status": "ok",
+            "provider": "openrouter",
+            "model": model_used,
+        }
+
+    api_key = _configured_api_key("GEMINI_API_KEY", "GOOGLE_API_KEY")
+    if not api_key:
+        return {"items": [], "status": "api_key_missing"}
     try:
-        client = genai.Client(api_key=api_key)
+        from google import genai
+    except Exception as exc:
+        return {"items": [], "status": f"google_genai_unavailable:{type(exc).__name__}"}
+    try:
+        http_options = None
+        try:
+            from google.genai import types
+
+            http_options = types.HttpOptions(timeout=timeout_ms)
+        except Exception:
+            http_options = {"timeout": timeout_ms}
+        client = genai.Client(api_key=api_key, http_options=http_options)
         response = client.models.generate_content(
             model=os.environ.get("ALETHEIA_RESEARCH_SEMANTIC_MODEL", "gemini-2.5-flash"),
             contents=json.dumps(prompt, ensure_ascii=False),
@@ -1867,7 +2072,7 @@ def _run_research_semantic_llm(source_text: str, frontier_item: dict[str, Any], 
     coverage = parsed.get("coverage") if isinstance(parsed, dict) else {}
     if isinstance(coverage, dict):
         coverage_candidates = []
-        for key in ("abstract_classes", "concrete_objects", "events", "actions", "functions", "policies"):
+        for key in ("abstract_classes", "concrete_objects", "relations", "events", "actions", "functions", "policies"):
             values = coverage.get(key)
             if isinstance(values, list):
                 coverage_candidates.extend(item for item in values if isinstance(item, dict))
@@ -1875,6 +2080,8 @@ def _run_research_semantic_llm(source_text: str, frontier_item: dict[str, Any], 
             ontology_candidates = [*ontology_candidates, *coverage_candidates]
         else:
             ontology_candidates = coverage_candidates
+    if isinstance(ontology_candidates, list):
+        ontology_candidates = _filter_instance_backed_ontology_classes(ontology_candidates)
     return {
         "items": items if isinstance(items, list) else [],
         "ontology_candidates": ontology_candidates if isinstance(ontology_candidates, list) else [],
@@ -1938,11 +2145,34 @@ def _semantic_item_key(item: dict[str, Any]) -> str:
 
 
 def _ontology_candidate_key(candidate: dict[str, Any]) -> str:
+    artifact_type = _normalize_identity_text(candidate.get("artifact_type"))
+    ontology_part = _normalize_identity_text(candidate.get("ontology_part"))
+    source_label = _normalize_identity_text(candidate.get("source_label"))
+    target_label = _normalize_identity_text(candidate.get("target_label"))
+    relation = _normalize_identity_text(candidate.get("relation") or candidate.get("label"))
+    if (artifact_type in {"link", "relation"} or ontology_part == "relation") and source_label and target_label:
+        return _digest(
+            {
+                "artifact_type": "link",
+                "ontology_part": "relation",
+                "relation": relation,
+                "source_label": source_label,
+                "source_object_type": _normalize_identity_text(candidate.get("source_object_type")),
+                "target_label": target_label,
+                "target_object_type": _normalize_identity_text(candidate.get("target_object_type")),
+            },
+            16,
+        )
     return _digest(
         {
-            "artifact_type": _normalize_identity_text(candidate.get("artifact_type")),
-            "ontology_part": _normalize_identity_text(candidate.get("ontology_part")),
+            "artifact_type": artifact_type,
+            "ontology_part": ontology_part,
             "label": _normalize_identity_text(candidate.get("label")),
+            "relation": relation,
+            "source_label": source_label,
+            "source_object_type": _normalize_identity_text(candidate.get("source_object_type")),
+            "target_label": target_label,
+            "target_object_type": _normalize_identity_text(candidate.get("target_object_type")),
             "domain": _normalize_identity_text(candidate.get("domain")),
             "range": _normalize_identity_text(candidate.get("range")),
             "property_of": _normalize_identity_text(candidate.get("property_of")),
@@ -2005,6 +2235,7 @@ def _run_research_semantic_chunked(
     frontier_item: dict[str, Any],
     source_ref: str,
     semantic_runner=None,
+    trace_callback=None,
 ) -> dict[str, Any]:
     chunks = _research_semantic_chunks(source_text)
     raw_results: list[dict[str, Any] | None] = [None] * len(chunks)
@@ -2014,10 +2245,36 @@ def _run_research_semantic_chunked(
             **(frontier_item or {}),
             "semantic_chunk": {"index": index, "count": len(chunks), "char_count": len(chunk)},
         }
-        if semantic_runner:
-            raw = semantic_runner(chunk, chunk_frontier, source_ref)
-        else:
-            raw = _run_research_semantic_llm(chunk, chunk_frontier, source_ref)
+        started = time.perf_counter()
+        if trace_callback:
+            trace_callback(
+                "semantic_chunk_start",
+                chunk_index=index,
+                chunk_count=len(chunks),
+                chunk_chars=len(chunk),
+                source_url=source_ref,
+            )
+        try:
+            if semantic_runner:
+                raw = semantic_runner(chunk, chunk_frontier, source_ref)
+            else:
+                raw = _run_research_semantic_llm(chunk, chunk_frontier, source_ref)
+        except Exception as exc:
+            raw = {"items": [], "ontology_candidates": [], "status": f"chunk_error:{type(exc).__name__}"}
+        elapsed_ms = int((time.perf_counter() - started) * 1000)
+        if trace_callback:
+            status = raw.get("status") if isinstance(raw, dict) else "runner"
+            trace_callback(
+                "semantic_chunk_done",
+                chunk_index=index,
+                chunk_count=len(chunks),
+                chunk_chars=len(chunk),
+                elapsed_ms=elapsed_ms,
+                status=status,
+                item_count=len(raw.get("items") or []) if isinstance(raw, dict) else len(raw or []),
+                ontology_candidate_count=len(raw.get("ontology_candidates") or []) if isinstance(raw, dict) else 0,
+                source_url=source_ref,
+            )
         return index, raw if isinstance(raw, dict) else {"items": raw if isinstance(raw, list) else [], "status": "runner"}
 
     worker_count = max(1, min(RESEARCH_SEMANTIC_CHUNK_WORKERS, len(chunks) or 1))
@@ -2041,6 +2298,7 @@ def _research_semantic_proposals(
     summary: str,
     iteration: int,
     semantic_runner=None,
+    trace_callback=None,
 ) -> list[dict[str, Any]]:
     """Wrap LLM-extracted research semantics as review-gated proposals."""
     if semantic_runner is None and os.environ.get("ALETHEIA_DISABLE_RESEARCH_SEMANTIC_LLM", "").strip().lower() in {
@@ -2053,8 +2311,18 @@ def _research_semantic_proposals(
     source_ref = result.url
     source_title = result.title or source_ref
     source_text = _clean_text(summary or result.snippet or result.title or "", 1_000_000)
+    semantic_started = time.perf_counter()
+    chunks = _research_semantic_chunks(source_text)
+    if trace_callback:
+        trace_callback(
+            "semantic_pass_start",
+            source_url=source_ref,
+            summary_length=len(source_text),
+            chunk_count=len(chunks),
+            chunk_chars=[len(chunk) for chunk in chunks],
+        )
     if len(source_text) > max(1200, RESEARCH_SEMANTIC_CHUNK_CHARS):
-        raw = _run_research_semantic_chunked(source_text, frontier_item, source_ref, semantic_runner)
+        raw = _run_research_semantic_chunked(source_text, frontier_item, source_ref, semantic_runner, trace_callback=trace_callback)
     else:
         raw = semantic_runner(source_text, frontier_item, source_ref) if semantic_runner else _run_research_semantic_llm(source_text, frontier_item, source_ref)
     if isinstance(raw, list):
@@ -2065,6 +2333,17 @@ def _research_semantic_proposals(
         items = []
     if not isinstance(ontology_candidates, list):
         ontology_candidates = []
+    ontology_candidates = _filter_instance_backed_ontology_classes(ontology_candidates)
+    if trace_callback:
+        trace_callback(
+            "semantic_pass_done",
+            source_url=source_ref,
+            elapsed_ms=int((time.perf_counter() - semantic_started) * 1000),
+            status=raw.get("status") if isinstance(raw, dict) else "runner",
+            item_count=len(items),
+            ontology_candidate_count=len(ontology_candidates),
+            chunk_count=len(chunks),
+        )
     elements: list[dict[str, Any]] = []
     for item in items[: max(1, RESEARCH_SEMANTIC_MAX_ITEMS)]:
         if not isinstance(item, dict):
@@ -2127,6 +2406,17 @@ def _research_semantic_proposals(
             label,
             _clean_text(candidate.get("description") or f"Candidate ontology {artifact_type}: {label}", 700),
             ontology_part=candidate.get("ontology_part"),
+            object_type=candidate.get("object_type"),
+            ontology_type=candidate.get("ontology_type"),
+            class_label=candidate.get("class_label"),
+            example_objects=candidate.get("example_objects"),
+            supporting_concrete_objects=candidate.get("supporting_concrete_objects"),
+            instance_backed=candidate.get("instance_backed"),
+            relation=candidate.get("relation"),
+            source_label=candidate.get("source_label"),
+            source_object_type=candidate.get("source_object_type"),
+            target_label=candidate.get("target_label"),
+            target_object_type=candidate.get("target_object_type"),
             domain=candidate.get("domain"),
             range=candidate.get("range"),
             property_of=candidate.get("property_of"),
@@ -2152,6 +2442,17 @@ def _research_semantic_proposals(
                     "artifact_type": artifact_type,
                     "ontology_part": candidate.get("ontology_part"),
                     "label": label,
+                    "object_type": candidate.get("object_type"),
+                    "ontology_type": candidate.get("ontology_type"),
+                    "class_label": candidate.get("class_label"),
+                    "example_objects": candidate.get("example_objects"),
+                    "supporting_concrete_objects": candidate.get("supporting_concrete_objects"),
+                    "instance_backed": candidate.get("instance_backed"),
+                    "relation": candidate.get("relation"),
+                    "source_label": candidate.get("source_label"),
+                    "source_object_type": candidate.get("source_object_type"),
+                    "target_label": candidate.get("target_label"),
+                    "target_object_type": candidate.get("target_object_type"),
                     "domain": candidate.get("domain"),
                     "range": candidate.get("range"),
                     "property_of": candidate.get("property_of"),
@@ -2811,6 +3112,31 @@ class IterativeGraphEnrichmentAgent:
             return TenantRegistry.load().get(tenant_id).source_db_url
         except Exception:
             return default_source_db_url()
+
+    def _runtime_trace(self, session, run, event_type: str, **payload: Any) -> None:
+        event = {
+            "ts": datetime.utcnow().isoformat(),
+            "type": event_type,
+            **{key: value for key, value in payload.items() if value is not None},
+        }
+        try:
+            print(_json_dump({"runtime_trace": event}), flush=True)
+        except Exception:
+            pass
+        try:
+            safety_profile = _json_load(run.safety_profile_json, {})
+            trace = list(safety_profile.get("runtime_trace") or [])
+            trace.append(event)
+            safety_profile["runtime_trace"] = trace[-200:]
+            safety_profile["last_runtime_event"] = event
+            run.safety_profile_json = _json_dump(safety_profile)
+            session.add(run)
+            session.commit()
+        except Exception:
+            try:
+                session.rollback()
+            except Exception:
+                pass
 
     def _frontier_from_artifacts(self, session, artifact_keys: list[str] | None) -> list[dict[str, Any]]:
         query = (
@@ -3646,7 +3972,15 @@ class IterativeGraphEnrichmentAgent:
             ],
         ).to_payload()
 
-    def _candidate_elements(self, extraction: dict[str, Any], frontier_item: dict[str, Any], result, summary: str, iteration: int) -> list[dict[str, Any]]:
+    def _candidate_elements(
+        self,
+        extraction: dict[str, Any],
+        frontier_item: dict[str, Any],
+        result,
+        summary: str,
+        iteration: int,
+        trace_callback=None,
+    ) -> list[dict[str, Any]]:
         elements: list[dict[str, Any]] = []
         source_ref = result.url
         source_title = result.title or source_ref
@@ -3859,7 +4193,16 @@ class IterativeGraphEnrichmentAgent:
                 }
             )
         if self._frontier_allows_semantic_ontology_pass(frontier_item, result):
-            elements.extend(_research_semantic_proposals(frontier_item, result, summary, iteration, self.research_semantic_runner))
+            elements.extend(
+                _research_semantic_proposals(
+                    frontier_item,
+                    result,
+                    summary,
+                    iteration,
+                    self.research_semantic_runner,
+                    trace_callback=trace_callback,
+                )
+            )
         return elements
 
     def _approved_identity_index(self, session) -> list[dict[str, Any]]:
@@ -4236,13 +4579,22 @@ class IterativeGraphEnrichmentAgent:
             if entry.get("source") == "proposed_graph" and entry.get("node_key")
         }
         rows = (
-            session.query(ProposedGraphElement.element_key)
+            session.query(
+                ProposedGraphElement.element_key,
+                ProposedGraphElement.element_type,
+                ProposedGraphElement.status,
+                ProposedGraphElement.payload_json,
+            )
             .filter(ProposedGraphElement.project_id == self.tenant)
             .filter(ProposedGraphElement.element_type.in_(sorted(PROPOSED_GRAPH_IDENTITY_ELEMENT_TYPES)))
-            .filter(ProposedGraphElement.status.in_(sorted(INDEXED_PROPOSED_GRAPH_STATUSES)))
+            .filter(~ProposedGraphElement.element_type.in_(["node", "edge"]))
+            .filter(ProposedGraphElement.status.in_(["draft", "needs_more_evidence"]))
             .all()
         )
-        return any(row.element_key not in indexed_source_keys for row in rows)
+        for row in rows:
+            if row.element_key not in indexed_source_keys:
+                return True
+        return False
 
     def _upsert_identity_index_row(
         self,
@@ -4863,6 +5215,26 @@ class IterativeGraphEnrichmentAgent:
             return parsed if isinstance(parsed, dict) else {"enabled": True, "status": "invalid_runner_response"}
         if not self.dedup_llm_verifier_enabled:
             return {"enabled": False, "status": "disabled"}
+        provider = os.environ.get("ALETHEIA_DEDUP_VERIFIER_PROVIDER", "gemini").strip().lower()
+        if provider == "openrouter":
+            model = os.environ.get("ALETHEIA_DEDUP_VERIFIER_OPENROUTER_MODEL") or os.environ.get("OPENROUTER_MODEL") or DEFAULT_OPENROUTER_DEDUP_MODEL
+            timeout_ms = max(1_000, int(os.environ.get("ALETHEIA_DEDUP_VERIFIER_TIMEOUT_MS", "30000") or "30000"))
+            parsed = _openrouter_chat_json(prompt, model=model, timeout_ms=timeout_ms)
+            status = parsed.pop("_status", "ok")
+            model_used = parsed.pop("_model", model)
+            if status != "ok":
+                return {
+                    "enabled": True,
+                    "status": status,
+                    "provider": "openrouter",
+                    "model": model_used,
+                    "prompt": prompt,
+                }
+            parsed["enabled"] = True
+            parsed["status"] = "ok"
+            parsed["provider"] = "openrouter"
+            parsed["model"] = model_used
+            return parsed
         api_key = _configured_api_key("GEMINI_API_KEY", "GOOGLE_API_KEY")
         if not api_key:
             return {"enabled": False, "status": "api_key_missing", "prompt": prompt}
@@ -5552,9 +5924,27 @@ class IterativeGraphEnrichmentAgent:
                         "auto_merge_threshold": 0.92,
                         "review_threshold": 0.75,
                         "llm_duplicate_verifier": "enabled" if self.dedup_llm_verifier_enabled else "disabled",
-                        "llm_duplicate_verifier_model": os.environ.get("ALETHEIA_DEDUP_VERIFIER_MODEL", "gemini-2.5-flash"),
+                        "llm_duplicate_verifier_provider": os.environ.get("ALETHEIA_DEDUP_VERIFIER_PROVIDER", "gemini"),
+                        "llm_duplicate_verifier_model": (
+                            os.environ.get("ALETHEIA_DEDUP_VERIFIER_OPENROUTER_MODEL")
+                            or os.environ.get("OPENROUTER_MODEL")
+                            or DEFAULT_OPENROUTER_DEDUP_MODEL
+                            if os.environ.get("ALETHEIA_DEDUP_VERIFIER_PROVIDER", "gemini").strip().lower() == "openrouter"
+                            else os.environ.get("ALETHEIA_DEDUP_VERIFIER_MODEL", "gemini-2.5-flash")
+                        ),
                     },
                     "research_provider": self.research_provider,
+                    "research_semantic_llm": {
+                        "provider": os.environ.get("ALETHEIA_RESEARCH_SEMANTIC_LLM_PROVIDER", "gemini"),
+                        "model": (
+                            os.environ.get("ALETHEIA_RESEARCH_SEMANTIC_OPENROUTER_MODEL")
+                            or os.environ.get("OPENROUTER_MODEL")
+                            or DEFAULT_OPENROUTER_SEMANTIC_MODEL
+                            if os.environ.get("ALETHEIA_RESEARCH_SEMANTIC_LLM_PROVIDER", "gemini").strip().lower() == "openrouter"
+                            else os.environ.get("ALETHEIA_RESEARCH_SEMANTIC_MODEL", "gemini-2.5-flash")
+                        ),
+                        "timeout_ms": int(os.environ.get("ALETHEIA_RESEARCH_SEMANTIC_TIMEOUT_MS", str(RESEARCH_SEMANTIC_TIMEOUT_MS)) or RESEARCH_SEMANTIC_TIMEOUT_MS),
+                    },
                     "retrieval_provider": "gpt_researcher",
                     "gpt_researcher_report_is_intermediate_evidence": True,
                     "gpt_researcher_env_config": {
@@ -5576,8 +5966,20 @@ class IterativeGraphEnrichmentAgent:
         )
         session.add(run)
         session.flush()
+        self._runtime_trace(
+            session,
+            run,
+            "run_created",
+            run_key=run_key,
+            frontier_count=len(frontier),
+            max_iterations=self.max_iterations,
+            max_frontier=self.max_frontier,
+            max_results_per_query=self.max_results_per_query,
+        )
         try:
+            self._runtime_trace(session, run, "identity_index_start", run_key=run_key)
             identity_index = self._identity_index(session)
+            self._runtime_trace(session, run, "identity_index_done", run_key=run_key, identity_count=len(identity_index))
             trace = []
             skipped_sources = []
             next_frontier = list(frontier)
@@ -5590,11 +5992,39 @@ class IterativeGraphEnrichmentAgent:
             for iteration in range(1, self.max_iterations + 1):
                 current_frontier = next_frontier[: self.max_frontier]
                 next_frontier = []
+                self._runtime_trace(
+                    session,
+                    run,
+                    "iteration_start",
+                    run_key=run_key,
+                    iteration=iteration,
+                    frontier_count=len(current_frontier),
+                )
                 for item in current_frontier:
                     frontier_id = str(item.get("key") or item.get("name") or f"frontier:{iteration}")
                     query_plan = self._query_plan_for_frontier(item, objective)
                     query = query_plan["query"]
+                    self._runtime_trace(
+                        session,
+                        run,
+                        "frontier_search_start",
+                        run_key=run_key,
+                        iteration=iteration,
+                        frontier_id=frontier_id,
+                        frontier_name=item.get("name"),
+                        query=query,
+                    )
                     results = self.provider.search(query, self.max_results_per_query)
+                    self._runtime_trace(
+                        session,
+                        run,
+                        "frontier_search_done",
+                        run_key=run_key,
+                        iteration=iteration,
+                        frontier_id=frontier_id,
+                        result_count=len(results),
+                        urls=[getattr(result, "url", None) for result in results[:5]],
+                    )
                     extracted_keys = []
                     pruned = []
                     extraction_profile = {
@@ -5646,14 +6076,88 @@ class IterativeGraphEnrichmentAgent:
                             pruned_count += 1
                             continue
                         summary = _result_text_summary(result)
+                        self._runtime_trace(
+                            session,
+                            run,
+                            "extraction_start",
+                            run_key=run_key,
+                            iteration=iteration,
+                            frontier_id=frontier_id,
+                            source_url=getattr(result, "url", None),
+                            summary_length=len(summary or ""),
+                        )
                         extraction_profile = self._extract_graph_evidence_contract(session, item, result, summary)
-                        candidates = self._candidate_elements(extraction_profile, item, result, summary, iteration)
+                        self._runtime_trace(
+                            session,
+                            run,
+                            "extraction_done",
+                            run_key=run_key,
+                            iteration=iteration,
+                            frontier_id=frontier_id,
+                            source_url=getattr(result, "url", None),
+                            engine=extraction_profile.get("extraction_engine"),
+                            engine_status=extraction_profile.get("extraction_engine_status"),
+                            ontology_candidate_count=len(extraction_profile.get("ontology_candidates") or []),
+                            node_count=len(extraction_profile.get("nodes") or []),
+                            edge_count=len(extraction_profile.get("edges") or []),
+                            finding_count=len(extraction_profile.get("findings") or []),
+                            rejected_count=len(extraction_profile.get("rejected_or_ambiguous_candidates") or []),
+                        )
+                        self._runtime_trace(
+                            session,
+                            run,
+                            "candidate_elements_start",
+                            run_key=run_key,
+                            iteration=iteration,
+                            frontier_id=frontier_id,
+                        )
+                        def trace_candidate_event(event_type: str, **payload: Any) -> None:
+                            self._runtime_trace(
+                                session,
+                                run,
+                                event_type,
+                                run_key=run_key,
+                                iteration=iteration,
+                                frontier_id=frontier_id,
+                                **payload,
+                            )
+
+                        candidates = self._candidate_elements(
+                            extraction_profile,
+                            item,
+                            result,
+                            summary,
+                            iteration,
+                            trace_callback=trace_candidate_event,
+                        )
+                        self._runtime_trace(
+                            session,
+                            run,
+                            "candidate_elements_done",
+                            run_key=run_key,
+                            iteration=iteration,
+                            frontier_id=frontier_id,
+                            candidate_count=len(candidates or []),
+                            candidate_types={
+                                element_type: sum(1 for candidate in candidates if candidate.get("element_type") == element_type)
+                                for element_type in sorted({candidate.get("element_type") for candidate in candidates if candidate.get("element_type")})
+                            },
+                        )
                         if not candidates:
                             pruned.append({"url": result.url, "reason": "no_graph_candidate_extracted"})
                             pruned_count += 1
                             continue
                         annotated_candidates = []
                         endpoint_evidence: dict[str, dict[str, Any]] = {}
+                        self._runtime_trace(
+                            session,
+                            run,
+                            "candidate_dedup_start",
+                            run_key=run_key,
+                            iteration=iteration,
+                            frontier_id=frontier_id,
+                            candidate_count=len(candidates),
+                        )
                         for candidate in candidates:
                             candidate_seq += 1
                             if candidate.get("element_type") == "edge":
@@ -5847,6 +6351,18 @@ class IterativeGraphEnrichmentAgent:
                                         "depth": iteration,
                                     }
                                 )
+                        self._runtime_trace(
+                            session,
+                            run,
+                            "candidate_dedup_done",
+                            run_key=run_key,
+                            iteration=iteration,
+                            frontier_id=frontier_id,
+                            extracted_count=len(extracted_keys),
+                            proposed_count=proposed_count,
+                            pruned_count=pruned_count,
+                            skipped_duplicate_count=len([item for item in skipped_duplicates if item.get("frontier_id") == frontier_id]),
+                        )
                     trace.append(
                         {
                             "iteration": iteration,
@@ -5907,13 +6423,39 @@ class IterativeGraphEnrichmentAgent:
             run.proposed_count = proposed_count
             run.pruned_count = pruned_count
             run.finding_count = finding_count
+            self._runtime_trace(
+                session,
+                run,
+                "duplicate_cleanup_start",
+                run_key=run_key,
+                proposed_count=proposed_count,
+                pruned_count=pruned_count,
+                finding_count=finding_count,
+            )
             duplicate_cleanup = self._cleanup_duplicate_proposed_edges(session)
+            self._runtime_trace(
+                session,
+                run,
+                "duplicate_cleanup_done",
+                run_key=run_key,
+                reviewed_count=len(duplicate_cleanup.get("reviewed") or []),
+                skipped_count=len(duplicate_cleanup.get("skipped") or []),
+            )
             if duplicate_cleanup.get("reviewed"):
                 safety_profile = _json_load(run.safety_profile_json, {})
                 safety_profile["post_run_duplicate_edge_cleanup"] = duplicate_cleanup
                 run.safety_profile_json = _json_dump(safety_profile)
             run.status = "completed"
             run.finished_at = datetime.utcnow()
+            self._runtime_trace(
+                session,
+                run,
+                "run_completed",
+                run_key=run_key,
+                proposed_count=proposed_count,
+                pruned_count=pruned_count,
+                finding_count=finding_count,
+            )
             session.commit()
             return self.get_run(run_key)
         except Exception as exc:
@@ -5922,6 +6464,7 @@ class IterativeGraphEnrichmentAgent:
             run.error = str(exc)
             run.finished_at = datetime.utcnow()
             session.add(run)
+            self._runtime_trace(session, run, "run_failed", run_key=run_key, error=str(exc))
             session.commit()
             raise
         finally:

@@ -1,0 +1,29 @@
+{
+  "loop_id": "maritime-risk-ontology-loop-v1",
+  "coverage_targets": {
+    "class_with_object_ratio": 0.9,
+    "object_with_class_ratio": 0.95,
+    "object_with_relation_ratio": 0.8,
+    "object_with_property_ratio": 0.8,
+    "isolated_object_ratio_max": 0.2,
+    "unsupported_class_count_max": 0,
+    "unclassified_object_ratio_max": 0.1
+  },
+  "latency_targets": {
+    "identity_index_sec_max": 3,
+    "semantic_extraction_sec_max": 60,
+    "dedup_sec_max": 10,
+    "cycle_sec_max": 900
+  },
+  "next_action_policy": {
+    "if_no_frontier": "rebuild_frontier_from_uncovered_approved_objects",
+    "if_many_isolated_objects": "relation_completion",
+    "if_many_unclassified_objects": "class_assignment",
+    "if_many_unsupported_classes": "ontology_shape_repair",
+    "if_many_objects_without_properties": "property_completion",
+    "if_dedup_conflicts_high": "dedup_verifier_review",
+    "if_latency_high": "stage_bottleneck_diagnosis",
+    "if_run_failed": "run_health_diagnosis",
+    "if_targets_met": "continue_frontier_enrichment"
+  }
+}

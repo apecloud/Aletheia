@@ -1423,8 +1423,10 @@ class InstanceRepository:
 
     def types(self, tenant, include_draft=False):
         schema_types = self._schema_graph_types(tenant)
-        if schema_types:
-            return {"tenant": tenant.public_dict(), "types": schema_types}
+        ontology_types = self._ontology_concrete_object_types(tenant, include_draft=include_draft)
+        merged = self._merge_instance_types(schema_types, ontology_types)
+        if merged:
+            return {"tenant": tenant.public_dict(), "types": merged, "approved": True}
         return {
             "tenant": tenant.public_dict(),
             "types": [],
@@ -1434,8 +1436,53 @@ class InstanceRepository:
 
     def search(self, tenant, object_type, query, limit=25, include_draft=False):
         schema_search = self._schema_graph_search(tenant, object_type, query, limit=limit)
-        if schema_search is not None:
-            return schema_search
+        ontology_instances = self._ontology_concrete_object_search(
+            tenant,
+            object_type,
+            query,
+            limit=limit,
+            include_draft=include_draft,
+        )
+        if schema_search is not None or ontology_instances:
+            instances = []
+            seen = set()
+            for node in (schema_search or {}).get("instances") or []:
+                node_id = node.get("id")
+                if node_id and node_id not in seen:
+                    seen.add(node_id)
+                    instances.append(node)
+            for node in ontology_instances:
+                node_id = node.get("id")
+                if not node_id:
+                    continue
+                if node_id in seen:
+                    for existing in instances:
+                        if existing.get("id") != node_id:
+                            continue
+                        aliases = list(dict.fromkeys((existing.get("aliases") or []) + (node.get("aliases") or [])))
+                        if node.get("label") and node.get("label") != existing.get("label"):
+                            aliases.append(node.get("label"))
+                        existing["aliases"] = list(dict.fromkeys([alias for alias in aliases if alias]))
+                        existing["projection_source"] = self._join_projection_sources(
+                            existing.get("projection_source"),
+                            node.get("projection_source"),
+                        )
+                        break
+                    continue
+                seen.add(node_id)
+                instances.append(node)
+                if len(instances) >= max(1, min(int(limit), 100)):
+                    break
+            return {
+                "instances": instances[: max(1, min(int(limit), 100))],
+                "approved": True,
+                "artifact_status": "approved",
+                "tenant": tenant.public_dict(),
+                "projection_source": self._join_projection_sources(
+                    (schema_search or {}).get("projection_source"),
+                    "OntologyConcreteObject" if ontology_instances else None,
+                ),
+            }
         return {
             "tenant": tenant.public_dict(),
             "instances": [],
@@ -1462,8 +1509,596 @@ class InstanceRepository:
     def detail(self, tenant, object_type, instance_id):
         schema_detail = self._schema_graph_detail(tenant, object_type, instance_id)
         if schema_detail is not None:
-            return schema_detail
+            ontology_detail = self._ontology_concrete_object_detail(tenant, object_type, instance_id)
+            if ontology_detail:
+                aliases = list(dict.fromkeys((schema_detail.get("aliases") or []) + (ontology_detail.get("aliases") or [])))
+                if ontology_detail.get("label") and ontology_detail.get("label") != schema_detail.get("label"):
+                    aliases.append(ontology_detail.get("label"))
+                return {
+                    **schema_detail,
+                    "aliases": list(dict.fromkeys([alias for alias in aliases if alias])),
+                    "ontology_concrete_object": ontology_detail.get("ontology_concrete_object"),
+                    "projection_source": self._join_projection_sources(
+                        schema_detail.get("projection_source"),
+                        ontology_detail.get("projection_source"),
+                    ),
+                }
+        ontology_detail = self._ontology_concrete_object_detail(tenant, object_type, instance_id)
+        if ontology_detail is not None:
+            return ontology_detail
         return None
+
+    def _join_projection_sources(self, *sources):
+        items = []
+        for source in sources:
+            for part in str(source or "").split("+"):
+                part = part.strip()
+                if part and part not in items:
+                    items.append(part)
+        return "+".join(items) if items else None
+
+    def _compact_identifier(self, value):
+        return re.sub(r"[^0-9A-Za-z]", "", str(value or "")).lower()
+
+    def _instance_type_matches(self, left, right):
+        return self._compact_identifier(left) == self._compact_identifier(right)
+
+    def _merge_instance_types(self, schema_types, ontology_types):
+        result = []
+        by_compact = {}
+        for item in schema_types or []:
+            item = dict(item)
+            key = self._compact_identifier(item.get("type"))
+            if not key:
+                continue
+            result.append(item)
+            by_compact[key] = item
+        for item in ontology_types or []:
+            item = dict(item)
+            key = self._compact_identifier(item.get("type"))
+            if not key:
+                continue
+            existing = by_compact.get(key)
+            if existing:
+                existing["ontology_object_count"] = int(existing.get("ontology_object_count") or 0) + int(item.get("ontology_object_count") or 0)
+                existing["projection_source"] = self._join_projection_sources(
+                    existing.get("projection_source"),
+                    item.get("projection_source"),
+                )
+                continue
+            result.append(item)
+            by_compact[key] = item
+        return result
+
+    def _ontology_concrete_object_statuses(self, include_draft=False):
+        statuses = ["approved"]
+        if include_draft:
+            statuses.extend(["needs_more_evidence", "draft"])
+        return statuses
+
+    def _ontology_concrete_object_rows(self, tenant, include_draft=False, class_catalog=None):
+        statuses = self._ontology_concrete_object_statuses(include_draft=include_draft)
+        placeholders = ", ".join(f":status_{idx}" for idx, _ in enumerate(statuses))
+        params = {"tenant_id": tenant.tenant_id, **{f"status_{idx}": status for idx, status in enumerate(statuses)}}
+        try:
+            with self.metadata_engine_for(tenant).connect() as conn:
+                rows = conn.execute(
+                    text(
+                        f"""
+                        SELECT element_key, element_type, name, payload_json, evidence_refs_json,
+                               source_url, confidence, status, created_at
+                        FROM aletheia_proposed_graph_elements
+                        WHERE project_id = :tenant_id
+                          AND status IN ({placeholders})
+                          AND element_type = 'ontology_concept'
+                        ORDER BY created_at DESC NULLS LAST, id DESC
+                        """
+                    ),
+                    params,
+                ).mappings().all()
+        except Exception:
+            return []
+
+        result = []
+        if class_catalog is None:
+            class_catalog = self._ontology_class_catalog(tenant)
+        for row in rows:
+            try:
+                payload = _load_json(row["payload_json"], {})
+            except Exception:
+                payload = {}
+            if not self._is_ontology_concrete_object_payload(payload):
+                continue
+            node = self._ontology_concrete_object_node(tenant, row, payload, class_catalog=class_catalog)
+            if node:
+                result.append({"row": row, "payload": payload, "node": node})
+        return result
+
+    def _is_ontology_concrete_object_payload(self, payload):
+        if not isinstance(payload, dict):
+            return False
+        artifact_type = str(payload.get("artifact_type") or payload.get("source_artifact_type") or "").strip().lower()
+        ontology_part = str(payload.get("ontology_part") or "").strip().lower()
+        identity = payload.get("identity") if isinstance(payload.get("identity"), dict) else {}
+        identity_role = str(identity.get("identity_role") or "").strip().lower()
+        return (
+            artifact_type in {"object", "entity", "instance"}
+            and (
+                ontology_part in {"concrete_object", "object_instance", "instance"}
+                or identity_role == "concrete_object"
+            )
+        )
+
+    def _ontology_class_catalog(self, tenant):
+        classes = {}
+
+        def add_class(label, description="", source="ontology"):
+            label = str(label or "").strip()
+            if not label:
+                return
+            type_name = re.sub(r"[^0-9A-Za-z]", "", label) or label
+            key = self._compact_identifier(type_name)
+            if not key or key in classes:
+                return
+            classes[key] = {
+                "type": type_name,
+                "label": label,
+                "description": str(description or "").strip(),
+                "source": source,
+            }
+
+        for item in self._schema_graph_types(tenant) or []:
+            add_class(item.get("label") or item.get("type"), item.get("description"), source="schema_graph")
+
+        try:
+            with self.metadata_engine_for(tenant).connect() as conn:
+                rows = conn.execute(
+                    text(
+                        """
+                        SELECT name, description, payload_json
+                        FROM aletheia_ontology_artifacts
+                        WHERE project_id = :tenant_id
+                          AND status = 'approved'
+                          AND artifact_type = 'object'
+                        """
+                    ),
+                    {"tenant_id": tenant.tenant_id},
+                ).mappings().all()
+                proposed_rows = conn.execute(
+                    text(
+                        """
+                        SELECT name, payload_json
+                        FROM aletheia_proposed_graph_elements
+                        WHERE project_id = :tenant_id
+                          AND status = 'approved'
+                          AND element_type = 'ontology_concept'
+                        """
+                    ),
+                    {"tenant_id": tenant.tenant_id},
+                ).mappings().all()
+        except Exception:
+            rows = []
+            proposed_rows = []
+
+        for row in rows:
+            payload = _load_json(row["payload_json"], {}) if row["payload_json"] else {}
+            ontology_part = str(payload.get("ontology_part") or "").strip().lower()
+            source_artifact_type = str(payload.get("source_artifact_type") or "").strip().lower()
+            if ontology_part in {"concrete_object", "object_instance", "instance"} or source_artifact_type in {"entity", "instance"}:
+                continue
+            add_class(payload.get("label") or row["name"], payload.get("description") or row["description"], source="ontology_artifact")
+
+        for row in proposed_rows:
+            payload = _load_json(row["payload_json"], {}) if row["payload_json"] else {}
+            artifact_type = str(payload.get("artifact_type") or "").strip().lower()
+            ontology_part = str(payload.get("ontology_part") or "").strip().lower()
+            if artifact_type != "class" and ontology_part not in {"class", "abstract_class"}:
+                continue
+            add_class(payload.get("label") or row["name"], payload.get("description"), source="ontology_proposal")
+
+        return list(classes.values())
+
+    def _ontology_class_tokens(self, *values):
+        stop_words = {
+            "a", "an", "and", "are", "as", "by", "for", "from", "in", "is", "it", "of",
+            "on", "or", "such", "that", "the", "their", "this", "to", "used", "with",
+            "good", "were", "where", "whose",
+        }
+        tokens = []
+        for value in values:
+            for token in re.findall(r"[A-Za-z][A-Za-z0-9]+", str(value or "").lower()):
+                if token in stop_words or len(token) < 3:
+                    continue
+                if len(token) > 4 and token.endswith("ies"):
+                    token = token[:-3] + "y"
+                elif len(token) > 4 and token.endswith("s"):
+                    token = token[:-1]
+                tokens.append(token)
+        return set(tokens)
+
+    def _infer_ontology_concrete_object_class(self, tenant, payload, label, class_catalog=None):
+        class_catalog = class_catalog if class_catalog is not None else self._ontology_class_catalog(tenant)
+        if not class_catalog:
+            return None
+        candidate = payload.get("ontology_candidate") if isinstance(payload.get("ontology_candidate"), dict) else {}
+        object_tokens = self._ontology_class_tokens(
+            label,
+            payload.get("description"),
+            payload.get("evidence_quote"),
+            candidate.get("description"),
+        )
+        if not object_tokens:
+            return None
+        best = None
+        for item in class_catalog:
+            label_tokens = self._ontology_class_tokens(item.get("label"), item.get("type"))
+            description_tokens = self._ontology_class_tokens(item.get("description"))
+            if not label_tokens and not description_tokens:
+                continue
+            label_overlap = len(object_tokens & label_tokens)
+            description_overlap = len(object_tokens & description_tokens)
+            coverage = (label_overlap * 3 + description_overlap) / max(len(label_tokens) * 3 + len(description_tokens), 1)
+            evidence = label_overlap * 3 + description_overlap
+            score = evidence + coverage
+            if evidence <= 0:
+                continue
+            if not best or score > best["score"]:
+                best = {"score": score, "class": item}
+        if best and best["score"] >= 1.0:
+            return best["class"]["type"]
+        return None
+
+    def _ontology_concrete_object_class(self, tenant, payload, label, class_catalog=None):
+        identity = payload.get("identity") if isinstance(payload.get("identity"), dict) else {}
+        candidate = payload.get("ontology_candidate") if isinstance(payload.get("ontology_candidate"), dict) else {}
+        for value in [
+            payload.get("object_type"),
+            payload.get("ontology_type"),
+            payload.get("class_name"),
+            payload.get("class"),
+            payload.get("type"),
+            identity.get("entity_type"),
+            candidate.get("object_type"),
+            candidate.get("ontology_type"),
+            candidate.get("class_name"),
+            candidate.get("class"),
+            candidate.get("type"),
+        ]:
+            text_value = str(value or "").strip()
+            if text_value:
+                return re.sub(r"[^0-9A-Za-z]", "", text_value) or text_value
+        dedup_decision = str(payload.get("dedup_decision") or payload.get("llm_dedup_decision_override") or "").strip().lower()
+        matched_node_key = str(payload.get("matched_node_key") or "").strip()
+        if dedup_decision == "merge_existing" and ":" in matched_node_key:
+            prefix = matched_node_key.split(":", 1)[0].strip()
+            if prefix:
+                return prefix
+        inferred = self._infer_ontology_concrete_object_class(tenant, payload, label, class_catalog=class_catalog)
+        return inferred or "UnclassifiedOntologyObject"
+
+    def _ontology_concrete_object_label(self, row, payload):
+        identity = payload.get("identity") if isinstance(payload.get("identity"), dict) else {}
+        candidate = payload.get("ontology_candidate") if isinstance(payload.get("ontology_candidate"), dict) else {}
+        for value in [payload.get("label"), candidate.get("label"), identity.get("label"), row["name"]]:
+            text_value = str(value or "").strip()
+            if text_value:
+                return text_value
+        return row["element_key"]
+
+    def _ontology_concrete_object_node_id(self, object_type, label, payload, row):
+        dedup_decision = str(payload.get("dedup_decision") or payload.get("llm_dedup_decision_override") or "").strip().lower()
+        matched_node_key = str(payload.get("matched_node_key") or "").strip()
+        if dedup_decision == "merge_existing" and ":" in matched_node_key:
+            return matched_node_key
+        identity = payload.get("identity") if isinstance(payload.get("identity"), dict) else {}
+        source_identity = (
+            payload.get("source_identity")
+            or payload.get("instance_id")
+            or identity.get("source_identity")
+            or identity.get("canonical_id")
+        )
+        stable_id = str(source_identity or label or row["element_key"]).strip()
+        return f"{object_type}:{stable_id}"
+
+    def _ontology_concrete_object_node(self, tenant, row, payload, class_catalog=None):
+        label = self._ontology_concrete_object_label(row, payload)
+        object_type = self._ontology_concrete_object_class(tenant, payload, label, class_catalog=class_catalog)
+        if not object_type or not label:
+            return None
+        node_id = self._ontology_concrete_object_node_id(object_type, label, payload, row)
+        identity = payload.get("identity") if isinstance(payload.get("identity"), dict) else {}
+        candidate = payload.get("ontology_candidate") if isinstance(payload.get("ontology_candidate"), dict) else {}
+        aliases = []
+        for alias in identity.get("aliases") or payload.get("aliases") or []:
+            alias = str(alias or "").strip()
+            if alias and alias not in aliases:
+                aliases.append(alias)
+        if label and label not in aliases:
+            aliases.append(label)
+        source_url = payload.get("source_url") or candidate.get("source_ref") or row["source_url"]
+        evidence_refs = _load_json(row["evidence_refs_json"], []) if row["evidence_refs_json"] else []
+        return {
+            "id": node_id,
+            "tenant_id": tenant.tenant_id,
+            "namespace": tenant.namespace,
+            "graph_database": tenant.graph_database,
+            "type": object_type,
+            "label": label,
+            "aliases": aliases,
+            "status": row["status"],
+            "source_table": None,
+            "source_pk": f"element_key={row['element_key']}",
+            "ontology_artifact": None,
+            "ontology_part": payload.get("ontology_part"),
+            "element_key": row["element_key"],
+            "confidence": row["confidence"],
+            "source_url": source_url,
+            "projection_source": "OntologyConcreteObject",
+            "key_properties": {
+                "label": label,
+                "description": payload.get("description") or candidate.get("description"),
+                "evidence_quote": payload.get("evidence_quote"),
+                "source_url": source_url,
+                "dedup_decision": payload.get("dedup_decision"),
+                "matched_node_key": payload.get("matched_node_key"),
+                "element_key": row["element_key"],
+            },
+            "properties": {
+                "artifact_type": payload.get("artifact_type"),
+                "ontology_part": payload.get("ontology_part"),
+                "dedup_decision": payload.get("dedup_decision"),
+                "matched_node_key": payload.get("matched_node_key"),
+                "evidence_refs": evidence_refs,
+            },
+            "ontology_concrete_object": {
+                "element_key": row["element_key"],
+                "dedup_decision": payload.get("dedup_decision"),
+                "matched_node_key": payload.get("matched_node_key"),
+            },
+        }
+
+    def _ontology_concrete_object_nodes(self, tenant, include_draft=False, class_catalog=None):
+        nodes = []
+        by_id = {}
+        class_catalog = class_catalog if class_catalog is not None else self._ontology_class_catalog(tenant)
+        for item in self._ontology_concrete_object_rows(tenant, include_draft=include_draft, class_catalog=class_catalog):
+            node = dict(item["node"])
+            existing = by_id.get(node["id"])
+            if existing:
+                existing["aliases"] = list(dict.fromkeys((existing.get("aliases") or []) + (node.get("aliases") or [])))
+                existing["projection_source"] = self._join_projection_sources(
+                    existing.get("projection_source"),
+                    node.get("projection_source"),
+                )
+                continue
+            by_id[node["id"]] = node
+            nodes.append(node)
+        return nodes
+
+    def _ontology_concrete_object_types(self, tenant, include_draft=False):
+        class_catalog = self._ontology_class_catalog(tenant)
+        counts = {}
+        for node in self._ontology_concrete_object_nodes(tenant, include_draft=include_draft, class_catalog=class_catalog):
+            object_type = node.get("type")
+            if not object_type:
+                continue
+            counts[object_type] = counts.get(object_type, 0) + 1
+        class_rows = []
+        seen = set()
+        for item in class_catalog:
+            object_type = item.get("type")
+            if not object_type:
+                continue
+            object_count = counts.get(object_type, 0)
+            if object_count <= 0:
+                continue
+            seen.add(self._compact_identifier(object_type))
+            class_rows.append(
+                {
+                    "type": object_type,
+                    "label": item.get("label") or object_type,
+                    "table": "approved ontology classes",
+                    "ontology_artifact": None,
+                    "artifact_status": "approved",
+                    "approved": True,
+                    "tenant_id": tenant.tenant_id,
+                    "projection_source": "OntologyClassCatalog",
+                    "ontology_object_count": object_count,
+                }
+            )
+        object_rows = [
+            {
+                "type": object_type,
+                "label": object_type,
+                "table": "approved ontology objects",
+                "ontology_artifact": None,
+                "artifact_status": "approved",
+                "approved": True,
+                "tenant_id": tenant.tenant_id,
+                "projection_source": "OntologyConcreteObject",
+                "ontology_object_count": count,
+            }
+            for object_type, count in sorted(counts.items(), key=lambda item: item[0].lower())
+            if self._compact_identifier(object_type) not in seen
+            and self._compact_identifier(object_type) != "unclassifiedontologyobject"
+        ]
+        return class_rows + object_rows
+
+    def _ontology_concrete_object_search(self, tenant, object_type, query, limit=25, include_draft=False):
+        limit = max(1, min(int(limit), 100))
+        normalized_query = str(query or "").strip().lower()
+        result = []
+        for node in self._ontology_concrete_object_nodes(tenant, include_draft=include_draft):
+            if not self._instance_type_matches(node.get("type"), object_type):
+                continue
+            node_id = str(node.get("id") or "")
+            short_id = node_id.split(":", 1)[1] if ":" in node_id else node_id
+            haystack = [
+                node_id,
+                short_id,
+                node.get("label"),
+                *(node.get("aliases") or []),
+                *((node.get("key_properties") or {}).values()),
+            ]
+            normalized_values = [str(value or "").strip().lower() for value in haystack if value not in (None, "")]
+            if normalized_query and not any(normalized_query in value for value in normalized_values):
+                continue
+            result.append(node)
+            if len(result) >= limit:
+                break
+        return result
+
+    def _ontology_concrete_object_detail(self, tenant, object_type, instance_id):
+        expected_id = f"{object_type}:{instance_id}"
+        nodes = self._ontology_concrete_object_nodes(tenant, include_draft=True)
+        for node in nodes:
+            node_id = str(node.get("id") or "")
+            short_id = node_id.split(":", 1)[1] if ":" in node_id else node_id
+            if not self._instance_type_matches(node.get("type"), object_type):
+                continue
+            if node_id != expected_id and short_id != str(instance_id):
+                continue
+            relations_summary = self._ontology_node_relations_summary(tenant, node_id, nodes=nodes)
+            return {
+                **node,
+                "source_row": node.get("key_properties") or {},
+                "relations_summary": relations_summary,
+            }
+        return None
+
+    def _ontology_relation_instance_rows(self, tenant):
+        try:
+            with self.metadata_engine_for(tenant).connect() as conn:
+                rows = conn.execute(
+                    text(
+                        """
+                        SELECT element_key, name, payload_json, evidence_refs_json,
+                               source_url, confidence, status, created_at
+                        FROM aletheia_proposed_graph_elements
+                        WHERE project_id = :tenant_id
+                          AND status = 'approved'
+                          AND element_type = 'ontology_concept'
+                        ORDER BY created_at DESC NULLS LAST, id DESC
+                        """
+                    ),
+                    {"tenant_id": tenant.tenant_id},
+                ).mappings().all()
+        except Exception:
+            return []
+        result = []
+        for row in rows:
+            try:
+                payload = _load_json(row["payload_json"], {})
+            except Exception:
+                continue
+            artifact_type = str(payload.get("artifact_type") or "").strip().lower()
+            ontology_part = str(payload.get("ontology_part") or "").strip().lower()
+            if artifact_type not in {"link", "relation"} and ontology_part != "relation":
+                continue
+            if not payload.get("source_label") or not payload.get("target_label"):
+                continue
+            result.append({"row": row, "payload": payload})
+        return result
+
+    def _ontology_node_lookup(self, nodes):
+        lookup = {}
+
+        def add(key, node_id):
+            key = self._compact_identifier(key)
+            if key and node_id:
+                lookup.setdefault(key, node_id)
+
+        for node in nodes or []:
+            node_id = node.get("id")
+            node_type = node.get("type")
+            label = node.get("label")
+            short_id = str(node_id or "").split(":", 1)[1] if ":" in str(node_id or "") else node_id
+            for value in [node_id, short_id, label, *(node.get("aliases") or [])]:
+                add(value, node_id)
+                add(f"{node_type}:{value}", node_id)
+        return lookup
+
+    def _ontology_relation_instance_edges(self, tenant, nodes):
+        lookup = self._ontology_node_lookup(nodes)
+        edges = []
+        seen = set()
+        for item in self._ontology_relation_instance_rows(tenant):
+            row = item["row"]
+            payload = item["payload"]
+            source_type = payload.get("source_object_type") or payload.get("source_type") or payload.get("domain")
+            target_type = payload.get("target_object_type") or payload.get("target_type") or payload.get("range")
+            source_label = payload.get("source_label")
+            target_label = payload.get("target_label")
+            source_id = (
+                lookup.get(self._compact_identifier(f"{source_type}:{source_label}"))
+                or lookup.get(self._compact_identifier(source_label))
+            )
+            target_id = (
+                lookup.get(self._compact_identifier(f"{target_type}:{target_label}"))
+                or lookup.get(self._compact_identifier(target_label))
+            )
+            if not source_id or not target_id or source_id == target_id:
+                continue
+            relation = payload.get("relation") or payload.get("label") or row["name"] or "relation"
+            edge_id = f"{source_id}->{target_id}:ontology:{row['element_key']}"
+            if edge_id in seen:
+                continue
+            seen.add(edge_id)
+            evidence_refs = _load_json(row["evidence_refs_json"], []) if row["evidence_refs_json"] else []
+            edges.append(
+                {
+                    "id": edge_id,
+                    "tenant_id": tenant.tenant_id,
+                    "source": source_id,
+                    "target": target_id,
+                    "label": relation,
+                    "kind": relation,
+                    "status": row["status"],
+                    "projection_source": "OntologyRelationInstance",
+                    "element_key": row["element_key"],
+                    "confidence": row["confidence"],
+                    "source_url": payload.get("source_url") or row["source_url"],
+                    "properties": {
+                        "artifact_type": payload.get("artifact_type"),
+                        "ontology_part": payload.get("ontology_part"),
+                        "source_label": source_label,
+                        "source_object_type": source_type,
+                        "target_label": target_label,
+                        "target_object_type": target_type,
+                        "evidence_quote": payload.get("evidence_quote"),
+                        "evidence_refs": evidence_refs,
+                    },
+                }
+            )
+        return edges
+
+    def _ontology_node_relations_summary(self, tenant, node_id, nodes=None):
+        node_id = str(node_id or "").strip()
+        if not node_id:
+            return {"nodes": 0, "edges": 0, "by_relation": {}, "projection_source": "OntologyRelationInstance"}
+        nodes = nodes if nodes is not None else self._ontology_concrete_object_nodes(tenant, include_draft=False)
+        edges = self._ontology_relation_instance_edges(tenant, nodes)
+        by_relation = {}
+        related_nodes = set()
+        edge_count = 0
+        for edge in edges:
+            source = edge.get("source")
+            target = edge.get("target")
+            if source != node_id and target != node_id:
+                continue
+            edge_count += 1
+            relation = str(edge.get("label") or edge.get("kind") or "relation")
+            by_relation[relation] = int(by_relation.get(relation) or 0) + 1
+            if source and source != node_id:
+                related_nodes.add(source)
+            if target and target != node_id:
+                related_nodes.add(target)
+        return {
+            "nodes": len(related_nodes) + (1 if edge_count else 0),
+            "edges": edge_count,
+            "by_relation": by_relation,
+            "projection_source": "OntologyRelationInstance",
+        }
 
     def _schema_graph_artifacts(self, tenant):
         with self.metadata_engine_for(tenant).connect() as conn:
@@ -2147,14 +2782,159 @@ class InstanceRepository:
     def neighborhood(self, tenant, object_type, instance_id, depth=1, limit=200):
         schema_graph = self._schema_graph_neighborhood(tenant, object_type, instance_id, depth=depth, limit=limit)
         if schema_graph is not None:
-            return schema_graph
+            return self._merge_ontology_concrete_objects_into_graph(
+                tenant,
+                schema_graph,
+                object_type=object_type,
+                instance_id=instance_id,
+                limit=limit,
+            )
+        ontology_detail = self._ontology_concrete_object_detail(tenant, object_type, instance_id)
+        if ontology_detail is not None:
+            requested_limit = int(limit)
+            applied_limit = max(1, min(requested_limit, 300))
+            return {
+                "approved": True,
+                "tenant": tenant.public_dict(),
+                "graph_database": tenant.graph_database,
+                "depth": max(1, min(int(depth), 2)),
+                "limit": applied_limit,
+                "limits": {"requested_limit": requested_limit, "applied_limit": applied_limit, "hard_limit": 300, "truncated": False},
+                "center": ontology_detail,
+                "nodes": [ontology_detail],
+                "edges": [],
+                "scope": {
+                    "tenant_id": tenant.tenant_id,
+                    "center_node": ontology_detail["id"],
+                    "type": ontology_detail["type"],
+                    "id": str(instance_id),
+                    "depth": max(1, min(int(depth), 2)),
+                    "node_limit": applied_limit,
+                    "edge_limit": applied_limit,
+                    "allowed_node_types": [ontology_detail["type"]],
+                    "allowed_link_keys": [],
+                    "approved_only": True,
+                    "projection_source": "OntologyConcreteObject",
+                },
+            }
         return None
 
     def full_graph(self, tenant, object_type=None, instance_id=None, limit=200):
         schema_graph = self._schema_graph_full_graph(tenant, object_type=object_type, instance_id=instance_id, limit=limit)
         if schema_graph is not None:
-            return schema_graph
-        return None
+            return self._merge_ontology_concrete_objects_into_graph(
+                tenant,
+                schema_graph,
+                object_type=object_type,
+                instance_id=instance_id,
+                limit=limit,
+            )
+        ontology_nodes = self._ontology_concrete_object_nodes(tenant, include_draft=False)
+        if not ontology_nodes:
+            return None
+        requested_limit = int(limit)
+        applied_limit = max(1, min(requested_limit, 300))
+        graph = {
+            "approved": True,
+            "tenant": tenant.public_dict(),
+            "graph_database": tenant.graph_database,
+            "depth": 0,
+            "limit": applied_limit,
+            "limits": {"requested_limit": requested_limit, "applied_limit": applied_limit, "hard_limit": 300, "truncated": len(ontology_nodes) > applied_limit},
+            "center": None,
+            "nodes": [],
+            "edges": [],
+            "scope": {
+                "tenant_id": tenant.tenant_id,
+                "view": "all",
+                "node_limit": applied_limit,
+                "edge_limit": applied_limit * 3,
+                "approved_only": True,
+                "projection_source": "OntologyConcreteObject",
+            },
+        }
+        return self._merge_ontology_concrete_objects_into_graph(
+            tenant,
+            graph,
+            object_type=object_type,
+            instance_id=instance_id,
+            limit=limit,
+            ontology_nodes=ontology_nodes,
+        )
+
+    def _merge_ontology_concrete_objects_into_graph(self, tenant, graph, object_type=None, instance_id=None, limit=200, ontology_nodes=None):
+        if graph is None:
+            return None
+        requested_limit = int(limit)
+        applied_limit = max(1, min(requested_limit, 300))
+        nodes = list(graph.get("nodes") or [])
+        edges = list(graph.get("edges") or [])
+        by_id = {node.get("id"): node for node in nodes if node.get("id")}
+        ontology_nodes = ontology_nodes if ontology_nodes is not None else self._ontology_concrete_object_nodes(tenant, include_draft=False)
+        center = graph.get("center")
+
+        for node in ontology_nodes:
+            node_id = node.get("id")
+            if not node_id:
+                continue
+            if node_id in by_id:
+                existing = by_id[node_id]
+                aliases = list(dict.fromkeys((existing.get("aliases") or []) + (node.get("aliases") or [])))
+                if node.get("label") and node.get("label") != existing.get("label"):
+                    aliases.append(node.get("label"))
+                existing["aliases"] = list(dict.fromkeys([alias for alias in aliases if alias]))
+                existing["projection_source"] = self._join_projection_sources(
+                    existing.get("projection_source"),
+                    node.get("projection_source"),
+                )
+                existing.setdefault("ontology_concrete_object", node.get("ontology_concrete_object"))
+            elif len(nodes) < applied_limit:
+                nodes.append(node)
+                by_id[node_id] = node
+
+            short_id = node_id.split(":", 1)[1] if ":" in node_id else node_id
+            if object_type and instance_id and self._instance_type_matches(node.get("type"), object_type) and short_id == str(instance_id):
+                center = by_id.get(node_id) or node
+
+        seen_edges = {edge.get("id") for edge in edges if edge.get("id")}
+        ontology_edges = self._ontology_relation_instance_edges(tenant, nodes)
+        promoted_edges = []
+        for edge in ontology_edges:
+            edge_id = edge.get("id")
+            if not edge_id or edge_id in seen_edges:
+                continue
+            if edge.get("source") not in by_id or edge.get("target") not in by_id:
+                continue
+            promoted_edges.append(edge)
+            seen_edges.add(edge_id)
+        if promoted_edges:
+            edges = [*promoted_edges, *edges]
+
+        scope = dict(graph.get("scope") or {})
+        scope["projection_source"] = self._join_projection_sources(
+            scope.get("projection_source"),
+            "OntologyConcreteObject" if ontology_nodes else None,
+            "OntologyRelationInstance" if ontology_edges else None,
+        )
+        allowed_node_types = set(scope.get("allowed_node_types") or [])
+        allowed_node_types.update(node.get("type") for node in ontology_nodes if node.get("type"))
+        if allowed_node_types and "allowed_node_types" in scope:
+            scope["allowed_node_types"] = sorted(allowed_node_types)
+        limits = dict(graph.get("limits") or {})
+        limits.setdefault("requested_limit", requested_limit)
+        limits.setdefault("applied_limit", applied_limit)
+        limits.setdefault("hard_limit", 300)
+        limits["truncated"] = bool(limits.get("truncated")) or len(nodes) >= applied_limit and len(ontology_nodes) > 0 or len(edges) > applied_limit * 3
+        return {
+            **graph,
+            "approved": bool(graph.get("approved")) or bool(nodes),
+            "limit": graph.get("limit") or applied_limit,
+            "limits": limits,
+            "center": center,
+            "nodes": nodes[:applied_limit],
+            "edges": edges[: applied_limit * 3],
+            "scope": scope,
+        }
 
     def ontology_model_graph(self, tenant, limit=300):
         requested_limit = int(limit or 300)
@@ -2956,6 +3736,8 @@ class InstanceRepository:
         ):
             if key in body:
                 config[key] = max(0, min(int(body.get(key) or 0), upper_bound))
+        if "instance_coverage_detail_fallback" in body:
+            config["instance_coverage_detail_fallback"] = bool(body.get("instance_coverage_detail_fallback"))
         if "budget" in body:
             raw_budget = body.get("budget") or config.get("max_frontier") or 4
             budget_config = dict(config.get("budget") or {})
@@ -3518,6 +4300,33 @@ class InstanceRepository:
         min_relation_edges = max(0, int(config.get("instance_coverage_min_edges") or 0))
         min_enrichment_items = max(0, int(config.get("instance_coverage_min_enrichment_items") or 2))
         per_type_limit = max(1, min(int(config.get("instance_coverage_per_type_limit") or limit or 50), 200))
+        detail_fallback = bool(config.get("instance_coverage_detail_fallback"))
+        projected_relations = {}
+        if min_relation_edges > 0:
+            try:
+                graph = self.full_graph(tenant, limit=max(50, min(per_type_limit * 4, 1000))) or {}
+            except Exception:
+                graph = {}
+            for edge in graph.get("edges") or []:
+                source = edge.get("source")
+                target = edge.get("target")
+                relation = str(edge.get("label") or edge.get("kind") or "relation")
+                for node_id, related_node in ((source, target), (target, source)):
+                    if not node_id:
+                        continue
+                    summary = projected_relations.setdefault(
+                        node_id,
+                        {
+                            "nodes": set(),
+                            "edges": 0,
+                            "by_relation": {},
+                            "projection_source": "ApprovedGraphProjection",
+                        },
+                    )
+                    summary["edges"] += 1
+                    if related_node:
+                        summary["nodes"].add(related_node)
+                    summary["by_relation"][relation] = int(summary["by_relation"].get(relation) or 0) + 1
         try:
             type_rows = self.types(tenant, include_draft=False).get("types") or []
         except Exception:
@@ -3539,13 +4348,23 @@ class InstanceRepository:
                 relation_count = 0
                 relations_summary = {}
                 if min_relation_edges > 0:
-                    try:
-                        detail = self.detail(tenant, object_type, instance_id) if instance_id else None
-                        relations_summary = (detail or {}).get("relations_summary") if isinstance((detail or {}).get("relations_summary"), dict) else {}
-                        relation_count = int(relations_summary.get("edges") or 0)
-                    except Exception:
-                        relation_count = 0
-                        relations_summary = {}
+                    projected_summary = projected_relations.get(node_id)
+                    if projected_summary:
+                        relation_count = int(projected_summary.get("edges") or 0)
+                        relations_summary = {
+                            "nodes": len(projected_summary.get("nodes") or []),
+                            "edges": relation_count,
+                            "by_relation": dict(projected_summary.get("by_relation") or {}),
+                            "projection_source": projected_summary.get("projection_source"),
+                        }
+                    elif detail_fallback:
+                        try:
+                            detail = self.detail(tenant, object_type, instance_id) if instance_id else None
+                            relations_summary = (detail or {}).get("relations_summary") if isinstance((detail or {}).get("relations_summary"), dict) else {}
+                            relation_count = int(relations_summary.get("edges") or 0)
+                        except Exception:
+                            relation_count = 0
+                            relations_summary = {}
                 label = str(instance.get("label") or instance.get("name") or instance_id or node_id)
                 instance_records.append(
                     {
@@ -6392,12 +7211,19 @@ class InstanceRepository:
         if not (config or {}).get("auto_approve_low_duplicate_proposals", True):
             return False, "disabled", 0.0
         element_type = str(element.get("element_type") or "").lower()
-        if element_type in {"ontology_concept", "ontology_model_node"}:
-            return False, "ontology_review_or_projection_not_auto_approved", 0.0
+        payload = element.get("payload") or {}
+        if element_type == "ontology_model_node":
+            return False, "ontology_model_projection_not_auto_approved", 0.0
+        if element_type == "ontology_concept":
+            artifact_type = str(payload.get("artifact_type") or "").strip().lower()
+            ontology_part = str(payload.get("ontology_part") or "").strip().lower()
+            if artifact_type == "class" or ontology_part in {"class", "abstract_class"}:
+                return False, "ontology_class_requires_human_review", 0.0
+            if ontology_part not in {"concrete_object", "object_instance", "instance", "relation", "property"}:
+                return False, "ontology_model_concept_requires_human_review", 0.0
         status = str(element.get("status") or "").replace("-", "_").lower()
         if status not in {"draft", "needs_review", "needs_more_evidence", "proposed"}:
             return False, f"status_not_pending:{status or 'unknown'}", 0.0
-        payload = element.get("payload") or {}
         if payload.get("decision_reason") == "structural_conflict" or payload.get("conflict_fields"):
             return False, "structural_conflict_requires_human_review", self._proposal_duplicate_score(element)
         try:

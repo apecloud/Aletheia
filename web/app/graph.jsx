@@ -468,13 +468,22 @@ function GraphExplorer({ data, tenant, language }) {
     [tenantId, centerType, centerSearch, 50, { includeDraft: true }],
     { enabled: typesLoaded && !!activeType, fallback: [] }
   );
-  const candidates = Array.isArray(candidatesQ.data) ? candidatesQ.data : [];
+  const candidateMatchesCenterType = (candidate) => {
+    const id = String(candidate?.id || "");
+    return !!centerType && (id === centerType || id.startsWith(`${centerType}:`));
+  };
+  const candidates = Array.isArray(candidatesQ.data)
+    ? candidatesQ.data.filter(candidateMatchesCenterType)
+    : [];
   const allCandidatesQ = useApiData(
     "instanceSearch",
     [tenantId, centerType, "", 300, { includeDraft: true }],
     { enabled: typesLoaded && !!activeType, fallback: [] }
   );
-  const allCandidates = Array.isArray(allCandidatesQ.data) ? allCandidatesQ.data : [];
+  const allCandidates = Array.isArray(allCandidatesQ.data)
+    ? allCandidatesQ.data.filter(candidateMatchesCenterType)
+    : [];
+  const centerCandidatesLoading = candidatesQ.loading || allCandidatesQ.loading || candidatesQ.source === "loading" || allCandidatesQ.source === "loading";
   const centerCandidateUniverse = allCandidates.length ? allCandidates : candidates;
   const visibleCandidates = candidates.length || centerSearch.trim() ? candidates : allCandidates;
   const proposedQ = useApiData("graphProposedElements", [tenantId, {}], {
@@ -526,7 +535,7 @@ function GraphExplorer({ data, tenant, language }) {
   }, [tenantId, typesQ.source, JSON.stringify(centerTypeNames)]);
 
   useEffectGX(() => {
-    if (!centerType || candidatesQ.source === "loading" || allCandidatesQ.source === "loading") return;
+    if (!centerType || centerCandidatesLoading) return;
     if (centerCandidateUniverse.length === 0) {
       if (centerNodeId) setCenterNodeId("");
       return;
@@ -539,7 +548,9 @@ function GraphExplorer({ data, tenant, language }) {
       requestedCenterNodeId &&
       (!requestedTenantId || requestedTenantId === tenantId)
     ) {
-      setCenterNodeId(requestedCenterNodeId);
+      const resolvedRequested = resolveCenterInputGX(requestedCenterNodeId, centerType, centerCandidateUniverse);
+      if (resolvedRequested) setCenterNodeId(resolvedRequested);
+      else setCenterSearch("");
       return;
     }
     if (!centerNodeId && !centerSearch.trim()) {
@@ -552,11 +563,13 @@ function GraphExplorer({ data, tenant, language }) {
         setFocusMessage(tGX(language, "Center resolved inside current tenant. Load full graph to focus it.", "已在当前租户内解析中心节点；点击加载全图后聚焦。"));
         return;
       }
-      setFocusMessage(`${expectedId} is outside the visible center list; Load full graph will still include it if it exists.`);
+      setCenterNodeId("");
+      setFocusMessage(tGX(language, "No matching center node for this type in the current tenant.", "当前租户的当前类型下没有匹配的中心节点。"));
     } else if (!match) {
-      setFocusMessage(`${expectedId} is outside the visible center list; Load full graph will still include it if it exists.`);
+      setCenterNodeId("");
+      setFocusMessage(`${expectedId} is outside the visible center list.`);
     }
-  }, [tenantId, centerType, centerSearch, candidatesQ.source, allCandidatesQ.source, JSON.stringify(centerCandidateUniverse.map(c => c.id))]);
+  }, [tenantId, centerType, centerSearch, centerCandidatesLoading, JSON.stringify(centerCandidateUniverse.map(c => c.id))]);
 
   useEffectGX(() => {
     try {
@@ -927,8 +940,9 @@ function GraphExplorer({ data, tenant, language }) {
                   {centerTypes.length === 0 && <option value="">{tGX(language, "No tenant types", "无租户类型")}</option>}
                   {centerTypes.map(t => <option key={t.type} value={t.type}>{t.label || t.type}{t.approved ? "" : " · draft"}</option>)}
                 </select>
-                <select className="select" value={centerNodeId} onChange={e => { setCenterNodeId(e.target.value); setCenterSearch(e.target.value); }} disabled={!centerType || visibleCandidates.length === 0}>
-                  {visibleCandidates.length === 0 && <option value="">{tGX(language, "No center nodes", "无中心节点")}</option>}
+                <select className="select" value={centerNodeId} onChange={e => { setCenterNodeId(e.target.value); setCenterSearch(e.target.value); }} disabled={!centerType || centerCandidatesLoading || visibleCandidates.length === 0}>
+                  {centerCandidatesLoading && <option value="">{tGX(language, "Loading center nodes", "加载中心节点")}</option>}
+                  {!centerCandidatesLoading && visibleCandidates.length === 0 && <option value="">{tGX(language, "No center nodes", "无中心节点")}</option>}
                   {visibleCandidates.map(c => {
                     const id = String(c.id || "").split(":").slice(1).join(":");
                     return <option key={c.id} value={id}>{centerType === "Country" ? countryLabelGX(c.label || c.id, language) : labelGX(c.label || c.id, language)}</option>;
@@ -948,7 +962,7 @@ function GraphExplorer({ data, tenant, language }) {
                 {tGX(language, "Use typed center", "使用输入的中心节点")}
               </button>
               <div style={{ marginTop: 6, fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--muted)" }}>
-                {activeType ? `${activeType.table} · ${activeType.ontology_artifact} · ${activeType.artifact_status || "unknown"} · ${centerCandidateUniverse.length} ${tGX(language, "candidates", "候选")}` : tGX(language, "No tenant graph center types for this tenant.", "该租户没有可用的图谱中心类型。")}
+                {activeType ? `${activeType.table} · ${activeType.ontology_artifact} · ${activeType.artifact_status || "unknown"} · ${centerCandidatesLoading ? "…" : centerCandidateUniverse.length} ${tGX(language, "candidates", "候选")}` : tGX(language, "No tenant graph center types for this tenant.", "该租户没有可用的图谱中心类型。")}
               </div>
               <button className="btn ghost" style={{ marginTop: 8, width: "100%" }} disabled={!centerKey || !graphWithPositions.nodes.some(node => node.id === centerKey)} onClick={focusCenterNode}>
                 {tGX(language, "Focus center in full graph", "在全图中聚焦中心")}

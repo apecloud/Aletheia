@@ -199,6 +199,176 @@ class ContinuousEnrichmentFrontierTest(unittest.TestCase):
         self.assertEqual(result["match_method"], "schema_exact_instance_query")
         self.assertTrue(result["matched_existing_instance"])
 
+    def test_approved_concrete_ontology_objects_project_to_approved_graph(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo, tenant = self._sqlite_tenant_repo(tmpdir)
+            engine = repo.metadata_engine_for(tenant)
+            ensure_artifact_schema(engine)
+            with engine.begin() as conn:
+                run_result = conn.execute(
+                    text(
+                        """
+                        INSERT INTO aletheia_iterative_graph_enrichment_runs
+                            (project_id, run_key, source_agent, status, objective,
+                             frontier_json, expansion_trace_json, safety_profile_json,
+                             budget_json, skipped_sources_json, proposed_count,
+                             pruned_count, finding_count, started_at)
+                        VALUES
+                            (:project_id, :run_key, 'IterativeGraphEnrichmentAgent',
+                             'completed', 'test concrete object projection', '[]', '[]',
+                             '{}', '{}', '[]', 2, 0, 0, :started_at)
+                        """
+                    ),
+                    {
+                        "project_id": tenant.tenant_id,
+                        "run_key": "concrete-object-projection-test",
+                        "started_at": datetime.utcnow(),
+                    },
+                )
+                run_id = run_result.lastrowid
+                rows = [
+                    (
+                        "proposed-graph:tenant-a:ontology-concept:waterway-class",
+                        "Waterway",
+                        {
+                            "artifact_type": "class",
+                            "ontology_part": "abstract_class",
+                            "label": "Waterway",
+                            "description": "A class for navigable water bodies, channels, passages, and seas.",
+                        },
+                    ),
+                    (
+                        "proposed-graph:tenant-a:ontology-concept:empty-class",
+                        "Empty Class",
+                        {
+                            "artifact_type": "class",
+                            "ontology_part": "abstract_class",
+                            "label": "Empty Class",
+                            "description": "A class with no approved concrete objects.",
+                        },
+                    ),
+                    (
+                        "proposed-graph:tenant-a:ontology-concept:red-sea",
+                        "Red Sea",
+                        {
+                            "artifact_type": "object",
+                            "ontology_part": "concrete_object",
+                            "label": "Red Sea",
+                            "description": "A named body of water.",
+                            "identity": {"identity_role": "concrete_object", "label": "Red Sea"},
+                            "dedup_decision": "new_proposal",
+                            "evidence_quote": "connecting the Red Sea to the Gulf of Aden",
+                        },
+                    ),
+                    (
+                        "proposed-graph:tenant-a:ontology-concept:portugal",
+                        "Portugal",
+                        {
+                            "artifact_type": "object",
+                            "ontology_part": "concrete_object",
+                            "label": "Portugal",
+                            "identity": {"identity_role": "concrete_object", "label": "Portugal"},
+                            "dedup_decision": "merge_existing",
+                            "matched_node_key": "Country:PRT",
+                        },
+                    ),
+                    (
+                        "proposed-graph:tenant-a:ontology-concept:gulf-of-aden",
+                        "Gulf of Aden",
+                        {
+                            "artifact_type": "object",
+                            "ontology_part": "concrete_object",
+                            "label": "Gulf of Aden",
+                            "object_type": "Waterway",
+                            "description": "A named body of water.",
+                            "identity": {"identity_role": "concrete_object", "label": "Gulf of Aden"},
+                            "dedup_decision": "new_proposal",
+                            "evidence_quote": "Red Sea connects to the Gulf of Aden",
+                        },
+                    ),
+                    (
+                        "proposed-graph:tenant-a:ontology-concept:red-sea-connects-gulf-of-aden",
+                        "connects_to",
+                        {
+                            "artifact_type": "link",
+                            "ontology_part": "relation",
+                            "label": "connects_to",
+                            "relation": "connects_to",
+                            "source_label": "Red Sea",
+                            "source_object_type": "Waterway",
+                            "target_label": "Gulf of Aden",
+                            "target_object_type": "Waterway",
+                            "description": "Relation instance between two concrete objects.",
+                            "evidence_quote": "Red Sea connects to the Gulf of Aden",
+                        },
+                    ),
+                ]
+                for element_key, name, payload in rows:
+                    conn.execute(
+                        text(
+                            """
+                            INSERT INTO aletheia_proposed_graph_elements
+                                (run_id, project_id, element_key, element_type, name,
+                                 payload_json, evidence_refs_json, source_url,
+                                 confidence, status, iteration, created_at)
+                            VALUES
+                                (:run_id, :project_id, :element_key, 'ontology_concept',
+                                 :name, :payload_json, :evidence_refs_json, :source_url,
+                                 0.9, 'approved', 1, :created_at)
+                            """
+                        ),
+                        {
+                            "run_id": run_id,
+                            "project_id": tenant.tenant_id,
+                            "element_key": element_key,
+                            "name": name,
+                            "payload_json": json.dumps(payload),
+                            "evidence_refs_json": json.dumps(["gpt_researcher://report/test"]),
+                            "source_url": "gpt_researcher://report/test",
+                            "created_at": datetime.utcnow(),
+                        },
+                    )
+
+            type_rows = repo.types(tenant).get("types") or []
+            self.assertIn("Waterway", {row["type"] for row in type_rows})
+            self.assertIn("Country", {row["type"] for row in type_rows})
+            self.assertNotIn("EmptyClass", {row["type"] for row in type_rows})
+
+            ontology_instances = repo.search(tenant, "Waterway", "", limit=10).get("instances") or []
+            ontology_instance_by_id = {item["id"]: item for item in ontology_instances}
+            self.assertIn("Waterway:Red Sea", ontology_instance_by_id)
+            self.assertEqual(ontology_instance_by_id["Waterway:Red Sea"]["label"], "Red Sea")
+
+            country_instances = repo.search(tenant, "Country", "Portugal", limit=10).get("instances") or []
+            self.assertEqual(country_instances[0]["id"], "Country:PRT")
+            self.assertIn("Portugal", country_instances[0]["aliases"])
+
+            graph = repo.full_graph(tenant, limit=10)
+            node_ids = {node["id"] for node in graph["nodes"]}
+            self.assertIn("Waterway:Red Sea", node_ids)
+            self.assertIn("Waterway:Gulf of Aden", node_ids)
+            self.assertIn("Country:PRT", node_ids)
+            self.assertEqual((graph["scope"] or {})["projection_source"], "OntologyConcreteObject+OntologyRelationInstance")
+            relation_edges = [
+                edge
+                for edge in graph["edges"]
+                if edge["source"] == "Waterway:Red Sea"
+                and edge["target"] == "Waterway:Gulf of Aden"
+                and edge["label"] == "connects_to"
+            ]
+            self.assertTrue(relation_edges)
+            detail = repo._ontology_concrete_object_detail(tenant, "Waterway", "Red Sea")
+            self.assertEqual(detail["relations_summary"]["edges"], 1)
+            self.assertEqual(detail["relations_summary"]["by_relation"], {"connects_to": 1})
+            coverage = repo._continuous_instance_coverage_frontier(
+                tenant,
+                config={"instance_coverage_min_edges": 2, "instance_coverage_min_enrichment_items": 0},
+                limit=10,
+            )
+            red_sea_coverage = next(item for item in coverage if item["key"] == "instance-coverage:Waterway:Red Sea")
+            self.assertEqual(red_sea_coverage["payload"]["relation_count"], 1)
+            self.assertEqual(red_sea_coverage["payload"]["relation_coverage_gap"], 1)
+
     def test_ontology_model_graph_links_semantic_items_to_approved_ontology(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             repo, tenant = self._sqlite_tenant_repo(tmpdir)
@@ -370,6 +540,79 @@ class ContinuousEnrichmentFrontierTest(unittest.TestCase):
 
         self.assertEqual(result["reviewed"], [])
         self.assertEqual(result["skipped"][0]["reason"], "above_duplicate_threshold")
+
+    def test_auto_approve_can_review_concrete_ontology_but_not_abstract_class(self):
+        repo = object.__new__(InstanceRepository)
+        reviewed = []
+        repo.review_proposed_graph_element = lambda tenant, key, action, body: reviewed.append((key, action, body)) or {
+            "element": {"element_key": key, "status": "approved"}
+        }
+        tenant = TenantConfig(
+            tenant_id="tenant-a",
+            namespace="tenant-a",
+            display_name="Tenant A",
+            graph_database="tenant_a",
+            metadata_db_url="sqlite:///:memory:",
+            source_db_url="sqlite:///:memory:",
+        )
+        concrete_object = {
+            "element_key": "proposed-graph:tenant-a:ontology-concept:red-sea",
+            "element_type": "ontology_concept",
+            "status": "draft",
+            "confidence": 0.91,
+            "payload": {
+                "artifact_type": "object",
+                "ontology_part": "concrete_object",
+                "label": "Red Sea",
+                "dedup_decision": "new_proposal",
+                "match_score": 0.0,
+            },
+        }
+        relation = {
+            "element_key": "proposed-graph:tenant-a:ontology-concept:red-sea-suez",
+            "element_type": "ontology_concept",
+            "status": "draft",
+            "confidence": 0.9,
+            "payload": {
+                "artifact_type": "link",
+                "ontology_part": "relation",
+                "relation": "leads_to",
+                "source_label": "Red Sea",
+                "target_label": "Suez Canal",
+                "dedup_decision": "new_proposal",
+                "match_score": 0.0,
+            },
+        }
+        abstract_class = {
+            "element_key": "proposed-graph:tenant-a:ontology-concept:waterway-class",
+            "element_type": "ontology_concept",
+            "status": "draft",
+            "confidence": 0.95,
+            "payload": {
+                "artifact_type": "class",
+                "ontology_part": "abstract_class",
+                "label": "Waterway",
+                "dedup_decision": "new_proposal",
+                "match_score": 0.0,
+            },
+        }
+
+        result = repo._continuous_auto_approve_low_duplicate_proposals(
+            tenant,
+            [concrete_object, relation, abstract_class],
+            {
+                "auto_approve_low_duplicate_proposals": True,
+                "auto_approve_min_confidence": 0.8,
+                "auto_approve_max_duplicate_score": 0.5,
+            },
+        )
+
+        self.assertEqual([item[0] for item in reviewed], [
+            "proposed-graph:tenant-a:ontology-concept:red-sea",
+            "proposed-graph:tenant-a:ontology-concept:red-sea-suez",
+        ])
+        self.assertEqual(len(result["reviewed"]), 2)
+        self.assertEqual(result["skipped"][0]["reason"], "ontology_class_requires_human_review")
 
     def test_default_continuous_session_objective_is_optional_empty(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -1233,7 +1476,11 @@ class ContinuousEnrichmentFrontierTest(unittest.TestCase):
 
         items = repo._continuous_instance_coverage_frontier(
             tenant,
-            config={"instance_coverage_min_edges": 1, "instance_coverage_min_enrichment_items": 2},
+            config={
+                "instance_coverage_min_edges": 1,
+                "instance_coverage_min_enrichment_items": 2,
+                "instance_coverage_detail_fallback": True,
+            },
             limit=10,
         )
 
