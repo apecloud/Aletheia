@@ -2,6 +2,7 @@ import json
 import os
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -169,13 +170,70 @@ class WrongVectorNeighborEmbeddingAdapter:
 class IterativeGraphEnrichmentTest(unittest.TestCase):
     def setUp(self):
         self._old_disable_research_semantic_llm = os.environ.get("ALETHEIA_DISABLE_RESEARCH_SEMANTIC_LLM")
+        self._old_dedup_llm_verifier = os.environ.get("ALETHEIA_DEDUP_LLM_VERIFIER")
         os.environ["ALETHEIA_DISABLE_RESEARCH_SEMANTIC_LLM"] = "1"
+        os.environ["ALETHEIA_DEDUP_LLM_VERIFIER"] = "0"
 
     def tearDown(self):
         if self._old_disable_research_semantic_llm is None:
             os.environ.pop("ALETHEIA_DISABLE_RESEARCH_SEMANTIC_LLM", None)
         else:
             os.environ["ALETHEIA_DISABLE_RESEARCH_SEMANTIC_LLM"] = self._old_disable_research_semantic_llm
+        if self._old_dedup_llm_verifier is None:
+            os.environ.pop("ALETHEIA_DEDUP_LLM_VERIFIER", None)
+        else:
+            os.environ["ALETHEIA_DEDUP_LLM_VERIFIER"] = self._old_dedup_llm_verifier
+
+    def test_candidate_constraint_gate_filters_malformed_ontology_relation(self):
+        agent = object.__new__(IterativeGraphEnrichmentAgent)
+        malformed = {
+            "element_type": "ontology_concept",
+            "name": "depends_on",
+            "payload": {
+                "artifact_type": "link",
+                "ontology_part": "relation",
+                "relation": "depends_on",
+                "source_label": "China",
+            },
+        }
+        valid = {
+            "element_type": "ontology_concept",
+            "name": "China depends on Strait of Hormuz",
+            "payload": {
+                "artifact_type": "link",
+                "ontology_part": "relation",
+                "relation": "depends_on",
+                "source_label": "China",
+                "target_label": "Strait of Hormuz",
+            },
+        }
+
+        self.assertEqual(agent._candidate_constraint_issues(malformed), ["relation_missing_target_label"])
+        self.assertEqual(agent._candidate_constraint_issues(valid), [])
+
+    def test_relation_completion_anchor_allows_distinctive_label_token_endpoint(self):
+        frontier = {
+            "name": "Hormuz Crisis",
+            "object_type": "Crisis",
+            "source_kind": "loop_harness_relation_completion",
+        }
+        tokens = iterative_graph_enrichment_agent._frontier_relation_anchor_tokens(frontier)
+
+        self.assertEqual(tokens, {"hormuz"})
+        self.assertTrue(
+            iterative_graph_enrichment_agent._relation_edge_matches_frontier_anchor(
+                {"source_label": "Iran", "target_label": "Strait of Hormuz"},
+                "hormuz crisis",
+                tokens,
+            )
+        )
+        self.assertFalse(
+            iterative_graph_enrichment_agent._relation_edge_matches_frontier_anchor(
+                {"source_label": "Iran", "target_label": "Strait"},
+                "hormuz crisis",
+                tokens,
+            )
+        )
 
     def test_openrouter_semantic_provider_parses_json_response(self):
         class FakeResponse:
@@ -234,6 +292,145 @@ class IterativeGraphEnrichmentTest(unittest.TestCase):
         self.assertEqual(result["items"][0]["element_type"], "situation")
         request = urlopen_mock.call_args.args[0]
         self.assertIn("Bearer test-key", request.headers["Authorization"])
+
+    def test_openrouter_semantic_provider_uses_default_qwen_model(self):
+        class FakeResponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def read(self):
+                return json.dumps(
+                    {
+                        "choices": [
+                            {
+                                "message": {
+                                    "content": json.dumps(
+                                        {
+                                            "items": [],
+                                            "ontology_candidates": [],
+                                        }
+                                    )
+                                }
+                            }
+                        ]
+                    }
+                ).encode("utf-8")
+
+        with patch.dict(
+            os.environ,
+            {
+                "OPENROUTER_API_KEY": "test-key",
+                "ALETHEIA_RESEARCH_SEMANTIC_LLM_PROVIDER": "openrouter",
+            },
+            clear=False,
+        ), patch.object(iterative_graph_enrichment_agent.urllib.request, "urlopen", return_value=FakeResponse()) as urlopen_mock:
+            os.environ.pop("ALETHEIA_RESEARCH_SEMANTIC_OPENROUTER_MODEL", None)
+            os.environ.pop("OPENROUTER_MODEL", None)
+            result = iterative_graph_enrichment_agent._run_research_semantic_llm(
+                "traffic through the Strait remains unstable",
+                {"key": "frontier:test"},
+                "gpt_researcher://report/test",
+            )
+
+        expected_model = "qwen/qwen3-30b-a3b-instruct-2507"
+        self.assertEqual(iterative_graph_enrichment_agent.DEFAULT_OPENROUTER_SEMANTIC_MODEL, expected_model)
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(result["provider"], "openrouter")
+        self.assertEqual(result["model"], expected_model)
+        request = urlopen_mock.call_args.args[0]
+        request_payload = json.loads(request.data.decode("utf-8"))
+        self.assertEqual(request_payload["model"], expected_model)
+        prompt = json.loads(request_payload["messages"][1]["content"])
+        self.assertEqual(prompt["prompt_mode"], "light")
+        self.assertNotIn("function", prompt["allowed_ontology_artifact_types"])
+        self.assertNotIn("policy", prompt["allowed_ontology_artifact_types"])
+        self.assertNotIn("functions", prompt["output_schema"]["coverage"])
+        self.assertNotIn("policies", prompt["output_schema"]["coverage"])
+
+    def test_openrouter_semantic_provider_keeps_deep_prompt_mode_when_requested(self):
+        class FakeResponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def read(self):
+                return json.dumps(
+                    {
+                        "choices": [
+                            {
+                                "message": {
+                                    "content": json.dumps(
+                                        {
+                                            "items": [],
+                                            "ontology_candidates": [],
+                                        }
+                                    )
+                                }
+                            }
+                        ]
+                    }
+                ).encode("utf-8")
+
+        with patch.dict(
+            os.environ,
+            {
+                "OPENROUTER_API_KEY": "test-key",
+                "ALETHEIA_RESEARCH_SEMANTIC_LLM_PROVIDER": "openrouter",
+                "ALETHEIA_RESEARCH_SEMANTIC_PROMPT_MODE": "deep",
+            },
+            clear=False,
+        ), patch.object(iterative_graph_enrichment_agent.urllib.request, "urlopen", return_value=FakeResponse()) as urlopen_mock:
+            os.environ.pop("ALETHEIA_RESEARCH_SEMANTIC_OPENROUTER_MODEL", None)
+            os.environ.pop("OPENROUTER_MODEL", None)
+            result = iterative_graph_enrichment_agent._run_research_semantic_llm(
+                "traffic through the Strait remains unstable",
+                {"key": "frontier:test"},
+                "gpt_researcher://report/test",
+            )
+
+        self.assertEqual(result["status"], "ok")
+        request = urlopen_mock.call_args.args[0]
+        prompt = json.loads(json.loads(request.data.decode("utf-8"))["messages"][1]["content"])
+        self.assertEqual(prompt["prompt_mode"], "deep")
+        self.assertIn("function", prompt["allowed_ontology_artifact_types"])
+        self.assertIn("policy", prompt["allowed_ontology_artifact_types"])
+        self.assertIn("functions", prompt["output_schema"]["coverage"])
+        self.assertIn("policies", prompt["output_schema"]["coverage"])
+
+    def test_semantic_chunked_returns_partial_when_chunks_hit_hard_timeout(self):
+        old_workers = iterative_graph_enrichment_agent.RESEARCH_SEMANTIC_CHUNK_WORKERS
+        old_chunk_chars = iterative_graph_enrichment_agent.RESEARCH_SEMANTIC_CHUNK_CHARS
+        old_hard_timeout = iterative_graph_enrichment_agent.RESEARCH_SEMANTIC_CHUNK_HARD_TIMEOUT_MS
+
+        def slow_semantic_llm(_source_text, _frontier_item, _source_ref):
+            time.sleep(0.2)
+            return {"items": [], "ontology_candidates": [], "status": "ok"}
+
+        traces = []
+
+        try:
+            iterative_graph_enrichment_agent.RESEARCH_SEMANTIC_CHUNK_WORKERS = 2
+            iterative_graph_enrichment_agent.RESEARCH_SEMANTIC_CHUNK_CHARS = 1200
+            iterative_graph_enrichment_agent.RESEARCH_SEMANTIC_CHUNK_HARD_TIMEOUT_MS = 20
+            with patch.object(iterative_graph_enrichment_agent, "_run_research_semantic_llm", side_effect=slow_semantic_llm):
+                result = iterative_graph_enrichment_agent._run_research_semantic_chunked(
+                    "Perim Island controls maritime access. " * 120,
+                    {"key": "frontier:test"},
+                    "gpt_researcher://report/test",
+                    trace_callback=lambda event_type, **payload: traces.append({"type": event_type, **payload}),
+                )
+        finally:
+            iterative_graph_enrichment_agent.RESEARCH_SEMANTIC_CHUNK_WORKERS = old_workers
+            iterative_graph_enrichment_agent.RESEARCH_SEMANTIC_CHUNK_CHARS = old_chunk_chars
+            iterative_graph_enrichment_agent.RESEARCH_SEMANTIC_CHUNK_HARD_TIMEOUT_MS = old_hard_timeout
+
+        self.assertEqual(result["status"], "chunked_partial")
+        self.assertTrue(any(trace["type"] == "semantic_chunk_timeout" for trace in traces))
 
     def test_openrouter_semantic_provider_reports_missing_key(self):
         old_cache = iterative_graph_enrichment_agent._DOTENV_CACHE
@@ -923,8 +1120,8 @@ class IterativeGraphEnrichmentTest(unittest.TestCase):
             after_fp = agent.graph_fingerprint()
 
             proposed = result["proposed_graph"]
-            self.assertGreaterEqual(result["run"]["proposed_count"], 3)
-            self.assertTrue(any(item["element_type"] == "node" for item in proposed))
+            self.assertGreaterEqual(result["run"]["proposed_count"], 2)
+            self.assertFalse(any(item["element_type"] == "node" for item in proposed))
             self.assertTrue(any(item["element_type"] == "edge" for item in proposed))
             self.assertTrue(any(item["element_type"] == "finding" for item in proposed))
             self.assertTrue(all(item["evidence_refs"] for item in proposed))
@@ -942,7 +1139,7 @@ class IterativeGraphEnrichmentTest(unittest.TestCase):
                     {"new_proposal", "merge_existing", "needs_review", "duplicate_existing_proposal", "duplicate_current_run"},
                 )
                 self.assertIn("review_required", payload)
-                if item["element_type"] in {"node", "edge"}:
+                if item["element_type"] == "edge":
                     self.assertTrue(payload.get("identity"))
                     self.assertTrue(payload.get("identity_key"))
 
@@ -1040,20 +1237,8 @@ class IterativeGraphEnrichmentTest(unittest.TestCase):
             edges = [item for item in proposed if item["element_type"] == "edge"]
             trade_edges = [item for item in edges if item["payload"].get("relation") == "trade_dependency"]
 
-            self.assertTrue(nodes)
+            self.assertFalse(nodes)
             self.assertTrue(trade_edges)
-            for node in nodes:
-                payload = node["payload"]
-                self.assertEqual(payload["extraction"]["prompt_version"], GRAPH_EXTRACTION_PROMPT_VERSION)
-                self.assertTrue(payload.get("description"))
-                self.assertTrue(payload.get("properties"))
-                self.assertTrue(payload.get("evidence_quote"))
-                self.assertEqual(payload["extraction"].get("extraction_source"), "structured_llm_contract")
-                self.assertEqual(
-                    payload["extraction"].get("schema_context", {}).get("projection_source"),
-                    "SchemaGraphModelingAgent",
-                )
-                self.assertEqual(payload.get("ontology_candidate", {}).get("schema_projection_source"), "SchemaGraphModelingAgent")
             for edge in trade_edges:
                 payload = edge["payload"]
                 self.assertEqual(payload["source_type"], "Country")
@@ -1303,13 +1488,7 @@ class IterativeGraphEnrichmentTest(unittest.TestCase):
                     for item in edge["payload"]["source_grounding"]
                 )
             )
-            node = next(
-                item
-                for item in result["proposed_graph"]
-                if item["element_type"] == "node" and item["payload"].get("label") == "AAA"
-            )
-            self.assertEqual(node["payload"]["source_grounding"][0]["extraction_text"], "AAA")
-            self.assertEqual(node["payload"]["source_grounding"][0]["char_interval"]["start_pos"], 12)
+            self.assertFalse([item for item in result["proposed_graph"] if item["element_type"] == "node"])
 
     def test_no_langextract_key_blocks_production_heuristic_proposals(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -2104,6 +2283,13 @@ class IterativeGraphEnrichmentTest(unittest.TestCase):
                         "trigger_or_condition": "safe transit unavailable",
                         "affected_object_types": ["Waterway", "Route"],
                         "state_changes": ["operational_status changes from Open to Closed"],
+                        "event_time": "2026-06-01",
+                        "time_precision": "exact_date",
+                        "time_range_start": "2026-06-01",
+                        "time_range_end": "2026-06-03",
+                        "observed_at": "2026-06-02",
+                        "source_time_text": "from June 1 to June 3, 2026",
+                        "time_confidence": 0.82,
                         "evidence_quote": "Authorities may close the canal when conflict disrupts safe transit.",
                         "confidence": 0.71,
                     },
@@ -2157,6 +2343,15 @@ class IterativeGraphEnrichmentTest(unittest.TestCase):
         self.assertEqual(action_payload["trigger_event"], "Waterway Disruption Event")
         self.assertEqual(action_payload["expected_effects"], ["set operational_status to Closed"])
         self.assertEqual(action_payload["ontology_candidate"]["guardrails"], ["requires authorized operator approval"])
+        event_payload = proposals["Waterway Closure Event"]["payload"]
+        self.assertEqual(event_payload["event_time"], "2026-06-01")
+        self.assertEqual(event_payload["time_precision"], "exact_date")
+        self.assertEqual(event_payload["time_range_start"], "2026-06-01")
+        self.assertEqual(event_payload["time_range_end"], "2026-06-03")
+        self.assertEqual(event_payload["observed_at"], "2026-06-02")
+        self.assertEqual(event_payload["source_time_text"], "from June 1 to June 3, 2026")
+        self.assertEqual(event_payload["time_confidence"], 0.82)
+        self.assertEqual(event_payload["ontology_candidate"]["event_time"], "2026-06-01")
 
     def test_research_ontology_classes_require_concrete_object_support(self):
         def semantic_runner(_source_text, _frontier_item, _source_ref):
@@ -2274,7 +2469,7 @@ class IterativeGraphEnrichmentTest(unittest.TestCase):
         self.assertEqual(relation["target_object_type"], "Gulf")
         self.assertEqual(relation["relation"], "connects_to")
 
-    def test_operational_ontology_identity_distinguishes_action_shape(self):
+    def test_operational_ontology_identity_merges_same_action_concept(self):
         def action_item(trigger_event, expected_effects):
             return {
                 "element_type": "ontology_concept",
@@ -2298,7 +2493,10 @@ class IterativeGraphEnrichmentTest(unittest.TestCase):
         second = iterative_graph_enrichment_agent._candidate_identity_payload(
             action_item("Reopening Event", ["set status to Open"])
         )
-        self.assertNotEqual(first["source_identity"], second["source_identity"])
+        self.assertEqual(
+            iterative_graph_enrichment_agent._identity_key("maritime-risk", first),
+            iterative_graph_enrichment_agent._identity_key("maritime-risk", second),
+        )
 
     def test_benchmark_reads_baseline_as_comparison_only(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -2499,13 +2697,7 @@ class IterativeGraphEnrichmentTest(unittest.TestCase):
                     if item["element_type"] == "edge"
                 )
             )
-            self.assertTrue(
-                any(
-                    item.get("reason") == "duplicate_endpoint_node_not_proposed"
-                    for item in second["run"]["skipped_sources"]
-                    if item.get("element_type") == "node"
-                )
-            )
+            self.assertFalse([item for item in second["proposed_graph"] if item["element_type"] == "node"])
 
     def test_duplicate_endpoint_nodes_are_edge_context_not_node_proposals(self):
         def runner_for_metric(metric_key):
@@ -2586,7 +2778,7 @@ class IterativeGraphEnrichmentTest(unittest.TestCase):
                 embedding_adapter=DegradedTestEmbeddingAdapter(),
             )
             first = first_agent.run("discover first maritime edge")
-            self.assertTrue([item for item in first["proposed_graph"] if item["element_type"] == "node"])
+            self.assertFalse([item for item in first["proposed_graph"] if item["element_type"] == "node"])
 
             second_agent = IterativeGraphEnrichmentAgent(
                 db_url,
@@ -2607,24 +2799,12 @@ class IterativeGraphEnrichmentTest(unittest.TestCase):
             self.assertEqual(len(edges), 1)
             edge_payload = edges[0]["payload"]
             self.assertEqual(edge_payload["dedup_decision"], "new_proposal")
-            self.assertEqual(edge_payload.get("endpoint_review_required"), False)
+            self.assertFalse(edge_payload.get("endpoint_review_required", False))
             endpoint_evidence = edge_payload.get("endpoint_dedup_evidence") or {}
-            self.assertEqual(endpoint_evidence.get("source", {}).get("dedup_decision"), "duplicate_existing_proposal")
-            self.assertEqual(endpoint_evidence.get("target", {}).get("dedup_decision"), "duplicate_existing_proposal")
-            self.assertFalse(endpoint_evidence.get("source", {}).get("proposed_node_created"))
-            self.assertFalse(endpoint_evidence.get("target", {}).get("proposed_node_created"))
-            self.assertTrue(endpoint_evidence.get("source", {}).get("matched_node_key"))
-            self.assertTrue(endpoint_evidence.get("target", {}).get("matched_node_key"))
+            self.assertFalse(endpoint_evidence)
             identity = edge_payload.get("identity") or {}
             self.assertEqual(identity.get("source_canonical_key"), "")
             self.assertEqual(identity.get("target_canonical_key"), "")
-            self.assertTrue(
-                any(
-                    item.get("reason") == "duplicate_endpoint_node_not_proposed"
-                    for item in second["run"]["skipped_sources"]
-                    if item.get("element_type") == "node"
-                )
-            )
 
     def test_persistent_identity_index_is_populated_and_reused(self):
         def empty_semantic_runner(_source_text, _frontier_item, _source_ref):
@@ -4406,13 +4586,7 @@ class IterativeGraphEnrichmentTest(unittest.TestCase):
             after_fp = agent.graph_fingerprint()
 
             self.assertEqual(after_fp["proposed_graph_elements"], before_count + result["run"]["proposed_count"])
-            self.assertTrue(
-                any(
-                    item.get("dedup_decision") == "merge_existing"
-                    and item.get("matched_node_key") == "proposed-graph:maritime-risk:node:approved-chn"
-                    for item in result["run"]["skipped_sources"]
-                )
-            )
+            self.assertFalse([item for item in result["proposed_graph"] if item["element_type"] == "node"])
 
     def test_same_run_duplicate_candidate_is_skipped_in_memory(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -4724,24 +4898,10 @@ class IterativeGraphEnrichmentTest(unittest.TestCase):
             ]
 
             self.assertFalse(chokepoints)
-            self.assertTrue(
-                any(
-                    item.get("element_type") == "node"
-                    and item.get("name") == "Bab el-Mandeb Strait"
-                    and item.get("dedup_decision") == "duplicate_existing_proposal"
-                    and item.get("reason") == "duplicate_endpoint_node_not_proposed"
-                    for item in result["run"]["skipped_sources"]
-                )
-            )
+            self.assertFalse([item for item in result["proposed_graph"] if item["element_type"] == "node"])
             edge = next(item for item in result["proposed_graph"] if item["element_type"] == "edge")
             self.assertEqual(edge["status"], "draft")
-            self.assertFalse(edge["payload"]["endpoint_review_required"])
-            target_evidence = edge["payload"]["endpoint_dedup_evidence"]["target"]
-            self.assertEqual(target_evidence["dedup_decision"], "duplicate_existing_proposal")
-            self.assertEqual(target_evidence["matched_node_key"], "proposed-graph:maritime-risk:node:ambiguous-bab")
-            self.assertEqual(target_evidence["decision_reason"], "node_similarity_confidence_threshold_met")
-            self.assertFalse(target_evidence["review_required"])
-            self.assertFalse(target_evidence["proposed_node_created"])
+            self.assertFalse(edge["payload"].get("endpoint_review_required", False))
 
 
 if __name__ == "__main__":

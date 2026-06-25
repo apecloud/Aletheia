@@ -7,9 +7,10 @@ import sys
 import time
 from datetime import datetime
 
-from agents.enrichment_loop_harness import evaluate_enrichment_loop, load_loop_config
+from agents.enrichment_loop_harness import apply_repair_plan, evaluate_enrichment_loop, load_loop_config
 from server.aletheia_server import InstanceRepository
 from tenant_registry import TenantRegistry
+from sqlalchemy import create_engine, text
 
 
 DEFAULT_OBJECTIVE = (
@@ -90,21 +91,171 @@ def loop_report(args, tenant, run_key=None):
     )
 
 
-def run_cycle_child(queue, tenant_id, session_key, force, trigger_autopilot):
+def maybe_apply_loop_repair(args, tenant, report):
+    if not args.apply_loop_repair:
+        return None
+    plan = (report or {}).get("repair_plan") or {}
+    result = apply_repair_plan(
+        tenant.metadata_db_url,
+        tenant.tenant_id,
+        plan,
+        reviewer=args.loop_repair_reviewer,
+        reason=args.loop_repair_reason,
+    )
+    return result
+
+
+def maybe_enqueue_loop_frontier(args, tenant, report):
+    if not args.enqueue_loop_frontier:
+        return None
+    plan = (report or {}).get("repair_plan") or {}
+    loop_sources = {"loop_harness_relation_completion", "loop_harness_property_completion"}
+
+    def frontier_identity(item):
+        source_kind = str(item.get("source_kind") or item.get("source") or "").strip().lower()
+        if source_kind in loop_sources:
+            label = str(item.get("name") or "").strip().lower()
+            object_type = str(item.get("object_type") or "").strip().lower()
+            if label:
+                return f"{source_kind}:{object_type}:{label}"
+        return str(item.get("key") or "").strip()
+
+    frontier_items = []
+    frontier_identities = set()
+    for plan_item in plan.get("items") or []:
+        item = plan_item.get("frontier_item")
+        if not isinstance(item, dict):
+            continue
+        if item.get("source_kind") in loop_sources and not str(item.get("object_type") or "").strip():
+            continue
+        identity = frontier_identity(item)
+        if identity and identity in frontier_identities:
+            continue
+        if identity:
+            frontier_identities.add(identity)
+        frontier_items.append(item)
+        if len(frontier_items) >= max(1, int(args.loop_frontier_limit)):
+            break
+    engine = create_engine(tenant.metadata_db_url)
+    with engine.begin() as conn:
+        row = conn.execute(
+            text(
+                """
+                SELECT frontier_json, config_json
+                FROM aletheia_continuous_enrichment_sessions
+                WHERE project_id = :tenant_id AND session_key = :session_key
+                LIMIT 1
+                """
+            ),
+            {"tenant_id": tenant.tenant_id, "session_key": args.session_key},
+        ).mappings().first()
+        if not row:
+            return {"enqueued": 0, "skipped": len(frontier_items), "reason": "session not found"}
+        existing = [item for item in json.loads(row["frontier_json"] or "[]") if isinstance(item, dict)]
+        try:
+            config = json.loads(row["config_json"] or "{}")
+        except Exception:
+            config = {}
+        existing_before_cleanup = len(existing)
+        existing = [
+            item for item in existing
+            if str(item.get("source_kind") or item.get("source") or "") not in loop_sources
+        ]
+        cleared_stale = existing_before_cleanup - len(existing)
+        existing_keys = {str(item.get("key") or "") for item in existing if item.get("key")}
+        prioritized = []
+        prioritized_identities = set()
+        new_count = 0
+        for item in frontier_items:
+            key = str(item.get("key") or "").strip()
+            identity = frontier_identity(item) or key
+            if not key or identity in prioritized_identities:
+                continue
+            prioritized_identities.add(identity)
+            prioritized.append(item)
+            if key not in existing_keys:
+                new_count += 1
+        reordered = [*prioritized, *[item for item in existing if (frontier_identity(item) or str(item.get("key") or "")) not in prioritized_identities]]
+        prioritized_visit_keys = {
+            value
+            for item in prioritized
+            for value in (str(item.get("key") or "").strip(), frontier_identity(item))
+            if value
+        }
+        previous_visited = list(config.get("visited_frontier_keys") or [])
+        if prioritized_visit_keys:
+            config["visited_frontier_keys"] = [
+                value for value in previous_visited
+                if value not in prioritized_visit_keys
+            ]
+            frontier_state = config.get("frontier_state") if isinstance(config.get("frontier_state"), dict) else {}
+            for bucket in ("last_enriched_at", "selected_count"):
+                values = frontier_state.get(bucket) if isinstance(frontier_state.get(bucket), dict) else {}
+                for key in prioritized_visit_keys:
+                    values.pop(key, None)
+                frontier_state[bucket] = values
+            config["frontier_state"] = frontier_state
+        if prioritized or cleared_stale:
+            conn.execute(
+                text(
+                    """
+                    UPDATE aletheia_continuous_enrichment_sessions
+                    SET frontier_json = :frontier_json,
+                        config_json = :config_json,
+                        status = CASE WHEN status = 'paused' THEN 'idle' ELSE status END,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE project_id = :tenant_id AND session_key = :session_key
+                    """
+                ),
+                {
+                    "tenant_id": tenant.tenant_id,
+                    "session_key": args.session_key,
+                    "frontier_json": json.dumps(reordered, ensure_ascii=False, sort_keys=True),
+                    "config_json": json.dumps(config, ensure_ascii=False, sort_keys=True),
+                },
+            )
+    return {
+        "enqueued": new_count,
+        "promoted": len(prioritized) - new_count,
+        "cleared_stale_loop_frontier": cleared_stale,
+        "cleared_visited_repair_frontier": len(previous_visited) - len(config.get("visited_frontier_keys") or []),
+        "skipped": len(frontier_items) - len(prioritized),
+        "frontier_keys": [item.get("key") for item in prioritized],
+        "reason": None if prioritized else "repair plan has no eligible frontier items after relevance filtering",
+    }
+
+
+def run_cycle_child(queue, tenant_id, session_key, force, trigger_autopilot, cycle_options=None):
     try:
+        print_json_event({"type": "cycle_child_start", "tenant": tenant_id, "session_key": session_key})
         registry = TenantRegistry.load()
+        print_json_event({"type": "cycle_child_registry_loaded", "tenant": tenant_id, "session_key": session_key})
         tenant = registry.get(tenant_id)
         repo = InstanceRepository(registry)
+        print_json_event({"type": "cycle_child_run_start", "tenant": tenant_id, "session_key": session_key})
+        body = {
+            "force": force,
+            "trigger_autopilot": trigger_autopilot,
+        }
+        if isinstance(cycle_options, dict):
+            body.update(cycle_options)
         result = repo.run_continuous_enrichment_cycle(
             tenant,
             session_key,
-            {
-                "force": force,
-                "trigger_autopilot": trigger_autopilot,
-            },
+            body,
         )
+        print_json_event({"type": "cycle_child_run_done", "tenant": tenant_id, "session_key": session_key})
         queue.put({"ok": True, "result": result})
     except BaseException as exc:
+        print_json_event(
+            {
+                "type": "cycle_child_error",
+                "tenant": tenant_id,
+                "session_key": session_key,
+                "error_type": type(exc).__name__,
+                "error": str(exc),
+            }
+        )
         queue.put({"ok": False, "error": str(exc), "error_type": type(exc).__name__})
 
 
@@ -169,10 +320,47 @@ def debug_snapshot(tenant_id, session_key):
 
 
 def run_cycle_with_timeout(args):
+    before_snapshot = debug_snapshot(args.tenant, args.session_key)
+    before_run_key = ((before_snapshot or {}).get("latest_run") or {}).get("run_key")
+
+    def completed_cycle_from_snapshot(snapshot):
+        latest_run = (snapshot or {}).get("latest_run") or {}
+        latest_event = latest_run.get("last_runtime_event") or {}
+        run_key = latest_run.get("run_key")
+        if not run_key or run_key == before_run_key:
+            return None
+        if latest_run.get("status") != "completed" and latest_event.get("type") != "run_completed":
+            return None
+        return {
+            "ok": True,
+            "result": {
+                "cycle": {
+                    "status": "completed",
+                    "run_key": run_key,
+                    "proposed_count": latest_run.get("proposed_count"),
+                    "returned_element_count": None,
+                    "frontier_used": [],
+                    "next_frontier_count": snapshot.get("frontier_queue_count"),
+                    "events": [snapshot.get("latest_event")] if snapshot.get("latest_event") else [],
+                }
+            },
+        }
+
     queue = mp.Queue(maxsize=1)
+    cycle_options = {
+        "max_frontier": args.max_frontier,
+        "max_results_per_query": args.max_results_per_query,
+        "max_iterations": args.max_iterations,
+        "gpt_researcher_max_report_chars": args.gpt_researcher_max_report_chars,
+        "budget": {
+            "max_frontier_per_cycle": args.max_frontier,
+            "max_results_per_query": args.max_results_per_query,
+            "max_iterations_per_cycle": args.max_iterations,
+        },
+    }
     proc = mp.Process(
         target=run_cycle_child,
-        args=(queue, args.tenant, args.session_key, args.force, args.trigger_autopilot),
+        args=(queue, args.tenant, args.session_key, args.force, args.trigger_autopilot, cycle_options),
     )
     proc.start()
     deadline = time.time() + max(1, int(args.cycle_timeout_seconds))
@@ -191,26 +379,21 @@ def run_cycle_with_timeout(args):
                     "snapshot": snapshot,
                 }
             )
-            latest_run = (snapshot or {}).get("latest_run") or {}
-            if snapshot.get("session_status") == "idle" and latest_run.get("status") == "completed":
+            completed = completed_cycle_from_snapshot(snapshot)
+            if snapshot.get("session_status") == "idle" and completed:
                 proc.terminate()
                 proc.join(10)
-                return {
-                    "ok": True,
-                    "result": {
-                        "cycle": {
-                            "status": "completed",
-                            "run_key": latest_run.get("run_key"),
-                            "proposed_count": latest_run.get("proposed_count"),
-                            "returned_element_count": None,
-                            "frontier_used": [],
-                            "next_frontier_count": snapshot.get("frontier_queue_count"),
-                            "events": [snapshot.get("latest_event")] if snapshot.get("latest_event") else [],
-                        }
-                    },
-                }
+                return completed
             next_trace = time.time() + max(1, int(args.trace_poll_seconds))
     if proc.is_alive():
+        final_snapshot = debug_snapshot(args.tenant, args.session_key)
+        completed = completed_cycle_from_snapshot(final_snapshot)
+        if completed:
+            proc.join(15)
+            if not proc.is_alive():
+                if not queue.empty():
+                    return queue.get()
+                return completed
         proc.terminate()
         proc.join(10)
         if proc.is_alive():
@@ -269,6 +452,14 @@ def main():
     parser.add_argument("--loop-report-file", default=None)
     parser.add_argument("--evaluate-only", action="store_true", help="Evaluate the latest or specified run without starting a new cycle.")
     parser.add_argument("--run-key", default=None, help="Run key to evaluate with --evaluate-only.")
+    parser.add_argument("--apply-loop-repair", action="store_true", help="Apply the repair plan recommended by the loop harness.")
+    parser.add_argument("--enqueue-loop-frontier", action="store_true", help="Append loop repair frontier items to the continuous enrichment session.")
+    parser.add_argument("--loop-frontier-limit", type=int, default=10)
+    parser.add_argument("--loop-repair-reviewer", default="Loop Harness")
+    parser.add_argument(
+        "--loop-repair-reason",
+        default="Loop harness shape repair: approved ontology class has no approved concrete object instance.",
+    )
     args = parser.parse_args()
     if args.auto_review_llm_verifier:
         os.environ.setdefault("ALETHEIA_DEDUP_LLM_VERIFIER", "1")
@@ -288,7 +479,15 @@ def main():
     repo = InstanceRepository(registry)
     if args.evaluate_only:
         report = loop_report(args, tenant, run_key=args.run_key)
+        repair_result = maybe_apply_loop_repair(args, tenant, report)
+        if repair_result is not None:
+            report = loop_report(args, tenant, run_key=args.run_key)
+        enqueue_result = maybe_enqueue_loop_frontier(args, tenant, report)
         event = {"type": "loop_report", "cycle": None, "report": report}
+        if repair_result is not None:
+            event["repair_result"] = repair_result
+        if enqueue_result is not None:
+            event["enqueue_result"] = enqueue_result
         print_json_event(event)
         append_jsonl(args.loop_report_file, event)
         return 0
@@ -376,6 +575,13 @@ def main():
                     "cycle": cycle,
                     "report": loop_report(args, tenant, run_key=cycle_result.get("run_key")),
                 }
+                repair_result = maybe_apply_loop_repair(args, tenant, loop_event["report"])
+                if repair_result is not None:
+                    loop_event["repair_result"] = repair_result
+                    loop_event["report"] = loop_report(args, tenant, run_key=cycle_result.get("run_key"))
+                enqueue_result = maybe_enqueue_loop_frontier(args, tenant, loop_event["report"])
+                if enqueue_result is not None:
+                    loop_event["enqueue_result"] = enqueue_result
                 print_json_event(loop_event)
                 append_jsonl(args.loop_report_file, loop_event)
         except KeyboardInterrupt:

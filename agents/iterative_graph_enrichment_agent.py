@@ -15,10 +15,11 @@ import math
 import os
 import re
 import sys
+import threading
 import time
 import urllib.error
 import urllib.request
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor, wait
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from difflib import SequenceMatcher
@@ -66,19 +67,19 @@ INDEXED_PROPOSED_GRAPH_STATUSES = PENDING_PROPOSED_GRAPH_STATUSES | {"approved",
 
 DEEP_GRAPH_REQUIRED_STEPS = ("source_entity", "relation", "target_entity", "evidence", "action")
 
-GRAPH_EXTRACTION_PROMPT_VERSION = "graph_entity_relation_v4"
+GRAPH_EXTRACTION_PROMPT_VERSION = "graph_endpoint_relation_v5"
 
 GRAPH_EXTRACTION_PROMPT = """Extract graph-ready facts from GPT Researcher evidence.
 Return strict JSON with:
 1. ontology_candidates: object/relation/property proposals with label, description, domain, range, and review_required=true.
-2. nodes: typed real-world entities only, with label, type, stable id hint, properties, description, confidence, and evidence_quote.
-3. edges: typed binary relations only, with source_label, relation, target_label, properties, description, confidence, and evidence_quote.
-4. findings: candidate analytical findings for evidence-backed claims, metrics, changes, situations, mechanisms, and indicators. Findings may be broader than graph edges.
+2. edges: typed binary relations only, with embedded source/target endpoint labels and endpoint classes, properties, description, confidence, and evidence_quote.
+3. findings: candidate analytical findings for evidence-backed claims, metrics, changes, situations, mechanisms, and indicators. Findings may be broader than graph edges.
 Rules:
 - Use only facts explicitly supported by the source text.
 - Prefer findings or typed semantic candidates for quantitative facts, current developments, causal mechanisms, and risk indicators. Do not force these into a legacy node/edge relation when the ontology does not fit.
-- Resolve contextual references and generic noun phrases before emitting entities. Do not emit labels that are only ordinal/contextual references, class names, or common-noun descriptions as graph nodes; emit the canonical named entity only when the source text states enough context to resolve it.
-- Do not emit a graph node when the label is only the ontology type name, its plural/common-noun form, or a class-level concept. These are ontology classes, properties, metrics, or finding concepts, not real-world object instances.
+- Resolve contextual references and generic noun phrases before emitting relation endpoints. Do not emit endpoint labels that are only ordinal/contextual references, class names, or common-noun descriptions; emit the canonical named entity only when the source text states enough context to resolve it.
+- Do not emit standalone graph nodes. Endpoint objects may appear only inside edges/relations as source_label/source_type and target_label/target_type.
+- Do not emit an endpoint when the label is only the ontology type name, its plural/common-noun form, or a class-level concept. These are ontology classes, properties, metrics, or finding concepts, not real-world object instances.
 - If a phrase refers to an entity but the canonical name is not explicit or safely resolvable from the source text, put it in rejected_or_ambiguous_candidates with reason unresolved_entity_reference instead of creating a node or edge.
 - Use relation types only from approved SchemaGraphModelingAgent edge metadata.
 - If evidence suggests a relation that cannot be mapped to approved edge metadata, return it as ambiguous_relation for review.
@@ -304,6 +305,59 @@ def _normalize_relation_identity(value: Any) -> str:
     if normalized.startswith("link "):
         normalized = normalized.removeprefix("link ").strip()
     return normalized
+
+
+def _frontier_relation_anchor_tokens(frontier_item: dict[str, Any]) -> set[str]:
+    payload = frontier_item.get("payload") if isinstance(frontier_item.get("payload"), dict) else {}
+    label_text = _normalize_identity_text(
+        frontier_item.get("name")
+        or payload.get("label")
+        or payload.get("name")
+    )
+    type_tokens = set(
+        _normalize_identity_text(
+            frontier_item.get("object_type")
+            or payload.get("object_type")
+            or payload.get("class_label")
+            or payload.get("ontology_type")
+            or payload.get("artifact_type")
+        ).split()
+    )
+    weak_tokens = {
+        "event",
+        "situation",
+        "incident",
+        "case",
+        "issue",
+        "risk",
+        "claim",
+        "object",
+        "entity",
+        "instance",
+    }
+    tokens = {
+        token
+        for token in label_text.split()
+        if len(token) >= 4 and token not in type_tokens and token not in weak_tokens
+    }
+    if tokens:
+        return tokens
+    return {token for token in label_text.split() if len(token) >= 4 and token not in weak_tokens}
+
+
+def _relation_edge_matches_frontier_anchor(edge: dict[str, Any], relation_anchor_label: str, anchor_tokens: set[str]) -> bool:
+    endpoint_labels = {
+        _normalize_identity_text(edge.get("source_label")),
+        _normalize_identity_text(edge.get("target_label")),
+    }
+    if relation_anchor_label and relation_anchor_label in endpoint_labels:
+        return True
+    endpoint_tokens = {
+        token
+        for endpoint in endpoint_labels
+        for token in endpoint.split()
+    }
+    return bool(anchor_tokens and endpoint_tokens.intersection(anchor_tokens))
 
 
 _GENERIC_REFERENCE_MODIFIERS = {
@@ -933,6 +987,7 @@ def _candidate_identity_payload(item: dict[str, Any]) -> dict[str, Any]:
         payload = item.get("payload") or {}
         ontology_candidate = payload.get("ontology_candidate") if isinstance(payload.get("ontology_candidate"), dict) else {}
         artifact_type = str(payload.get("artifact_type") or ontology_candidate.get("artifact_type") or "").strip()
+        ontology_part = str(payload.get("ontology_part") or ontology_candidate.get("ontology_part") or "").strip()
         if _ontology_proposal_is_concrete_object(payload, item.get("element_type")):
             return _ontology_concrete_object_identity_payload(
                 item,
@@ -947,6 +1002,12 @@ def _candidate_identity_payload(item: dict[str, Any]) -> dict[str, Any]:
         operational_shape = {
             "trigger_event": payload.get("trigger_event") or ontology_candidate.get("trigger_event"),
             "trigger_or_condition": payload.get("trigger_or_condition") or ontology_candidate.get("trigger_or_condition"),
+            "event_time": payload.get("event_time") or ontology_candidate.get("event_time"),
+            "time_precision": payload.get("time_precision") or ontology_candidate.get("time_precision"),
+            "time_range_start": payload.get("time_range_start") or ontology_candidate.get("time_range_start"),
+            "time_range_end": payload.get("time_range_end") or ontology_candidate.get("time_range_end"),
+            "observed_at": payload.get("observed_at") or ontology_candidate.get("observed_at"),
+            "source_time_text": payload.get("source_time_text") or ontology_candidate.get("source_time_text"),
             "target_object_types": payload.get("target_object_types") or ontology_candidate.get("target_object_types"),
             "affected_object_types": payload.get("affected_object_types") or ontology_candidate.get("affected_object_types"),
             "input_parameters": payload.get("input_parameters") or ontology_candidate.get("input_parameters"),
@@ -957,28 +1018,30 @@ def _candidate_identity_payload(item: dict[str, Any]) -> dict[str, Any]:
             "guardrails": payload.get("guardrails") or ontology_candidate.get("guardrails"),
             "applies_to": payload.get("applies_to") or ontology_candidate.get("applies_to"),
         }
-        source_identity = payload.get("source_identity") or _digest(
-            {
-                "artifact_type": _normalize_identity_text(artifact_type),
-                "relation_label": _normalize_identity_text(relation_label),
-                "domain": _normalize_identity_text(domain),
-                "range": _normalize_identity_text(range_type),
-                "property_of": _normalize_identity_text(property_of),
-                "operational_shape": operational_shape,
-            },
-            16,
-        )
         return {
             "kind": item.get("element_type"),
             "artifact_type": artifact_type,
+            "ontology_part": ontology_part,
             "label": relation_label,
             "normalized_label": _normalize_identity_text(relation_label),
             "domain": domain,
             "range": range_type,
             "property_of": property_of,
             "operational_shape": operational_shape,
-            "source_identity": source_identity,
-            "property_fingerprint": source_identity,
+            "temporal_identity": _event_temporal_identity(operational_shape),
+            "source_identity": payload.get("source_identity"),
+            "property_fingerprint": _digest(
+                {
+                    "artifact_type": _normalize_identity_text(artifact_type),
+                    "ontology_part": _normalize_identity_text(ontology_part),
+                    "label": _normalize_identity_text(relation_label),
+                    "domain": _normalize_identity_text(domain),
+                    "range": _normalize_identity_text(range_type),
+                    "property_of": _normalize_identity_text(property_of),
+                    "temporal_identity": _event_temporal_identity(operational_shape),
+                },
+                16,
+            ),
         }
     return {
         "kind": item.get("element_type"),
@@ -1024,14 +1087,15 @@ def _identity_key(tenant: str, identity: dict[str, Any]) -> str:
             source_identity=identity.get("source_identity") or identity.get("property_fingerprint"),
         )
     if identity.get("kind") == "ontology_concept":
-        return "ontology-concept:{tenant}:{artifact_type}:{label}:{domain}:{range}:{property_of}:{source_identity}".format(
+        return "ontology-concept:{tenant}:{artifact_type}:{ontology_part}:{label}:{domain}:{range}:{property_of}:{temporal}".format(
             tenant=tenant,
             artifact_type=_normalize_identity_text(identity.get("artifact_type")) or "concept",
+            ontology_part=_normalize_identity_text(identity.get("ontology_part")) or "concept",
             label=identity.get("normalized_label") or "unknown-concept",
             domain=_normalize_identity_text(identity.get("domain")) or "unknown-domain",
             range=_normalize_identity_text(identity.get("range")) or "unknown-range",
             property_of=_normalize_identity_text(identity.get("property_of")) or "unknown-owner",
-            source_identity=identity.get("source_identity") or identity.get("property_fingerprint"),
+            temporal=_normalize_identity_text(identity.get("temporal_identity")) or "unknown-time",
         )
     if identity.get("kind") in RESEARCH_SEMANTIC_ELEMENT_TYPES:
         return "research-semantic:{tenant}:{kind}:{metric}:{subject}:{target}:{time}:{geo}:{source_identity}".format(
@@ -1589,7 +1653,8 @@ RESEARCH_SEMANTIC_CHUNK_CHARS = int(os.environ.get("ALETHEIA_RESEARCH_SEMANTIC_C
 RESEARCH_SEMANTIC_MAX_CHUNKS = int(os.environ.get("ALETHEIA_RESEARCH_SEMANTIC_MAX_CHUNKS", "8"))
 RESEARCH_SEMANTIC_CHUNK_WORKERS = int(os.environ.get("ALETHEIA_RESEARCH_SEMANTIC_CHUNK_WORKERS", "3"))
 RESEARCH_SEMANTIC_TIMEOUT_MS = int(os.environ.get("ALETHEIA_RESEARCH_SEMANTIC_TIMEOUT_MS", "45000"))
-DEFAULT_OPENROUTER_SEMANTIC_MODEL = "qwen/qwen3-next-80b-a3b-instruct:free"
+RESEARCH_SEMANTIC_CHUNK_HARD_TIMEOUT_MS = int(os.environ.get("ALETHEIA_RESEARCH_SEMANTIC_CHUNK_HARD_TIMEOUT_MS", "55000"))
+DEFAULT_OPENROUTER_SEMANTIC_MODEL = "qwen/qwen3-30b-a3b-instruct-2507"
 DEFAULT_OPENROUTER_DEDUP_MODEL = "openai/gpt-oss-20b:free"
 
 
@@ -1824,6 +1889,7 @@ def _run_research_semantic_llm(source_text: str, frontier_item: dict[str, Any], 
             "For links/relations, distinguish relation definitions from relation instances. If the source sentence names concrete endpoints, emit a relation candidate with source_label, source_object_type, target_label, target_object_type, and relation. Do not emit only the abstract link type when endpoint objects are present.",
             "When a sentence says A connects to B, A leads to B, A is located in B, A borders B, A is part of B, A depends on B, A affects B, or A governs B, emit a concrete relation instance between A and B.",
             "For events, propose business/world events or incidents in the source that create, update, degrade, disrupt, close, reopen, reroute, delay, threaten, or otherwise change objects.",
+            "For events, extract temporal context whenever the source states it. Use event_time for a point time/date/year, time_range_start and time_range_end for periods, observed_at for observation/reporting time, source_time_text for the exact source wording, and time_precision as exact_date, month, year, range, relative, or unknown. If no time is stated, set time_precision=unknown and time_missing_reason.",
             "For actions, propose operational responses that a human or agent could execute against objects in response to events or states, including required inputs, target object types, expected object/property/link changes, and guardrails.",
             "For functions, propose computations or derived indicators needed to evaluate state, risk, impact, priority, capacity, exposure, cost, or recommendation logic.",
             "For policies, propose constraints, approval rules, thresholds, permissions, or review gates that should govern actions.",
@@ -1936,6 +2002,14 @@ def _run_research_semantic_llm(source_text: str, frontier_item: dict[str, Any], 
                         "trigger_or_condition": "condition observed in source text",
                         "affected_object_types": ["object/class labels affected by the event"],
                         "state_changes": ["properties, states, links, or metrics changed by the event"],
+                        "event_time": "point event time/date/year when stated, otherwise null",
+                        "time_precision": "exact_date | month | year | range | relative | unknown",
+                        "time_range_start": "start of event period when stated",
+                        "time_range_end": "end of event period when stated",
+                        "observed_at": "observation/report/publication time when distinct from event_time",
+                        "source_time_text": "exact time expression from source text",
+                        "time_confidence": 0.0,
+                        "time_missing_reason": "why time_precision is unknown, if no time is stated",
                         "evidence_quote": "exact supporting clause or sentence",
                         "confidence": 0.0,
                     }
@@ -1997,6 +2071,14 @@ def _run_research_semantic_llm(source_text: str, frontier_item: dict[str, Any], 
                     "property_of": "owning object/link type for property when known",
                     "trigger_event": "event/state that triggers this action when artifact_type=action",
                     "trigger_or_condition": "condition, event, threshold, or lifecycle state that creates this event/action/policy obligation",
+                    "event_time": "for event candidates: point event time/date/year when stated, otherwise null",
+                    "time_precision": "for event candidates: exact_date | month | year | range | relative | unknown",
+                    "time_range_start": "for event candidates: start of event period when stated",
+                    "time_range_end": "for event candidates: end of event period when stated",
+                    "observed_at": "for event candidates: observation/report/publication time when distinct from event_time",
+                    "source_time_text": "for event candidates: exact time expression from source text",
+                    "time_confidence": "for event candidates: confidence in temporal extraction",
+                    "time_missing_reason": "for event candidates: why time_precision is unknown, if no time is stated",
                     "target_object_types": ["objects/classes this action/event/function/policy applies to"],
                     "affected_object_types": ["objects/classes whose state or relationships change"],
                     "input_parameters": ["inputs required by this action/function"],
@@ -2012,6 +2094,78 @@ def _run_research_semantic_llm(source_text: str, frontier_item: dict[str, Any], 
             ],
         },
     }
+    prompt_mode = os.environ.get("ALETHEIA_RESEARCH_SEMANTIC_PROMPT_MODE", "light").strip().lower()
+    if prompt_mode not in {"deep", "full"}:
+        prompt["prompt_mode"] = "light"
+        prompt["task"] = (
+            "Extract compact reviewable research-semantic candidates and a minimal ontology delta from the source text."
+        )
+        prompt["allowed_ontology_artifact_types"] = ["class", "object", "link", "property", "event", "action"]
+        prompt["rules"] = [
+            "Use only information explicitly supported by the source text.",
+            "Process the source text sentence by sentence. Cover substantive clauses with semantic items or ontology candidates.",
+            "Prefer metric_observation or metric_change_observation for quantitative statements.",
+            "Prefer situation, impact_claim, indicator_claim, or recommendation for developments, causal claims, indicators, and recommended actions.",
+            "Do not rely on the current graph schema when proposing ontology. Infer ontology from the source text itself.",
+            "Propose only ontology needed to preserve source semantics: reusable classes, concrete objects, relation instances, properties, events, and executable actions.",
+            "For abstract_classes, emit only instance-backed reusable classes. A class is valid only when this same response emits at least one concrete_object whose object_type/class_label is exactly that class.",
+            "For concrete_objects, emit named real-world entities, assets, places, organizations, routes, chokepoints, projects, instruments, treaties, systems, or named initiatives explicitly mentioned by the source text.",
+            "For relation instances, require concrete endpoints. If the source says A connects to B, A is located in B, A depends on B, A affects B, A controls B, or A governs B, emit source_label, relation, and target_label.",
+            "For properties, emit attributes or measurable fields needed to describe object state, risk, capacity, exposure, location, control, status, or strategic importance.",
+            "For events, emit source-supported events or states that change, threaten, degrade, block, disrupt, militarize, occupy, construct, control, reroute, delay, or otherwise affect objects.",
+            "For events, extract temporal context whenever stated. Use event_time for point time/date/year, time_range_start/time_range_end for periods, observed_at for report/observation time, source_time_text for exact wording, and time_precision as exact_date, month, year, range, relative, or unknown. If no time is stated, set time_precision=unknown and time_missing_reason.",
+            "For actions, emit only operational responses that are directly justified by a recommendation, risk, threat, disruption, or event in the source.",
+            "Skip function and policy candidates in light mode unless the source explicitly names a computation, threshold rule, approval rule, or governance constraint.",
+            "Do not propose theme-only or macro-topic classes such as GlobalTrade, SupplyChain, EnergySecurity, PriceStability, or RiskFactorType unless the source names concrete instances of that class.",
+            "Every ontology candidate must include ontology_part and an exact evidence_quote.",
+            "Return strict JSON only.",
+        ]
+        prompt["operational_ontology_requirements"] = {
+            "mode": "light",
+            "objective": "Minimize latency while preserving concrete objects, relation instances, properties, events, actions, and semantic claims needed to reconstruct source meaning.",
+            "recommendation_to_action": "When a recommendation is emitted, add one matching action candidate if the source supports an executable response.",
+            "risk_or_disruption_to_event": "When a sentence describes risk, threat, blockage, militarization, control, or disruption, add one event candidate if it changes object state.",
+        }
+        coverage_schema = (prompt.get("output_schema") or {}).get("coverage")
+        if isinstance(coverage_schema, dict):
+            coverage_schema.pop("functions", None)
+            coverage_schema.pop("policies", None)
+        prompt["output_schema"]["ontology_candidates"] = [
+            {
+                "artifact_type": "class | object | link | property | event | action",
+                "ontology_part": "abstract_class | concrete_object | relation | property | event | action",
+                "label": "candidate ontology label",
+                "object_type": "for concrete_object only: label of an emitted abstract_class this object instantiates",
+                "class_label": "for concrete_object only: same meaning as object_type if used by the model",
+                "relation": "for relation/link instances: stable relation key or verb phrase",
+                "source_label": "for relation/link instances: source concrete object label",
+                "source_object_type": "for relation/link instances: source object type/class",
+                "target_label": "for relation/link instances: target concrete object label",
+                "target_object_type": "for relation/link instances: target object type/class",
+                "description": "why this ontology concept is needed",
+                "property_of": "owning object/link type for property when known",
+                "trigger_event": "event/state that triggers this action when artifact_type=action",
+                "trigger_or_condition": "condition, event, threshold, or lifecycle state that creates this event/action obligation",
+                "event_time": "for event candidates: point event time/date/year when stated, otherwise null",
+                "time_precision": "for event candidates: exact_date | month | year | range | relative | unknown",
+                "time_range_start": "for event candidates: start of event period when stated",
+                "time_range_end": "for event candidates: end of event period when stated",
+                "observed_at": "for event candidates: observation/report/publication time when distinct from event_time",
+                "source_time_text": "for event candidates: exact time expression from source text",
+                "time_confidence": "for event candidates: confidence in temporal extraction",
+                "time_missing_reason": "for event candidates: why time_precision is unknown, if no time is stated",
+                "target_object_types": ["objects/classes this action/event applies to"],
+                "affected_object_types": ["objects/classes whose state or relationships change"],
+                "input_parameters": ["inputs required by this action"],
+                "expected_effects": ["object/property/link/state changes when applicable"],
+                "state_changes": ["state transitions represented by an event or action"],
+                "guardrails": ["approval/review/safety constraints when applicable"],
+                "evidence_quote": "short exact quote from source text",
+                "confidence": 0.0,
+            }
+        ]
+    else:
+        prompt["prompt_mode"] = "deep"
     provider = os.environ.get("ALETHEIA_RESEARCH_SEMANTIC_LLM_PROVIDER", "gemini").strip().lower()
     timeout_ms = max(1_000, int(os.environ.get("ALETHEIA_RESEARCH_SEMANTIC_TIMEOUT_MS", str(RESEARCH_SEMANTIC_TIMEOUT_MS)) or RESEARCH_SEMANTIC_TIMEOUT_MS))
     if provider == "openrouter":
@@ -2144,6 +2298,42 @@ def _semantic_item_key(item: dict[str, Any]) -> str:
     )
 
 
+def _event_temporal_identity(value: dict[str, Any]) -> str:
+    return _normalize_identity_text(
+        value.get("event_time")
+        or "|".join(
+            str(item or "").strip()
+            for item in (value.get("time_range_start"), value.get("time_range_end"))
+            if str(item or "").strip()
+        )
+        or value.get("observed_at")
+        or value.get("source_time_text")
+        or value.get("time_precision")
+    )
+
+
+def _event_temporal_fields(candidate: dict[str, Any]) -> dict[str, Any]:
+    fields = {
+        "event_time": candidate.get("event_time"),
+        "time_precision": candidate.get("time_precision"),
+        "time_range_start": candidate.get("time_range_start"),
+        "time_range_end": candidate.get("time_range_end"),
+        "observed_at": candidate.get("observed_at"),
+        "source_time_text": candidate.get("source_time_text"),
+        "time_confidence": candidate.get("time_confidence"),
+        "time_missing_reason": candidate.get("time_missing_reason"),
+    }
+    has_time_value = any(
+        str(fields.get(key) or "").strip()
+        for key in ("event_time", "time_range_start", "time_range_end", "observed_at", "source_time_text")
+    )
+    if not str(fields.get("time_precision") or "").strip():
+        fields["time_precision"] = "unknown" if not has_time_value else "relative"
+    if fields["time_precision"] == "unknown" and not str(fields.get("time_missing_reason") or "").strip():
+        fields["time_missing_reason"] = "source text does not state event timing"
+    return fields
+
+
 def _ontology_candidate_key(candidate: dict[str, Any]) -> str:
     artifact_type = _normalize_identity_text(candidate.get("artifact_type"))
     ontology_part = _normalize_identity_text(candidate.get("ontology_part"))
@@ -2176,17 +2366,7 @@ def _ontology_candidate_key(candidate: dict[str, Any]) -> str:
             "domain": _normalize_identity_text(candidate.get("domain")),
             "range": _normalize_identity_text(candidate.get("range")),
             "property_of": _normalize_identity_text(candidate.get("property_of")),
-            "trigger_event": _normalize_identity_text(candidate.get("trigger_event")),
-            "trigger_or_condition": _normalize_identity_text(candidate.get("trigger_or_condition")),
-            "target_object_types": candidate.get("target_object_types"),
-            "affected_object_types": candidate.get("affected_object_types"),
-            "input_parameters": candidate.get("input_parameters"),
-            "inputs": candidate.get("inputs"),
-            "outputs": candidate.get("outputs"),
-            "expected_effects": candidate.get("expected_effects"),
-            "state_changes": candidate.get("state_changes"),
-            "guardrails": candidate.get("guardrails"),
-            "applies_to": candidate.get("applies_to"),
+            "temporal_identity": _event_temporal_identity(candidate) if artifact_type == "event" or ontology_part == "event" else "",
         },
         16,
     )
@@ -2278,16 +2458,41 @@ def _run_research_semantic_chunked(
         return index, raw if isinstance(raw, dict) else {"items": raw if isinstance(raw, list) else [], "status": "runner"}
 
     worker_count = max(1, min(RESEARCH_SEMANTIC_CHUNK_WORKERS, len(chunks) or 1))
-    if worker_count == 1 or semantic_runner:
+    hard_timeout_s = max(0.001, RESEARCH_SEMANTIC_CHUNK_HARD_TIMEOUT_MS / 1000.0)
+    if semantic_runner:
         for index, chunk in enumerate(chunks, 1):
             result_index, raw = run_chunk(index, chunk)
             raw_results[result_index - 1] = raw
     else:
-        with ThreadPoolExecutor(max_workers=worker_count) as executor:
-            futures = [executor.submit(run_chunk, index, chunk) for index, chunk in enumerate(chunks, 1)]
-            for future in as_completed(futures):
+        executor = ThreadPoolExecutor(max_workers=worker_count)
+        futures = {executor.submit(run_chunk, index, chunk): (index, len(chunk)) for index, chunk in enumerate(chunks, 1)}
+        try:
+            done, pending = wait(futures, timeout=hard_timeout_s)
+            for future in done:
                 result_index, raw = future.result()
                 raw_results[result_index - 1] = raw
+            for future in pending:
+                index, chunk_chars = futures[future]
+                future.cancel()
+                timeout_raw = {
+                    "items": [],
+                    "ontology_candidates": [],
+                    "status": "chunk_timeout",
+                    "timeout_ms": RESEARCH_SEMANTIC_CHUNK_HARD_TIMEOUT_MS,
+                }
+                raw_results[index - 1] = timeout_raw
+                if trace_callback:
+                    trace_callback(
+                        "semantic_chunk_timeout",
+                        chunk_index=index,
+                        chunk_count=len(chunks),
+                        chunk_chars=chunk_chars,
+                        elapsed_ms=RESEARCH_SEMANTIC_CHUNK_HARD_TIMEOUT_MS,
+                        status="chunk_timeout",
+                        source_url=source_ref,
+                    )
+        finally:
+            executor.shutdown(wait=False, cancel_futures=True)
     merged_inputs = [raw for raw in raw_results if isinstance(raw, dict)]
     return _merge_research_semantic_raw_results(merged_inputs, len(chunks))
 
@@ -2401,6 +2606,11 @@ def _research_semantic_proposals(
         evidence_quote = _clean_text(candidate.get("evidence_quote") or "", 700)
         if not label or not evidence_quote:
             continue
+        event_temporal_fields = (
+            _event_temporal_fields(candidate)
+            if artifact_type == "event" or str(candidate.get("ontology_part") or "").strip().lower() == "event"
+            else {}
+        )
         ontology_candidate = _ontology_candidate(
             artifact_type,
             label,
@@ -2422,6 +2632,7 @@ def _research_semantic_proposals(
             property_of=candidate.get("property_of"),
             trigger_event=candidate.get("trigger_event"),
             trigger_or_condition=candidate.get("trigger_or_condition"),
+            **event_temporal_fields,
             target_object_types=candidate.get("target_object_types"),
             affected_object_types=candidate.get("affected_object_types"),
             input_parameters=candidate.get("input_parameters"),
@@ -2458,6 +2669,7 @@ def _research_semantic_proposals(
                     "property_of": candidate.get("property_of"),
                     "trigger_event": candidate.get("trigger_event"),
                     "trigger_or_condition": candidate.get("trigger_or_condition"),
+                    **event_temporal_fields,
                     "target_object_types": candidate.get("target_object_types"),
                     "affected_object_types": candidate.get("affected_object_types"),
                     "input_parameters": candidate.get("input_parameters"),
@@ -2682,17 +2894,13 @@ def _graph_context_query_plan(item: dict[str, Any], objective: str, tenant: str)
     context_text = " ".join(
         str(value)
         for value in [
-            item.get("key"),
             item.get("name"),
-            item.get("artifact_type"),
-            item.get("ontology_type"),
             item.get("path"),
             payload.get("label"),
             payload.get("source_label"),
             payload.get("target_label"),
             payload.get("relation"),
             " ".join(map(str, payload.get("metrics") or [])) if isinstance(payload.get("metrics"), list) else payload.get("metrics"),
-            None if is_research_topic else objective,
         ]
         if value
     )
@@ -2719,7 +2927,7 @@ def _graph_context_query_plan(item: dict[str, Any], objective: str, tenant: str)
         raw_metrics = [raw_metrics] if raw_metrics else []
     for metric in raw_metrics:
         _append_unique(metric_terms, metric)
-    objective_terms = [] if is_research_topic else _objective_search_hints(objective)
+    objective_terms: list[str] = []
 
     query_terms = {
         "codes": code_terms[:4],
@@ -3123,6 +3331,8 @@ class IterativeGraphEnrichmentAgent:
             print(_json_dump({"runtime_trace": event}), flush=True)
         except Exception:
             pass
+        if threading.current_thread() is not threading.main_thread():
+            return
         try:
             safety_profile = _json_load(run.safety_profile_json, {})
             trace = list(safety_profile.get("runtime_trace") or [])
@@ -3285,8 +3495,9 @@ class IterativeGraphEnrichmentAgent:
         ]
         return (
             "Extract graph evidence from the text using only exact source spans. "
-            "Return graph_node extractions for entities that match the approved node types, "
-            "graph_relation extractions for explicit relation phrases between extracted nodes, "
+            "Do not return standalone graph_node extractions. "
+            "Return graph_relation extractions for explicit relation phrases, with endpoint attributes "
+            "source_label, source_node_key, source_type, target_label, target_node_key, target_type, and relation_label. "
             "and graph_metric extractions for numeric or named measures that support a relation. "
             "Do not invent node types or relation types. If relation evidence cannot map to an approved edge type, "
             "still extract the relation phrase so the review gate can inspect it. "
@@ -3314,16 +3525,6 @@ class IterativeGraphEnrichmentAgent:
                 text="Alpha Entity has example relation with Beta Entity supported by value_metric.",
                 extractions=[
                     lx.data.Extraction(
-                        extraction_class="graph_node",
-                        extraction_text="Alpha Entity",
-                        attributes={"schema_node_key": first_key, "node_type": str(first_node.get("name") or first_key)},
-                    ),
-                    lx.data.Extraction(
-                        extraction_class="graph_node",
-                        extraction_text="Beta Entity",
-                        attributes={"schema_node_key": second_key, "node_type": str(second_node.get("name") or second_key)},
-                    ),
-                    lx.data.Extraction(
                         extraction_class="graph_relation",
                         extraction_text="example relation with",
                         attributes={
@@ -3331,7 +3532,9 @@ class IterativeGraphEnrichmentAgent:
                             "target_label": "Beta Entity",
                             "relation_label": relation,
                             "source_node_key": first_key,
+                            "source_type": str(first_node.get("name") or first_key),
                             "target_node_key": second_key,
+                            "target_type": str(second_node.get("name") or second_key),
                         },
                     ),
                     lx.data.Extraction(
@@ -3634,6 +3837,33 @@ class IterativeGraphEnrichmentAgent:
         nodes_by_type: dict[str, list[GraphEvidenceNodeDraft]] = {}
         ontology_candidates: list[dict[str, Any]] = []
         rejected: list[dict[str, Any]] = []
+        relation_endpoint_candidates: dict[str, list[dict[str, Any]]] = {}
+        for relation_item in langextract_candidates["relations"]:
+            attrs = relation_item.get("attributes") or {}
+            for role in ("source", "target"):
+                label = str(attrs.get(f"{role}_label") or "").strip()
+                if not label:
+                    continue
+                attr_key = str(
+                    attrs.get(f"{role}_node_key")
+                    or attrs.get(f"{role}_schema_node_key")
+                    or attrs.get(f"{role}_object_key")
+                    or ""
+                ).strip()
+                attr_type = str(
+                    attrs.get(f"{role}_type")
+                    or attrs.get(f"{role}_node_type")
+                    or attrs.get(f"{role}_object_type")
+                    or ""
+                ).strip()
+                relation_endpoint_candidates.setdefault(attr_key or attr_type.lower(), []).append(
+                    {
+                        "label": label,
+                        "type": attr_type,
+                        "role": role,
+                        "relation_item": relation_item,
+                    }
+                )
         for node_key, node_type in schema_context["node_types"].items():
             labels: list[str] = []
             grounding_by_label: dict[str, list[dict[str, Any]]] = {}
@@ -3646,6 +3876,20 @@ class IterativeGraphEnrichmentAgent:
                     _append_unique(labels, label)
                     if label:
                         grounding_by_label.setdefault(label, []).append(self._grounding_from_langextract_item(item, source_ref))
+            endpoint_items = [
+                *relation_endpoint_candidates.get(node_key, []),
+                *relation_endpoint_candidates.get(str(node_type.get("name") or "").lower(), []),
+            ]
+            for endpoint in endpoint_items:
+                endpoint_type = str(endpoint.get("type") or "").strip().lower()
+                if endpoint_type and endpoint_type != str(node_type.get("name") or "").lower():
+                    continue
+                label = str(endpoint.get("label") or "").strip()
+                _append_unique(labels, label)
+                if label:
+                    grounding_by_label.setdefault(label, []).append(
+                        self._grounding_from_langextract_item(endpoint["relation_item"], source_ref)
+                    )
             if not labels:
                 continue
             for label in labels:
@@ -3987,48 +4231,31 @@ class IterativeGraphEnrichmentAgent:
         source_payload = extraction.get("source") or {}
         emitted_node_keys: set[tuple[str, str]] = set()
         emitted_edge_keys: set[tuple[str, str, str]] = set()
+        relation_anchor_label = ""
+        relation_anchor_tokens: set[str] = set()
+        if frontier_item.get("source_kind") == "loop_harness_relation_completion":
+            relation_anchor_label = _normalize_identity_text(
+                frontier_item.get("name")
+                or (frontier_item.get("payload") or {}).get("label")
+                or (frontier_item.get("payload") or {}).get("name")
+            )
+            relation_anchor_tokens = _frontier_relation_anchor_tokens(frontier_item)
         for node in extraction["nodes"]:
             emitted_node_keys.add((str(node["type"]), str(node["label"])))
-            elements.append(
-                {
-                    "element_type": "node",
-                    "name": node["label"],
-                    "payload": {
-                        "ontology_type": node["type"],
-                        "label": node["label"],
-                        "description": node["description"],
-                        "properties": node["properties"],
-                        "evidence_quote": node["evidence_quote"],
-                        "source_grounding": node.get("source_grounding") or node["properties"].get("source_grounding") or [],
-                        "ontology_candidate": next(
-                            (
-                                candidate
-                                for candidate in extraction["ontology_candidates"]
-                                if candidate.get("artifact_type") == "object" and candidate.get("label") == node["type"]
-                            ),
-                            None,
-                        ),
-                        "extraction": {
-                            "prompt_version": extraction["prompt_version"],
-                            "extraction_source": extraction.get("extraction_source"),
-                            "extraction_engine": extraction.get("extraction_engine"),
-                            "extraction_engine_status": extraction.get("extraction_engine_status"),
-                            "schema_context": extraction.get("schema_context"),
-                            "source": source_payload,
-                            "steps": extraction["quality"]["extraction_steps"],
-                            "review_boundary": "proposed_graph_space",
-                            "canonical_ontology_write": False,
-                            "formal_graph_write": False,
-                        },
-                        "discovered_from": frontier_item.get("key"),
-                    },
-                    "evidence_refs": [source_ref],
-                    "source_url": source_ref,
-                    "confidence": node["confidence"],
-                    "iteration": iteration,
-                }
-            )
         for edge in extraction["edges"]:
+            if relation_anchor_label or relation_anchor_tokens:
+                if not _relation_edge_matches_frontier_anchor(edge, relation_anchor_label, relation_anchor_tokens):
+                    if trace_callback:
+                        trace_callback(
+                            "candidate_edge_skipped",
+                            reason="relation_completion_edge_missing_frontier_anchor",
+                            anchor_label=frontier_item.get("name"),
+                            anchor_tokens=sorted(relation_anchor_tokens),
+                            source_label=edge.get("source_label"),
+                            target_label=edge.get("target_label"),
+                            relation=edge.get("relation"),
+                        )
+                    continue
             edge_schema_key = (edge.get("properties") or {}).get("schema_edge_key")
             relation_ontology = next(
                 (
@@ -4686,23 +4913,40 @@ class IterativeGraphEnrichmentAgent:
         session.flush()
         return self._persistent_identity_index(session)
 
-    def _identity_index(self, session) -> list[dict[str, Any]]:
+    def _identity_index(self, session, *, run=None, run_key: str | None = None) -> list[dict[str, Any]]:
+        def trace(event_type: str, **payload: Any) -> None:
+            if run is not None:
+                self._runtime_trace(session, run, event_type, run_key=run_key, **payload)
+
+        def rebuild(reason: str) -> list[dict[str, Any]]:
+            trace("identity_index_rebuild_start", reason=reason)
+            rebuilt = self._rebuild_persistent_identity_index(session)
+            trace("identity_index_rebuild_done", reason=reason, identity_count=len(rebuilt))
+            return rebuilt
+
+        trace("identity_index_read_start")
         index = self._persistent_identity_index(session)
+        trace("identity_index_read_done", identity_count=len(index))
         if index:
+            trace("identity_index_stale_check_start", identity_count=len(index))
             approved_objects, _approved_links = self._approved_schema_graph_projection_artifacts(session)
             if approved_objects and not any(entry.get("source") == "approved_graph_instance" for entry in index):
                 if self._approved_graph_instance_identity_index(session):
-                    return self._rebuild_persistent_identity_index(session)
+                    trace("identity_index_stale_check_done", stale=True, reason="missing_approved_graph_instance")
+                    return rebuild("missing_approved_graph_instance")
             if any(
                 entry.get("identity", {}).get("kind") == "edge"
                 and "://" in str(entry.get("identity_key") or "")
                 for entry in index
             ):
-                return self._rebuild_persistent_identity_index(session)
+                trace("identity_index_stale_check_done", stale=True, reason="legacy_edge_identity_key")
+                return rebuild("legacy_edge_identity_key")
             if self._persistent_index_missing_proposed_graph_sources(session, index):
-                return self._rebuild_persistent_identity_index(session)
+                trace("identity_index_stale_check_done", stale=True, reason="missing_proposed_graph_sources")
+                return rebuild("missing_proposed_graph_sources")
+            trace("identity_index_stale_check_done", stale=False)
             return index
-        return self._rebuild_persistent_identity_index(session)
+        return rebuild("empty_persistent_identity_index")
 
     def rebuild_identity_index(self) -> dict[str, Any]:
         session = self.Session()
@@ -5843,6 +6087,63 @@ class IterativeGraphEnrichmentAgent:
                     issues.append("policy_missing_rule_or_guardrail")
         return issues
 
+    def _candidate_constraint_issues(self, item: dict[str, Any]) -> list[str]:
+        if item.get("element_type") not in ONTOLOGY_PROPOSAL_ELEMENT_TYPES:
+            return []
+        payload = item.get("payload") or {}
+        artifact_type = str(payload.get("artifact_type") or "").strip().lower()
+        ontology_part = str(payload.get("ontology_part") or "").strip().lower()
+        issues: list[str] = []
+
+        def has_value(field: str) -> bool:
+            value = payload.get(field)
+            return value not in (None, "", [])
+
+        is_relation = artifact_type in {"link", "relation"} or ontology_part == "relation"
+        if is_relation:
+            if not has_value("source_label"):
+                issues.append("relation_missing_source_label")
+            if not has_value("target_label"):
+                issues.append("relation_missing_target_label")
+            if not (has_value("relation") or has_value("label")):
+                issues.append("relation_missing_relation")
+            return issues
+
+        is_concrete_object = artifact_type in {"object", "entity", "instance"} or ontology_part in {
+            "concrete_object",
+            "object_instance",
+            "instance",
+        }
+        if is_concrete_object:
+            if not has_value("label"):
+                issues.append("object_missing_label")
+            return issues
+
+        if artifact_type == "property" or ontology_part == "property":
+            if not (has_value("property_of") or has_value("domain") or has_value("target_object_types")):
+                issues.append("property_missing_owner")
+            return issues
+
+        if artifact_type == "event" or ontology_part == "event":
+            if not (has_value("trigger_or_condition") or has_value("trigger_event")):
+                issues.append("event_missing_trigger_or_condition")
+            if not (has_value("affected_object_types") or has_value("target_object_types")):
+                issues.append("event_missing_affected_objects")
+            if not (has_value("state_changes") or has_value("expected_effects")):
+                issues.append("event_missing_state_changes")
+            return issues
+
+        if artifact_type == "action" or ontology_part == "action":
+            if not (has_value("trigger_event") or has_value("trigger_or_condition")):
+                issues.append("action_missing_trigger")
+            if not has_value("target_object_types"):
+                issues.append("action_missing_targets")
+            if not (has_value("expected_effects") or has_value("state_changes") or has_value("outputs")):
+                issues.append("action_missing_effects")
+            return issues
+
+        return issues
+
     def _candidate_rejection_record(self, candidate: dict[str, Any], frontier_id: str, reason: str) -> dict[str, Any]:
         payload = candidate.get("payload") or {}
         return {
@@ -5978,7 +6279,7 @@ class IterativeGraphEnrichmentAgent:
         )
         try:
             self._runtime_trace(session, run, "identity_index_start", run_key=run_key)
-            identity_index = self._identity_index(session)
+            identity_index = self._identity_index(session, run=run, run_key=run_key)
             self._runtime_trace(session, run, "identity_index_done", run_key=run_key, identity_count=len(identity_index))
             trace = []
             skipped_sources = []
@@ -6145,6 +6446,69 @@ class IterativeGraphEnrichmentAgent:
                         )
                         if not candidates:
                             pruned.append({"url": result.url, "reason": "no_graph_candidate_extracted"})
+                            pruned_count += 1
+                            continue
+                        constraint_filtered = []
+                        constraint_valid_candidates = []
+                        for candidate in candidates:
+                            constraint_issues = self._candidate_constraint_issues(candidate)
+                            if constraint_issues:
+                                payload = {**(candidate.get("payload") or {})}
+                                payload["ontology_constraint_status"] = "filtered"
+                                payload["ontology_constraint_issues"] = sorted(constraint_issues)
+                                candidate = {**candidate, "payload": payload}
+                                skipped_duplicates.append(
+                                    self._candidate_rejection_record(
+                                        candidate,
+                                        frontier_id,
+                                        f"ontology_constraint_gate:{','.join(sorted(constraint_issues))}",
+                                    )
+                                )
+                                constraint_filtered.append(candidate)
+                                pruned.append(
+                                    {
+                                        "url": result.url,
+                                        "reason": "ontology_constraint_gate",
+                                        "candidate": candidate.get("name"),
+                                        "issues": sorted(constraint_issues),
+                                    }
+                                )
+                                pruned_count += 1
+                                continue
+                            if candidate.get("element_type") in ONTOLOGY_PROPOSAL_ELEMENT_TYPES:
+                                payload = {**(candidate.get("payload") or {})}
+                                payload.setdefault("ontology_constraint_status", "passed")
+                                candidate = {**candidate, "payload": payload}
+                            constraint_valid_candidates.append(candidate)
+                        if constraint_filtered:
+                            constraint_issue_counts = {
+                                issue_name: sum(
+                                    1
+                                    for filtered_candidate in constraint_filtered
+                                    if issue_name in ((filtered_candidate.get("payload") or {}).get("ontology_constraint_issues") or [])
+                                )
+                                for issue_name in sorted(
+                                    {
+                                        issue
+                                        for filtered_candidate in constraint_filtered
+                                        for issue in ((filtered_candidate.get("payload") or {}).get("ontology_constraint_issues") or [])
+                                    }
+                                )
+                            }
+                            self._runtime_trace(
+                                session,
+                                run,
+                                "ontology_constraint_filtered",
+                                run_key=run_key,
+                                iteration=iteration,
+                                frontier_id=frontier_id,
+                                filtered_count=len(constraint_filtered),
+                                remaining_count=len(constraint_valid_candidates),
+                                issue_counts=constraint_issue_counts,
+                            )
+                        candidates = constraint_valid_candidates
+                        if not candidates:
+                            pruned.append({"url": result.url, "reason": "all_candidates_filtered_by_ontology_constraints"})
                             pruned_count += 1
                             continue
                         annotated_candidates = []
@@ -6384,9 +6748,10 @@ class IterativeGraphEnrichmentAgent:
                             ],
                             "extraction_prompt_version": GRAPH_EXTRACTION_PROMPT_VERSION,
                             "extraction_contract": {
-                                "outputs": ["ontology_candidates", "nodes", "edges", "properties", "descriptions", "findings"],
+                                "outputs": ["ontology_candidates", "edges", "endpoint_objects", "properties", "descriptions", "findings"],
                                 "rules": [
-                                    "typed entities only",
+                                    "endpoint objects only inside relations",
+                                    "no standalone graph node proposals",
                                     "typed binary relations with properties",
                                     "evidence quote and source URL required",
                                     "approved graph identity checked before proposed graph write",

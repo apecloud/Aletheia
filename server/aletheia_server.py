@@ -35,6 +35,7 @@ from iterative_graph_enrichment_agent import (  # noqa: E402
     _edge_fact_identity_parts,
     _graph_context_query_plan,
 )
+from ontology_quality import concrete_object_quality  # noqa: E402
 from ontology_artifacts import ensure_artifact_schema, upsert_artifact  # noqa: E402
 from tenant_registry import TenantRegistry  # noqa: E402
 
@@ -63,6 +64,14 @@ def _load_json(value, default):
     if not value:
         return default
     return json.loads(value)
+
+
+def _first_nonempty(*values):
+    for value in values:
+        text_value = str(value or "").strip()
+        if text_value:
+            return text_value
+    return ""
 
 
 def _web_enrichment_query(raw_payload, target_artifact_key=None):
@@ -3027,6 +3036,7 @@ class InstanceRepository:
             "link": "OntologyLink",
             "property": "OntologyProperty",
             "action": "OntologyAction",
+            "event": "OntologyEvent",
         }
         for row in artifact_rows:
             payload = _load_json(row["payload_json"], {})
@@ -4126,10 +4136,12 @@ class InstanceRepository:
 
     def _continuous_source_priority(self, source_kind):
         return {
-            "new_graph_node": 100,
-            "new_graph_edge": 100,
+            "loop_harness_relation_completion": 135,
+            "loop_harness_property_completion": 130,
+            "instance_coverage": 125,
+            "new_graph_edge": 90,
+            "new_graph_node": 55,
             "research_topic": 120,
-            "instance_coverage": 70,
             "user_question_scope": 80,
             "reasoning_finding_seed": 60,
             "graph_coverage": 20,
@@ -4143,11 +4155,25 @@ class InstanceRepository:
             "instance_coverage": "approved instance has sparse or missing relation coverage",
             "user_question_scope": "user scoped reasoning question is an active research focus",
             "reasoning_finding_seed": "reasoning finding suggests a path that needs more evidence or expansion",
+            "loop_harness_relation_completion": "approved ontology object has sparse or missing relation coverage",
+            "loop_harness_property_completion": "approved ontology object has sparse or missing property coverage",
             "graph_coverage": "coverage fallback is rotating through graph items after higher-priority seeds",
         }.get(source_kind or "", "continuous enrichment frontier")
 
     def _continuous_proposed_status_is_frontier_eligible(self, status):
         return str(status or "").replace("-", "_").lower() in {"draft", "needs_more_evidence"}
+
+    def _continuous_frontier_item_is_storage_node(self, item):
+        item = item or {}
+        source_kind = str(item.get("source_kind") or "").strip().lower()
+        kind = str(item.get("kind") or item.get("artifact_type") or "").strip().lower()
+        key = str(self._continuous_frontier_key(item) or "").strip().lower()
+        return (
+            source_kind == "new_graph_node"
+            or kind == "proposed_node"
+            or key.startswith("proposed-graph:node:")
+            or ":node:" in key
+        )
 
     def _continuous_normalize_frontier_item(self, item, *, source_kind=None, priority=None, reason=None):
         item = dict(item or {})
@@ -4159,6 +4185,10 @@ class InstanceRepository:
                 source_kind = "new_graph_node"
             elif kind == "proposed_edge":
                 source_kind = "new_graph_edge"
+            elif item.get("source") in {"loop_harness_relation_completion", "loop_harness_property_completion"}:
+                source_kind = item.get("source")
+            elif kind == "ontology_concrete_object":
+                source_kind = "loop_harness_relation_completion"
             else:
                 source_kind = "graph_coverage"
         item["source_kind"] = source_kind
@@ -4197,17 +4227,37 @@ class InstanceRepository:
             return self._continuous_normalize_frontier_item(item)
         if not row:
             return self._continuous_normalize_frontier_item(item)
-        if not self._continuous_proposed_status_is_frontier_eligible(row["status"]):
+        if str(row["element_type"] or "").strip().lower() == "node":
+            return None
+        payload = _load_json(row["payload_json"], {})
+        source_kind = item.get("source_kind")
+        if source_kind is None and item.get("source") in {"loop_harness_relation_completion", "loop_harness_property_completion"}:
+            source_kind = item.get("source")
+        ontology_part = str(payload.get("ontology_part") or "").strip().lower()
+        artifact_type = str(payload.get("artifact_type") or "").strip().lower()
+        is_loop_relation_object = (
+            source_kind in {"loop_harness_relation_completion", "loop_harness_property_completion"}
+            and str(row["status"] or "").replace("-", "_").lower() == "approved"
+            and artifact_type == "object"
+            and ontology_part == "concrete_object"
+        )
+        has_loop_completion_class = bool(
+            str(payload.get("object_type") or payload.get("class_label") or payload.get("ontology_type") or "").strip()
+        )
+        if source_kind in {"loop_harness_relation_completion", "loop_harness_property_completion"} and not is_loop_relation_object:
+            return None
+        if source_kind in {"loop_harness_relation_completion", "loop_harness_property_completion"} and not has_loop_completion_class:
+            return None
+        if not is_loop_relation_object and not self._continuous_proposed_status_is_frontier_eligible(row["status"]):
             return None
         hydrated = dict(item)
-        payload = _load_json(row["payload_json"], {})
         deep_profile = payload.get("deep_graph_profile") if isinstance(payload.get("deep_graph_profile"), dict) else {}
         hydrated.update(
             {
                 "key": row["element_key"],
                 "name": row["name"] or hydrated.get("name") or row["element_key"],
-                "artifact_type": f"proposed_{row['element_type']}",
-                "kind": f"proposed_{row['element_type']}",
+                "artifact_type": hydrated.get("artifact_type") or f"proposed_{row['element_type']}",
+                "kind": hydrated.get("kind") or f"proposed_{row['element_type']}",
                 "source": hydrated.get("source") or "proposed_graph",
                 "source_run_key": hydrated.get("source_run_key") or row["run_key"],
                 "confidence": hydrated.get("confidence") if hydrated.get("confidence") is not None else row["confidence"],
@@ -4227,7 +4277,6 @@ class InstanceRepository:
                 "relation": hydrated.get("relation") or payload.get("relation"),
             }
         )
-        source_kind = hydrated.get("source_kind")
         if not source_kind:
             source_kind = "new_graph_edge" if row["element_type"] == "edge" else "new_graph_node"
         return self._continuous_normalize_frontier_item(hydrated, source_kind=source_kind)
@@ -4275,7 +4324,7 @@ class InstanceRepository:
                         LEFT JOIN aletheia_iterative_graph_enrichment_runs r
                           ON e.run_id = r.id AND e.project_id = r.project_id
                         WHERE e.project_id = :tenant_id
-                          AND e.element_type IN ('node', 'edge')
+                          AND e.element_type = 'edge'
                           AND e.status IN ('draft', 'needs_more_evidence')
                         ORDER BY e.created_at DESC, e.id DESC
                         LIMIT :limit
@@ -4289,7 +4338,7 @@ class InstanceRepository:
         for row in rows:
             is_new = row["element_key"] not in enriched
             if is_new:
-                source_kind = "new_graph_edge" if row["element_type"] == "edge" else "new_graph_node"
+                source_kind = "new_graph_edge"
             else:
                 source_kind = "graph_coverage"
             items.append(self._continuous_row_to_frontier_item(row, source_kind))
@@ -4976,10 +5025,14 @@ class InstanceRepository:
         stored_candidates = []
         stored_seen = set()
         for item in stored_frontier or []:
+            if self._continuous_frontier_item_is_storage_node(item):
+                continue
             hydrated = self._hydrate_continuous_frontier_item(tenant, item)
             if not hydrated:
                 continue
             normalized = self._continuous_normalize_frontier_item(hydrated)
+            if self._continuous_frontier_item_is_storage_node(normalized):
+                continue
             key = self._continuous_frontier_key(normalized)
             identity = self._continuous_frontier_identity(normalized) or key
             if not key or key in stored_seen or identity in stored_seen or key in visited or identity in visited:
@@ -4991,14 +5044,15 @@ class InstanceRepository:
         dynamic_candidates = [
             item
             for item in (self._continuous_normalize_frontier_item(item) for item in self._continuous_frontier_candidates(tenant, [], config))
-            if self._continuous_frontier_key(item) not in visited
+            if not self._continuous_frontier_item_is_storage_node(item)
+            and self._continuous_frontier_key(item) not in visited
             and self._continuous_frontier_identity(item) not in visited
             and self._continuous_frontier_key(item) not in stored_seen
             and self._continuous_frontier_identity(item) not in stored_seen
         ]
         if stored_frontier:
             candidates = stored_candidates
-            if len(stored_candidates) < max_frontier or objective_text:
+            if len(stored_candidates) < max_frontier:
                 candidates = [*stored_candidates, *dynamic_candidates]
         else:
             candidates = dynamic_candidates
@@ -5020,8 +5074,7 @@ class InstanceRepository:
                 self._continuous_frontier_key(item),
             ),
         )
-        if not stored_frontier or objective_text:
-            available_candidates = score_ranked_candidates
+        available_candidates = score_ranked_candidates
         shortlist_size = max(int(max_frontier), min(int((config or {}).get("frontier_selector_shortlist") or 20), 100))
         shortlist = score_ranked_candidates[:shortlist_size]
         reranked, selector_trace = self._continuous_llm_rerank_frontier(tenant, (config or {}).get("_frontier_selection_objective") or "", shortlist, max_frontier, config or {})
@@ -5032,7 +5085,7 @@ class InstanceRepository:
             **(selector_trace or {"planner": "deterministic", "reason": "not_run"}),
             "candidate_source": (
                 "stored_frontier_with_dynamic_backfill"
-                if stored_frontier and (len(stored_candidates) < max_frontier or objective_text)
+                if stored_frontier and len(stored_candidates) < max_frontier
                 else "stored_frontier"
                 if stored_frontier
                 else "dynamic_frontier"
@@ -5115,6 +5168,8 @@ class InstanceRepository:
         # runs walk the queue instead of repeatedly selecting the same high
         # priority seed.
         for item in previous_frontier or []:
+            if self._continuous_frontier_item_is_storage_node(item):
+                continue
             key = self._continuous_frontier_key(item)
             identity = self._continuous_frontier_identity(item) or key
             if key and key not in visited and identity not in visited and key not in consumed and identity not in consumed and key not in existing and identity not in existing:
@@ -5122,7 +5177,7 @@ class InstanceRepository:
                 existing.add(key)
                 existing.add(identity)
         for element in result.get("proposed_graph") or []:
-            if element.get("element_type") not in {"node", "edge"}:
+            if element.get("element_type") != "edge":
                 continue
             key = element.get("element_key")
             if not key or key in existing or key in visited or key in consumed:
@@ -5135,7 +5190,7 @@ class InstanceRepository:
                 "name": element.get("name") or key,
                 "artifact_type": f"proposed_{element.get('element_type')}",
                 "source": "proposed_graph",
-                "source_kind": "new_graph_edge" if element.get("element_type") == "edge" else "new_graph_node",
+                "source_kind": "new_graph_edge",
                 "source_run_key": result.get("run", {}).get("run_key"),
                 "confidence": element.get("confidence"),
                 "depth": int(element.get("iteration") or 1),
@@ -6770,8 +6825,22 @@ class InstanceRepository:
             payload = _load_json(row["payload_json"], {})
             before_status = row["status"]
             after_status = status_by_action[action] or before_status
+            quality_gate = None
+            if action == "approve":
+                quality_gate = self._ontology_candidate_quality_gate(row, payload)
+                if quality_gate:
+                    after_status = "needs_more_evidence"
+                    payload["quality_gate"] = {
+                        **quality_gate,
+                        "requested_action": action,
+                        "reviewed_at": reviewed_at,
+                    }
             promoted_artifact = None
-            should_promote_ontology = action == "approve" and str(row["element_type"] or "").lower() == "ontology_concept"
+            should_promote_ontology = (
+                action == "approve"
+                and not quality_gate
+                and str(row["element_type"] or "").lower() == "ontology_concept"
+            )
             if should_promote_ontology:
                 promoted_artifact = self._promote_ontology_candidate_to_catalog(tenant, session, row, payload, reviewer, reason, reviewed_at)
             catalog_write = bool(promoted_artifact and promoted_artifact.get("artifact_type") != "object_instance" and promoted_artifact.get("catalog_write", True))
@@ -6787,6 +6856,7 @@ class InstanceRepository:
                 "graph_space_write": graph_space_write,
                 "formal_graph_write": False,
                 "promoted_artifact": promoted_artifact,
+                "quality_gate": quality_gate,
             }
             payload.setdefault("review_events", []).append(review_event)
             payload["review_boundary"] = {
@@ -6819,7 +6889,7 @@ class InstanceRepository:
             )
             if (
                 str(row["element_type"] or "").lower() == "ontology_concept"
-                and after_status in {"approved", "rejected"}
+                and after_status in {"approved", "rejected", "needs_more_evidence"}
                 and self._ontology_candidate_is_concrete_object(payload, payload.get("artifact_type"))
             ):
                 session.execute(
@@ -6889,7 +6959,9 @@ class InstanceRepository:
             return "link"
         if raw == "property":
             return "property"
-        if raw in {"action", "event", "function", "policy"}:
+        if raw == "event":
+            return "event"
+        if raw in {"action", "function", "policy"}:
             return "action"
         return "object"
 
@@ -6920,6 +6992,58 @@ class InstanceRepository:
             ontology_part in {"concrete_object", "object_instance", "instance"}
             or source_type in {"entity", "instance"}
         )
+
+    def _ontology_candidate_concrete_object_quality(self, row, payload):
+        payload = payload or {}
+        identity = payload.get("identity") if isinstance(payload.get("identity"), dict) else {}
+        ontology_candidate = payload.get("ontology_candidate") if isinstance(payload.get("ontology_candidate"), dict) else {}
+        source_url = row.get("source_url") if hasattr(row, "get") else None
+        confidence = row.get("confidence") if hasattr(row, "get") else None
+        label = (
+            payload.get("label")
+            or identity.get("label")
+            or identity.get("normalized_label")
+            or ontology_candidate.get("label")
+            or (row.get("name") if hasattr(row, "get") else None)
+        )
+        class_label = _first_nonempty(
+            payload.get("class_label"),
+            payload.get("object_type"),
+            payload.get("entity_type"),
+            payload.get("ontology_type"),
+            payload.get("type"),
+            payload.get("type_label"),
+            identity.get("class_label"),
+            identity.get("object_type"),
+            identity.get("entity_type"),
+            identity.get("ontology_type"),
+            identity.get("type"),
+            ontology_candidate.get("class_label"),
+            ontology_candidate.get("object_type"),
+            ontology_candidate.get("entity_type"),
+            ontology_candidate.get("ontology_type"),
+            ontology_candidate.get("type"),
+        )
+        return concrete_object_quality(
+            {"label": label, "class_label": class_label},
+            {"source_url": source_url, "confidence": confidence},
+        )
+
+    def _ontology_candidate_quality_gate(self, row, payload):
+        artifact_type = str(payload.get("artifact_type") or "").strip().lower()
+        if str(row["element_type"] or "").lower() != "ontology_concept":
+            return None
+        if not self._ontology_candidate_is_concrete_object(payload, artifact_type):
+            return None
+        quality = self._ontology_candidate_concrete_object_quality(row, payload)
+        if not quality.get("issues"):
+            return None
+        return {
+            "decision": "needs_more_evidence",
+            "reason": "approved_concrete_object_failed_generic_quality_gate",
+            "score": quality.get("score"),
+            "issues": quality.get("issues") or [],
+        }
 
     def _ontology_candidate_instance_queries(self, payload, label):
         identity = payload.get("identity") if isinstance(payload.get("identity"), dict) else {}
@@ -6989,7 +7113,7 @@ class InstanceRepository:
         digest = hashlib.sha1(str(canonical_key or "").encode("utf-8")).hexdigest()[:16]
         return f"ontology-model:{tenant_id}:node:{digest}"
 
-    def _upsert_ontology_model_graph_node(self, tenant, session, row, payload, artifact, source_refs):
+    def _upsert_ontology_model_graph_projection(self, tenant, session, row, payload, artifact, source_refs):
         graph_key = self._ontology_graph_space_element_key(tenant.tenant_id, artifact.canonical_key)
         graph_payload = {
             "label": artifact.name,
@@ -7043,7 +7167,7 @@ class InstanceRepository:
                     """
                     UPDATE aletheia_proposed_graph_elements
                     SET run_id = :run_id,
-                        element_type = 'ontology_model_node',
+                        element_type = 'ontology_model_projection',
                         name = :name,
                         payload_json = :payload_json,
                         evidence_refs_json = :evidence_refs_json,
@@ -7064,7 +7188,7 @@ class InstanceRepository:
                          payload_json, evidence_refs_json, source_url,
                          confidence, status, iteration, created_at)
                     VALUES
-                        (:run_id, :tenant_id, :element_key, 'ontology_model_node', :name,
+                        (:run_id, :tenant_id, :element_key, 'ontology_model_projection', :name,
                          :payload_json, :evidence_refs_json, :source_url,
                          :confidence, 'approved', 1, CURRENT_TIMESTAMP)
                     """
@@ -7137,7 +7261,7 @@ class InstanceRepository:
             status="approved",
         )
         session.flush()
-        graph_space_element_key = self._upsert_ontology_model_graph_node(tenant, session, row, reviewed_payload, artifact, source_refs)
+        graph_space_element_key = self._upsert_ontology_model_graph_projection(tenant, session, row, reviewed_payload, artifact, source_refs)
         return {
             "id": artifact.id,
             "canonical_key": artifact.canonical_key,
@@ -7212,15 +7336,18 @@ class InstanceRepository:
             return False, "disabled", 0.0
         element_type = str(element.get("element_type") or "").lower()
         payload = element.get("payload") or {}
-        if element_type == "ontology_model_node":
+        if element_type in {"ontology_model_projection", "ontology_model_node"}:
             return False, "ontology_model_projection_not_auto_approved", 0.0
         if element_type == "ontology_concept":
             artifact_type = str(payload.get("artifact_type") or "").strip().lower()
             ontology_part = str(payload.get("ontology_part") or "").strip().lower()
             if artifact_type == "class" or ontology_part in {"class", "abstract_class"}:
                 return False, "ontology_class_requires_human_review", 0.0
-            if ontology_part not in {"concrete_object", "object_instance", "instance", "relation", "property"}:
+            if ontology_part not in {"concrete_object", "object_instance", "instance", "relation", "property", "event"}:
                 return False, "ontology_model_concept_requires_human_review", 0.0
+            quality_gate = self._ontology_candidate_quality_gate(element, payload)
+            if quality_gate:
+                return False, "concrete_object_quality_gate", 0.0
         status = str(element.get("status") or "").replace("-", "_").lower()
         if status not in {"draft", "needs_review", "needs_more_evidence", "proposed"}:
             return False, f"status_not_pending:{status or 'unknown'}", 0.0

@@ -123,7 +123,7 @@ class ContinuousEnrichmentFrontierTest(unittest.TestCase):
             self.assertTrue(result["write_boundary"]["canonical_write"])
             self.assertTrue(result["write_boundary"]["graph_space_write"])
             self.assertEqual(result["write_boundary"]["target"], "ontology_catalog_and_graph_space")
-            self.assertEqual(result["promoted_artifact"]["artifact_type"], "action")
+            self.assertEqual(result["promoted_artifact"]["artifact_type"], "event")
             self.assertTrue(result["promoted_artifact"]["graph_space_element_key"].startswith("ontology-model:tenant-a:node:"))
 
             with engine.connect() as conn:
@@ -151,15 +151,101 @@ class ContinuousEnrichmentFrontierTest(unittest.TestCase):
                     },
                 ).mappings().one()
             artifact_payload = json.loads(row["payload_json"])
-            self.assertEqual(row["artifact_type"], "action")
+            self.assertEqual(row["artifact_type"], "event")
             self.assertEqual(row["status"], "approved")
             self.assertEqual(artifact_payload["source_artifact_type"], "event")
             self.assertEqual(artifact_payload["source_proposed_graph_element_key"], "proposed-graph:tenant-a:ontology-concept:port-closure-event")
             graph_payload = json.loads(graph_row["payload_json"])
-            self.assertEqual(graph_row["element_type"], "ontology_model_node")
+            self.assertEqual(graph_row["element_type"], "ontology_model_projection")
             self.assertEqual(graph_row["status"], "approved")
             self.assertEqual(graph_payload["ontology_artifact"], result["promoted_artifact"]["canonical_key"])
             self.assertEqual(graph_payload["graph_space"]["space"], "ontology_model")
+
+    def test_approving_low_quality_concrete_ontology_object_needs_evidence(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo, tenant = self._sqlite_tenant_repo(tmpdir)
+            engine = repo.metadata_engine_for(tenant)
+            ensure_artifact_schema(engine)
+            payload = {
+                "artifact_type": "object",
+                "ontology_part": "concrete_object",
+                "label": "The East",
+                "class_label": "Region",
+                "description": "A vague determiner phrase should not become an approved concrete object.",
+                "dedup_decision": "new_proposal",
+            }
+            with engine.begin() as conn:
+                run_result = conn.execute(
+                    text(
+                        """
+                        INSERT INTO aletheia_iterative_graph_enrichment_runs
+                            (project_id, run_key, source_agent, status, objective,
+                             frontier_json, expansion_trace_json, safety_profile_json,
+                             budget_json, skipped_sources_json, proposed_count,
+                             pruned_count, finding_count, started_at)
+                        VALUES
+                            (:project_id, :run_key, 'IterativeGraphEnrichmentAgent',
+                             'completed', 'test ontology quality gate', '[]', '[]',
+                             '{}', '{}', '[]', 1, 0, 0, :started_at)
+                        """
+                    ),
+                    {
+                        "project_id": tenant.tenant_id,
+                        "run_key": "ontology-quality-gate-test",
+                        "started_at": datetime.utcnow(),
+                    },
+                )
+                run_id = run_result.lastrowid
+                conn.execute(
+                    text(
+                        """
+                        INSERT INTO aletheia_proposed_graph_elements
+                            (run_id, project_id, element_key, element_type, name,
+                             payload_json, evidence_refs_json, source_url,
+                             confidence, status, iteration, created_at)
+                        VALUES
+                            (:run_id, :project_id, :element_key, 'ontology_concept',
+                             :name, :payload_json, :evidence_refs_json, :source_url,
+                             0.9, 'draft', 1, :created_at)
+                        """
+                    ),
+                    {
+                        "run_id": run_id,
+                        "project_id": tenant.tenant_id,
+                        "element_key": "proposed-graph:tenant-a:ontology-concept:the-east",
+                        "name": "The East",
+                        "payload_json": json.dumps(payload),
+                        "evidence_refs_json": json.dumps(["gpt_researcher://report/the-east"]),
+                        "source_url": "gpt_researcher://report/the-east",
+                        "created_at": datetime.utcnow(),
+                    },
+                )
+
+            result = repo.review_proposed_graph_element(
+                tenant,
+                "proposed-graph:tenant-a:ontology-concept:the-east",
+                "approve",
+                {"reviewer": "M. Aoki", "reason": "test quality gate", "review_surface": "ontology"},
+            )
+
+            self.assertEqual(result["element"]["status"], "needs_more_evidence")
+            self.assertFalse(result["write_boundary"]["canonical_write"])
+            self.assertIsNone(result["promoted_artifact"])
+            self.assertEqual(result["review"]["quality_gate"]["decision"], "needs_more_evidence")
+            self.assertEqual(result["element"]["payload"]["quality_gate"]["issues"][0]["code"], "short_determiner_phrase")
+
+            with engine.connect() as conn:
+                catalog_count = conn.execute(
+                    text(
+                        """
+                        SELECT COUNT(*) AS count
+                        FROM aletheia_ontology_artifacts
+                        WHERE project_id = :project_id AND name = 'The East'
+                        """
+                    ),
+                    {"project_id": tenant.tenant_id},
+                ).mappings().one()
+            self.assertEqual(catalog_count["count"], 0)
 
     def test_concrete_object_candidate_resolves_to_schema_instance_by_explicit_identity(self):
         repo = object.__new__(InstanceRepository)
@@ -583,6 +669,19 @@ class ContinuousEnrichmentFrontierTest(unittest.TestCase):
                 "match_score": 0.0,
             },
         }
+        event = {
+            "element_key": "proposed-graph:tenant-a:ontology-concept:closure-event",
+            "element_type": "ontology_concept",
+            "status": "draft",
+            "confidence": 0.83,
+            "payload": {
+                "artifact_type": "event",
+                "ontology_part": "event",
+                "label": "Waterway Closure Event",
+                "dedup_decision": "new_proposal",
+                "match_score": 0.0,
+            },
+        }
         abstract_class = {
             "element_key": "proposed-graph:tenant-a:ontology-concept:waterway-class",
             "element_type": "ontology_concept",
@@ -599,7 +698,7 @@ class ContinuousEnrichmentFrontierTest(unittest.TestCase):
 
         result = repo._continuous_auto_approve_low_duplicate_proposals(
             tenant,
-            [concrete_object, relation, abstract_class],
+            [concrete_object, relation, event, abstract_class],
             {
                 "auto_approve_low_duplicate_proposals": True,
                 "auto_approve_min_confidence": 0.8,
@@ -610,9 +709,51 @@ class ContinuousEnrichmentFrontierTest(unittest.TestCase):
         self.assertEqual([item[0] for item in reviewed], [
             "proposed-graph:tenant-a:ontology-concept:red-sea",
             "proposed-graph:tenant-a:ontology-concept:red-sea-suez",
+            "proposed-graph:tenant-a:ontology-concept:closure-event",
         ])
-        self.assertEqual(len(result["reviewed"]), 2)
+        self.assertEqual(len(result["reviewed"]), 3)
         self.assertEqual(result["skipped"][0]["reason"], "ontology_class_requires_human_review")
+
+    def test_auto_approve_skips_low_quality_concrete_ontology_object(self):
+        repo = object.__new__(InstanceRepository)
+        repo.review_proposed_graph_element = lambda *_args, **_kwargs: self.fail("low-quality concrete object should not auto approve")
+        tenant = TenantConfig(
+            tenant_id="tenant-a",
+            namespace="tenant-a",
+            display_name="Tenant A",
+            graph_database="tenant_a",
+            metadata_db_url="sqlite:///:memory:",
+            source_db_url="sqlite:///:memory:",
+        )
+        element = {
+            "element_key": "proposed-graph:tenant-a:ontology-concept:the-east",
+            "element_type": "ontology_concept",
+            "name": "The East",
+            "status": "draft",
+            "confidence": 0.94,
+            "source_url": "gpt_researcher://report/the-east",
+            "payload": {
+                "artifact_type": "object",
+                "ontology_part": "concrete_object",
+                "label": "The East",
+                "class_label": "Region",
+                "dedup_decision": "new_proposal",
+                "match_score": 0.0,
+            },
+        }
+
+        result = repo._continuous_auto_approve_low_duplicate_proposals(
+            tenant,
+            [element],
+            {
+                "auto_approve_low_duplicate_proposals": True,
+                "auto_approve_min_confidence": 0.8,
+                "auto_approve_max_duplicate_score": 0.5,
+            },
+        )
+
+        self.assertEqual(result["reviewed"], [])
+        self.assertEqual(result["skipped"][0]["reason"], "concrete_object_quality_gate")
 
     def test_default_continuous_session_objective_is_optional_empty(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -639,26 +780,59 @@ class ContinuousEnrichmentFrontierTest(unittest.TestCase):
             self.assertEqual(updated["session"]["objective"], "maritime chokepoint disruption")
             self.assertEqual(cleared["session"]["objective"], "")
 
-    def test_priority_order_prefers_new_graph_then_question_then_finding_then_coverage(self):
+    def test_priority_order_prefers_approved_coverage_gaps_then_new_graph(self):
         candidates = [
             {"key": "coverage:country:chn", "name": "CHN", "source_kind": "graph_coverage"},
             {"key": "finding:bab", "name": "Bab finding", "source_kind": "reasoning_finding_seed"},
             {"key": "question:hormuz", "name": "Hormuz question", "source_kind": "user_question_scope"},
             {"key": "proposed-graph:edge:chn-bab", "name": "CHN depends on Bab", "source_kind": "new_graph_edge"},
             {"key": "proposed-graph:node:hormuz", "name": "Hormuz Strait", "source_kind": "new_graph_node"},
+            {
+                "key": "instance-coverage:Country:CHN",
+                "name": "CHN Country enrichment coverage",
+                "source_kind": "instance_coverage",
+                "payload": {"label": "CHN", "ontology_type": "Country", "identity_key": "Country:CHN"},
+            },
         ]
         repo = self._repo_with_candidates(candidates)
 
-        selected = repo._continuous_frontier_for_cycle(None, [], {"frontier_state": {}, "frontier_cooldown_minutes": 360}, 5)
+        selected = repo._continuous_frontier_for_cycle(None, [], {"frontier_state": {}, "frontier_cooldown_minutes": 360}, 6)
         self.assertEqual([item["source_kind"] for item in selected], [
+            "instance_coverage",
             "new_graph_edge",
-            "new_graph_node",
             "user_question_scope",
             "reasoning_finding_seed",
             "graph_coverage",
         ])
         self.assertTrue(all(item.get("reason") for item in selected))
         self.assertTrue(all("priority" in item for item in selected))
+
+    def test_loop_completion_frontier_preempts_unreviewed_candidate_node(self):
+        candidates = [
+            {
+                "key": "proposed-graph:node:historical-topic",
+                "name": "Historical Topic",
+                "source_kind": "new_graph_node",
+            },
+            {
+                "key": "loop:relation:approved-object",
+                "name": "Approved Object",
+                "source": "loop_harness_relation_completion",
+                "source_kind": "loop_harness_relation_completion",
+                "artifact_type": "ontology_concrete_object",
+            },
+        ]
+        repo = self._repo_with_candidates(candidates)
+
+        selected = repo._continuous_frontier_for_cycle(
+            None,
+            [],
+            {"frontier_state": {}, "frontier_cooldown_minutes": 360},
+            1,
+        )
+
+        self.assertEqual(selected[0]["key"], "loop:relation:approved-object")
+        self.assertEqual(selected[0]["source_kind"], "loop_harness_relation_completion")
 
     def test_full_graph_degrades_when_source_db_is_unavailable(self):
         repo = object.__new__(InstanceRepository)
@@ -777,7 +951,7 @@ class ContinuousEnrichmentFrontierTest(unittest.TestCase):
         next_frontier, additions = repo._continuous_next_frontier([], result, {"visited_frontier_keys": []})
 
         self.assertEqual(additions[0]["source_kind"], "new_graph_edge")
-        self.assertEqual(additions[0]["priority"], 100.0)
+        self.assertEqual(additions[0]["priority"], repo._continuous_source_priority("new_graph_edge"))
         self.assertIn("new proposed graph edge", additions[0]["reason"])
         self.assertEqual(next_frontier[0]["payload"]["relation"], "depends_on")
 
@@ -855,21 +1029,251 @@ class ContinuousEnrichmentFrontierTest(unittest.TestCase):
         self.assertEqual(reason, "structural_conflict_requires_human_review")
         self.assertEqual(score, 0.99)
 
-    def test_stored_frontier_queue_order_takes_precedence_over_dynamic_priority(self):
+    def test_stored_frontier_queue_selection_uses_priority_score(self):
         candidates = [
             {"key": "proposed-graph:node:high", "name": "High priority node", "source_kind": "new_graph_node"},
         ]
         repo = self._repo_with_candidates(candidates)
         stored_frontier = [
             {"key": "queue:first", "name": "First queued", "source_kind": "graph_coverage", "priority": 10},
-            {"key": "queue:second", "name": "Second queued", "source_kind": "graph_coverage", "priority": 10},
+            {"key": "queue:second", "name": "Second queued", "source_kind": "graph_coverage", "priority": 80},
         ]
 
         selected = repo._continuous_frontier_for_cycle(None, stored_frontier, {"frontier_state": {}, "frontier_cooldown_minutes": 360}, 2)
 
-        self.assertEqual([item["key"] for item in selected], ["queue:first", "queue:second"])
+        self.assertEqual([item["key"] for item in selected], ["queue:second", "queue:first"])
 
-    def test_dynamic_frontier_does_not_reselect_visited_key_when_cooldown_is_zero(self):
+    def test_stored_repair_frontier_priority_takes_precedence_with_selection_objective(self):
+        candidates = [
+            {
+                "key": "proposed-graph:node:high",
+                "name": "United Arab Emirates",
+                "source_kind": "new_graph_node",
+                "priority": 90,
+            },
+        ]
+        repo = self._repo_with_candidates(candidates)
+        stored_frontier = [
+            {
+                "key": "queue:first",
+                "name": "First queued",
+                "source_kind": "new_graph_node",
+                "priority": 90,
+            },
+            {
+                "key": "loop:relation:first",
+                "name": "Portugal",
+                "source": "loop_harness_relation_completion",
+                "source_kind": "loop_harness_relation_completion",
+                "priority": 135,
+            },
+        ]
+
+        selected = repo._continuous_frontier_for_cycle(
+            None,
+            stored_frontier,
+            {
+                "frontier_state": {},
+                "frontier_cooldown_minutes": 360,
+                "_frontier_selection_objective": "Find evidence-backed relations and properties for approved ontology objects.",
+            },
+            1,
+        )
+
+        self.assertEqual([item["key"] for item in selected], ["loop:relation:first"])
+
+    def test_loop_relation_frontier_hydrates_approved_concrete_ontology_object(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo, tenant = self._sqlite_tenant_repo(tmpdir)
+            engine = repo.metadata_engine_for(tenant)
+            ensure_artifact_schema(engine)
+            with engine.begin() as conn:
+                run_id = conn.execute(
+                    text(
+                        """
+                        INSERT INTO aletheia_iterative_graph_enrichment_runs
+                            (project_id, run_key, source_agent, status, objective,
+                             frontier_json, expansion_trace_json, safety_profile_json,
+                             budget_json, skipped_sources_json, proposed_count,
+                             pruned_count, finding_count, started_at)
+                        VALUES
+                            (:project_id, 'run-loop-frontier', 'IterativeGraphEnrichmentAgent',
+                             'completed', 'test loop frontier', '[]', '[]',
+                             '{}', '{}', '[]', 1, 0, 0, :started_at)
+                        """
+                    ),
+                    {"project_id": tenant.tenant_id, "started_at": datetime.utcnow()},
+                ).lastrowid
+                conn.execute(
+                    text(
+                        """
+                        INSERT INTO aletheia_proposed_graph_elements
+                            (run_id, project_id, element_key, element_type, name,
+                             payload_json, evidence_refs_json, source_url,
+                             confidence, status, iteration, created_at)
+                        VALUES
+                            (:run_id, :project_id, :element_key, 'ontology_concept',
+                             'Portugal', :payload_json, '[]',
+                             'gpt_researcher://report/test', 0.85, 'approved', 1, :created_at)
+                        """
+                    ),
+                    {
+                        "run_id": run_id,
+                        "project_id": tenant.tenant_id,
+                        "element_key": "proposed-graph:tenant-a:ontology-concept:portugal",
+                        "payload_json": json.dumps(
+                            {
+                                "artifact_type": "object",
+                                "ontology_part": "concrete_object",
+                                "label": "Portugal",
+                                "object_type": "Country",
+                            }
+                        ),
+                        "created_at": datetime.utcnow(),
+                    },
+                )
+
+            hydrated = repo._hydrate_continuous_frontier_item(
+                tenant,
+                {
+                    "key": "proposed-graph:tenant-a:ontology-concept:portugal",
+                    "name": "Portugal",
+                    "artifact_type": "ontology_concrete_object",
+                    "source": "loop_harness_relation_completion",
+                },
+            )
+
+            self.assertIsNotNone(hydrated)
+            self.assertEqual(hydrated["source_kind"], "loop_harness_relation_completion")
+            self.assertEqual(hydrated["artifact_type"], "ontology_concrete_object")
+            self.assertEqual(hydrated["payload"]["ontology_part"], "concrete_object")
+
+    def test_loop_relation_frontier_rejects_unclassified_concrete_ontology_object(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo, tenant = self._sqlite_tenant_repo(tmpdir)
+            engine = repo.metadata_engine_for(tenant)
+            ensure_artifact_schema(engine)
+            with engine.begin() as conn:
+                run_id = conn.execute(
+                    text(
+                        """
+                        INSERT INTO aletheia_iterative_graph_enrichment_runs
+                            (project_id, run_key, source_agent, status, objective,
+                             frontier_json, expansion_trace_json, safety_profile_json,
+                             budget_json, skipped_sources_json, proposed_count,
+                             pruned_count, finding_count, started_at)
+                        VALUES
+                            (:project_id, 'run-loop-frontier-untyped', 'IterativeGraphEnrichmentAgent',
+                             'completed', 'test loop frontier', '[]', '[]',
+                             '{}', '{}', '[]', 1, 0, 0, :started_at)
+                        """
+                    ),
+                    {"project_id": tenant.tenant_id, "started_at": datetime.utcnow()},
+                ).lastrowid
+                conn.execute(
+                    text(
+                        """
+                        INSERT INTO aletheia_proposed_graph_elements
+                            (run_id, project_id, element_key, element_type, name,
+                             payload_json, evidence_refs_json, source_url,
+                             confidence, status, iteration, created_at)
+                        VALUES
+                            (:run_id, :project_id, :element_key, 'ontology_concept',
+                             'Unclassified Object', :payload_json, '[]',
+                             'gpt_researcher://report/test', 0.85, 'approved', 1, :created_at)
+                        """
+                    ),
+                    {
+                        "run_id": run_id,
+                        "project_id": tenant.tenant_id,
+                        "element_key": "proposed-graph:tenant-a:ontology-concept:unclassified",
+                        "payload_json": json.dumps(
+                            {
+                                "artifact_type": "object",
+                                "ontology_part": "concrete_object",
+                                "label": "Unclassified Object",
+                            }
+                        ),
+                        "created_at": datetime.utcnow(),
+                    },
+                )
+
+            hydrated = repo._hydrate_continuous_frontier_item(
+                tenant,
+                {
+                    "key": "proposed-graph:tenant-a:ontology-concept:unclassified",
+                    "name": "Unclassified Object",
+                    "artifact_type": "ontology_concrete_object",
+                    "source": "loop_harness_relation_completion",
+                },
+            )
+
+            self.assertIsNone(hydrated)
+
+    def test_loop_relation_frontier_rejects_demoted_concrete_ontology_object(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo, tenant = self._sqlite_tenant_repo(tmpdir)
+            engine = repo.metadata_engine_for(tenant)
+            ensure_artifact_schema(engine)
+            with engine.begin() as conn:
+                run_id = conn.execute(
+                    text(
+                        """
+                        INSERT INTO aletheia_iterative_graph_enrichment_runs
+                            (project_id, run_key, source_agent, status, objective,
+                             frontier_json, expansion_trace_json, safety_profile_json,
+                             budget_json, skipped_sources_json, proposed_count,
+                             pruned_count, finding_count, started_at)
+                        VALUES
+                            (:project_id, 'run-loop-frontier-demoted', 'IterativeGraphEnrichmentAgent',
+                             'completed', 'test loop frontier', '[]', '[]',
+                             '{}', '{}', '[]', 1, 0, 0, :started_at)
+                        """
+                    ),
+                    {"project_id": tenant.tenant_id, "started_at": datetime.utcnow()},
+                ).lastrowid
+                conn.execute(
+                    text(
+                        """
+                        INSERT INTO aletheia_proposed_graph_elements
+                            (run_id, project_id, element_key, element_type, name,
+                             payload_json, evidence_refs_json, source_url,
+                             confidence, status, iteration, created_at)
+                        VALUES
+                            (:run_id, :project_id, :element_key, 'ontology_concept',
+                             'Global Shipping', :payload_json, '[]',
+                             'gpt_researcher://report/test', 0.85, 'needs_more_evidence', 1, :created_at)
+                        """
+                    ),
+                    {
+                        "run_id": run_id,
+                        "project_id": tenant.tenant_id,
+                        "element_key": "proposed-graph:tenant-a:ontology-concept:global-shipping",
+                        "payload_json": json.dumps(
+                            {
+                                "artifact_type": "object",
+                                "ontology_part": "concrete_object",
+                                "label": "Global Shipping",
+                                "object_type": "GlobalShipping",
+                            }
+                        ),
+                        "created_at": datetime.utcnow(),
+                    },
+                )
+
+            hydrated = repo._hydrate_continuous_frontier_item(
+                tenant,
+                {
+                    "key": "proposed-graph:tenant-a:ontology-concept:global-shipping",
+                    "name": "Global Shipping",
+                    "artifact_type": "ontology_concrete_object",
+                    "source": "loop_harness_relation_completion",
+                },
+            )
+
+            self.assertIsNone(hydrated)
+
+    def test_dynamic_frontier_filters_storage_node_candidates(self):
         candidates = [
             {"key": "proposed-graph:node:first", "name": "First node", "source_kind": "new_graph_node"},
             {"key": "proposed-graph:node:second", "name": "Second node", "source_kind": "new_graph_node"},
@@ -883,7 +1287,7 @@ class ContinuousEnrichmentFrontierTest(unittest.TestCase):
             1,
         )
 
-        self.assertEqual([item["key"] for item in selected], ["proposed-graph:node:second"])
+        self.assertEqual(selected, [])
 
     def test_dynamic_frontier_dedupes_repeated_edge_fact_identity(self):
         candidates = [
@@ -967,7 +1371,7 @@ class ContinuousEnrichmentFrontierTest(unittest.TestCase):
 
         self.assertEqual([item["key"] for item in selected], ["proposed-graph:maritime-risk:edge:jpn-source"])
 
-    def test_next_frontier_removes_consumed_items_and_appends_new_nodes_to_tail(self):
+    def test_next_frontier_removes_consumed_items_and_skips_new_storage_nodes(self):
         repo = object.__new__(InstanceRepository)
         previous = [
             {"key": "queue:first", "name": "First queued", "source_kind": "graph_coverage"},
@@ -994,8 +1398,8 @@ class ContinuousEnrichmentFrontierTest(unittest.TestCase):
             consumed_frontier=[previous[0]],
         )
 
-        self.assertEqual([item["key"] for item in next_frontier], ["queue:second", "proposed-graph:node:new-tail"])
-        self.assertEqual([item["key"] for item in additions], ["proposed-graph:node:new-tail"])
+        self.assertEqual([item["key"] for item in next_frontier], ["queue:second"])
+        self.assertEqual(additions, [])
 
     def test_next_frontier_does_not_append_repeated_edge_fact_from_new_source(self):
         repo = object.__new__(InstanceRepository)
@@ -1323,6 +1727,30 @@ class ContinuousEnrichmentFrontierTest(unittest.TestCase):
         self.assertTrue(any("cape of good hope" in query.lower() for query in queries))
         self.assertNotIn("gpt researcher", joined)
         self.assertNotIn("researcher", joined)
+
+    def test_frontier_query_plan_does_not_pollute_node_query_with_type_or_objective_terms(self):
+        plan = _graph_context_query_plan(
+            {
+                "key": "proposed-graph:maritime-risk:node:b458709618a70e9d",
+                "name": "Bab el-Mandeb Strait",
+                "artifact_type": "proposed_node",
+                "ontology_type": "Maritime Chokepoint",
+                "payload": {
+                    "label": "Bab el-Mandeb Strait",
+                    "matched_node_key": "Country:CHN",
+                    "matched_type": "Country",
+                },
+            },
+            "Country CHN Country maritime chokepoint disruption",
+            "maritime-risk",
+        )
+
+        queries = [item["query"] for item in plan["plans"]]
+        joined = " ".join(queries)
+        self.assertTrue(all("Bab el Mandeb Strait" in query for query in queries))
+        self.assertNotIn("Country CHN", joined)
+        self.assertNotIn("proposed node", joined.lower())
+        self.assertNotIn("Maritime Chokepoint", joined)
         self.assertNotIn("expand", joined)
 
     def test_continuous_cycle_splits_research_topic_from_execution_goal(self):
@@ -1525,7 +1953,7 @@ class ContinuousEnrichmentFrontierTest(unittest.TestCase):
             "node:country:chn",
         )
 
-    def test_objective_matched_dynamic_frontier_can_preempt_stored_queue(self):
+    def test_objective_matched_dynamic_frontier_does_not_preempt_stored_queue(self):
         dynamic = [
             {
                 "key": "instance-coverage:Country:XYZ",
@@ -1555,7 +1983,7 @@ class ContinuousEnrichmentFrontierTest(unittest.TestCase):
             1,
         )
 
-        self.assertEqual([item["key"] for item in selected], ["instance-coverage:Country:XYZ"])
+        self.assertEqual([item["key"] for item in selected], ["queue:generic"])
 
     def test_backoff_schedules_exponential_delay_and_blocks_until_due(self):
         repo = object.__new__(InstanceRepository)
@@ -1790,7 +2218,7 @@ class ContinuousEnrichmentFrontierTest(unittest.TestCase):
 
         self.assertEqual([item["key"] for item in selected], ["queue:second"])
         self.assertEqual(config["_frontier_selection_trace"]["planner"], "llm")
-        self.assertEqual(config["_frontier_selection_trace"]["candidate_source"], "stored_frontier_with_dynamic_backfill")
+        self.assertEqual(config["_frontier_selection_trace"]["candidate_source"], "stored_frontier")
 
     def test_resume_persistent_session_preserves_queue_and_schedules_immediate_tick(self):
         repo = object.__new__(InstanceRepository)

@@ -13,8 +13,16 @@ from collections import Counter, defaultdict
 from datetime import datetime
 from pathlib import Path
 from typing import Any
+from urllib.parse import unquote
 
 from sqlalchemy import create_engine, text
+
+try:
+    from ontology_quality import concrete_object_quality as _concrete_object_quality
+    from ontology_quality import normalize_label as _normalize_label
+except ModuleNotFoundError:
+    from agents.ontology_quality import concrete_object_quality as _concrete_object_quality
+    from agents.ontology_quality import normalize_label as _normalize_label
 
 
 DEFAULT_LOOP_CONFIG: dict[str, Any] = {
@@ -39,11 +47,33 @@ DEFAULT_LOOP_CONFIG: dict[str, Any] = {
         "if_many_isolated_objects": "relation_completion",
         "if_many_unclassified_objects": "class_assignment",
         "if_many_unsupported_classes": "ontology_shape_repair",
+        "if_low_quality_concrete_objects": "concrete_object_quality_repair",
         "if_many_objects_without_properties": "property_completion",
         "if_dedup_conflicts_high": "dedup_verifier_review",
         "if_latency_high": "stage_bottleneck_diagnosis",
         "if_run_failed": "run_health_diagnosis",
         "if_targets_met": "continue_frontier_enrichment",
+    },
+    "repair_policy": {
+        "ontology_shape_repair": {
+            "default_action": "needs_more_evidence",
+            "max_items": 200,
+            "reviewer": "Loop Harness",
+            "reason": "Loop harness shape repair: approved ontology class has no approved concrete object instance.",
+        },
+        "class_assignment": {
+            "max_items": 200,
+            "min_score": 4.0,
+            "auto_apply_min_score": 8.0,
+            "reviewer": "Loop Harness",
+            "reason": "Loop harness class assignment: approved concrete object had no stable class, and the assigned class matched object evidence text.",
+        },
+        "concrete_object_quality_repair": {
+            "default_action": "needs_more_evidence",
+            "max_items": 200,
+            "reviewer": "Loop Harness",
+            "reason": "Loop harness quality repair: approved concrete object looks like a semantic phrase, metric, claim, or class-shaped abstraction rather than a stable referential object.",
+        },
     },
 }
 
@@ -118,6 +148,20 @@ def evaluate_enrichment_loop(
         config=config,
         session=session,
     )
+    repair_plan = build_repair_plan(
+        tenant_id,
+        tenant_elements,
+        next_focus=verdict.get("next_focus"),
+        config=config,
+    )
+    verdict = _advance_unactionable_focus(verdict, repair_plan, tenant_metrics, config)
+    if verdict.get("next_focus") != repair_plan.get("focus"):
+        repair_plan = build_repair_plan(
+            tenant_id,
+            tenant_elements,
+            next_focus=verdict.get("next_focus"),
+            config=config,
+        )
     return {
         "loop_id": config.get("loop_id"),
         "tenant": tenant_id,
@@ -128,7 +172,807 @@ def evaluate_enrichment_loop(
         "tenant_metrics": tenant_metrics,
         "stage_latency_sec": latency,
         "verdict": verdict,
+        "repair_plan": repair_plan,
     }
+
+
+def _advance_unactionable_focus(
+    verdict: dict[str, Any],
+    repair_plan: dict[str, Any],
+    tenant_metrics: dict[str, Any],
+    config: dict[str, Any],
+) -> dict[str, Any]:
+    focus = verdict.get("next_focus")
+    if repair_plan.get("actionable", False):
+        return verdict
+    if focus not in {"class_assignment", "ontology_shape_repair"}:
+        return verdict
+    targets = config.get("coverage_targets") or {}
+    policy = config.get("next_action_policy") or {}
+    reasons = list(verdict.get("reasons") or [])
+    reasons.append(f"{focus} has no automatically actionable repair items; remaining candidates require review")
+    if tenant_metrics.get("isolated_object_ratio", 0.0) > float(targets.get("isolated_object_ratio_max", 0.2)):
+        return {**verdict, "next_focus": policy.get("if_many_isolated_objects", "relation_completion"), "reasons": reasons}
+    if tenant_metrics.get("object_with_property_ratio", 1.0) < float(targets.get("object_with_property_ratio", 0.8)):
+        return {**verdict, "next_focus": policy.get("if_many_objects_without_properties", "property_completion"), "reasons": reasons}
+    return verdict
+
+
+def build_repair_plan(
+    tenant_id: str,
+    elements: list[dict[str, Any]],
+    *,
+    next_focus: str | None,
+    config: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    config = _deep_merge(json.loads(json.dumps(DEFAULT_LOOP_CONFIG)), config or {})
+    if next_focus != "ontology_shape_repair":
+        if next_focus == "class_assignment":
+            return _build_class_assignment_repair_plan(tenant_id, elements, config=config)
+        if next_focus == "concrete_object_quality_repair":
+            return _build_concrete_object_quality_repair_plan(tenant_id, elements, config=config)
+        if next_focus == "relation_completion":
+            return _build_relation_completion_plan(tenant_id, elements, config=config)
+        if next_focus == "property_completion":
+            return _build_property_completion_plan(tenant_id, elements, config=config)
+        return {"focus": next_focus, "actionable": False, "items": [], "item_count": 0}
+    policy = ((config.get("repair_policy") or {}).get("ontology_shape_repair") or {})
+    max_items = max(1, int(policy.get("max_items") or 200))
+    action = str(policy.get("default_action") or "needs_more_evidence").strip()
+    object_class_labels = {
+        _normalize_label(_object_record(item)["class_label"])
+        for item in elements
+        if str(item.get("status") or "").lower() == "approved" and _is_concrete_object(item)
+    }
+    items = []
+    for item in elements:
+        if str(item.get("status") or "").lower() != "approved" or not _is_class(item):
+            continue
+        class_label = _class_label(item)
+        normalized_class = _normalize_label(class_label)
+        if not normalized_class or normalized_class in object_class_labels:
+            continue
+        items.append(
+            {
+                "element_key": item.get("element_key"),
+                "name": item.get("name"),
+                "label": class_label,
+                "normalized_label": normalized_class,
+                "current_status": item.get("status"),
+                "recommended_action": action,
+                "reason": policy.get("reason") or "Approved ontology class has no approved concrete object instance.",
+                "source_url": item.get("source_url"),
+                "confidence": item.get("confidence"),
+            }
+        )
+        if len(items) >= max_items:
+            break
+    return {
+        "focus": "ontology_shape_repair",
+        "actionable": bool(items),
+        "recommended_action": action,
+        "item_count": len(items),
+        "items": items,
+    }
+
+
+def _build_class_assignment_repair_plan(
+    tenant_id: str,
+    elements: list[dict[str, Any]],
+    *,
+    config: dict[str, Any],
+) -> dict[str, Any]:
+    policy = ((config.get("repair_policy") or {}).get("class_assignment") or {})
+    max_items = max(1, int(policy.get("max_items") or 200))
+    min_score = float(policy.get("min_score") or 4.0)
+    auto_apply_min_score = float(policy.get("auto_apply_min_score") or 8.0)
+    class_candidates = []
+    seen_classes = set()
+    for item in elements:
+        if str(item.get("status") or "").lower() not in {"approved", "needs_more_evidence"} or not _is_class(item):
+            continue
+        label = _class_label(item)
+        normalized = _normalize_label(label)
+        if not normalized or normalized in seen_classes:
+            continue
+        seen_classes.add(normalized)
+        payload = item.get("payload") if isinstance(item.get("payload"), dict) else {}
+        class_candidates.append(
+            {
+                "label": label,
+                "normalized_label": normalized,
+                "element_key": item.get("element_key"),
+                "status": item.get("status"),
+                "tokens": _semantic_tokens(label, payload.get("description"), payload.get("evidence_quote")),
+            }
+        )
+    items = []
+    for item in elements:
+        if str(item.get("status") or "").lower() != "approved" or not _is_concrete_object(item):
+            continue
+        record = _object_record(item)
+        if record.get("class_label") and _normalize_label(record.get("class_label")) != "unclassifiedontologyobject":
+            continue
+        payload = item.get("payload") if isinstance(item.get("payload"), dict) else {}
+        description = str(payload.get("description") or "")
+        object_tokens = _semantic_tokens(
+            record.get("label"),
+            description,
+            payload.get("evidence_quote"),
+        )
+        best = None
+        for candidate in class_candidates:
+            if not _object_text_supports_class_label(record.get("label"), description, candidate["label"]):
+                continue
+            score = _class_assignment_score(object_tokens, candidate["tokens"], candidate["label"], object_label=record.get("label"))
+            if score < min_score:
+                continue
+            if not best or score > best["score"]:
+                best = {**candidate, "score": round(score, 4)}
+        if not best:
+            continue
+        verification = {
+            "method": "generic_text_evidence_overlap",
+            "class_status": best.get("status"),
+            "score": best["score"],
+            "min_score": min_score,
+            "auto_apply_min_score": auto_apply_min_score,
+            "text_supports_class_label": True,
+            "auto_apply_eligible": best["score"] >= auto_apply_min_score,
+        }
+        items.append(
+            {
+                "element_key": item.get("element_key"),
+                "name": item.get("name"),
+                "label": record.get("label"),
+                "current_status": item.get("status"),
+                "recommended_action": "assign_class" if verification["auto_apply_eligible"] else "needs_review",
+                "assigned_class": best["label"],
+                "assigned_class_key": best.get("element_key"),
+                "assigned_class_status": best.get("status"),
+                "score": best["score"],
+                "verification": verification,
+                "reason": policy.get("reason") or "Approved concrete object had no stable class and matched class evidence text.",
+                "source_url": item.get("source_url"),
+                "confidence": item.get("confidence"),
+            }
+        )
+        if len(items) >= max_items:
+            break
+    return {
+        "focus": "class_assignment",
+        "actionable": any(item.get("recommended_action") == "assign_class" for item in items),
+        "recommended_action": "assign_class",
+        "item_count": len(items),
+        "auto_assign_count": len([item for item in items if item.get("recommended_action") == "assign_class"]),
+        "needs_review_count": len([item for item in items if item.get("recommended_action") == "needs_review"]),
+        "items": items,
+    }
+
+
+def _build_relation_completion_plan(
+    tenant_id: str,
+    elements: list[dict[str, Any]],
+    *,
+    config: dict[str, Any],
+) -> dict[str, Any]:
+    policy = ((config.get("repair_policy") or {}).get("relation_completion") or {})
+    max_items = max(1, int(policy.get("max_items") or 50))
+    approved_objects = [
+        item for item in elements
+        if str(item.get("status") or "").lower() == "approved" and _is_concrete_object(item)
+    ]
+    approved_relations = [
+        _relation_record(item)
+        for item in elements
+        if str(item.get("status") or "").lower() == "approved" and _is_relation(item)
+    ]
+    endpoint_labels = {
+        _normalize_label(value)
+        for relation in approved_relations
+        for value in [relation.get("source_label"), relation.get("target_label")]
+        if value
+    }
+    items = []
+    neutral_fallback_items = []
+    for item in approved_objects:
+        record = _object_record(item)
+        if _object_matches(record, endpoint_labels):
+            continue
+        label = record.get("label")
+        if not label:
+            continue
+        quality = _concrete_object_quality(record, item)
+        if quality["issues"]:
+            continue
+        object_type = record.get("class_label")
+        if not object_type:
+            continue
+        relevance = _repair_domain_relevance(record, item, policy)
+        priority = _relation_completion_priority(label, object_type, item)
+        priority["score"] = round(priority["score"] + relevance["score"], 3)
+        priority["reasons"].extend(relevance["reasons"])
+        plan_item = _completion_frontier_plan_item(
+            item,
+            label=label,
+            object_type=object_type,
+            recommended_action="enrich_relations",
+            source_kind="loop_harness_relation_completion",
+            reason="Approved ontology object has no approved relation endpoint.",
+            objective=(
+                "Find evidence-backed relations and properties for this approved ontology object. "
+                f"Anchor extraction on the object label {label!r}: every proposed relation must include this object "
+                "as source_label or target_label, unless the sentence only supports a background finding."
+            ),
+            priority=priority,
+            relevance=relevance,
+        )
+        if relevance["eligible"]:
+            items.append(plan_item)
+        elif _allow_neutral_relevance_fallback(relevance, policy):
+            plan_item["domain_relevance"]["fallback_used"] = True
+            plan_item["priority_reasons"].append({"feature": "neutral_relevance_fallback", "value": True})
+            neutral_fallback_items.append(plan_item)
+    if not items and neutral_fallback_items:
+        items = neutral_fallback_items
+    items.sort(key=lambda item: (-float(item.get("priority_score") or 0.0), str(item.get("label") or "")))
+    items = items[:max_items]
+    return {
+        "focus": "relation_completion",
+        "actionable": bool(items),
+        "recommended_action": "enqueue_frontier",
+        "item_count": len(items),
+        "items": items,
+    }
+
+
+def _build_property_completion_plan(
+    tenant_id: str,
+    elements: list[dict[str, Any]],
+    *,
+    config: dict[str, Any],
+) -> dict[str, Any]:
+    policy = ((config.get("repair_policy") or {}).get("property_completion") or {})
+    max_items = max(1, int(policy.get("max_items") or 50))
+    approved_objects = [
+        item for item in elements
+        if str(item.get("status") or "").lower() == "approved" and _is_concrete_object(item)
+    ]
+    approved_properties = [
+        item for item in elements
+        if str(item.get("status") or "").lower() == "approved" and _ontology_part(item) == "property"
+    ]
+    property_targets = {
+        _normalize_label(value)
+        for item in approved_properties
+        for value in _property_target_labels(item)
+        if value
+    }
+    items = []
+    neutral_fallback_items = []
+    for item in approved_objects:
+        record = _object_record(item)
+        if _object_matches(record, property_targets):
+            continue
+        label = record.get("label")
+        if not label:
+            continue
+        quality = _concrete_object_quality(record, item)
+        if quality["issues"]:
+            continue
+        object_type = record.get("class_label")
+        if not object_type:
+            continue
+        relevance = _repair_domain_relevance(record, item, policy)
+        priority = _relation_completion_priority(label, object_type, item)
+        priority["score"] = round(priority["score"] + relevance["score"], 3)
+        priority["reasons"].extend(relevance["reasons"])
+        plan_item = _completion_frontier_plan_item(
+            item,
+            label=label,
+            object_type=object_type,
+            recommended_action="enrich_properties",
+            source_kind="loop_harness_property_completion",
+            reason="Approved ontology object has no approved property coverage.",
+            objective=(
+                "Find evidence-backed properties, measurements, identifiers, and state observations for this approved ontology object. "
+                f"Anchor extraction on the object label {label!r}: every proposed property must describe this object "
+                "or a directly evidenced state of this object."
+            ),
+            priority=priority,
+            relevance=relevance,
+        )
+        if relevance["eligible"]:
+            items.append(plan_item)
+        elif _allow_neutral_relevance_fallback(relevance, policy):
+            plan_item["domain_relevance"]["fallback_used"] = True
+            plan_item["priority_reasons"].append({"feature": "neutral_relevance_fallback", "value": True})
+            neutral_fallback_items.append(plan_item)
+    if not items and neutral_fallback_items:
+        items = neutral_fallback_items
+    items.sort(key=lambda item: (-float(item.get("priority_score") or 0.0), str(item.get("label") or "")))
+    items = items[:max_items]
+    return {
+        "focus": "property_completion",
+        "actionable": bool(items),
+        "recommended_action": "enqueue_frontier",
+        "item_count": len(items),
+        "items": items,
+    }
+
+
+def _completion_frontier_plan_item(
+    item: dict[str, Any],
+    *,
+    label: Any,
+    object_type: Any,
+    recommended_action: str,
+    source_kind: str,
+    reason: str,
+    objective: str,
+    priority: dict[str, Any],
+    relevance: dict[str, Any],
+) -> dict[str, Any]:
+    return {
+        "element_key": item.get("element_key"),
+        "label": label,
+        "object_type": object_type,
+        "recommended_action": recommended_action,
+        "frontier_item": {
+            "key": item.get("element_key"),
+            "name": label,
+            "artifact_type": "ontology_concrete_object",
+            "object_type": object_type,
+            "source": source_kind,
+            "source_kind": source_kind,
+            "priority": priority["score"],
+            "reason": reason,
+            "objective": objective,
+        },
+        "reason": reason,
+        "source_url": item.get("source_url"),
+        "confidence": item.get("confidence"),
+        "priority_score": priority["score"],
+        "priority_reasons": priority["reasons"],
+        "domain_relevance": relevance,
+    }
+
+
+def _allow_neutral_relevance_fallback(relevance: dict[str, Any], policy: dict[str, Any]) -> bool:
+    relevance_policy = policy.get("domain_relevance") if isinstance(policy.get("domain_relevance"), dict) else {}
+    if not relevance_policy.get("allow_neutral_fallback_when_starved"):
+        return False
+    if relevance.get("eligible"):
+        return False
+    if relevance.get("negative_hits"):
+        return False
+    try:
+        return float(relevance.get("score") or 0.0) >= 0.0
+    except (TypeError, ValueError):
+        return False
+
+
+def _build_concrete_object_quality_repair_plan(
+    tenant_id: str,
+    elements: list[dict[str, Any]],
+    *,
+    config: dict[str, Any],
+) -> dict[str, Any]:
+    policy = ((config.get("repair_policy") or {}).get("concrete_object_quality_repair") or {})
+    max_items = max(1, int(policy.get("max_items") or 200))
+    action = str(policy.get("default_action") or "needs_more_evidence").strip()
+    approved_relations = [
+        _relation_record(item)
+        for item in elements
+        if str(item.get("status") or "").lower() == "approved" and _is_relation(item)
+    ]
+    endpoint_labels = {
+        _normalize_label(value)
+        for relation in approved_relations
+        for value in [relation.get("source_label"), relation.get("target_label")]
+        if value
+    }
+    items = []
+    for item in elements:
+        if str(item.get("status") or "").lower() != "approved" or not _is_concrete_object(item):
+            continue
+        record = _object_record(item)
+        if _object_matches(record, endpoint_labels):
+            continue
+        quality = _concrete_object_quality(record, item)
+        if not quality["issues"]:
+            continue
+        items.append(
+            {
+                "element_key": item.get("element_key"),
+                "name": item.get("name"),
+                "label": record.get("label"),
+                "object_type": record.get("class_label"),
+                "current_status": item.get("status"),
+                "recommended_action": action,
+                "reason": policy.get("reason") or "Approved concrete object failed generic object quality checks.",
+                "quality_score": quality["score"],
+                "quality_issues": quality["issues"],
+                "source_url": item.get("source_url"),
+                "confidence": item.get("confidence"),
+            }
+        )
+    items.sort(key=lambda item: (float(item.get("quality_score") or 0.0), str(item.get("label") or "")))
+    items = items[:max_items]
+    return {
+        "focus": "concrete_object_quality_repair",
+        "actionable": bool(items),
+        "recommended_action": action,
+        "item_count": len(items),
+        "items": items,
+    }
+
+
+def _relation_completion_priority(label: Any, object_type: Any, item: dict[str, Any]) -> dict[str, Any]:
+    text = str(label or "").strip()
+    tokens = re.findall(r"[A-Za-z0-9][A-Za-z0-9-]*", text)
+    lower_tokens = [token.lower() for token in tokens]
+    reasons = []
+    score = 0.0
+    try:
+        confidence = float(item.get("confidence") or 0.0)
+    except (TypeError, ValueError):
+        confidence = 0.0
+    score += min(max(confidence, 0.0), 1.0) * 10
+    reasons.append({"feature": "confidence", "value": round(min(max(confidence, 0.0), 1.0) * 10, 3)})
+    if str(object_type or "").strip() and _normalize_label(object_type) != "unclassifiedontologyobject":
+        score += 8
+        reasons.append({"feature": "stable_class", "value": 8})
+        normalized_label = _normalize_label(text)
+        normalized_type = _normalize_label(object_type)
+        type_token_count = len(re.findall(r"[A-Za-z0-9][A-Za-z0-9-]*", re.sub(r"([a-z])([A-Z])", r"\1 \2", str(object_type or ""))))
+        if normalized_type and (
+            normalized_type == normalized_label
+            or (type_token_count > 1 and normalized_label.endswith(normalized_type))
+        ):
+            score -= 10
+            reasons.append({"feature": "self_typed_label", "value": -10})
+    unique_token_count = len(set(lower_tokens))
+    token_score = min(unique_token_count, 4) * 1.5
+    score += token_score
+    reasons.append({"feature": "label_token_count", "value": round(token_score, 3)})
+    proper_phrases = re.findall(r"\b[A-Z][A-Za-z0-9-]*(?:\s+[A-Z][A-Za-z0-9-]*){1,4}\b", text)
+    phrase_score = min(len(proper_phrases), 2) * 3
+    score += phrase_score
+    if phrase_score:
+        reasons.append({"feature": "proper_phrase", "value": phrase_score})
+    if item.get("source_url"):
+        score += 2
+        reasons.append({"feature": "source_available", "value": 2})
+    if len(tokens) <= 2 and lower_tokens[:1] in (["the"], ["a"], ["an"]):
+        score -= 8
+        reasons.append({"feature": "short_determiner_phrase", "value": -8})
+    if re.search(r"\b[A-Za-z0-9-]+'s\b", text):
+        score -= 6
+        reasons.append({"feature": "possessive_phrase", "value": -6})
+    if len(tokens) <= 1 and not proper_phrases:
+        score -= 2
+        reasons.append({"feature": "single_token_label", "value": -2})
+    if 2 <= unique_token_count <= 4:
+        score += 5
+        reasons.append({"feature": "concise_named_label", "value": 5})
+    if unique_token_count > 4:
+        penalty = min((unique_token_count - 4) * 2, 12)
+        score -= penalty
+        reasons.append({"feature": "long_label", "value": -penalty})
+    if unique_token_count > 6:
+        penalty = min((unique_token_count - 6) * 2, 10)
+        score -= penalty
+        reasons.append({"feature": "overlong_label", "value": -penalty})
+    return {"score": round(score, 3), "reasons": reasons}
+
+
+def _repair_domain_relevance(record: dict[str, Any], item: dict[str, Any], policy: dict[str, Any]) -> dict[str, Any]:
+    relevance_policy = policy.get("domain_relevance") if isinstance(policy.get("domain_relevance"), dict) else {}
+    if not relevance_policy.get("enabled"):
+        return {"eligible": True, "score": 0.0, "reasons": []}
+    payload = item.get("payload") if isinstance(item.get("payload"), dict) else {}
+    text = " ".join(
+        str(value or "")
+        for value in (
+            record.get("label"),
+            record.get("class_label"),
+            payload.get("description"),
+            payload.get("evidence_quote"),
+            item.get("source_url"),
+        )
+        if value
+    )
+    normalized_text = _normalize_relevance_text(text)
+    positive_terms = [
+        str(term or "").strip()
+        for term in relevance_policy.get("positive_terms") or []
+        if str(term or "").strip()
+    ]
+    negative_terms = [
+        str(term or "").strip()
+        for term in relevance_policy.get("negative_terms") or []
+        if str(term or "").strip()
+    ]
+    negative_classes = {
+        _normalize_label(term)
+        for term in relevance_policy.get("negative_object_types") or []
+        if str(term or "").strip()
+    }
+    positive_hits = [term for term in positive_terms if _relevance_phrase_present(normalized_text, term)]
+    negative_hits = [term for term in negative_terms if _relevance_phrase_present(normalized_text, term)]
+    object_type_norm = _normalize_label(record.get("class_label"))
+    score = float(len(positive_hits) * float(relevance_policy.get("positive_weight") or 2.0))
+    score -= float(len(negative_hits) * float(relevance_policy.get("negative_weight") or 3.0))
+    if object_type_norm and object_type_norm in negative_classes:
+        score -= float(relevance_policy.get("negative_object_type_weight") or 8.0)
+        negative_hits.append(str(record.get("class_label") or "object_type"))
+    min_score = float(relevance_policy.get("min_score") or 0.0)
+    reasons = [
+        {"feature": "domain_positive_hits", "value": positive_hits[:8]},
+        {"feature": "domain_negative_hits", "value": negative_hits[:8]},
+        {"feature": "domain_relevance_score", "value": round(score, 3)},
+        {"feature": "domain_relevance_min_score", "value": min_score},
+    ]
+    return {
+        "eligible": score >= min_score,
+        "score": round(score, 3),
+        "positive_hits": positive_hits,
+        "negative_hits": negative_hits,
+        "min_score": min_score,
+        "reasons": reasons,
+    }
+
+
+def _normalize_relevance_text(value: Any) -> str:
+    words = re.findall(r"[A-Za-z0-9]+", unquote(str(value or "")).lower())
+    return " ".join(words)
+
+
+def _relevance_phrase_present(normalized_text: str, term: Any) -> bool:
+    normalized_term = _normalize_relevance_text(term)
+    if not normalized_text or not normalized_term:
+        return False
+    return f" {normalized_term} " in f" {normalized_text} "
+
+
+def apply_repair_plan(
+    metadata_db_url: str,
+    tenant_id: str,
+    repair_plan: dict[str, Any],
+    *,
+    reviewer: str | None = None,
+    reason: str | None = None,
+) -> dict[str, Any]:
+    if not repair_plan:
+        return {"applied": 0, "skipped": 0, "items": [], "reason": "missing repair plan"}
+    if repair_plan.get("focus") == "class_assignment":
+        return _apply_class_assignment_repair_plan(
+            metadata_db_url,
+            tenant_id,
+            repair_plan,
+            reviewer=reviewer,
+            reason=reason,
+        )
+    if repair_plan.get("focus") == "concrete_object_quality_repair":
+        return _apply_status_repair_plan(
+            metadata_db_url,
+            tenant_id,
+            repair_plan,
+            repair_focus="concrete_object_quality_repair",
+            default_reason="Loop harness quality repair: approved concrete object looks like a semantic phrase, metric, claim, or class-shaped abstraction rather than a stable referential object.",
+            reviewer=reviewer,
+            reason=reason,
+        )
+    if repair_plan.get("focus") != "ontology_shape_repair":
+        return {"applied": 0, "skipped": 0, "items": [], "reason": "repair plan is not actionable"}
+    return _apply_status_repair_plan(
+        metadata_db_url,
+        tenant_id,
+        repair_plan,
+        repair_focus="ontology_shape_repair",
+        default_reason="Loop harness shape repair: approved ontology class has no approved concrete object instance.",
+        reviewer=reviewer,
+        reason=reason,
+    )
+
+
+def _apply_status_repair_plan(
+    metadata_db_url: str,
+    tenant_id: str,
+    repair_plan: dict[str, Any],
+    *,
+    repair_focus: str,
+    default_reason: str,
+    reviewer: str | None = None,
+    reason: str | None = None,
+) -> dict[str, Any]:
+    action = str(repair_plan.get("recommended_action") or "needs_more_evidence").strip()
+    if action not in {"needs_more_evidence", "rejected"}:
+        raise ValueError(f"Unsupported repair action: {action}")
+    after_status = "needs_more_evidence" if action == "needs_more_evidence" else "rejected"
+    reviewer = reviewer or "Loop Harness"
+    reason = reason or default_reason
+    reviewed_at = datetime.utcnow().isoformat()
+    engine = create_engine(metadata_db_url)
+    applied = []
+    skipped = []
+    with engine.begin() as conn:
+        for item in repair_plan.get("items") or []:
+            element_key = str(item.get("element_key") or "").strip()
+            if not element_key:
+                skipped.append({"element_key": element_key, "reason": "missing element_key"})
+                continue
+            row = conn.execute(
+                text(
+                    """
+                    SELECT element_key, status, payload_json
+                    FROM aletheia_proposed_graph_elements
+                    WHERE project_id = :tenant_id AND element_key = :element_key
+                    LIMIT 1
+                    """
+                ),
+                {"tenant_id": tenant_id, "element_key": element_key},
+            ).mappings().first()
+            if not row:
+                skipped.append({"element_key": element_key, "reason": "not_found"})
+                continue
+            if row["status"] != "approved":
+                skipped.append({"element_key": element_key, "reason": f"status_is_{row['status']}"})
+                continue
+            payload = _json_load(row["payload_json"], {})
+            payload.setdefault("review_events", []).append(
+                {
+                    "decision": action,
+                    "reviewer": reviewer,
+                    "reason": reason,
+                    "before_status": row["status"],
+                    "after_status": after_status,
+                    "created_at": reviewed_at,
+                    "canonical_write": False,
+                    "graph_space_write": False,
+                    "formal_graph_write": False,
+                    "source": "enrichment_loop_harness",
+                }
+            )
+            payload["loop_repair"] = {
+                "focus": repair_focus,
+                "reason": reason,
+                "reviewer": reviewer,
+                "repaired_at": reviewed_at,
+                "quality_issues": item.get("quality_issues"),
+            }
+            conn.execute(
+                text(
+                    """
+                    UPDATE aletheia_proposed_graph_elements
+                    SET status = :status, payload_json = :payload_json
+                    WHERE project_id = :tenant_id AND element_key = :element_key
+                    """
+                ),
+                {
+                    "tenant_id": tenant_id,
+                    "element_key": element_key,
+                    "status": after_status,
+                    "payload_json": json.dumps(payload, ensure_ascii=False, sort_keys=True),
+                },
+            )
+            conn.execute(
+                text(
+                    """
+                    DELETE FROM aletheia_graph_identity_index
+                    WHERE project_id = :tenant_id
+                      AND source_space = 'proposed_graph'
+                      AND source_key = :element_key
+                    """
+                ),
+                {"tenant_id": tenant_id, "element_key": element_key},
+            )
+            applied.append({"element_key": element_key, "before_status": row["status"], "after_status": after_status})
+    return {"applied": len(applied), "skipped": len(skipped), "items": applied, "skipped_items": skipped}
+
+
+def _apply_class_assignment_repair_plan(
+    metadata_db_url: str,
+    tenant_id: str,
+    repair_plan: dict[str, Any],
+    *,
+    reviewer: str | None = None,
+    reason: str | None = None,
+) -> dict[str, Any]:
+    reviewer = reviewer or "Loop Harness"
+    reason = reason or "Loop harness class assignment: approved concrete object had no stable class, and the assigned class matched object evidence text."
+    reviewed_at = datetime.utcnow().isoformat()
+    engine = create_engine(metadata_db_url)
+    applied = []
+    skipped = []
+    with engine.begin() as conn:
+        for item in repair_plan.get("items") or []:
+            element_key = str(item.get("element_key") or "").strip()
+            assigned_class = str(item.get("assigned_class") or "").strip()
+            if item.get("recommended_action") != "assign_class":
+                skipped.append({"element_key": element_key, "reason": "needs_review"})
+                continue
+            if not element_key or not assigned_class:
+                skipped.append({"element_key": element_key, "reason": "missing element_key_or_assigned_class"})
+                continue
+            row = conn.execute(
+                text(
+                    """
+                    SELECT element_key, status, payload_json
+                    FROM aletheia_proposed_graph_elements
+                    WHERE project_id = :tenant_id AND element_key = :element_key
+                    LIMIT 1
+                    """
+                ),
+                {"tenant_id": tenant_id, "element_key": element_key},
+            ).mappings().first()
+            if not row:
+                skipped.append({"element_key": element_key, "reason": "not_found"})
+                continue
+            if row["status"] != "approved":
+                skipped.append({"element_key": element_key, "reason": f"status_is_{row['status']}"})
+                continue
+            payload = _json_load(row["payload_json"], {})
+            current_class = _first_text(
+                payload.get("object_type"),
+                payload.get("ontology_type"),
+                payload.get("class_name"),
+                payload.get("class"),
+                payload.get("type"),
+            )
+            if current_class and _normalize_label(current_class) != "unclassifiedontologyobject":
+                skipped.append({"element_key": element_key, "reason": "already_has_class"})
+                continue
+            payload["object_type"] = assigned_class
+            payload["class_name"] = assigned_class
+            identity = payload.get("identity") if isinstance(payload.get("identity"), dict) else {}
+            identity["entity_type"] = assigned_class
+            payload["identity"] = identity
+            payload.setdefault("review_events", []).append(
+                {
+                    "decision": "assign_class",
+                    "reviewer": reviewer,
+                    "reason": reason,
+                    "before_status": row["status"],
+                    "after_status": row["status"],
+                    "assigned_class": assigned_class,
+                    "assigned_class_key": item.get("assigned_class_key"),
+                    "score": item.get("score"),
+                    "verification": item.get("verification"),
+                    "created_at": reviewed_at,
+                    "canonical_write": False,
+                    "graph_space_write": True,
+                    "formal_graph_write": False,
+                    "source": "enrichment_loop_harness",
+                }
+            )
+            payload["loop_repair"] = {
+                "focus": "class_assignment",
+                "assigned_class": assigned_class,
+                "assigned_class_key": item.get("assigned_class_key"),
+                "score": item.get("score"),
+                "verification": item.get("verification"),
+                "reason": reason,
+                "reviewer": reviewer,
+                "repaired_at": reviewed_at,
+            }
+            conn.execute(
+                text(
+                    """
+                    UPDATE aletheia_proposed_graph_elements
+                    SET payload_json = :payload_json
+                    WHERE project_id = :tenant_id AND element_key = :element_key
+                    """
+                ),
+                {
+                    "tenant_id": tenant_id,
+                    "element_key": element_key,
+                    "payload_json": json.dumps(payload, ensure_ascii=False, sort_keys=True),
+                },
+            )
+            applied.append({"element_key": element_key, "assigned_class": assigned_class, "score": item.get("score")})
+    return {"applied": len(applied), "skipped": len(skipped), "items": applied, "skipped_items": skipped}
 
 
 def _load_run(conn, tenant_id: str, run_key: str | None) -> dict[str, Any] | None:
@@ -260,6 +1104,22 @@ def _tenant_metrics(elements: list[dict[str, Any]]) -> dict[str, Any]:
         for value in [rel.get("source_label"), rel.get("target_label")]
         if value
     }
+    low_quality_objects = []
+    for item in objects:
+        record = _object_record(item)
+        if _object_matches(record, relation_endpoint_labels):
+            continue
+        quality = _concrete_object_quality(record, item)
+        if quality["issues"]:
+            low_quality_objects.append(
+                {
+                    "element_key": item.get("element_key"),
+                    "label": record.get("label"),
+                    "object_type": record.get("class_label"),
+                    "quality_score": quality["score"],
+                    "quality_issues": quality["issues"],
+                }
+            )
 
     objects_with_class = [item for item in object_records if _normalize_label(item["class_label"]) in class_labels]
     objects_with_relation = [item for item in object_records if _object_matches(item, relation_endpoint_labels)]
@@ -286,6 +1146,8 @@ def _tenant_metrics(elements: list[dict[str, Any]]) -> dict[str, Any]:
         "classes_with_object": len(classes_with_object),
         "unsupported_class_count": len(unsupported_classes),
         "unsupported_classes": unsupported_classes[:50],
+        "low_quality_concrete_object_count": len(low_quality_objects),
+        "low_quality_concrete_objects": low_quality_objects[:50],
         "objects_with_class": len(objects_with_class),
         "objects_with_relation": len(objects_with_relation),
         "objects_with_property": len(objects_with_property),
@@ -309,6 +1171,9 @@ def _latency_metrics(run: dict[str, Any] | None) -> dict[str, Any]:
         trace = []
     stage_pairs = {
         "identity_index": ("identity_index_start", "identity_index_done"),
+        "identity_index_read": ("identity_index_read_start", "identity_index_read_done"),
+        "identity_index_rebuild": ("identity_index_rebuild_start", "identity_index_rebuild_done"),
+        "identity_index_stale_check": ("identity_index_stale_check_start", "identity_index_stale_check_done"),
         "frontier_search": ("frontier_search_start", "frontier_search_done"),
         "extraction": ("extraction_start", "extraction_done"),
         "candidate_elements": ("candidate_elements_start", "candidate_elements_done"),
@@ -360,13 +1225,11 @@ def _decide_next_focus(
     policy = config.get("next_action_policy") or {}
     reasons = []
     focus = None
+    latency_reasons = _latency_reasons(latency, latency_targets)
 
     if not run or run.get("status") != "completed":
         focus = policy.get("if_run_failed", "run_health_diagnosis")
         reasons.append("latest run is missing or not completed")
-    elif _exceeds_latency(latency, latency_targets):
-        focus = policy.get("if_latency_high", "stage_bottleneck_diagnosis")
-        reasons.extend(_latency_reasons(latency, latency_targets))
 
     frontier_count = len((session or {}).get("frontier") or [])
     if not focus and session is not None and frontier_count == 0:
@@ -376,6 +1239,10 @@ def _decide_next_focus(
     if not focus and tenant_metrics.get("unsupported_class_count", 0) > int(targets.get("unsupported_class_count_max", 0)):
         focus = policy.get("if_many_unsupported_classes", "ontology_shape_repair")
         reasons.append("approved classes exist without approved concrete objects")
+
+    if not focus and tenant_metrics.get("low_quality_concrete_object_count", 0) > 0:
+        focus = policy.get("if_low_quality_concrete_objects", "concrete_object_quality_repair")
+        reasons.append("approved concrete objects include low-quality semantic phrases that should not drive relation enrichment")
 
     if not focus and tenant_metrics.get("unclassified_object_ratio", 0.0) > float(targets.get("unclassified_object_ratio_max", 0.1)):
         focus = policy.get("if_many_unclassified_objects", "class_assignment")
@@ -394,9 +1261,16 @@ def _decide_next_focus(
         focus = policy.get("if_dedup_conflicts_high", "dedup_verifier_review")
         reasons.append("dedup produced many needs_review decisions")
 
+    if not focus and latency_reasons:
+        focus = policy.get("if_latency_high", "stage_bottleneck_diagnosis")
+        reasons.extend(latency_reasons)
+
     if not focus:
         focus = policy.get("if_targets_met", "continue_frontier_enrichment")
         reasons.append("coverage targets are currently satisfied or no stronger failure signal was found")
+
+    if focus != policy.get("if_latency_high", "stage_bottleneck_diagnosis") and latency_reasons:
+        reasons.extend(f"latency warning: {reason}" for reason in latency_reasons)
 
     return {
         "decision": "continue",
@@ -412,17 +1286,18 @@ def _exceeds_latency(latency: dict[str, Any], targets: dict[str, Any]) -> bool:
 
 def _latency_reasons(latency: dict[str, Any], targets: dict[str, Any]) -> list[str]:
     checks = [
-        ("identity_index", "identity_index_sec_max"),
+        ("identity_index_read", "identity_index_sec_max"),
         ("semantic_extraction", "semantic_extraction_sec_max"),
         ("dedup", "dedup_sec_max"),
         ("cycle", "cycle_sec_max"),
     ]
     reasons = []
     for metric, target_key in checks:
-        value = float(latency.get(metric) or 0.0)
+        value = float(latency.get(metric) or (latency.get("identity_index") if metric == "identity_index_read" else 0.0) or 0.0)
         target = targets.get(target_key)
         if target is not None and value > float(target):
-            reasons.append(f"{metric} latency {value:.3f}s exceeds target {float(target):.3f}s")
+            label = "identity_index_read" if metric == "identity_index_read" else metric
+            reasons.append(f"{label} latency {value:.3f}s exceeds target {float(target):.3f}s")
     return reasons
 
 
@@ -556,16 +1431,75 @@ def _object_matches(record: dict[str, Any], normalized_labels: set[str]) -> bool
     return any(_normalize_label(value) in normalized_labels for value in candidates if value)
 
 
+def _semantic_tokens(*values: Any) -> set[str]:
+    stop_words = {
+        "a", "an", "and", "are", "as", "by", "for", "from", "has", "in", "is", "it",
+        "of", "on", "or", "that", "the", "their", "this", "to", "with", "specific",
+        "named", "source", "text", "object", "entity", "class", "type",
+    }
+    tokens = set()
+    for value in values:
+        for token in re.findall(r"[A-Za-z][A-Za-z0-9]+", str(value or "").lower()):
+            if token in stop_words or len(token) < 3:
+                continue
+            if len(token) > 4 and token.endswith("ies"):
+                token = token[:-3] + "y"
+            elif len(token) > 4 and token.endswith("s"):
+                token = token[:-1]
+            tokens.add(token)
+    return tokens
+
+
+def _class_assignment_score(object_tokens: set[str], class_tokens: set[str], class_label: str, *, object_label: Any = None) -> float:
+    if not object_tokens or not class_tokens:
+        return 0.0
+    label_tokens = _semantic_tokens(class_label)
+    label_overlap = len(object_tokens & label_tokens)
+    class_overlap = len(object_tokens & class_tokens)
+    coverage = class_overlap / max(len(class_tokens), 1)
+    direct_label_overlap = len(_semantic_tokens(object_label) & label_tokens)
+    return float(direct_label_overlap * 20 + label_overlap * 4 + class_overlap + coverage)
+
+
+def _object_text_supports_class_label(object_label: Any, object_description: Any, class_label: Any) -> bool:
+    class_tokens = _semantic_tokens(class_label)
+    if not class_tokens:
+        return False
+    label_tokens = _semantic_tokens(object_label)
+    if label_tokens & class_tokens:
+        return True
+    description = str(object_description or "").lower()
+    description_tokens = _semantic_tokens(description)
+    if not class_tokens.issubset(description_tokens):
+        return False
+    ordered_class_tokens = [token for token in _ordered_semantic_tokens(class_label) if token in class_tokens]
+    if not ordered_class_tokens:
+        return False
+    class_pattern = r"[\w\s,-]{0,16}".join(re.escape(token) for token in ordered_class_tokens)
+    patterns = [
+        rf"\b(?:a|an|the)\b[\w\s,-]{{0,48}}\b{class_pattern}\b",
+        rf"\b(?:specific|named|explicitly named)\b[\w\s,-]{{0,48}}\b{class_pattern}\b",
+    ]
+    return any(re.search(pattern, description) for pattern in patterns)
+
+
+def _ordered_semantic_tokens(value: Any) -> list[str]:
+    tokens = []
+    seen = set()
+    for token in re.findall(r"[A-Za-z][A-Za-z0-9]+", str(value or "").lower()):
+        normalized = next(iter(_semantic_tokens(token)), "")
+        if normalized and normalized not in seen:
+            seen.add(normalized)
+            tokens.append(normalized)
+    return tokens
+
+
 def _first_text(*values: Any) -> str:
     for value in values:
         text_value = str(value or "").strip()
         if text_value:
             return text_value
     return ""
-
-
-def _normalize_label(value: Any) -> str:
-    return re.sub(r"[^a-z0-9]+", "", str(value or "").lower())
 
 
 def _ratio(numerator: int, denominator: int) -> float:

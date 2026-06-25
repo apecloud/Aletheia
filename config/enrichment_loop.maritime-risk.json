@@ -25,5 +25,108 @@
     "if_latency_high": "stage_bottleneck_diagnosis",
     "if_run_failed": "run_health_diagnosis",
     "if_targets_met": "continue_frontier_enrichment"
+  },
+  "repair_policy": {
+    "class_assignment": {
+      "auto_apply_min_score": 8.0
+    },
+    "relation_completion": {
+      "max_items": 50,
+      "domain_relevance": {
+        "enabled": true,
+        "min_score": 1.0,
+        "allow_neutral_fallback_when_starved": true,
+        "positive_weight": 2.0,
+        "negative_weight": 2.0,
+        "negative_object_type_weight": 8.0,
+        "positive_terms": [
+          "maritime",
+          "shipping",
+          "chokepoint",
+          "strait",
+          "canal",
+          "sea lane",
+          "port",
+          "naval",
+          "vessel",
+          "trade route",
+          "supply chain",
+          "disruption",
+          "blockade",
+          "transit",
+          "energy shipment",
+          "oil shipment",
+          "container",
+          "freight",
+          "piracy",
+          "risk"
+        ],
+        "negative_terms": [
+          "explorer",
+          "voyage",
+          "marriage",
+          "family",
+          "nobleman",
+          "historical biography",
+          "born",
+          "died"
+        ],
+        "negative_object_types": [
+          "Explorer",
+          "Person",
+          "Biography",
+          "Expedition"
+        ]
+      }
+    },
+    "property_completion": {
+      "max_items": 50,
+      "domain_relevance": {
+        "enabled": true,
+        "min_score": 1.0,
+        "allow_neutral_fallback_when_starved": true,
+        "positive_weight": 2.0,
+        "negative_weight": 2.0,
+        "negative_object_type_weight": 8.0,
+        "positive_terms": [
+          "maritime",
+          "shipping",
+          "chokepoint",
+          "strait",
+          "canal",
+          "sea lane",
+          "port",
+          "naval",
+          "vessel",
+          "trade route",
+          "supply chain",
+          "disruption",
+          "blockade",
+          "transit",
+          "energy shipment",
+          "oil shipment",
+          "container",
+          "freight",
+          "piracy",
+          "risk"
+        ],
+        "negative_terms": [
+          "explorer",
+          "voyage",
+          "marriage",
+          "family",
+          "nobleman",
+          "historical biography",
+          "born",
+          "died"
+        ],
+        "negative_object_types": [
+          "Explorer",
+          "Person",
+          "Biography",
+          "Expedition"
+        ]
+      }
+    }
   }
 }
