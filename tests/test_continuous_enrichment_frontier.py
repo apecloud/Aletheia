@@ -8,6 +8,7 @@ from sqlalchemy.exc import OperationalError
 
 from server.aletheia_server import (
     InstanceRepository,
+    ReasoningRepository,
     _apply_edge_source_identity_presentation_guard,
     _apply_possible_duplicate_presentation_guard,
     _dedup_audit_from_payload,
@@ -50,6 +51,67 @@ class ContinuousEnrichmentFrontierTest(unittest.TestCase):
         )
         repo = InstanceRepository(TenantRegistry([tenant], "tenant-a"))
         return repo, tenant
+
+    def test_ontology_concrete_object_uses_class_label_as_type(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo, tenant = self._sqlite_tenant_repo(tmpdir)
+            engine = repo.metadata_engine_for(tenant)
+            ensure_artifact_schema(engine)
+            with engine.begin() as conn:
+                run_result = conn.execute(
+                    text(
+                        """
+                        INSERT INTO aletheia_iterative_graph_enrichment_runs
+                            (project_id, run_key, source_agent, status, objective,
+                             frontier_json, expansion_trace_json, safety_profile_json,
+                             budget_json, skipped_sources_json, proposed_count,
+                             pruned_count, finding_count, started_at)
+                        VALUES
+                            (:project_id, 'class-label-object-test', 'IterativeGraphEnrichmentAgent',
+                             'completed', 'test class label object', '[]', '[]',
+                             '{}', '{}', '[]', 1, 0, 0, :started_at)
+                        """
+                    ),
+                    {"project_id": tenant.tenant_id, "started_at": datetime.utcnow()},
+                )
+                conn.execute(
+                    text(
+                        """
+                        INSERT INTO aletheia_proposed_graph_elements
+                            (run_id, project_id, element_key, element_type, name,
+                             payload_json, evidence_refs_json, source_url,
+                             confidence, status, iteration, created_at)
+                        VALUES
+                            (:run_id, :project_id, :element_key, 'ontology_concept', 'Cape Peninsula',
+                             :payload_json, '["gpt_researcher://report/cape"]',
+                             'gpt_researcher://report/cape', 0.9, 'approved', 1, :created_at)
+                        """
+                    ),
+                    {
+                        "run_id": run_result.lastrowid,
+                        "project_id": tenant.tenant_id,
+                        "element_key": "proposed-graph:tenant-a:ontology-concept:cape-peninsula",
+                        "payload_json": json.dumps(
+                            {
+                                "artifact_type": "object",
+                                "ontology_part": "concrete_object",
+                                "label": "Cape Peninsula",
+                                "class_label": "GeographicalFeature",
+                                "description": "A peninsula where the Cape of Good Hope is located.",
+                                "evidence_quote": "Atlantic coast of the Cape Peninsula in South Africa",
+                            }
+                        ),
+                        "created_at": datetime.utcnow(),
+                    },
+                )
+
+            type_names = {row["type"] for row in repo.types(tenant).get("types") or []}
+            self.assertIn("GeographicalFeature", type_names)
+            instances = repo.search(tenant, "GeographicalFeature", "Cape Peninsula", limit=10).get("instances") or []
+            self.assertEqual(instances[0]["id"], "GeographicalFeature:Cape Peninsula")
+            graph = repo.neighborhood(tenant, "GeographicalFeature", "Cape Peninsula", depth=1, limit=20)
+            self.assertTrue(graph["approved"])
+            self.assertEqual(graph["center"]["id"], "GeographicalFeature:Cape Peninsula")
 
     def test_approving_ontology_concept_promotes_to_catalog(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -414,6 +476,38 @@ class ContinuousEnrichmentFrontierTest(unittest.TestCase):
                             "created_at": datetime.utcnow(),
                         },
                     )
+                conn.execute(
+                    text(
+                        """
+                        INSERT INTO aletheia_proposed_graph_elements
+                            (run_id, project_id, element_key, element_type, name,
+                             payload_json, evidence_refs_json, source_url,
+                             confidence, status, iteration, created_at)
+                        VALUES
+                            (:run_id, :project_id, :element_key, 'situation',
+                             :name, :payload_json, :evidence_refs_json, :source_url,
+                             0.86, 'needs_more_evidence', 1, :created_at)
+                        """
+                    ),
+                    {
+                        "run_id": run_id,
+                        "project_id": tenant.tenant_id,
+                        "element_key": "proposed-graph:tenant-a:situation:red-sea-connectivity",
+                        "name": "Red Sea connectivity depends on Gulf of Aden access",
+                        "payload_json": json.dumps(
+                            {
+                                "subject": "Red Sea",
+                                "target": "Gulf of Aden",
+                                "source_url": "gpt_researcher://report/test",
+                                "evidence_quote": "Red Sea connects to the Gulf of Aden",
+                                "summary": "The Red Sea has a reviewed local relation to Gulf of Aden.",
+                            }
+                        ),
+                        "evidence_refs_json": json.dumps(["gpt_researcher://report/test"]),
+                        "source_url": "gpt_researcher://report/test",
+                        "created_at": datetime.utcnow(),
+                    },
+                )
 
             type_rows = repo.types(tenant).get("types") or []
             self.assertIn("Waterway", {row["type"] for row in type_rows})
@@ -446,6 +540,61 @@ class ContinuousEnrichmentFrontierTest(unittest.TestCase):
             detail = repo._ontology_concrete_object_detail(tenant, "Waterway", "Red Sea")
             self.assertEqual(detail["relations_summary"]["edges"], 1)
             self.assertEqual(detail["relations_summary"]["by_relation"], {"connects_to": 1})
+            local_context = repo.local_rag_context(
+                tenant,
+                "Waterway",
+                "Red Sea",
+                question="What is connected to the Red Sea?",
+                limit=10,
+            )
+            self.assertTrue(local_context["approved"])
+            self.assertEqual(local_context["retrieval_mode"], "local_graph_context")
+            self.assertEqual(local_context["center"]["id"], "Waterway:Red Sea")
+            self.assertIn("Waterway:Gulf of Aden", {node["id"] for node in local_context["nodes"]})
+            context_edges = [
+                edge
+                for edge in local_context["edges"]
+                if edge["source"] == "Waterway:Red Sea"
+                and edge["target"] == "Waterway:Gulf of Aden"
+                and edge["relation"] == "connects_to"
+            ]
+            self.assertEqual(len(context_edges), 1)
+            self.assertIn("Red Sea --connects_to--> Gulf of Aden", local_context["context_text"])
+            self.assertGreaterEqual(local_context["scope"]["evidence_count"], 1)
+            self.assertEqual(local_context["semantic_items"][0]["element_type"], "situation")
+            self.assertTrue(local_context["eval"]["coverage"]["has_semantic_context"])
+            reasoning_repo = ReasoningRepository(repo.tenant_registry, repo)
+            reasoning_context = reasoning_repo._scoped_graph_prompt_context(
+                tenant,
+                "Waterway:Red Sea",
+                depth=1,
+                node_limit=10,
+                edge_limit=10,
+            )
+            self.assertEqual(reasoning_context["retrieval_mode"], "local_graph_context")
+            self.assertIn("Red Sea --connects_to--> Gulf of Aden", reasoning_context["context_text"])
+            self.assertEqual(reasoning_context["degree"]["center"], 1)
+            retrieval_edges = reasoning_context["retrieval_context"]["edges"]
+            self.assertEqual(retrieval_edges[0]["relation"], "connects_to")
+            self.assertEqual(reasoning_context["retrieval_context"]["semantic_items"][0]["element_type"], "situation")
+            communities = repo.graph_community_summaries(tenant, limit=20)
+            self.assertTrue(communities["approved"])
+            self.assertGreaterEqual(communities["eval"]["community_count"], 1)
+            self.assertIn("connects_to", communities["communities"][0]["relation_types"])
+            local_query = repo.graph_rag_query_context(
+                tenant,
+                question="What is connected to the Red Sea?",
+                limit=10,
+            )
+            self.assertEqual(local_query["query_route"]["route"], "local")
+            self.assertEqual(local_query["query_route"]["matched_node"], "Waterway:Red Sea")
+            global_query = repo.graph_rag_query_context(
+                tenant,
+                question="Summarize the maritime graph.",
+                limit=10,
+            )
+            self.assertEqual(global_query["query_route"]["route"], "global")
+            self.assertEqual(global_query["retrieval_mode"], "community_summary")
             coverage = repo._continuous_instance_coverage_frontier(
                 tenant,
                 config={"instance_coverage_min_edges": 2, "instance_coverage_min_enrichment_items": 0},

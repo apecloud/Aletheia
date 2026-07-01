@@ -6,3 +6,5 @@ run_reasoning_result.md
 datasets/
 .env
 reports/
+logs/
+*.db

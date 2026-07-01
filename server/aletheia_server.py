@@ -28,6 +28,18 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import sessionmaker
 
 from reasoning_engine import ReasoningEngine
+from reasoning_finding_framework import (  # noqa: E402
+    DEEP_GRAPH_REQUIRED_STEPS as REASONING_DEEP_GRAPH_REQUIRED_STEPS,
+    deep_graph_profile,
+    display_label_from_question,
+    entity_profile_aggregate_evidence,
+    finding_canonical_boundary,
+    paths_with_peer,
+    plain_reasoning_conclusion,
+    plain_reasoning_title,
+    review_graph_scope_action,
+    scoped_graph_finding,
+)
 from iterative_graph_enrichment_agent import (  # noqa: E402
     IterativeGraphEnrichmentAgent,
     _configured_api_key,
@@ -1763,12 +1775,14 @@ class InstanceRepository:
         for value in [
             payload.get("object_type"),
             payload.get("ontology_type"),
+            payload.get("class_label"),
             payload.get("class_name"),
             payload.get("class"),
             payload.get("type"),
             identity.get("entity_type"),
             candidate.get("object_type"),
             candidate.get("ontology_type"),
+            candidate.get("class_label"),
             candidate.get("class_name"),
             candidate.get("class"),
             candidate.get("type"),
@@ -3247,6 +3261,501 @@ class InstanceRepository:
                 "formal_graph_write": False,
                 "source": "approved_projection_read",
             },
+        }
+
+    def local_rag_context(self, tenant, object_type, instance_id, *, question=None, depth=1, limit=80):
+        graph = self.neighborhood(tenant, object_type, instance_id, depth=depth, limit=limit)
+        if not graph or not graph.get("approved"):
+            return None
+        applied_limit = max(1, min(int(limit or 80), 300))
+        center = graph.get("center") or next(
+            (node for node in graph.get("nodes") or [] if node.get("id") == f"{object_type}:{instance_id}"),
+            None,
+        )
+        center_id = (center or {}).get("id") or f"{object_type}:{instance_id}"
+        nodes = list(graph.get("nodes") or [])
+        edges = list(graph.get("edges") or [])
+        if center_id and not edges:
+            full_graph = self.full_graph(tenant, limit=applied_limit)
+            if full_graph and full_graph.get("approved"):
+                full_nodes_by_id = {node.get("id"): node for node in full_graph.get("nodes") or [] if node.get("id")}
+                local_edges = [
+                    edge
+                    for edge in full_graph.get("edges") or []
+                    if center_id in {edge.get("source"), edge.get("target")}
+                ][: applied_limit * 3]
+                local_node_ids = {center_id}
+                for edge in local_edges:
+                    local_node_ids.add(edge.get("source"))
+                    local_node_ids.add(edge.get("target"))
+                local_nodes = [
+                    full_nodes_by_id[node_id]
+                    for node_id in local_node_ids
+                    if node_id in full_nodes_by_id
+                ]
+                if local_edges:
+                    nodes = local_nodes
+                    edges = local_edges
+                    center = full_nodes_by_id.get(center_id) or center
+        nodes = nodes[:applied_limit]
+        edges = edges[: applied_limit * 3]
+        nodes_by_id = {node.get("id"): node for node in nodes if node.get("id")}
+
+        def node_summary(node):
+            properties = node.get("key_properties") or node.get("properties") or {}
+            summary_fields = {}
+            for key in ("description", "evidence_quote", "source_url", "source_pk", "ontology_artifact", "element_key"):
+                value = node.get(key) if key in node else properties.get(key)
+                if value not in (None, "", []):
+                    summary_fields[key] = value
+            return {
+                "id": node.get("id"),
+                "label": node.get("label") or node.get("id"),
+                "type": node.get("type"),
+                "aliases": node.get("aliases") or [],
+                "projection_source": node.get("projection_source"),
+                "confidence": node.get("confidence"),
+                "properties": summary_fields,
+            }
+
+        def edge_summary(edge):
+            source_node = nodes_by_id.get(edge.get("source")) or {}
+            target_node = nodes_by_id.get(edge.get("target")) or {}
+            properties = edge.get("properties") or {}
+            evidence_refs = properties.get("evidence_refs") or edge.get("evidence_refs") or []
+            evidence_quote = properties.get("evidence_quote") or edge.get("evidence_quote")
+            return {
+                "id": edge.get("id"),
+                "source": edge.get("source"),
+                "source_label": source_node.get("label") or edge.get("source"),
+                "relation": edge.get("label") or edge.get("kind") or edge.get("link_key"),
+                "target": edge.get("target"),
+                "target_label": target_node.get("label") or edge.get("target"),
+                "projection_source": edge.get("projection_source"),
+                "confidence": edge.get("confidence"),
+                "evidence_quote": evidence_quote,
+                "evidence_refs": evidence_refs,
+                "source_url": edge.get("source_url") or properties.get("source_url"),
+                "properties": {
+                    key: value
+                    for key, value in properties.items()
+                    if key not in {"evidence_refs", "evidence_quote"} and value not in (None, "", [])
+                },
+            }
+
+        context_nodes = [node_summary(node) for node in nodes]
+        context_edges = [edge_summary(edge) for edge in edges]
+        semantic_items = self._semantic_items_for_local_rag_context(
+            tenant,
+            context_nodes,
+            context_edges,
+            limit=max(10, min(applied_limit, 50)),
+        )
+        evidence = []
+        seen_evidence = set()
+
+        def add_evidence(kind, ref, summary, payload=None):
+            ref = str(ref or "").strip()
+            summary = str(summary or "").strip()
+            key = (kind, ref, summary)
+            if not ref and not summary:
+                return
+            if key in seen_evidence:
+                return
+            seen_evidence.add(key)
+            evidence.append(
+                {
+                    "kind": kind,
+                    "source_ref": ref or None,
+                    "summary": summary or ref,
+                    "payload": payload or {},
+                }
+            )
+
+        for node in context_nodes:
+            props = node.get("properties") or {}
+            add_evidence(
+                "node",
+                props.get("source_url") or props.get("source_pk") or props.get("element_key") or node.get("id"),
+                props.get("evidence_quote") or props.get("description") or node.get("label"),
+                {"node_id": node.get("id"), "type": node.get("type")},
+            )
+        for edge in context_edges:
+            for ref in edge.get("evidence_refs") or []:
+                add_evidence(
+                    "edge",
+                    ref,
+                    edge.get("evidence_quote") or f"{edge.get('source_label')} {edge.get('relation')} {edge.get('target_label')}",
+                    {"edge_id": edge.get("id"), "relation": edge.get("relation")},
+                )
+            add_evidence(
+                "edge",
+                edge.get("source_url"),
+                edge.get("evidence_quote"),
+                {"edge_id": edge.get("id"), "relation": edge.get("relation")},
+            )
+        for item in semantic_items:
+            add_evidence(
+                "semantic_item",
+                item.get("source_url") or item.get("element_key"),
+                item.get("evidence_quote") or item.get("summary") or item.get("label"),
+                {"element_key": item.get("element_key"), "element_type": item.get("element_type")},
+            )
+
+        lines = []
+        if center:
+            lines.append(f"Center: {center.get('label') or center.get('id')} ({center.get('type')})")
+        if question:
+            lines.append(f"Question: {question}")
+        if context_edges:
+            lines.append("Relations:")
+            for edge in context_edges[: min(len(context_edges), 40)]:
+                lines.append(
+                    "- {source} --{relation}--> {target}".format(
+                        source=edge.get("source_label"),
+                        relation=edge.get("relation"),
+                        target=edge.get("target_label"),
+                    )
+                )
+        elif context_nodes:
+            lines.append("No approved local relations are available for this center.")
+        if semantic_items:
+            lines.append("Semantic context:")
+            for item in semantic_items[:10]:
+                lines.append(f"- {item.get('element_type')}: {item.get('label')}")
+
+        return {
+            "tenant": tenant.public_dict(),
+            "approved": True,
+            "retrieval_mode": "local_graph_context",
+            "question": question,
+            "center": node_summary(center) if center else None,
+            "nodes": context_nodes,
+            "edges": context_edges,
+            "semantic_items": semantic_items,
+            "evidence": evidence,
+            "context_text": "\n".join(lines),
+            "scope": {
+                **(graph.get("scope") or {}),
+                "retrieval_mode": "local_graph_context",
+                "approved_only": True,
+                "node_count": len(context_nodes),
+                "edge_count": len(context_edges),
+                "semantic_item_count": len(semantic_items),
+                "evidence_count": len(evidence),
+            },
+            "eval": self._rag_context_eval(context_nodes, context_edges, evidence, semantic_items),
+        }
+
+    def _semantic_items_for_local_rag_context(self, tenant, nodes, edges, limit=30):
+        semantic_types = {
+            "situation",
+            "metric_observation",
+            "metric_change_observation",
+            "impact_claim",
+            "indicator_claim",
+            "recommendation",
+        }
+        node_labels = {
+            str(value or "").strip().lower()
+            for node in nodes or []
+            for value in [node.get("id"), node.get("label"), *(node.get("aliases") or [])]
+            if str(value or "").strip()
+        }
+        source_urls = {
+            str(value or "").strip()
+            for value in [
+                *[(node.get("properties") or {}).get("source_url") for node in nodes or []],
+                *[edge.get("source_url") for edge in edges or []],
+            ]
+            if str(value or "").strip()
+        }
+        if not node_labels and not source_urls:
+            return []
+        try:
+            with self.metadata_engine_for(tenant).connect() as conn:
+                rows = conn.execute(
+                    text(
+                        """
+                        SELECT element_key, element_type, name, payload_json, evidence_refs_json,
+                               source_url, confidence, status, created_at
+                        FROM aletheia_proposed_graph_elements
+                        WHERE project_id = :tenant_id
+                          AND element_type IN ('situation', 'metric_observation', 'metric_change_observation',
+                                               'impact_claim', 'indicator_claim', 'recommendation')
+                          AND status IN ('approved', 'needs_more_evidence')
+                        ORDER BY created_at DESC NULLS LAST, id DESC
+                        LIMIT :limit
+                        """
+                    ),
+                    {"tenant_id": tenant.tenant_id, "limit": max(1, min(int(limit or 30) * 4, 200))},
+                ).mappings().all()
+        except Exception:
+            return []
+
+        result = []
+        seen = set()
+        for row in rows:
+            payload = _load_json(row["payload_json"], {}) if row["payload_json"] else {}
+            element_type = row["element_type"]
+            if element_type not in semantic_types:
+                continue
+            source_url = str(payload.get("source_url") or row["source_url"] or "").strip()
+            text_values = [
+                row["name"],
+                payload.get("subject"),
+                payload.get("target"),
+                payload.get("metric_key"),
+                payload.get("recommended_action"),
+                payload.get("evidence_quote"),
+                payload.get("summary"),
+            ]
+            text_blob = " ".join(str(value or "").lower() for value in text_values)
+            source_match = bool(source_url and source_url in source_urls)
+            label_match = any(label and label in text_blob for label in node_labels if len(label) >= 3)
+            if not source_match and not label_match:
+                continue
+            key = row["element_key"]
+            if key in seen:
+                continue
+            seen.add(key)
+            evidence_refs = _load_json(row["evidence_refs_json"], []) if row["evidence_refs_json"] else []
+            result.append(
+                {
+                    "element_key": key,
+                    "element_type": element_type,
+                    "label": row["name"] or element_type,
+                    "status": row["status"],
+                    "confidence": row["confidence"],
+                    "source_url": source_url or None,
+                    "evidence_quote": payload.get("evidence_quote"),
+                    "summary": payload.get("summary") or payload.get("conclusion") or payload.get("description"),
+                    "subject": payload.get("subject"),
+                    "target": payload.get("target"),
+                    "metric_key": payload.get("metric_key"),
+                    "evidence_refs": evidence_refs,
+                    "context_role": "semantic_review_context",
+                    "match": {
+                        "source_url": source_match,
+                        "label": label_match,
+                    },
+                }
+            )
+            if len(result) >= max(1, min(int(limit or 30), 50)):
+                break
+        return result
+
+    def _rag_context_eval(self, nodes, edges, evidence, semantic_items=None):
+        semantic_items = semantic_items or []
+        unsupported_edge_count = len([
+            edge for edge in edges or []
+            if not edge.get("evidence_quote") and not edge.get("evidence_refs") and not edge.get("source_url")
+        ])
+        return {
+            "node_count": len(nodes or []),
+            "edge_count": len(edges or []),
+            "semantic_item_count": len(semantic_items),
+            "evidence_count": len(evidence or []),
+            "unsupported_edge_count": unsupported_edge_count,
+            "coverage": {
+                "has_center": bool(nodes),
+                "has_relation": bool(edges),
+                "has_evidence": bool(evidence),
+                "has_semantic_context": bool(semantic_items),
+            },
+        }
+
+    def graph_community_summaries(self, tenant, *, limit=300):
+        graph = self.full_graph(tenant, limit=limit) or {}
+        if not graph.get("approved"):
+            return {
+                "tenant": tenant.public_dict(),
+                "approved": False,
+                "retrieval_mode": "community_summary",
+                "communities": [],
+                "summary_text": "",
+                "eval": {"community_count": 0, "node_count": 0, "edge_count": 0},
+            }
+        nodes = list(graph.get("nodes") or [])
+        edges = list(graph.get("edges") or [])
+        nodes_by_id = {node.get("id"): node for node in nodes if node.get("id")}
+        adjacency = {node_id: set() for node_id in nodes_by_id}
+        edge_by_pair = {}
+        for edge in edges:
+            source = edge.get("source")
+            target = edge.get("target")
+            if source not in nodes_by_id or target not in nodes_by_id:
+                continue
+            adjacency.setdefault(source, set()).add(target)
+            adjacency.setdefault(target, set()).add(source)
+            edge_by_pair.setdefault(source, []).append(edge)
+            edge_by_pair.setdefault(target, []).append(edge)
+
+        visited = set()
+        communities = []
+        for node_id in nodes_by_id:
+            if node_id in visited:
+                continue
+            stack = [node_id]
+            component = []
+            visited.add(node_id)
+            while stack:
+                current = stack.pop()
+                component.append(current)
+                for neighbor in adjacency.get(current, set()):
+                    if neighbor in visited:
+                        continue
+                    visited.add(neighbor)
+                    stack.append(neighbor)
+            component_nodes = [nodes_by_id[item] for item in component if item in nodes_by_id]
+            component_node_ids = {node.get("id") for node in component_nodes}
+            component_edges = [
+                edge for edge in edges
+                if edge.get("source") in component_node_ids and edge.get("target") in component_node_ids
+            ]
+            type_counts = {}
+            relation_counts = {}
+            labels = []
+            evidence_refs = []
+            for node in component_nodes:
+                node_type = node.get("type") or "Unknown"
+                type_counts[node_type] = type_counts.get(node_type, 0) + 1
+                if node.get("label"):
+                    labels.append(node.get("label"))
+            for edge in component_edges:
+                relation = edge.get("label") or edge.get("kind") or edge.get("link_key") or "relation"
+                relation_counts[relation] = relation_counts.get(relation, 0) + 1
+                properties = edge.get("properties") or {}
+                for ref in properties.get("evidence_refs") or []:
+                    if ref and ref not in evidence_refs:
+                        evidence_refs.append(ref)
+                if edge.get("source_url") and edge.get("source_url") not in evidence_refs:
+                    evidence_refs.append(edge.get("source_url"))
+            top_types = sorted(type_counts.items(), key=lambda item: (-item[1], item[0]))[:5]
+            top_relations = sorted(relation_counts.items(), key=lambda item: (-item[1], item[0]))[:5]
+            title = ", ".join(label for label in labels[:3]) or component[0]
+            summary_parts = [
+                f"{len(component_nodes)} objects",
+                f"{len(component_edges)} relations",
+            ]
+            if top_types:
+                summary_parts.append("types: " + ", ".join(f"{key}({value})" for key, value in top_types))
+            if top_relations:
+                summary_parts.append("relations: " + ", ".join(f"{key}({value})" for key, value in top_relations))
+            communities.append(
+                {
+                    "community_id": f"community:{tenant.tenant_id}:{len(communities) + 1}",
+                    "title": title,
+                    "summary": "; ".join(summary_parts),
+                    "node_count": len(component_nodes),
+                    "edge_count": len(component_edges),
+                    "node_types": dict(sorted(type_counts.items())),
+                    "relation_types": dict(sorted(relation_counts.items())),
+                    "sample_nodes": [
+                        {"id": node.get("id"), "label": node.get("label"), "type": node.get("type")}
+                        for node in component_nodes[:10]
+                    ],
+                    "sample_edges": [
+                        {
+                            "source": edge.get("source"),
+                            "relation": edge.get("label") or edge.get("kind") or edge.get("link_key"),
+                            "target": edge.get("target"),
+                        }
+                        for edge in component_edges[:10]
+                    ],
+                    "evidence_refs": evidence_refs[:20],
+                    "projection_source": (graph.get("scope") or {}).get("projection_source"),
+                }
+            )
+        communities.sort(key=lambda item: (-item["edge_count"], -item["node_count"], item["title"]))
+        summary_text = "\n".join(
+            f"- {item['title']}: {item['summary']}"
+            for item in communities[:20]
+        )
+        return {
+            "tenant": tenant.public_dict(),
+            "approved": True,
+            "retrieval_mode": "community_summary",
+            "communities": communities,
+            "summary_text": summary_text,
+            "scope": {
+                "tenant_id": tenant.tenant_id,
+                "approved_only": True,
+                "projection_source": (graph.get("scope") or {}).get("projection_source"),
+                "node_count": len(nodes),
+                "edge_count": len(edges),
+            },
+            "eval": {
+                "community_count": len(communities),
+                "node_count": len(nodes),
+                "edge_count": len(edges),
+                "covered_node_count": sum(item["node_count"] for item in communities),
+            },
+        }
+
+    def graph_rag_query_context(self, tenant, *, question, object_type=None, instance_id=None, depth=1, limit=80):
+        question = str(question or "").strip()
+        if object_type and instance_id:
+            context = self.local_rag_context(
+                tenant,
+                object_type,
+                instance_id,
+                question=question,
+                depth=depth,
+                limit=limit,
+            )
+            if context:
+                return {
+                    **context,
+                    "query_route": {
+                        "route": "local",
+                        "reason": "explicit_center",
+                    },
+                }
+        default_center = None
+        if question:
+            lowered_question = question.lower()
+            for type_info in self.types(tenant).get("types") or []:
+                object_type_candidate = type_info.get("type")
+                if not object_type_candidate:
+                    continue
+                for node in self.search(tenant, object_type_candidate, "", limit=50).get("instances") or []:
+                    labels = [node.get("id"), node.get("label"), *(node.get("aliases") or [])]
+                    if any(str(label or "").strip().lower() in lowered_question for label in labels if len(str(label or "").strip()) >= 3):
+                        node_id = node.get("id") or ""
+                        if ":" in node_id:
+                            object_type, instance_id = node_id.split(":", 1)
+                            context = self.local_rag_context(
+                                tenant,
+                                object_type,
+                                instance_id,
+                                question=question,
+                                depth=depth,
+                                limit=limit,
+                            )
+                            if context:
+                                return {
+                                    **context,
+                                    "query_route": {
+                                        "route": "local",
+                                        "reason": "question_matched_approved_object",
+                                        "matched_node": node_id,
+                                    },
+                                }
+                if default_center is None:
+                    default_center = self.default_center(tenant)
+        communities = self.graph_community_summaries(tenant, limit=max(limit, 80))
+        route_reason = "global_question"
+        if not question and default_center:
+            route_reason = "no_question_defaulted_to_global_summary"
+        return {
+            **communities,
+            "question": question,
+            "query_route": {
+                "route": "global",
+                "reason": route_reason,
+            },
+            "context_text": communities.get("summary_text") or "",
         }
 
     def _approved_artifacts(self, tenant, keys):
@@ -8307,83 +8816,12 @@ class ReasoningRepository:
         }
 
     def _finding_canonical_boundary(self):
-        return {
-            "finding_approval_writes": ["aletheia_reasoning_findings", "aletheia_reasoning_reviews"],
-            "canonical_ontology_write": False,
-            "graph_write": False,
-            "auto_business_action": False,
-            "promotion_requires": "separate ontology/graph/rule proposal review gate",
-        }
+        return finding_canonical_boundary()
 
-    DEEP_GRAPH_REQUIRED_STEPS = ("source_entity", "relation", "target_entity", "evidence", "action")
+    DEEP_GRAPH_REQUIRED_STEPS = REASONING_DEEP_GRAPH_REQUIRED_STEPS
 
     def _deep_graph_profile(self, evidence_chain):
-        def step_for(item):
-            kind = str(item.get("kind") or "").lower()
-            if "action" in kind:
-                return "action"
-            if "source" in kind and "entity" in kind:
-                return "source_entity"
-            if "target" in kind and "entity" in kind:
-                return "target_entity"
-            if "relation" in kind or "edge" in kind or item.get("source_label") or item.get("target_label"):
-                return "relation"
-            if item.get("source_label") or item.get("source") or item.get("subject"):
-                return "source_entity"
-            if item.get("target_label") or item.get("target") or item.get("object"):
-                return "target_entity"
-            if item.get("metric") or isinstance(item.get("value"), (int, float)):
-                return "evidence"
-            if item.get("source_ref"):
-                return "evidence"
-            return None
-
-        def label_for(item):
-            value = item.get("value")
-            if isinstance(value, list):
-                labels = [
-                    str(v.get("label") or v.get("name") or v.get("id") or v.get("key") or v)
-                    for v in value[:5]
-                    if isinstance(v, dict)
-                ]
-                return ", ".join(labels[:5]) or item.get("metric") or item.get("kind")
-            if isinstance(value, dict):
-                return value.get("label") or value.get("name") or value.get("id") or value.get("key") or item.get("metric") or item.get("kind")
-            return str(value) if value not in (None, "") else item.get("metric") or item.get("kind")
-
-        step_order = []
-        nodes = []
-        for item in evidence_chain or []:
-            if not isinstance(item, dict):
-                continue
-            step = step_for(item)
-            if not step:
-                continue
-            if step not in step_order:
-                step_order.append(step)
-            nodes.append(
-                {
-                    "step": step,
-                    "kind": item.get("kind"),
-                    "source_ref": item.get("source_ref"),
-                    "metric": item.get("metric"),
-                    "label": label_for(item),
-                }
-            )
-        missing_steps = [step for step in self.DEEP_GRAPH_REQUIRED_STEPS if step not in step_order]
-        hop_count = max(len(step_order) - 1, 0)
-        multi_hop = hop_count >= 3 and not missing_steps
-        return {
-            "reasoning_type": "graph_multi_hop" if multi_hop else "evidence_chain",
-            "finding_emphasis": "deep_graph_finding" if multi_hop else "candidate_finding",
-            "required_steps": list(self.DEEP_GRAPH_REQUIRED_STEPS),
-            "observed_steps": step_order,
-            "missing_steps": missing_steps,
-            "hop_count": hop_count,
-            "multi_hop": multi_hop,
-            "path": nodes,
-            "path_label": " -> ".join(node["label"] for node in nodes if node.get("label")),
-        }
+        return deep_graph_profile(evidence_chain)
 
     def _finding_action_to_dict(self, row):
         due_at = row["due_at"]
@@ -9502,37 +9940,14 @@ class ReasoningRepository:
             yield {"event": "plan", "data": {"query_plan": query_plan, "task": task}}
             tool_calls.insert(1, {"tool": "entity_profile_aggregate", "tenant_id": tenant.tenant_id, "approved_only": True, "write_scope": "read_only_source_aggregate", "status": "completed"})
             metrics = structured_answer.get("metrics") or {}
-            rankings = metrics.get("rankings") or []
-            source_key_profile = metrics.get("source_key_profile") or {}
-            label = metrics.get("label") or center_node
-            if source_key_profile.get("related_tables"):
-                top_paths = source_key_profile.get("top_paths") or []
-                path_summary = ", ".join(f"{p['label']} ({p['metric']} {_fmt_number(p['metric_value'])})" for p in top_paths[:3]) or "no ranked paths"
-                ranking_summary = f"{source_key_profile.get('total_key_rows', 0)} source rows; top paths: {path_summary}"
-                second_hop_paths = source_key_profile.get("second_hop_paths") or []
-                if second_hop_paths:
-                    shared_summary = "; ".join(
-                        f"{p['label']} -> {', '.join(peer['key'] for peer in p.get('top_peers', [])[:4])}"
-                        for p in second_hop_paths[:3]
-                    )
-                    ranking_summary += f"; depth-{source_key_profile.get('scope_depth', scope_depth)} shared paths: {shared_summary}"
-                aggregate_label = f"{label} Source Evidence Profile"
-                aggregate_source_ref = f"{metrics.get('object_type', 'entity')} + degree + source-key metric aggregation"
-            else:
-                ranking_summary = "; ".join(
-                    f"{r['my_count']} {r['target_type']}(s) (#{r['rank']}/{r['total_peers']}, {r['level']})"
-                    for r in rankings if r.get("my_count", 0) > 0
-                ) or "no ranked relationships"
-                aggregate_label = f"{label} Business Profile"
-                aggregate_source_ref = f"{metrics.get('object_type', 'entity')} + peer ranking + value aggregation"
-            evidence_paths.append({
-                "kind": "controlled_aggregate",
-                "label": aggregate_label,
-                "summary": f"{label}: {ranking_summary}",
-                "url": f"/reasoning.html?tenant={tenant.tenant_id}&task={quote(task_key)}",
-                "source_ref": aggregate_source_ref,
-                "payload": metrics,
-            })
+            aggregate_evidence, ranking_summary = entity_profile_aggregate_evidence(
+                tenant.tenant_id,
+                task_key,
+                center_node,
+                scope_depth,
+                metrics,
+            )
+            evidence_paths.append(aggregate_evidence)
             yield {
                 "event": "no_llm_call",
                 "data": {
@@ -9547,21 +9962,15 @@ class ReasoningRepository:
         else:
             title, conclusion = self._edge_or_scoped_finding_text(tenant, task, scope)
         yield {"event": "evidence", "data": {"evidence_paths": evidence_paths}}
-        finding = {
-            "canonical_key": f"finding:graph-scope:{task_key}:run-{int(time.time() * 1000)}",
-            "title": title,
-            "conclusion": conclusion,
-            "confidence": 0.78 if structured_answer else 0.72,
-            "supporting_evidence": evidence_paths,
-            "counter_evidence": [{"kind": "scope_limit", "summary": ("Conclusions are based solely on the approved graph and controlled aggregation; external benchmarks, thresholds, and unapproved evidence are not included." if structured_answer else "The task cannot expand beyond the selected approved graph scope without a new bounded graph request.")}],
-            "recommended_action": {
-                "type": "review_graph_scope",
-                "title": "Review scoped graph evidence before operational action",
-                "description": "Use this draft as a reviewer prompt; do not treat it as an approved finding until it passes the review gate.",
-                "execution_boundary": "proposal_only",
-                **({"structured_answer": structured_answer, "structured_response": structured_response} if structured_answer else {}),
-            },
-        }
+        finding = scoped_graph_finding(
+            task_key,
+            title,
+            conclusion,
+            evidence_paths,
+            structured_answer,
+            structured_response,
+            now_ms=int(time.time() * 1000),
+        )
         output = {
             "summary": conclusion,
             "finding_keys": [finding["canonical_key"]],
@@ -9745,14 +10154,7 @@ class ReasoningRepository:
             "metrics": metrics,
             "limits": structured_answer.get("evidence_limits") or [],
             "next_questions": structured_answer.get("next_questions") or [],
-            "actions": [
-                {
-                    "type": "review_graph_scope",
-                    "title": "Review scoped graph evidence before operational action",
-                    "description": "Use this draft as a reviewer prompt; do not treat it as an approved finding until it passes the review gate.",
-                    "execution_boundary": "proposal_only",
-                }
-            ],
+            "actions": [review_graph_scope_action()],
             "write_boundary": {
                 "status": "draft_only",
                 "approved_finding_write": "review_gate_required",
@@ -9761,71 +10163,16 @@ class ReasoningRepository:
         }
 
     def _plain_reasoning_title(self, question, label, ranked_paths, second_hop_paths):
-        wants_zh = bool(re.search(r"[\u4e00-\u9fff]", question or ""))
-        label = self._display_label_from_question(question, label)
-        top_labels = [str(path.get("label")) for path in (ranked_paths or []) if path.get("label")][:3]
-        if not top_labels:
-            return f"{label} 风险画像" if wants_zh else f"{label} risk profile"
-        if wants_zh:
-            return f"{label} 主要关联路径：{'、'.join(top_labels)}"
-        return f"{label} main relationship paths: {', '.join(top_labels)}"
+        return plain_reasoning_title(question, label, ranked_paths, second_hop_paths)
 
     def _plain_reasoning_conclusion(self, question, label, detailed_conclusion, ranked_paths, second_hop_paths, graph_degree):
-        wants_zh = bool(re.search(r"[\u4e00-\u9fff]", question or ""))
-        label = self._display_label_from_question(question, label or "selected entity")
-        top_labels = [str(path.get("label")) for path in (ranked_paths or []) if path.get("label")][:3]
-        peer_keys = []
-        for path in second_hop_paths or []:
-            for peer in path.get("top_peers") or []:
-                key = peer.get("key") or peer.get("label") or peer.get("id")
-                if key and key not in peer_keys:
-                    peer_keys.append(str(key))
-                if len(peer_keys) >= 5:
-                    break
-            if len(peer_keys) >= 5:
-                break
-        source_rows = (graph_degree or {}).get("source_key_row_degree")
-        if top_labels:
-            paths_text = "、".join(top_labels) if wants_zh else ", ".join(top_labels)
-            if peer_keys:
-                peers_text = "、".join(peer_keys) if wants_zh else ", ".join(peer_keys)
-                if wants_zh:
-                    return (
-                        f"{label} 的主要敏感路径集中在 {paths_text}。这些路径还连接 {peers_text} 等相关方，"
-                        "说明风险来自高价值路径和关键对象的重叠。"
-                    )
-                return (
-                    f"{label}'s main exposure is concentrated in {paths_text}. "
-                    f"Those paths also connect {peers_text}, so the risk is driven by overlap between high-value paths and key counterparties."
-                )
-            if wants_zh:
-                return f"{label} 的主要敏感路径集中在 {paths_text}；具体排序和数值见下方关键路径。"
-            return f"{label}'s main exposure is concentrated in {paths_text}; see the ranked paths below for the supporting metrics."
-        if source_rows:
-            if wants_zh:
-                return f"{label} 在受控源数据中有 {source_rows} 条相关记录；当前证据足以做画像，但还需要关键路径指标来判断风险优先级。"
-            return f"{label} has {source_rows} related controlled source rows; it can be profiled, but path-level metrics are needed to rank risk priority."
-        return detailed_conclusion or (f"{label} 暂无足够的关联证据形成直白结论。" if wants_zh else f"{label} does not yet have enough related evidence for a clear conclusion.")
+        return plain_reasoning_conclusion(question, label, detailed_conclusion, ranked_paths, second_hop_paths, graph_degree)
 
     def _display_label_from_question(self, question, fallback):
-        question = question or ""
-        fallback = fallback or "selected entity"
-        match = re.search(r"([A-Z][A-Za-z .'-]{1,80}\s+\([A-Z]{3}\))", question)
-        return match.group(1) if match else fallback
+        return display_label_from_question(question, fallback)
 
     def _paths_with_peer(self, second_hop_paths, peer_keys):
-        wanted = {str(key).upper() for key in peer_keys}
-        labels = []
-        for path in second_hop_paths or []:
-            path_label = path.get("label")
-            if not path_label:
-                continue
-            for peer in path.get("top_peers") or []:
-                key = str(peer.get("key") or peer.get("label") or peer.get("id") or "").upper()
-                if key in wanted:
-                    labels.append(str(path_label))
-                    break
-        return labels
+        return paths_with_peer(second_hop_paths, peer_keys)
 
 
     def _formatted_scoped_reasoning_prompt_request(self, tenant, task, scope, evidence_paths, scope_depth, scope_limit, scope_edge_limit, graph_context=None):
@@ -9894,9 +10241,33 @@ class ReasoningRepository:
         node_limit = max(1, min(int(node_limit or 200), 300))
         edge_limit = max(1, min(int(edge_limit or node_limit), 300))
         depth = max(1, min(int(depth or 1), 2))
+        local_rag_context = self.instance_repository.local_rag_context(
+            tenant,
+            object_type,
+            instance_id,
+            question=None,
+            depth=depth,
+            limit=max(node_limit, edge_limit),
+        ) or {}
         graph = self.instance_repository.full_graph(tenant, object_type, instance_id, limit=max(node_limit, edge_limit)) or {}
         nodes = graph.get("nodes") or []
         edges = graph.get("edges") or []
+        if local_rag_context.get("approved"):
+            local_nodes = local_rag_context.get("nodes") or []
+            local_edges = local_rag_context.get("edges") or []
+            local_node_ids = {node.get("id") for node in local_nodes if node.get("id")}
+            full_nodes_by_id = {node.get("id"): node for node in nodes if node.get("id")}
+            for node in local_nodes:
+                if node.get("id") and node.get("id") not in full_nodes_by_id:
+                    nodes.append(node)
+                    full_nodes_by_id[node.get("id")] = node
+            edge_ids = {edge.get("id") for edge in edges if edge.get("id")}
+            for edge in local_edges:
+                if edge.get("id") and edge.get("id") not in edge_ids:
+                    edges.append(edge)
+                    edge_ids.add(edge.get("id"))
+            if local_node_ids:
+                nodes = sorted(nodes, key=lambda node: 0 if node.get("id") in local_node_ids else 1)
         nodes_by_id = {node.get("id"): node for node in nodes if node.get("id")}
         adjacency = {}
         for edge in edges:
@@ -10013,8 +10384,23 @@ class ReasoningRepository:
                 "projection_source": edge.get("projection_source"),
             }
 
+        retrieval_context = None
+        if local_rag_context.get("approved"):
+            retrieval_context = {
+                "mode": local_rag_context.get("retrieval_mode"),
+                "center": local_rag_context.get("center"),
+                "nodes": (local_rag_context.get("nodes") or [])[:node_limit],
+                "edges": (local_rag_context.get("edges") or [])[:edge_limit],
+                "semantic_items": local_rag_context.get("semantic_items") or [],
+                "evidence": local_rag_context.get("evidence") or [],
+                "context_text": local_rag_context.get("context_text") or "",
+                "scope": local_rag_context.get("scope") or {},
+                "eval": local_rag_context.get("eval") or {},
+            }
+
         return {
             "center_node": center_node,
+            "retrieval_mode": "local_graph_context" if retrieval_context else "approved_graph_scope",
             "depth": depth,
             "node_limit": node_limit,
             "edge_limit": edge_limit,
@@ -10036,6 +10422,8 @@ class ReasoningRepository:
                 "source_graph": (graph.get("limits") or {}).get("truncated"),
             },
             "source_key_metrics": source_key_profile,
+            "retrieval_context": retrieval_context,
+            "context_text": (retrieval_context or {}).get("context_text", ""),
         }
 
     def run_scoped_graph_task(self, tenant, task_key):
@@ -10104,67 +10492,27 @@ class ReasoningRepository:
                 },
             )
             metrics = structured_answer.get("metrics") or {}
-            rankings = metrics.get("rankings") or []
-            source_key_profile = metrics.get("source_key_profile") or {}
-            label = metrics.get("label") or center_node
-            if source_key_profile.get("related_tables"):
-                top_paths = source_key_profile.get("top_paths") or []
-                path_summary = ", ".join(f"{p['label']} ({p['metric']} {_fmt_number(p['metric_value'])})" for p in top_paths[:3]) or "no ranked paths"
-                ranking_summary = f"{source_key_profile.get('total_key_rows', 0)} source rows; top paths: {path_summary}"
-                second_hop_paths = source_key_profile.get("second_hop_paths") or []
-                if second_hop_paths:
-                    shared_summary = "; ".join(
-                        f"{p['label']} -> {', '.join(peer['key'] for peer in p.get('top_peers', [])[:4])}"
-                        for p in second_hop_paths[:3]
-                    )
-                    ranking_summary += f"; depth-{source_key_profile.get('scope_depth', scope_depth)} shared paths: {shared_summary}"
-                aggregate_label = f"{label} Source Evidence Profile"
-                aggregate_source_ref = f"{metrics.get('object_type', 'entity')} + degree + source-key metric aggregation"
-            else:
-                ranking_summary = "; ".join(
-                    f"{r['my_count']} {r['target_type']}(s) (#{r['rank']}/{r['total_peers']}, {r['level']})"
-                    for r in rankings if r.get("my_count", 0) > 0
-                ) or "no ranked relationships"
-                aggregate_label = f"{label} Business Profile"
-                aggregate_source_ref = f"{metrics.get('object_type', 'entity')} + peer ranking + value aggregation"
-            evidence_paths.append(
-                {
-                    "kind": "controlled_aggregate",
-                    "label": aggregate_label,
-                    "summary": f"{label}: {ranking_summary}",
-                    "url": f"/reasoning.html?tenant={tenant.tenant_id}&task={quote(task_key)}",
-                    "source_ref": aggregate_source_ref,
-                    "payload": metrics,
-                }
+            aggregate_evidence, ranking_summary = entity_profile_aggregate_evidence(
+                tenant.tenant_id,
+                task_key,
+                center_node,
+                scope_depth,
+                metrics,
             )
+            evidence_paths.append(aggregate_evidence)
             title = structured_response["answer"]["title"]
             conclusion = structured_response["answer"]["conclusion"]
         else:
             title, conclusion = self._edge_or_scoped_finding_text(tenant, task, scope)
-        finding = {
-            "canonical_key": f"finding:graph-scope:{task_key}:run-{int(time.time() * 1000)}",
-            "title": title,
-            "conclusion": conclusion,
-            "confidence": 0.78 if structured_answer else 0.72,
-            "supporting_evidence": evidence_paths,
-            "counter_evidence": [
-                {
-                    "kind": "scope_limit",
-                    "summary": (
-                        "Conclusions are based solely on the approved graph and controlled aggregation; external benchmarks, thresholds, and unapproved evidence are not included."
-                        if structured_answer
-                        else "The task cannot expand beyond the selected approved graph scope without a new bounded graph request."
-                    ),
-                }
-            ],
-            "recommended_action": {
-                "type": "review_graph_scope",
-                "title": "Review scoped graph evidence before operational action",
-                "description": "Use this draft as a reviewer prompt; do not treat it as an approved finding until it passes the review gate.",
-                "execution_boundary": "proposal_only",
-                **({"structured_answer": structured_answer, "structured_response": structured_response} if structured_answer else {}),
-            },
-        }
+        finding = scoped_graph_finding(
+            task_key,
+            title,
+            conclusion,
+            evidence_paths,
+            structured_answer,
+            structured_response,
+            now_ms=int(time.time() * 1000),
+        )
         output = {
             "summary": conclusion,
             "finding_keys": [finding["canonical_key"]],
@@ -12100,6 +12448,57 @@ class AletheiaServerHandler(BaseHTTPRequestHandler):
                         f"&id={quote(str(instance_id))}&depth={graph.get('depth', depth)}&limit={graph.get('limit', limit)}"
                     )
             self._send_json(graph)
+            return
+        if parsed.path == "/api/graph/local-rag-context":
+            query = parse_qs(parsed.query)
+            depth = int(query.get("depth", ["1"])[0])
+            limit = int(query.get("limit", ["80"])[0])
+            object_type = (query.get("type", [""])[0] or "").strip()
+            instance_id = (query.get("id", [""])[0] or "").strip()
+            question = query.get("question", [None])[0]
+            if not object_type or not instance_id:
+                default_center = self.instance_repository.default_center(tenant)
+                if default_center:
+                    object_type = object_type or default_center["type"]
+                    instance_id = instance_id or default_center["id"]
+            if not object_type or not instance_id:
+                self._send_error(HTTPStatus.BAD_REQUEST, "type and id are required when the tenant has no approved graph center")
+                return
+            context = self.instance_repository.local_rag_context(
+                tenant,
+                object_type,
+                instance_id,
+                question=question,
+                depth=depth,
+                limit=limit,
+            )
+            if context is None:
+                self._send_error(HTTPStatus.NOT_FOUND, "Local RAG context not found or not approved")
+                return
+            self._send_json(context)
+            return
+        if parsed.path == "/api/graph/community-summaries":
+            query = parse_qs(parsed.query)
+            limit = int(query.get("limit", ["300"])[0])
+            self._send_json(self.instance_repository.graph_community_summaries(tenant, limit=limit))
+            return
+        if parsed.path == "/api/graph/rag-query-context":
+            query = parse_qs(parsed.query)
+            depth = int(query.get("depth", ["1"])[0])
+            limit = int(query.get("limit", ["80"])[0])
+            object_type = (query.get("type", [""])[0] or "").strip() or None
+            instance_id = (query.get("id", [""])[0] or "").strip() or None
+            question = query.get("question", [""])[0]
+            self._send_json(
+                self.instance_repository.graph_rag_query_context(
+                    tenant,
+                    question=question,
+                    object_type=object_type,
+                    instance_id=instance_id,
+                    depth=depth,
+                    limit=limit,
+                )
+            )
             return
         if parsed.path == "/api/graph/ontology-model":
             query = parse_qs(parsed.query)
