@@ -1,9 +1,12 @@
+import contextlib
+import io
 import json
 import os
 import sys
 import tempfile
 import time
 import unittest
+import warnings
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -108,6 +111,33 @@ class DegradedTestEmbeddingAdapter:
             "vector": None,
             "dim": 0,
         }
+
+
+class OptionalEmbeddingLoadTest(unittest.TestCase):
+    def test_optional_embedding_import_noise_is_suppressed_on_degraded_load(self):
+        real_import = __import__
+        model_name = "test-noisy-optional-import"
+        iterative_graph_enrichment_agent._EMBEDDING_MODEL_CACHE.pop(model_name, None)
+        iterative_graph_enrichment_agent._EMBEDDING_MODEL_LOAD_ERRORS.pop(model_name, None)
+
+        def noisy_import(name, globals=None, locals=None, fromlist=(), level=0):
+            if name == "sentence_transformers":
+                print("Loading weights: noisy optional dependency")
+                print("bitsandbytes bug report", file=sys.stderr)
+                warnings.warn("The installed version of bitsandbytes was compiled without GPU support.", UserWarning)
+                raise ImportError("optional embedding stack unavailable")
+            return real_import(name, globals, locals, fromlist, level)
+
+        adapter = iterative_graph_enrichment_agent.SmallMultilingualEmbeddingAdapter(model_name)
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+        with patch("builtins.__import__", side_effect=noisy_import):
+            with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+                result = adapter.embed("candidate graph element")
+
+        self.assertEqual(result["status"], "degraded")
+        self.assertEqual(stdout.getvalue(), "")
+        self.assertEqual(stderr.getvalue(), "")
 
 
 class OrthogonalShortAliasEmbeddingAdapter:

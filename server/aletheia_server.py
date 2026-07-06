@@ -9651,7 +9651,7 @@ class ReasoningRepository:
         center_edge = scope.get("center_edge")
         if not center_node and not center_edge:
             raise ValueError("center_node or center_edge is required")
-        depth = max(1, min(int(scope.get("depth") or 1), 2))
+        depth = max(1, min(int(scope.get("depth") or 1), 3))
         node_limit = max(1, min(int(scope.get("node_limit") or 100), 300))
         edge_limit = max(1, min(int(scope.get("edge_limit") or 100), 300))
         key_source = center_node or f"{center_edge.get('source')}->{center_edge.get('target')}"
@@ -9979,6 +9979,8 @@ class ReasoningRepository:
             **({"structured_answer": structured_answer, "structured_response": structured_response} if structured_answer else {}),
         }
         eval_result = {"passed": True, "approved_only": True, "draft_only": True, "unsupported_claims": [], "evidence_path_count": len(evidence_paths), "tenant_id": tenant.tenant_id}
+        if structured_response and structured_response.get("conclusion_evaluation"):
+            eval_result["conclusion_evaluation"] = structured_response["conclusion_evaluation"]
         run = self._record_run(tenant, task, query_plan, tool_calls, evidence_paths, output, eval_result, "completed", started)
         yield {
             "event": "no_llm_call",
@@ -10109,15 +10111,44 @@ class ReasoningRepository:
             ranked_paths,
             second_hop_paths,
         )
+        traversal_analysis = self._joint_graph_traversal_analysis(
+            display_label,
+            scope.get("center_node"),
+            graph_context,
+            metrics,
+            ranked_paths,
+            second_hop_paths,
+        )
+        edge_target_reasoning = self._edge_target_reasoning_units(
+            display_label,
+            scope.get("center_node"),
+            graph_context,
+            metrics,
+            evidence_refs,
+        )
+        deep_conclusion = self._business_conclusion_from_traversal(
+            display_label,
+            metrics,
+            traversal_analysis,
+            plain_conclusion,
+            edge_target_reasoning,
+        )
+        conclusion_eval = self._evaluate_reasoning_conclusion(
+            deep_conclusion,
+            traversal_analysis,
+            evidence_refs,
+            structured_answer,
+            edge_target_reasoning,
+        )
 
         return {
             "schema_version": "reasoning_response_v1",
             "answer": {
                 "title": plain_title or structured_answer.get("title") or task.get("question") or "Scoped graph reasoning",
-                "plain_conclusion": plain_conclusion,
-                "conclusion": plain_conclusion,
-                "detailed_conclusion": structured_answer.get("profile_summary") or "",
-                "confidence": 0.78,
+                "plain_conclusion": deep_conclusion.get("plain_conclusion") or plain_conclusion,
+                "conclusion": deep_conclusion.get("conclusion") or plain_conclusion,
+                "detailed_conclusion": deep_conclusion.get("detailed_conclusion") or structured_answer.get("profile_summary") or "",
+                "confidence": conclusion_eval.get("confidence", 0.78),
                 "status": "draft",
             },
             "scope": {
@@ -10149,7 +10180,10 @@ class ReasoningRepository:
             "key_facts": structured_answer.get("key_facts") or [],
             "ranked_paths": ranked_paths,
             "second_hop_paths": second_hop_paths,
+            "traversal_analysis": traversal_analysis,
+            "edge_target_reasoning": edge_target_reasoning,
             "business_interpretation": structured_answer.get("business_interpretation") or [],
+            "conclusion_evaluation": conclusion_eval,
             "evidence": evidence_refs,
             "metrics": metrics,
             "limits": structured_answer.get("evidence_limits") or [],
@@ -10160,6 +10194,468 @@ class ReasoningRepository:
                 "approved_finding_write": "review_gate_required",
                 "must_not_write": ["canonical_ontology", "formal_graph"],
             },
+        }
+
+    def _joint_graph_traversal_analysis(self, label, center_node, graph_context, metrics, ranked_paths, second_hop_paths):
+        nodes = graph_context.get("related_nodes") or []
+        edges = graph_context.get("related_edges") or []
+        nodes_by_id = {node.get("id"): node for node in nodes if node.get("id")}
+        adjacency = {}
+        relation_counts = {}
+        relation_neighbor_types = {}
+        for edge in edges:
+            source = edge.get("source")
+            target = edge.get("target")
+            if not source or not target:
+                continue
+            relation = edge.get("label") or edge.get("link_key") or "relation"
+            relation_counts[relation] = relation_counts.get(relation, 0) + 1
+            for node_id, other_id in ((source, target), (target, source)):
+                other_type = (nodes_by_id.get(other_id) or {}).get("type") or "unknown"
+                relation_neighbor_types.setdefault(relation, {})
+                relation_neighbor_types[relation][other_type] = relation_neighbor_types[relation].get(other_type, 0) + 1
+                adjacency.setdefault(node_id, []).append({**edge, "_other": other_id, "_relation": relation})
+
+        bfs_layers = []
+        visited = {center_node} if center_node else set()
+        frontier = {center_node} if center_node else set()
+        for depth in range(1, 4):
+            next_frontier = set()
+            layer_relations = {}
+            layer_types = {}
+            sample_nodes = []
+            for node_id in frontier:
+                for edge in adjacency.get(node_id, []):
+                    other = edge.get("_other")
+                    if not other or other in visited:
+                        continue
+                    visited.add(other)
+                    next_frontier.add(other)
+                    relation = edge.get("_relation")
+                    layer_relations[relation] = layer_relations.get(relation, 0) + 1
+                    other_node = nodes_by_id.get(other) or {"id": other, "label": other, "type": "unknown"}
+                    other_type = other_node.get("type") or "unknown"
+                    layer_types[other_type] = layer_types.get(other_type, 0) + 1
+                    if len(sample_nodes) < 8:
+                        sample_nodes.append({
+                            "id": other,
+                            "label": other_node.get("label") or other,
+                            "type": other_type,
+                            "via_relation": relation,
+                        })
+            if not next_frontier:
+                break
+            bfs_layers.append({
+                "depth": depth,
+                "node_count": len(next_frontier),
+                "relation_counts": dict(sorted(layer_relations.items())),
+                "node_type_counts": dict(sorted(layer_types.items())),
+                "sample_nodes": sample_nodes,
+            })
+            frontier = next_frontier
+
+        dfs_paths = []
+        max_paths = 8
+
+        def dfs(node_id, path, seen, remaining):
+            if len(dfs_paths) >= max_paths or remaining <= 0:
+                return
+            def onward_count(item):
+                other = item.get("_other")
+                if not other:
+                    return 0
+                return sum(
+                    1
+                    for next_edge in adjacency.get(other, [])
+                    if next_edge.get("_other") not in seen and next_edge.get("_other") != node_id
+                )
+
+            candidates = sorted(
+                adjacency.get(node_id, []),
+                key=lambda item: (
+                    -onward_count(item),
+                    item.get("_relation") in {"Country Chokepoint Dependency", "relation"},
+                    item.get("_relation") or "",
+                    item.get("_other") or "",
+                ),
+            )
+            for edge in candidates[:12]:
+                other = edge.get("_other")
+                if not other or other in seen:
+                    continue
+                other_node = nodes_by_id.get(other) or {"id": other, "label": other, "type": "unknown"}
+                step = {
+                    "from": node_id,
+                    "relation": edge.get("_relation"),
+                    "to": other,
+                    "to_label": other_node.get("label") or other,
+                    "to_type": other_node.get("type") or "unknown",
+                }
+                next_path = [*path, step]
+                if len(next_path) >= 2 or onward_count(edge) == 0:
+                    dfs_paths.append(next_path)
+                dfs(other, next_path, {*seen, other}, remaining - 1)
+                if len(dfs_paths) >= max_paths:
+                    break
+
+        if center_node:
+            dfs(center_node, [], {center_node}, 3)
+
+        source_profile = (metrics or {}).get("source_key_profile") or {}
+        top_source_metrics = [
+            {
+                "label": path.get("label"),
+                "metric": path.get("metric"),
+                "metric_value": path.get("metric_value"),
+                "row_count": path.get("row_count"),
+                "source_table": path.get("source_table") or path.get("table"),
+            }
+            for path in ranked_paths[:5]
+        ]
+        relation_summary = [
+            {
+                "relation": relation,
+                "edge_count": count,
+                "neighbor_types": relation_neighbor_types.get(relation) or {},
+            }
+            for relation, count in sorted(relation_counts.items(), key=lambda item: (-item[1], item[0]))[:8]
+        ]
+        return {
+            "strategy": "joint_bfs_dfs_approved_graph_reasoning_v1",
+            "center": {"id": center_node, "label": label},
+            "max_observed_depth": bfs_layers[-1]["depth"] if bfs_layers else 0,
+            "breadth": {
+                "visited_node_count": len(visited),
+                "relation_type_count": len(relation_counts),
+                "layers": bfs_layers,
+            },
+            "depth_paths": [
+                {
+                    "path_length": len(path),
+                    "steps": path,
+                    "path_label": " -> ".join(
+                        [label, *[step.get("to_label") or step.get("to") for step in path]]
+                    ),
+                }
+                for path in dfs_paths
+            ],
+            "relation_summary": relation_summary,
+            "source_metric_summary": {
+                "total_rows": source_profile.get("total_key_rows"),
+                "related_table_count": len(source_profile.get("related_tables") or []),
+                "top_metrics": top_source_metrics,
+            },
+            "shared_peer_paths": second_hop_paths[:5],
+        }
+
+    def _edge_target_reasoning_units(self, label, center_node, graph_context, metrics, evidence_refs):
+        retrieval_context = graph_context.get("retrieval_context") or {}
+        related_nodes = graph_context.get("related_nodes") or []
+        related_edges = graph_context.get("related_edges") or []
+        retrieval_nodes = retrieval_context.get("nodes") or []
+        retrieval_edges = retrieval_context.get("edges") or []
+        semantic_items = retrieval_context.get("semantic_items") or []
+        prior_findings = [
+            item for item in evidence_refs or []
+            if str(item.get("kind") or "").lower() in {"prior_finding", "finding", "draft_finding"}
+            or item.get("label")
+        ]
+
+        nodes_by_id = {}
+        for node in [*related_nodes, *retrieval_nodes]:
+            node_id = node.get("id")
+            if node_id:
+                nodes_by_id.setdefault(node_id, {}).update(
+                    {key: value for key, value in node.items() if value not in (None, "", [])}
+                )
+
+        edges_by_key = {}
+        for edge in [*retrieval_edges, *related_edges]:
+            source = edge.get("source")
+            target = edge.get("target")
+            relation = edge.get("relation") or edge.get("label") or edge.get("link_key") or "relation"
+            if not source or not target:
+                continue
+            key = (source, relation, target)
+            edges_by_key.setdefault(key, {}).update(
+                {field: value for field, value in edge.items() if value not in (None, "", [])}
+            )
+            if edge.get("id"):
+                edges_by_key[key].setdefault("id", edge.get("id"))
+            edges_by_key[key].setdefault("relation", relation)
+
+        def text_blob(*items):
+            return " ".join(str(item or "").lower() for item in items if item not in (None, "", []))
+
+        def numeric_metrics(properties):
+            selected = {}
+            priority_terms = (
+                "risk", "trade", "piracy", "geopolitical", "canal", "share",
+                "v_", "q_", "impact", "likelihood", "severity", "cost", "flow",
+            )
+            for key, value in (properties or {}).items():
+                if isinstance(value, bool):
+                    continue
+                if isinstance(value, (int, float)):
+                    lower_key = str(key).lower()
+                    if any(term in lower_key for term in priority_terms):
+                        selected[key] = value
+                if len(selected) >= 12:
+                    break
+            return selected
+
+        def attached_semantic(source_label, relation, target_label, source_url):
+            markers = text_blob(source_label, relation, target_label).split()
+            result = []
+            for item in semantic_items:
+                item_blob = text_blob(
+                    item.get("label"),
+                    item.get("summary"),
+                    item.get("evidence_quote"),
+                    item.get("subject"),
+                    item.get("target"),
+                    item.get("metric_key"),
+                )
+                source_match = bool(source_url and item.get("source_url") == source_url)
+                label_match = any(marker and len(marker) >= 3 and marker in item_blob for marker in markers)
+                if source_match or label_match:
+                    result.append({
+                        "element_key": item.get("element_key"),
+                        "element_type": item.get("element_type"),
+                        "label": item.get("label"),
+                        "summary": item.get("summary") or item.get("evidence_quote"),
+                        "metric_key": item.get("metric_key"),
+                        "status": item.get("status"),
+                    })
+                if len(result) >= 3:
+                    break
+            return result
+
+        def attached_findings(source_label, target_label):
+            markers = [str(source_label or "").lower(), str(target_label or "").lower()]
+            result = []
+            for finding in prior_findings:
+                blob = text_blob(finding.get("label"), finding.get("summary"), finding.get("source_ref"))
+                if any(marker and len(marker) >= 3 and marker in blob for marker in markers):
+                    result.append({
+                        "label": finding.get("label"),
+                        "summary": finding.get("summary"),
+                        "source_ref": finding.get("source_ref"),
+                    })
+                if len(result) >= 2:
+                    break
+            return result
+
+        def local_business_reason(relation, target_label, target_type, edge_metrics, semantic_count, finding_count):
+            relation_l = str(relation or "").lower()
+            target = target_label or target_type or "the target node"
+            if "systemic risk" in relation_l:
+                return (
+                    f"{target} is an exposure channel for systemic chokepoint risk; edge metrics should be read as local loss, disruption, or trade-at-risk signals."
+                )
+            if "dependency" in relation_l:
+                return (
+                    f"{target} depends on the chokepoint, so this edge contributes demand-side exposure and should influence country or counterparty monitoring priority."
+                )
+            if "deploy" in relation_l or "mine" in relation_l:
+                return (
+                    f"{target} represents a disruption trigger or capability near the chokepoint, making the edge relevant to event escalation and scenario thresholds."
+                )
+            if relation_l in {"connects", "positioned_between", "situated_at_entrance_of", "provides_access_to"}:
+                return (
+                    f"{target} is part of the route-propagation structure; disruption can move from the center into adjacent maritime geography rather than staying local."
+                )
+            if edge_metrics:
+                return f"{target} carries quantified local evidence, so the edge should be weighted in the combined risk conclusion."
+            if semantic_count or finding_count:
+                return f"{target} has attached semantic or finding context, so the edge should be reviewed as more than a topology link."
+            return f"{target} contributes an approved relation that supports traversal but needs review before operational use."
+
+        units = []
+        relation_seen = {}
+        for edge in edges_by_key.values():
+            source = edge.get("source")
+            target = edge.get("target")
+            relation = edge.get("relation") or edge.get("label") or edge.get("link_key") or "relation"
+            if center_node and center_node not in {source, target} and len(units) >= 12:
+                continue
+            relation_seen[relation] = relation_seen.get(relation, 0) + 1
+            if relation_seen[relation] > 6 and len(units) >= 18:
+                continue
+            source_node = nodes_by_id.get(source) or {}
+            target_node = nodes_by_id.get(target) or {}
+            target_label = target_node.get("label") or edge.get("target_label") or target
+            source_label = source_node.get("label") or edge.get("source_label") or source
+            properties = edge.get("properties") or {
+                key: value for key, value in edge.items()
+                if key not in {
+                    "id", "source", "target", "label", "relation", "link_key", "status",
+                    "projection_source", "source_label", "target_label",
+                }
+            }
+            edge_metrics = numeric_metrics(properties)
+            semantic = attached_semantic(
+                source_label,
+                relation,
+                target_label,
+                edge.get("source_url") or properties.get("source_url"),
+            )
+            findings = attached_findings(source_label, target_label)
+            units.append({
+                "unit_type": "edge_target",
+                "edge_id": edge.get("id"),
+                "source": source,
+                "source_label": source_label,
+                "relation": relation,
+                "target": target,
+                "target_label": target_label,
+                "target_type": target_node.get("type"),
+                "local_metrics": edge_metrics,
+                "attached_semantic_items": semantic,
+                "attached_findings": findings,
+                "local_reasoning": local_business_reason(
+                    relation,
+                    target_label,
+                    target_node.get("type"),
+                    edge_metrics,
+                    len(semantic),
+                    len(findings),
+                ),
+                "evaluation": {
+                    "has_edge": True,
+                    "has_target_node": bool(target_node),
+                    "has_local_metrics": bool(edge_metrics),
+                    "has_semantic_or_finding_context": bool(semantic or findings),
+                    "has_business_reasoning": True,
+                },
+            })
+            if len(units) >= 24:
+                break
+
+        metric_units = sum(1 for unit in units if unit.get("local_metrics"))
+        contextual_units = sum(
+            1 for unit in units
+            if unit.get("attached_semantic_items") or unit.get("attached_findings")
+        )
+        relation_types = sorted({unit.get("relation") for unit in units if unit.get("relation")})
+        source_metric_profile = (metrics or {}).get("source_key_profile") or graph_context.get("source_key_metrics") or {}
+        top_source_metrics = [
+            {
+                "label": path.get("label"),
+                "metric": path.get("metric"),
+                "metric_value": path.get("metric_value"),
+                "row_count": path.get("row_count"),
+                "source_table": path.get("table") or path.get("source_table"),
+            }
+            for path in (source_metric_profile.get("top_paths") or [])[:8]
+        ]
+        return {
+            "strategy": "per_edge_target_then_aggregate_reasoning_v1",
+            "center": {"id": center_node, "label": label},
+            "unit_count": len(units),
+            "units": units,
+            "summary": {
+                "relation_type_count": len(relation_types),
+                "relations": relation_types[:12],
+                "units_with_local_metrics": metric_units,
+                "units_with_semantic_or_finding_context": contextual_units,
+                "source_metric_count": len(top_source_metrics),
+                "top_source_metrics": top_source_metrics,
+            },
+        }
+
+    def _business_conclusion_from_traversal(self, label, metrics, traversal_analysis, fallback, edge_target_reasoning=None):
+        source_summary = traversal_analysis.get("source_metric_summary") or {}
+        relation_summary = traversal_analysis.get("relation_summary") or []
+        edge_target_reasoning = edge_target_reasoning or {}
+        edge_summary = edge_target_reasoning.get("summary") or {}
+        breadth = traversal_analysis.get("breadth") or {}
+        neighbor_types = (metrics or {}).get("neighbor_types") or {}
+        source_profile = ((metrics or {}).get("source_key_profile") or {})
+        top_metrics = source_summary.get("top_metrics") or []
+        metric_names = {str(item.get("metric") or "").lower() for item in top_metrics}
+        country_count = int(neighbor_types.get("Country") or 0)
+        relation_text = ", ".join(item.get("relation") for item in relation_summary[:3] if item.get("relation")) or "approved relationships"
+        has_trade_exposure = any("trade_at_risk" in metric for metric in metric_names)
+        has_flow_concentration = any(metric in {"v_canal", "q_canal"} for metric in metric_names)
+        related_tables = source_profile.get("related_tables") or []
+        is_maritime = any(str(item.get("table") or "").startswith("maritime_") for item in related_tables)
+        if is_maritime or has_trade_exposure or has_flow_concentration:
+            drivers = []
+            if has_trade_exposure:
+                drivers.append("trade-at-risk exposure")
+            if has_flow_concentration:
+                drivers.append("canal-flow concentration")
+            if country_count:
+                drivers.append(f"{country_count} country dependency links")
+            if edge_target_reasoning.get("unit_count"):
+                drivers.append(f"{edge_target_reasoning.get('unit_count')} edge-target local reasoning units")
+            driver_text = ", ".join(drivers) or relation_text
+            unit_metric_text = ""
+            if edge_summary.get("units_with_local_metrics"):
+                unit_metric_text = f" {edge_summary.get('units_with_local_metrics')} local edge/node unit(s) also carry attached metrics."
+            plain = (
+                f"{label} is a systemic maritime risk priority because multiple approved evidence channels jointly point to {driver_text}. "
+                "The business risk is not the graph connectivity itself; it is that edge-level exposure, target-node dependency, and route-propagation signals can propagate into trade-flow interruption, freight-cost pressure, rerouting constraints, and cross-country exposure that should trigger monitoring escalation."
+            )
+            detail = (
+                f"Breadth-first traversal visits {breadth.get('visited_node_count', 0)} approved nodes across "
+                f"{breadth.get('relation_type_count', 0)} relation type(s), while depth-first paths show how the center connects through "
+                f"{relation_text}. Controlled source metrics add {source_summary.get('total_rows')} matching rows across "
+                f"{source_summary.get('related_table_count')} table(s). Per-edge/target reasoning reviewed "
+                f"{edge_target_reasoning.get('unit_count', 0)} local unit(s) across {edge_summary.get('relation_type_count', 0)} relation type(s)."
+                f"{unit_metric_text} The recommended business response is to review scenario thresholds, "
+                "alternate-route assumptions, and watchlist escalation before treating the finding as operational guidance."
+            )
+            return {"plain_conclusion": plain, "conclusion": plain, "detailed_conclusion": detail}
+        if traversal_analysis.get("max_observed_depth", 0) >= 2:
+            plain = (
+                f"{label} has multi-hop business exposure in the approved graph: its direct relationships connect into second-order counterparties, "
+                "so review should focus on propagation paths rather than a single-node profile."
+            )
+            return {"plain_conclusion": plain, "conclusion": plain, "detailed_conclusion": fallback}
+        return {"plain_conclusion": fallback, "conclusion": fallback, "detailed_conclusion": fallback}
+
+    def _evaluate_reasoning_conclusion(self, conclusion, traversal_analysis, evidence_refs, structured_answer, edge_target_reasoning=None):
+        breadth = traversal_analysis.get("breadth") or {}
+        source_summary = traversal_analysis.get("source_metric_summary") or {}
+        edge_target_reasoning = edge_target_reasoning or {}
+        edge_summary = edge_target_reasoning.get("summary") or {}
+        checks = {
+            "uses_breadth_traversal": bool((breadth.get("layers") or [])),
+            "uses_depth_paths": any(
+                int(path.get("path_length") or 0) >= 2
+                for path in traversal_analysis.get("depth_paths") or []
+            ),
+            "uses_multiple_relations_or_sources": (
+                int(breadth.get("relation_type_count") or 0) >= 2
+                or int(source_summary.get("related_table_count") or 0) >= 2
+            ),
+            "has_source_metrics": bool(source_summary.get("top_metrics")),
+            "uses_edge_target_units": bool(edge_target_reasoning.get("units")),
+            "uses_attached_edge_or_source_metrics": bool(
+                edge_summary.get("units_with_local_metrics")
+                or edge_summary.get("top_source_metrics")
+                or source_summary.get("top_metrics")
+            ),
+            "uses_attached_findings_or_semantic_context": bool(edge_summary.get("units_with_semantic_or_finding_context")),
+            "has_business_actionability": any(
+                term in str(conclusion.get("conclusion") or "").lower()
+                for term in ("monitoring", "scenario", "rerouting", "operational", "trade-flow", "cost", "escalation", "exposure")
+            ),
+            "states_review_boundary": bool((structured_answer or {}).get("evidence_limits")) or bool(evidence_refs),
+        }
+        score = round(sum(1 for value in checks.values() if value) / max(len(checks), 1), 4)
+        return {
+            "schema_version": "reasoning_conclusion_eval_v1",
+            "score": score,
+            "passed": score >= 0.75,
+            "confidence": 0.82 if score >= 0.85 else 0.78 if score >= 0.75 else 0.62,
+            "checks": checks,
+            "limits": [
+                "Evaluation checks reasoning shape and evidence linkage; it does not approve the finding.",
+                "Business conclusion remains draft-only until human review.",
+            ],
         }
 
     def _plain_reasoning_title(self, question, label, ranked_paths, second_hop_paths):
@@ -10240,16 +10736,17 @@ class ReasoningRepository:
         object_type, instance_id = str(center_node).split(":", 1)
         node_limit = max(1, min(int(node_limit or 200), 300))
         edge_limit = max(1, min(int(edge_limit or node_limit), 300))
-        depth = max(1, min(int(depth or 1), 2))
+        depth = max(1, min(int(depth or 1), 3))
+        fetch_limit = max(node_limit, edge_limit, 300)
         local_rag_context = self.instance_repository.local_rag_context(
             tenant,
             object_type,
             instance_id,
             question=None,
             depth=depth,
-            limit=max(node_limit, edge_limit),
+            limit=fetch_limit,
         ) or {}
-        graph = self.instance_repository.full_graph(tenant, object_type, instance_id, limit=max(node_limit, edge_limit)) or {}
+        graph = self.instance_repository.full_graph(tenant, object_type, instance_id, limit=fetch_limit) or {}
         nodes = graph.get("nodes") or []
         edges = graph.get("edges") or []
         if local_rag_context.get("approved"):
@@ -10292,7 +10789,7 @@ class ReasoningRepository:
             if not frontier:
                 break
 
-        center_edges = adjacency.get(center_node, [])
+        center_edges = self._diversify_edges_by_relation(adjacency.get(center_node, []))
         center_neighbor_ids = []
         for edge in center_edges:
             other = edge.get("target") if edge.get("source") == center_node else edge.get("source")
@@ -10306,13 +10803,19 @@ class ReasoningRepository:
                 continue
             seen_ordered_nodes.add(node_id)
             scoped_nodes.append(nodes_by_id[node_id])
-        center_edge_ids = {edge.get("id") for edge in center_edges}
+        center_edge_budget = edge_limit
+        if depth > 1 and len(center_edges) > 20:
+            center_edge_budget = max(20, min(len(center_edges), edge_limit // 2))
+        selected_center_edges = center_edges[:center_edge_budget]
+        center_edge_ids = {edge.get("id") for edge in selected_center_edges}
+        remaining_edge_budget = max(edge_limit - len(selected_center_edges), 0)
+        secondary_edges = [
+            edge for edge in edges
+            if edge.get("id") not in center_edge_ids and edge.get("source") in visited and edge.get("target") in visited
+        ][:remaining_edge_budget]
         scoped_edges = [
-            *center_edges,
-            *[
-                edge for edge in edges
-                if edge.get("id") not in center_edge_ids and edge.get("source") in visited and edge.get("target") in visited
-            ],
+            *selected_center_edges,
+            *secondary_edges,
         ]
         degree_by_link = {}
         neighbor_type_counts = {}
@@ -10374,6 +10877,7 @@ class ReasoningRepository:
             }
 
         def compact_edge(edge):
+            properties = edge.get("properties") or {}
             return {
                 "id": edge.get("id"),
                 "source": edge.get("source"),
@@ -10382,6 +10886,11 @@ class ReasoningRepository:
                 "link_key": edge.get("link_key"),
                 "status": edge.get("status"),
                 "projection_source": edge.get("projection_source"),
+                "source_url": edge.get("source_url") or properties.get("source_url"),
+                "properties": {
+                    key: value for key, value in properties.items()
+                    if key not in {"evidence_refs", "evidence_quote"} and value not in (None, "", [])
+                },
             }
 
         retrieval_context = None
@@ -10425,6 +10934,23 @@ class ReasoningRepository:
             "retrieval_context": retrieval_context,
             "context_text": (retrieval_context or {}).get("context_text", ""),
         }
+
+    def _diversify_edges_by_relation(self, edges):
+        buckets = {}
+        for edge in edges or []:
+            relation = edge.get("label") or edge.get("link_key") or edge.get("kind") or "relation"
+            buckets.setdefault(relation, []).append(edge)
+        ordered = []
+        bucket_items = sorted(buckets.items(), key=lambda item: (-len(item[1]), item[0]))
+        while bucket_items:
+            next_items = []
+            for relation, values in bucket_items:
+                if values:
+                    ordered.append(values.pop(0))
+                if values:
+                    next_items.append((relation, values))
+            bucket_items = next_items
+        return ordered
 
     def run_scoped_graph_task(self, tenant, task_key):
         started = time.monotonic()
@@ -10528,6 +11054,8 @@ class ReasoningRepository:
             "evidence_path_count": len(evidence_paths),
             "tenant_id": tenant.tenant_id,
         }
+        if structured_response and structured_response.get("conclusion_evaluation"):
+            eval_result["conclusion_evaluation"] = structured_response["conclusion_evaluation"]
         run = self._record_run(tenant, task, query_plan, tool_calls, evidence_paths, output, eval_result, "completed", started)
         finding_row = self._record_finding(tenant, run, finding)
         return {"tenant": tenant.public_dict(), "task": task, "run": run, "findings": [finding_row], "approved": True}

@@ -98,6 +98,104 @@ class DeepGraphReasoningTest(unittest.TestCase):
         self.assertIn("Path Alpha", response["answer"]["conclusion"])
         self.assertNotIn("source_path(s)", response["answer"]["conclusion"])
 
+    def test_reasoning_response_for_chokepoint_explains_business_meaning(self):
+        repo = object.__new__(ReasoningRepository)
+        tenant = type("Tenant", (), {"tenant_id": "maritime-risk"})()
+        task = {
+            "question": "Assess maritime risk monitoring action for Strait of Hormuz",
+            "canonical_key": "task",
+        }
+        scope = {"center_node": "MaritimeChokepoint:Strait of Hormuz", "depth": 2, "node_limit": 120}
+        structured_answer = {
+            "title": "Strait of Hormuz Maritime Exposure Profile",
+            "profile_summary": "Strait of Hormuz has 397 source rows across 3 related source table(s).",
+            "metrics": {
+                "label": "Strait of Hormuz",
+                "source_key_profile": {
+                    "total_key_rows": 397,
+                    "related_tables": [{"table": "maritime_chokepoint_country_dependencies"}],
+                    "top_paths": [
+                        {"label": "Strait of Hormuz", "metric": "v_canal", "metric_value": 1770271463166.0774},
+                        {"label": "Strait of Hormuz", "metric": "trade_at_risk_piracy_v", "metric_value": 569354729.0706857},
+                    ],
+                },
+            },
+        }
+        graph_context = {
+            "degree": {"source_key_row_degree": 397},
+            "related_nodes": [
+                {"id": "MaritimeChokepoint:Strait of Hormuz", "label": "Strait of Hormuz", "type": "MaritimeChokepoint"},
+                {"id": "Country:ARE", "label": "ARE", "type": "Country"},
+                {"id": "Port:Jebel Ali", "label": "Jebel Ali", "type": "Port"},
+            ],
+            "related_edges": [
+                {
+                    "source": "MaritimeChokepoint:Strait of Hormuz",
+                    "target": "Country:ARE",
+                    "label": "Country Chokepoint Dependency",
+                    "properties": {"trade_at_risk_piracy_v": 1200.0, "v_canal": 9000.0},
+                },
+                {
+                    "source": "Country:ARE",
+                    "target": "Port:Jebel Ali",
+                    "label": "uses_port",
+                },
+            ],
+            "retrieval_context": {
+                "nodes": [
+                    {"id": "MaritimeChokepoint:Strait of Hormuz", "label": "Strait of Hormuz", "type": "MaritimeChokepoint"},
+                    {"id": "Country:ARE", "label": "ARE", "type": "Country"},
+                ],
+                "edges": [
+                    {
+                        "id": "edge-1",
+                        "source": "MaritimeChokepoint:Strait of Hormuz",
+                        "target": "Country:ARE",
+                        "relation": "Country Chokepoint Dependency",
+                        "properties": {"trade_at_risk_piracy_v": 1200.0, "v_canal": 9000.0},
+                    }
+                ],
+                "semantic_items": [
+                    {
+                        "element_key": "metric:are-hormuz-risk",
+                        "element_type": "metric_observation",
+                        "label": "ARE Hormuz trade-at-risk observation",
+                        "summary": "ARE has measurable exposure to Strait of Hormuz disruption.",
+                        "metric_key": "trade_at_risk_piracy_v",
+                        "status": "approved",
+                    }
+                ],
+            },
+            "source_backed_related_nodes": [{"id": "SourcePath:Strait of Hormuz", "label": "Strait of Hormuz"}],
+            "source_backed_related_edges": [
+                {"target": "SourcePath:Strait of Hormuz", "metric": "v_canal", "metric_value": 1770271463166.0774}
+            ],
+        }
+
+        response = repo._reasoning_response_v1(tenant, task, scope, structured_answer, [], graph_context)
+
+        conclusion = response["answer"]["conclusion"]
+        self.assertIn("systemic maritime risk priority", conclusion)
+        self.assertIn("propagate", conclusion)
+        self.assertIn("rerouting", conclusion)
+        self.assertIn("monitoring escalation", conclusion)
+        self.assertIn("edge-level exposure", conclusion)
+        self.assertNotIn("source rows", conclusion)
+        self.assertNotIn("Strait of Hormuz, Strait of Hormuz", conclusion)
+        self.assertEqual(response["traversal_analysis"]["strategy"], "joint_bfs_dfs_approved_graph_reasoning_v1")
+        self.assertGreaterEqual(response["traversal_analysis"]["max_observed_depth"], 2)
+        self.assertTrue(response["traversal_analysis"]["depth_paths"])
+        self.assertEqual(response["edge_target_reasoning"]["strategy"], "per_edge_target_then_aggregate_reasoning_v1")
+        self.assertTrue(response["edge_target_reasoning"]["units"])
+        self.assertTrue(response["edge_target_reasoning"]["units"][0]["local_metrics"])
+        self.assertTrue(response["edge_target_reasoning"]["units"][0]["attached_semantic_items"])
+        self.assertTrue(response["conclusion_evaluation"]["passed"])
+        self.assertTrue(response["conclusion_evaluation"]["checks"]["uses_breadth_traversal"])
+        self.assertTrue(response["conclusion_evaluation"]["checks"]["uses_depth_paths"])
+        self.assertTrue(response["conclusion_evaluation"]["checks"]["uses_edge_target_units"])
+        self.assertTrue(response["conclusion_evaluation"]["checks"]["uses_attached_edge_or_source_metrics"])
+        self.assertTrue(response["conclusion_evaluation"]["checks"]["uses_attached_findings_or_semantic_context"])
+
 
 if __name__ == "__main__":
     unittest.main()

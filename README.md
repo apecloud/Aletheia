@@ -208,7 +208,7 @@ npx --yes esbuild web/app/reasoning.jsx --bundle --outfile=/tmp/aletheia-reasoni
 ./scripts/run_action_synthesizer.sh
 ./scripts/run_graph_ingestion.sh all
 ./scripts/run_semantic_consistency.sh
-./scripts/run_ontology_reasoning.sh
+python scripts/run_reasoning_loop.py --tenant default
 ```
 
 ### Maritime-risk dataset
@@ -231,6 +231,18 @@ python agents/iterative_graph_enrichment_agent.py \
   --max-frontier 2 \
   --max-results-per-query 2 \
   --json
+```
+
+### Reasoning
+
+Reasoning now runs through the approved graph workbench and reasoning loop. The
+active path is tenant-scoped, approved-only, draft-only, and review-gated:
+reasoning may create draft findings, but it must not write canonical ontology or
+formal graph data.
+
+```bash
+python scripts/run_reasoning_loop.py \
+  --tenant maritime-risk
 ```
 
 ## Test Case Map

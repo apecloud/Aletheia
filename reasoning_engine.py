@@ -802,6 +802,14 @@ class ReasoningEngine:
 
         # Activity level sentence
         if source_key_profile and source_key_profile.get("related_tables"):
+            business_summary = self._source_key_business_summary(
+                label,
+                object_type,
+                source_key_profile,
+                neighbors_by_type,
+            )
+            if business_summary:
+                sentences.append(business_summary)
             top_paths = source_key_profile.get("top_paths") or []
             second_hop_paths = source_key_profile.get("second_hop_paths") or []
             table_count = len(source_key_profile.get("related_tables") or [])
@@ -924,6 +932,34 @@ class ReasoningEngine:
                         )
 
         return " ".join(sentences)
+
+    def _source_key_business_summary(self, label, object_type, source_key_profile, neighbors_by_type):
+        related_tables = source_key_profile.get("related_tables") or []
+        top_paths = source_key_profile.get("top_paths") or []
+        table_names = {str(table.get("table") or "") for table in related_tables}
+        metric_names = {str(path.get("metric") or "").lower() for path in top_paths}
+        neighbor_types = {str(key): len(value) for key, value in (neighbors_by_type or {}).items()}
+        country_count = neighbor_types.get("Country", 0)
+        is_maritime = object_type == "MaritimeChokepoint" or any(name.startswith("maritime_") for name in table_names)
+        if is_maritime:
+            exposure_terms = []
+            if any("trade_at_risk" in metric for metric in metric_names):
+                exposure_terms.append("trade-at-risk")
+            if any(metric in {"v_canal", "q_canal"} for metric in metric_names):
+                exposure_terms.append("canal-flow concentration")
+            exposure_text = " and ".join(exposure_terms) if exposure_terms else "source-backed exposure"
+            country_text = f" across {country_count} country dependencies" if country_count else ""
+            return (
+                f"{label} is a maritime operational risk priority, not just a connected graph node: "
+                f"the approved evidence ties it to {exposure_text}{country_text}. "
+                "The business implication is that disruption should be reviewed for shipping continuity, trade exposure, rerouting pressure, and monitoring escalation."
+            )
+        if top_paths:
+            return (
+                f"{label} has business-relevant exposure in the approved source evidence. "
+                "Review should focus on whether the highest-value paths create concentration, continuity, or counterparty risk."
+            )
+        return ""
 
     # ------------------------------------------------------------------
     # Compose structured output
@@ -1075,9 +1111,11 @@ class ReasoningEngine:
                     "value": path_text,
                     "source_ref": "source-key metric aggregation",
                 })
+                business_summary = self._source_key_business_summary(label, object_type, source_key_profile, neighbors_by_type)
+                if business_summary:
+                    interpretations.append(business_summary)
                 interpretations.append(
-                    f"{label} is not just present in the graph: it has {total_key_rows} source-backed relationship rows. "
-                    f"The highest metric paths are {', '.join(p['label'] for p in top_paths[:3])}, so review should start from those connected chokepoints/routes."
+                    f"Evidence basis: {total_key_rows} controlled source rows support the exposure readout; the metric details should stay in evidence review rather than become the business conclusion."
                 )
             else:
                 interpretations.append(

@@ -76,12 +76,13 @@ if [[ "$1" == "all" || "$1" == "--all" || "$1" == "phase-all" ]]; then
     echo ">>> Phase 4: Semantic Validation"
     ./scripts/run_semantic_consistency.sh
 
-    echo ">>> Phase 5: Deep Ontology Reasoning"
-    ./scripts/run_ontology_reasoning.sh
+    echo ">>> Phase 5: Review-gated reasoning"
+    echo "Reasoning now runs through the approved graph workbench and reasoning loop."
+    echo "Use scripts/run_reasoning_loop.py to evaluate reasoning health after creating scoped reasoning tasks."
     
     echo "================================================="
     echo "Pipeline completed successfully!"
-    echo "Check 'run_reasoning_result.md' for the Deep Reasoning Output."
+    echo "Use the Reasoning workspace and scripts/run_reasoning_loop.py for draft finding review."
     echo "================================================="
 else
     echo "================================================="
@@ -91,7 +92,7 @@ else
     echo "2. Phase 2: Design & Modeling"
     echo "3. Phase 3: Graph Ingestion (run_graph_ingestion.sh)"
     echo "4. Phase 4: Semantic Validation (run_semantic_consistency.sh)"
-    echo "5. Phase 5: Deep Ontology Reasoning (run_ontology_reasoning.sh)"
+    echo "5. Phase 5: Review-gated Reasoning (Reasoning workspace + run_reasoning_loop.py)"
     echo ""
     echo "Or pass 'all' to this script to run the complete pipeline automatically."
 fi

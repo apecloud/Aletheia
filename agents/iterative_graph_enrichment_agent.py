@@ -9,7 +9,9 @@ semantics belong in SchemaGraphModelingAgent output plus the review gate.
 
 import argparse
 import asyncio
+import contextlib
 import hashlib
+import io
 import json
 import math
 import os
@@ -19,6 +21,7 @@ import threading
 import time
 import urllib.error
 import urllib.request
+import warnings
 from concurrent.futures import ThreadPoolExecutor, wait
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
@@ -180,16 +183,17 @@ class SmallMultilingualEmbeddingAdapter:
             self._load_error = _EMBEDDING_MODEL_LOAD_ERRORS[self.model_name]
             return None
         try:
-            from sentence_transformers import SentenceTransformer
+            with _quiet_optional_embedding_load():
+                from sentence_transformers import SentenceTransformer
 
-            try:
-                self._model = SentenceTransformer(self.model_name, local_files_only=True)
-            except TypeError:
-                self._model = SentenceTransformer(self.model_name)
-            except Exception as local_exc:
-                if EMBEDDING_LOCAL_FILES_ONLY:
-                    raise local_exc
-                self._model = SentenceTransformer(self.model_name)
+                try:
+                    self._model = SentenceTransformer(self.model_name, local_files_only=True)
+                except TypeError:
+                    self._model = SentenceTransformer(self.model_name)
+                except Exception as local_exc:
+                    if EMBEDDING_LOCAL_FILES_ONLY:
+                        raise local_exc
+                    self._model = SentenceTransformer(self.model_name)
             _EMBEDDING_MODEL_CACHE[self.model_name] = self._model
         except Exception as exc:  # pragma: no cover - depends on optional local model availability
             self._load_error = str(exc)
@@ -225,6 +229,26 @@ class SmallMultilingualEmbeddingAdapter:
             "vector": values,
             "dim": len(values),
         }
+
+
+@contextlib.contextmanager
+def _quiet_optional_embedding_load():
+    quiet = os.environ.get("ALETHEIA_QUIET_OPTIONAL_EMBEDDING_LOAD", "1").strip().lower() not in {
+        "0",
+        "false",
+        "no",
+        "off",
+    }
+    if not quiet:
+        yield
+        return
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", category=ImportWarning)
+        warnings.filterwarnings("ignore", category=UserWarning, module=r".*bitsandbytes.*")
+        warnings.filterwarnings("ignore", message=r".*allow_ops_in_compiled_graph.*", category=ImportWarning)
+        warnings.filterwarnings("ignore", message=r".*compiled without GPU support.*", category=UserWarning)
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            yield
 
 
 def _json_load(value: str | None, default: Any) -> Any:

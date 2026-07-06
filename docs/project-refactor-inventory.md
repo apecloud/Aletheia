@@ -32,8 +32,8 @@ fixtures.
 | `query_artifacts.py` | Artifact inspection CLI | Operator CLI | Keep |
 | `query_graph.py` | Graph query CLI | Imports `agents.graph_db_client.NebulaGraphClient` | Keep |
 | `query_metadata.py` | Metadata inspection CLI | Operator CLI | Keep |
-| `EXAMPLE_REASONING_RESULT.md` | Example output fixture/document | No runtime import | Keep as docs/example, candidate to move under `docs/` |
-| `run_reasoning_result.md` | Generated/manual reasoning result sample | No runtime import | Move/delete candidate; should become report artifact or docs example |
+| `EXAMPLE_REASONING_RESULT.md` | Removed legacy Nebula reasoning example | No runtime import | Deleted; active reasoning uses review-gated findings |
+| `run_reasoning_result.md` | Generated legacy reasoning result sample | No runtime import | Ignored runtime artifact; active reasoning writes reviewable findings |
 
 ## Agent Files
 
@@ -54,7 +54,7 @@ fixtures.
 | `agents/business_context_agent.py` | Legacy business context alignment | `scripts/run_business_context.sh` | Keep for old pipeline, candidate to fold into unified modeling prompt context |
 | `agents/action_synthesizer_agent.py` | Legacy action catalog generation | `scripts/run_action_synthesizer.sh` | Keep for old pipeline, candidate to replace with finding/action review workflow |
 | `agents/semantic_consistency_agent.py` | Legacy semantic validation | `scripts/run_semantic_consistency.sh` | Keep for old pipeline, candidate to convert into eval/test suite |
-| `agents/ontology_reasoning_agent.py` | Legacy deep ontology reasoning | `scripts/run_ontology_reasoning.sh` | Keep for old pipeline, candidate to merge with reasoning/workbench path |
+| `agents/ontology_reasoning_agent.py` | Removed legacy deep ontology reasoning | None | Deleted; replaced by approved graph workbench and reasoning loop |
 | `agents/hf_dataset_scraper.py` | Hugging Face dataset search helper | No active README/test reference found | Delete/move candidate after confirming no operator dependency |
 
 ## Keep
@@ -76,16 +76,15 @@ fixtures.
   package that feeds `SchemaGraphModelingAgent`.
 - `semantic_consistency_agent.py`: candidate to become tests/evals rather than a
   separate production agent.
-- `ontology_reasoning_agent.py`: candidate to merge into the workbench reasoning
-  path after confirming no standalone workflow remains.
+- `ontology_reasoning_agent.py`: removed after confirming the active reasoning
+  path is the workbench/reasoning loop.
 
 ## Delete Or Move Candidates
 
 - `agents/hf_dataset_scraper.py`: no active code/test/README reference found.
   Move to `scripts/experiments/` or delete after human confirmation.
-- `run_reasoning_result.md`: looks generated; move under `reports/` or delete if
-  obsolete.
-- `EXAMPLE_REASONING_RESULT.md`: keep if useful, otherwise move under `docs/`.
+- `run_reasoning_result.md`: generated legacy artifact; stays ignored.
+- `EXAMPLE_REASONING_RESULT.md`: removed with the legacy ontology reasoning path.
 - `requirements_hf_scraper.txt`: tied to HF scraper; remove with that tool if it
   is retired.
 

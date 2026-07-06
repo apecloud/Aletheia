@@ -50,6 +50,29 @@ class ReasoningFindingFrameworkTest(unittest.TestCase):
         self.assertNotIn("source_path(s)", conclusion)
         self.assertNotIn("#1/198", conclusion)
 
+    def test_plain_reasoning_for_self_labeled_source_path_is_business_meaning(self):
+        question = "Assess maritime risk monitoring action for Strait of Hormuz"
+        ranked_paths = [
+            {"label": "Strait of Hormuz", "metric": "v_canal", "metric_value": 1000},
+            {"label": "Strait of Hormuz", "metric": "trade_at_risk_piracy_v", "metric_value": 200},
+        ]
+
+        title = plain_reasoning_title(question, "Strait of Hormuz", ranked_paths)
+        conclusion = plain_reasoning_conclusion(
+            question,
+            "Strait of Hormuz",
+            "Strait of Hormuz has 397 source rows across 3 source tables.",
+            ranked_paths,
+            [],
+            {"source_key_row_degree": 397},
+        )
+
+        self.assertEqual(title, "Strait of Hormuz risk monitoring priority")
+        self.assertIn("business risk monitoring priority", conclusion)
+        self.assertIn("trade flow", conclusion)
+        self.assertNotIn("source rows", conclusion)
+        self.assertNotIn("Strait of Hormuz, Strait of Hormuz", conclusion)
+
     def test_review_scope_helpers_keep_reasoning_draft_only(self):
         action = review_graph_scope_action({"metrics": {"label": "A"}}, {"answer": {"title": "A"}})
         counter_evidence = scope_limit_counter_evidence(True)

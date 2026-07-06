@@ -108,9 +108,11 @@ def display_label_from_question(question, fallback):
 def plain_reasoning_title(question, label, ranked_paths, second_hop_paths=None):
     wants_zh = bool(re.search(r"[\u4e00-\u9fff]", question or ""))
     label = display_label_from_question(question, label)
-    top_labels = [str(path.get("label")) for path in (ranked_paths or []) if path.get("label")][:3]
+    top_labels = _unique_labels(path.get("label") for path in (ranked_paths or []) if path.get("label"))[:3]
     if not top_labels:
         return f"{label} 风险画像" if wants_zh else f"{label} risk profile"
+    if len(top_labels) == 1 and top_labels[0].lower() == str(label).lower():
+        return f"{label} 风险监控优先级" if wants_zh else f"{label} risk monitoring priority"
     if wants_zh:
         return f"{label} 主要关联路径：{'、'.join(top_labels)}"
     return f"{label} main relationship paths: {', '.join(top_labels)}"
@@ -119,7 +121,7 @@ def plain_reasoning_title(question, label, ranked_paths, second_hop_paths=None):
 def plain_reasoning_conclusion(question, label, detailed_conclusion, ranked_paths, second_hop_paths, graph_degree):
     wants_zh = bool(re.search(r"[\u4e00-\u9fff]", question or ""))
     label = display_label_from_question(question, label or "selected entity")
-    top_labels = [str(path.get("label")) for path in (ranked_paths or []) if path.get("label")][:3]
+    top_labels = _unique_labels(path.get("label") for path in (ranked_paths or []) if path.get("label"))[:3]
     peer_keys = []
     for path in second_hop_paths or []:
         for peer in path.get("top_peers") or []:
@@ -132,6 +134,16 @@ def plain_reasoning_conclusion(question, label, detailed_conclusion, ranked_path
             break
     source_rows = (graph_degree or {}).get("source_key_row_degree")
     if top_labels:
+        if len(top_labels) == 1 and top_labels[0].lower() == str(label).lower():
+            if wants_zh:
+                return (
+                    f"{label} 应被视为业务风险监控优先点：受控证据显示其承载的暴露规模较高，"
+                    "一旦出现扰动，影响更可能体现为贸易流、海运成本和应急绕航压力。"
+                )
+            return (
+                f"{label} should be treated as a business risk monitoring priority: controlled evidence shows material exposure there, "
+                "so disruption would most likely affect trade flow, shipping cost, and contingency routing pressure."
+            )
         paths_text = "、".join(top_labels) if wants_zh else ", ".join(top_labels)
         if peer_keys:
             peers_text = "、".join(peer_keys) if wants_zh else ", ".join(peer_keys)
@@ -149,9 +161,22 @@ def plain_reasoning_conclusion(question, label, detailed_conclusion, ranked_path
         return f"{label}'s main exposure is concentrated in {paths_text}; see the ranked paths below for the supporting metrics."
     if source_rows:
         if wants_zh:
-            return f"{label} 在受控源数据中有 {source_rows} 条相关记录；当前证据足以做画像，但还需要关键路径指标来判断风险优先级。"
-        return f"{label} has {source_rows} related controlled source rows; it can be profiled, but path-level metrics are needed to rank risk priority."
+            return f"{label} 已具备形成业务风险判断的受控证据；应优先评估扰动对运营连续性、贸易敞口和替代路径的影响。"
+        return f"{label} has enough controlled evidence for a business risk readout; prioritize review of operational continuity, trade exposure, and alternate-route impact."
     return detailed_conclusion or (f"{label} 暂无足够的关联证据形成直白结论。" if wants_zh else f"{label} does not yet have enough related evidence for a clear conclusion.")
+
+
+def _unique_labels(labels):
+    result = []
+    seen = set()
+    for label in labels:
+        text = str(label or "").strip()
+        key = text.lower()
+        if not text or key in seen:
+            continue
+        seen.add(key)
+        result.append(text)
+    return result
 
 
 def paths_with_peer(second_hop_paths, peer_keys):
