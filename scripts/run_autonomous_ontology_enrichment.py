@@ -8,6 +8,7 @@ import time
 from datetime import datetime
 
 from agents.enrichment_loop_harness import apply_repair_plan, evaluate_enrichment_loop, load_loop_config
+from agents.graph_search_loop_harness import evaluate_graph_search_loop, load_graph_search_loop_config
 from server.aletheia_server import InstanceRepository
 from tenant_registry import TenantRegistry
 from sqlalchemy import create_engine, text
@@ -110,6 +111,58 @@ def maybe_enqueue_loop_frontier(args, tenant, report):
         return None
     plan = (report or {}).get("repair_plan") or {}
     loop_sources = {"loop_harness_relation_completion", "loop_harness_property_completion"}
+    return enqueue_repair_frontier(
+        tenant,
+        args.session_key,
+        plan,
+        loop_sources=loop_sources,
+        frontier_limit=args.loop_frontier_limit,
+        require_object_type_sources=loop_sources,
+    )
+
+
+def graph_search_loop_report(args, repo, tenant):
+    config = load_graph_search_loop_config(args.graph_search_loop_config)
+    return evaluate_graph_search_loop(
+        repo,
+        tenant,
+        config=config,
+        limit=args.graph_search_loop_limit,
+        sample_size=None if args.graph_search_sample_size == 0 else args.graph_search_sample_size,
+        query_samples=args.graph_search_question or None,
+        query_eval_mode=args.graph_search_query_eval_mode,
+    )
+
+
+def maybe_enqueue_graph_search_frontier(args, tenant, report):
+    if not args.enqueue_graph_search_frontier:
+        return None
+    plan = (report or {}).get("repair_plan") or {}
+    graph_search_sources = {
+        "graph_search_loop_repair",
+        "graph_search_query_alias_repair",
+        "graph_search_query_context_repair",
+    }
+    return enqueue_repair_frontier(
+        tenant,
+        args.session_key,
+        plan,
+        loop_sources=graph_search_sources,
+        frontier_limit=args.graph_search_frontier_limit,
+        require_object_type_sources={"graph_search_loop_repair", "graph_search_query_context_repair"},
+    )
+
+
+def enqueue_repair_frontier(
+    tenant,
+    session_key,
+    plan,
+    *,
+    loop_sources,
+    frontier_limit,
+    require_object_type_sources=None,
+):
+    require_object_type_sources = require_object_type_sources or set()
 
     def frontier_identity(item):
         source_kind = str(item.get("source_kind") or item.get("source") or "").strip().lower()
@@ -126,7 +179,8 @@ def maybe_enqueue_loop_frontier(args, tenant, report):
         item = plan_item.get("frontier_item")
         if not isinstance(item, dict):
             continue
-        if item.get("source_kind") in loop_sources and not str(item.get("object_type") or "").strip():
+        source_kind = str(item.get("source_kind") or item.get("source") or "").strip()
+        if source_kind in require_object_type_sources and not str(item.get("object_type") or "").strip():
             continue
         identity = frontier_identity(item)
         if identity and identity in frontier_identities:
@@ -134,7 +188,7 @@ def maybe_enqueue_loop_frontier(args, tenant, report):
         if identity:
             frontier_identities.add(identity)
         frontier_items.append(item)
-        if len(frontier_items) >= max(1, int(args.loop_frontier_limit)):
+        if len(frontier_items) >= max(1, int(frontier_limit)):
             break
     engine = create_engine(tenant.metadata_db_url)
     with engine.begin() as conn:
@@ -147,7 +201,7 @@ def maybe_enqueue_loop_frontier(args, tenant, report):
                 LIMIT 1
                 """
             ),
-            {"tenant_id": tenant.tenant_id, "session_key": args.session_key},
+            {"tenant_id": tenant.tenant_id, "session_key": session_key},
         ).mappings().first()
         if not row:
             return {"enqueued": 0, "skipped": len(frontier_items), "reason": "session not found"}
@@ -209,7 +263,7 @@ def maybe_enqueue_loop_frontier(args, tenant, report):
                 ),
                 {
                     "tenant_id": tenant.tenant_id,
-                    "session_key": args.session_key,
+                    "session_key": session_key,
                     "frontier_json": json.dumps(reordered, ensure_ascii=False, sort_keys=True),
                     "config_json": json.dumps(config, ensure_ascii=False, sort_keys=True),
                 },
@@ -460,6 +514,14 @@ def main():
         "--loop-repair-reason",
         default="Loop harness shape repair: approved ontology class has no approved concrete object instance.",
     )
+    parser.add_argument("--graph-search-loop", action="store_true", help="Evaluate approved graph search quality after loop reports.")
+    parser.add_argument("--graph-search-loop-config", default=None)
+    parser.add_argument("--graph-search-loop-limit", type=int, default=200)
+    parser.add_argument("--graph-search-sample-size", type=int, default=20, help="Approved graph objects to evaluate; use 0 for all.")
+    parser.add_argument("--graph-search-query-eval-mode", choices=["fast", "real"], default="fast")
+    parser.add_argument("--graph-search-question", action="append", default=[], help="Graph search query sample; can be repeated.")
+    parser.add_argument("--enqueue-graph-search-frontier", action="store_true", help="Append graph search repair items to the continuous enrichment session.")
+    parser.add_argument("--graph-search-frontier-limit", type=int, default=10)
     args = parser.parse_args()
     if args.auto_review_llm_verifier:
         os.environ.setdefault("ALETHEIA_DEDUP_LLM_VERIFIER", "1")
@@ -488,6 +550,12 @@ def main():
             event["repair_result"] = repair_result
         if enqueue_result is not None:
             event["enqueue_result"] = enqueue_result
+        if args.graph_search_loop or args.enqueue_graph_search_frontier:
+            graph_report = graph_search_loop_report(args, repo, tenant)
+            graph_enqueue_result = maybe_enqueue_graph_search_frontier(args, tenant, graph_report)
+            event["graph_search_report"] = graph_report
+            if graph_enqueue_result is not None:
+                event["graph_search_enqueue_result"] = graph_enqueue_result
         print_json_event(event)
         append_jsonl(args.loop_report_file, event)
         return 0
@@ -582,6 +650,12 @@ def main():
                 enqueue_result = maybe_enqueue_loop_frontier(args, tenant, loop_event["report"])
                 if enqueue_result is not None:
                     loop_event["enqueue_result"] = enqueue_result
+                if args.graph_search_loop or args.enqueue_graph_search_frontier:
+                    graph_report = graph_search_loop_report(args, repo, tenant)
+                    graph_enqueue_result = maybe_enqueue_graph_search_frontier(args, tenant, graph_report)
+                    loop_event["graph_search_report"] = graph_report
+                    if graph_enqueue_result is not None:
+                        loop_event["graph_search_enqueue_result"] = graph_enqueue_result
                 print_json_event(loop_event)
                 append_jsonl(args.loop_report_file, loop_event)
         except KeyboardInterrupt:

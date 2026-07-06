@@ -122,6 +122,10 @@ class GraphSearchLoopHarnessTest(unittest.TestCase):
 
         self.assertEqual(report["verdict"]["next_focus"], "query_alias_repair")
         self.assertEqual(report["repair_plan"]["items"][0]["kind"], "query_alias_repair")
+        self.assertEqual(
+            report["repair_plan"]["items"][0]["frontier_item"]["key"],
+            "graph-search-query:tenant-a:0e68fa66596408cf",
+        )
 
     def test_global_summary_query_does_not_trigger_alias_repair(self):
         repo = FakeRepo(

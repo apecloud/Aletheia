@@ -8,6 +8,7 @@ the enrichment loop can execute later.
 from __future__ import annotations
 
 import json
+import hashlib
 from pathlib import Path
 from typing import Any
 
@@ -515,7 +516,7 @@ def _repair_plan(
                     "question": query.get("question"),
                     "reason": "query fell back to global graph search",
                     "frontier_item": {
-                        "key": f"graph-search-query:{tenant.tenant_id}:{abs(hash(query.get('question') or ''))}",
+                        "key": f"graph-search-query:{tenant.tenant_id}:{_stable_query_key(query.get('question'))}",
                         "name": query.get("question") or "graph search query",
                         "source": "graph_search_loop",
                         "source_kind": "graph_search_query_alias_repair",
@@ -598,6 +599,11 @@ def _expected_query_route(question: str) -> str:
     if any(marker in lowered for marker in global_markers):
         return "global"
     return "local"
+
+
+def _stable_query_key(question: str | None) -> str:
+    normalized = " ".join(str(question or "").strip().lower().split())
+    return hashlib.sha1(normalized.encode("utf-8")).hexdigest()[:16]
 
 
 def _frontier_item(tenant, node: dict[str, Any], *, priority: float, reason: str) -> dict[str, Any]:
