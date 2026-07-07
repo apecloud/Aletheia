@@ -106,10 +106,76 @@ def maybe_apply_loop_repair(args, tenant, report):
     return result
 
 
+def persist_next_cycle_plan(args, tenant, report):
+    plan = (report or {}).get("next_cycle_plan") or {}
+    if not plan.get("enabled"):
+        return None
+    cycle_options = plan.get("cycle_options") if isinstance(plan.get("cycle_options"), dict) else {}
+    engine = create_engine(tenant.metadata_db_url)
+    with engine.begin() as conn:
+        row = conn.execute(
+            text(
+                """
+                SELECT config_json
+                FROM aletheia_continuous_enrichment_sessions
+                WHERE project_id = :tenant_id AND session_key = :session_key
+                LIMIT 1
+                """
+            ),
+            {"tenant_id": tenant.tenant_id, "session_key": args.session_key},
+        ).mappings().first()
+        if not row:
+            return {"applied": False, "reason": "session not found"}
+        try:
+            config = json.loads(row["config_json"] or "{}")
+        except Exception:
+            config = {}
+        if isinstance(cycle_options.get("stop_policy"), dict):
+            stop_policy = config.get("stop_policy") if isinstance(config.get("stop_policy"), dict) else {}
+            stop_policy.update(cycle_options["stop_policy"])
+            config["stop_policy"] = stop_policy
+        for key in ("max_frontier", "max_results_per_query", "max_iterations", "gpt_researcher_max_report_chars"):
+            if key in cycle_options:
+                config[key] = cycle_options[key]
+        budget = config.get("budget") if isinstance(config.get("budget"), dict) else {}
+        if "max_frontier" in cycle_options:
+            budget["max_frontier_per_cycle"] = cycle_options["max_frontier"]
+        if "max_results_per_query" in cycle_options:
+            budget["max_results_per_query"] = cycle_options["max_results_per_query"]
+        if "max_iterations" in cycle_options:
+            budget["max_iterations_per_cycle"] = cycle_options["max_iterations"]
+        if budget:
+            config["budget"] = budget
+        config["next_cycle_plan"] = plan
+        conn.execute(
+            text(
+                """
+                UPDATE aletheia_continuous_enrichment_sessions
+                SET config_json = :config_json,
+                    status = CASE WHEN status = 'paused' THEN 'idle' ELSE status END,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE project_id = :tenant_id AND session_key = :session_key
+                """
+            ),
+            {
+                "tenant_id": tenant.tenant_id,
+                "session_key": args.session_key,
+                "config_json": json.dumps(config, ensure_ascii=False, sort_keys=True),
+            },
+        )
+    return {
+        "applied": True,
+        "cycle_options": cycle_options,
+        "actions": plan.get("actions") or [],
+    }
+
+
 def maybe_enqueue_loop_frontier(args, tenant, report):
     if not args.enqueue_loop_frontier:
         return None
     plan = (report or {}).get("repair_plan") or {}
+    next_cycle_plan = (report or {}).get("next_cycle_plan") or {}
+    enqueue_filters = next_cycle_plan.get("enqueue_filters") if isinstance(next_cycle_plan.get("enqueue_filters"), dict) else {}
     loop_sources = {"loop_harness_relation_completion", "loop_harness_property_completion"}
     return enqueue_repair_frontier(
         tenant,
@@ -118,6 +184,8 @@ def maybe_enqueue_loop_frontier(args, tenant, report):
         loop_sources=loop_sources,
         frontier_limit=args.loop_frontier_limit,
         require_object_type_sources=loop_sources,
+        skip_frontier_keys=set(enqueue_filters.get("skip_frontier_keys") or []),
+        do_not_clear_visited_keys=set(enqueue_filters.get("do_not_clear_visited_keys") or []),
     )
 
 
@@ -161,8 +229,16 @@ def enqueue_repair_frontier(
     loop_sources,
     frontier_limit,
     require_object_type_sources=None,
+    skip_frontier_keys=None,
+    do_not_clear_visited_keys=None,
 ):
     require_object_type_sources = require_object_type_sources or set()
+    skip_frontier_keys = {str(key or "").strip() for key in (skip_frontier_keys or set()) if str(key or "").strip()}
+    do_not_clear_visited_keys = {
+        str(key or "").strip()
+        for key in (do_not_clear_visited_keys or set())
+        if str(key or "").strip()
+    }
 
     def frontier_identity(item):
         source_kind = str(item.get("source_kind") or item.get("source") or "").strip().lower()
@@ -181,6 +257,9 @@ def enqueue_repair_frontier(
             continue
         source_kind = str(item.get("source_kind") or item.get("source") or "").strip()
         if source_kind in require_object_type_sources and not str(item.get("object_type") or "").strip():
+            continue
+        key = str(item.get("key") or "").strip()
+        if key in skip_frontier_keys:
             continue
         identity = frontier_identity(item)
         if identity and identity in frontier_identities:
@@ -240,12 +319,14 @@ def enqueue_repair_frontier(
         if prioritized_visit_keys:
             config["visited_frontier_keys"] = [
                 value for value in previous_visited
-                if value not in prioritized_visit_keys
+                if value not in prioritized_visit_keys or value in do_not_clear_visited_keys
             ]
             frontier_state = config.get("frontier_state") if isinstance(config.get("frontier_state"), dict) else {}
             for bucket in ("last_enriched_at", "selected_count"):
                 values = frontier_state.get(bucket) if isinstance(frontier_state.get(bucket), dict) else {}
                 for key in prioritized_visit_keys:
+                    if key in do_not_clear_visited_keys:
+                        continue
                     values.pop(key, None)
                 frontier_state[bucket] = values
             config["frontier_state"] = frontier_state
@@ -274,6 +355,7 @@ def enqueue_repair_frontier(
         "cleared_stale_loop_frontier": cleared_stale,
         "cleared_visited_repair_frontier": len(previous_visited) - len(config.get("visited_frontier_keys") or []),
         "skipped": len(frontier_items) - len(prioritized),
+        "plan_skipped_frontier_keys": sorted(skip_frontier_keys),
         "frontier_keys": [item.get("key") for item in prioritized],
         "reason": None if prioritized else "repair plan has no eligible frontier items after relevance filtering",
     }
@@ -544,10 +626,13 @@ def main():
         repair_result = maybe_apply_loop_repair(args, tenant, report)
         if repair_result is not None:
             report = loop_report(args, tenant, run_key=args.run_key)
+        next_cycle_plan_result = persist_next_cycle_plan(args, tenant, report)
         enqueue_result = maybe_enqueue_loop_frontier(args, tenant, report)
         event = {"type": "loop_report", "cycle": None, "report": report}
         if repair_result is not None:
             event["repair_result"] = repair_result
+        if next_cycle_plan_result is not None:
+            event["next_cycle_plan_result"] = next_cycle_plan_result
         if enqueue_result is not None:
             event["enqueue_result"] = enqueue_result
         if args.graph_search_loop or args.enqueue_graph_search_frontier:
@@ -647,6 +732,9 @@ def main():
                 if repair_result is not None:
                     loop_event["repair_result"] = repair_result
                     loop_event["report"] = loop_report(args, tenant, run_key=cycle_result.get("run_key"))
+                next_cycle_plan_result = persist_next_cycle_plan(args, tenant, loop_event["report"])
+                if next_cycle_plan_result is not None:
+                    loop_event["next_cycle_plan_result"] = next_cycle_plan_result
                 enqueue_result = maybe_enqueue_loop_frontier(args, tenant, loop_event["report"])
                 if enqueue_result is not None:
                     loop_event["enqueue_result"] = enqueue_result

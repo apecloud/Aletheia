@@ -18,7 +18,7 @@ class EnrichmentLoopHarnessTest(unittest.TestCase):
         ensure_artifact_schema(engine)
         return url, engine
 
-    def _insert_run(self, engine, tenant="tenant-a", run_key="run-a", safety=None, status="completed"):
+    def _insert_run(self, engine, tenant="tenant-a", run_key="run-a", safety=None, status="completed", frontier=None):
         now = datetime.utcnow()
         with engine.begin() as conn:
             result = conn.execute(
@@ -31,7 +31,7 @@ class EnrichmentLoopHarnessTest(unittest.TestCase):
                          pruned_count, finding_count, started_at, finished_at)
                     VALUES
                         (:project_id, :run_key, 'IterativeGraphEnrichmentAgent',
-                         :status, 'test loop', '[]', '[]', :safety_profile_json,
+                         :status, 'test loop', :frontier_json, '[]', :safety_profile_json,
                          '{}', '[]', 0, 0, 0, :started_at, :finished_at)
                     """
                 ),
@@ -39,6 +39,7 @@ class EnrichmentLoopHarnessTest(unittest.TestCase):
                     "project_id": tenant,
                     "run_key": run_key,
                     "status": status,
+                    "frontier_json": json.dumps(frontier or []),
                     "safety_profile_json": json.dumps(safety or {}),
                     "started_at": now - timedelta(seconds=30),
                     "finished_at": now,
@@ -370,6 +371,59 @@ class EnrichmentLoopHarnessTest(unittest.TestCase):
         self.assertEqual(report["repair_plan"]["items"][0]["frontier_item"]["source"], "loop_harness_relation_completion")
         self.assertEqual(report["repair_plan"]["items"][0]["frontier_item"]["source_kind"], "loop_harness_relation_completion")
         self.assertGreater(report["repair_plan"]["items"][0]["frontier_item"]["priority"], 0)
+
+    def test_next_cycle_plan_defers_recently_retried_unresolved_frontier(self):
+        url, engine = self._db()
+        frontier_key = "proposed-graph:tenant-a:hormuz-crisis"
+        run_id = self._insert_run(
+            engine,
+            frontier=[
+                {
+                    "key": frontier_key,
+                    "name": "Hormuz Crisis",
+                    "source_kind": "loop_harness_relation_completion",
+                }
+            ],
+        )
+        self._insert_element(
+            engine,
+            run_id,
+            {
+                "artifact_type": "object",
+                "ontology_part": "concrete_object",
+                "label": "Hormuz Crisis",
+                "object_type": "Crisis",
+                "description": "Maritime chokepoint disruption risk affecting shipping and oil transit.",
+            },
+            name="Hormuz Crisis",
+            status="approved",
+        )
+
+        config = load_loop_config(None)
+        config["coverage_targets"]["unsupported_class_count_max"] = 10
+        config["coverage_targets"]["unclassified_object_ratio_max"] = 1.0
+        config["repair_policy"]["relation_completion"] = {
+            "domain_relevance": {
+                "enabled": True,
+                "min_score": 1.0,
+                "positive_terms": ["maritime", "chokepoint", "shipping", "transit", "risk"],
+                "negative_terms": [],
+                "negative_object_types": [],
+            }
+        }
+
+        report = evaluate_enrichment_loop(url, "tenant-a", run_key="run-a", config=config)
+
+        self.assertEqual(report["verdict"]["next_focus"], "relation_completion")
+        self.assertEqual(report["run_metrics"]["frontier_keys"], [frontier_key])
+        self.assertEqual(report["repair_plan"]["items"][0]["element_key"], frontier_key)
+        plan = report["next_cycle_plan"]
+        self.assertIn(frontier_key, plan["enqueue_filters"]["skip_frontier_keys"])
+        self.assertIn(frontier_key, plan["enqueue_filters"]["do_not_clear_visited_keys"])
+        self.assertTrue(
+            any(action["type"] == "defer_recently_retried_frontier" for action in plan["actions"])
+        )
+        self.assertFalse(plan["cycle_options"]["stop_policy"]["pause_on_no_frontier"])
 
     def test_property_completion_plan_lists_objects_without_properties(self):
         url, engine = self._db()

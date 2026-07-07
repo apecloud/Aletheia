@@ -162,7 +162,7 @@ def evaluate_enrichment_loop(
             next_focus=verdict.get("next_focus"),
             config=config,
         )
-    return {
+    report = {
         "loop_id": config.get("loop_id"),
         "tenant": tenant_id,
         "session_key": session_key,
@@ -173,6 +173,117 @@ def evaluate_enrichment_loop(
         "stage_latency_sec": latency,
         "verdict": verdict,
         "repair_plan": repair_plan,
+    }
+    report["next_cycle_plan"] = build_next_cycle_plan(report, config=config)
+    return report
+
+
+def build_next_cycle_plan(report: dict[str, Any], *, config: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Turn the latest loop report into concrete controls for the next cycle."""
+
+    config = _deep_merge(json.loads(json.dumps(DEFAULT_LOOP_CONFIG)), config or {})
+    repair_plan = report.get("repair_plan") if isinstance(report.get("repair_plan"), dict) else {}
+    run_metrics = report.get("run_metrics") if isinstance(report.get("run_metrics"), dict) else {}
+    verdict = report.get("verdict") if isinstance(report.get("verdict"), dict) else {}
+    latency = report.get("stage_latency_sec") if isinstance(report.get("stage_latency_sec"), dict) else {}
+    latency_targets = config.get("latency_targets") or {}
+    run_frontier_keys = {
+        str(value or "").strip()
+        for value in run_metrics.get("frontier_keys") or []
+        if str(value or "").strip()
+    }
+    pending_repair_keys = {
+        str(item.get("element_key") or ((item.get("frontier_item") or {}).get("key")) or "").strip()
+        for item in repair_plan.get("items") or []
+        if isinstance(item, dict)
+    }
+    repeated_gap_keys = sorted(key for key in run_frontier_keys if key and key in pending_repair_keys)
+    actions: list[dict[str, Any]] = []
+    enqueue_filters: dict[str, Any] = {"skip_frontier_keys": [], "do_not_clear_visited_keys": []}
+    cycle_options: dict[str, Any] = {
+        "stop_policy": {
+            "pause_on_no_frontier": False,
+            "pause_on_budget_exhausted": False,
+        }
+    }
+
+    if repair_plan.get("recommended_action") == "enqueue_frontier" and repair_plan.get("item_count", 0):
+        actions.append(
+            {
+                "type": "enqueue_repair_frontier",
+                "focus": repair_plan.get("focus"),
+                "item_count": repair_plan.get("item_count"),
+            }
+        )
+
+    if repeated_gap_keys:
+        enqueue_filters["skip_frontier_keys"] = repeated_gap_keys
+        enqueue_filters["do_not_clear_visited_keys"] = repeated_gap_keys
+        actions.append(
+            {
+                "type": "defer_recently_retried_frontier",
+                "frontier_keys": repeated_gap_keys[:20],
+                "reason": "latest run consumed this frontier but the same coverage gap remains",
+            }
+        )
+
+    frontier_count = verdict.get("frontier_count")
+    try:
+        frontier_count_int = int(frontier_count) if frontier_count is not None else 0
+    except (TypeError, ValueError):
+        frontier_count_int = 0
+    item_count = int(repair_plan.get("item_count") or 0)
+    if item_count > 1 and not repeated_gap_keys:
+        cycle_options["max_frontier"] = min(max(2, item_count), 4)
+        actions.append(
+            {
+                "type": "widen_next_frontier_batch",
+                "max_frontier": cycle_options["max_frontier"],
+                "reason": "multiple actionable repair frontiers are available",
+            }
+        )
+    elif repeated_gap_keys and item_count > len(repeated_gap_keys):
+        cycle_options["max_frontier"] = min(max(2, item_count), 4)
+        actions.append(
+            {
+                "type": "rotate_away_from_repeated_gap",
+                "max_frontier": cycle_options["max_frontier"],
+                "reason": "defer repeated frontier and use remaining repair frontiers",
+            }
+        )
+    elif frontier_count_int == 0 and item_count:
+        cycle_options["max_frontier"] = min(max(1, item_count), 4)
+
+    semantic_target = float(latency_targets.get("semantic_extraction_sec_max") or 0.0)
+    semantic_latency = float(latency.get("semantic_extraction") or 0.0)
+    if semantic_target and semantic_latency > semantic_target:
+        cycle_options["gpt_researcher_max_report_chars"] = min(
+            int(config.get("gpt_researcher_max_report_chars") or 12000),
+            12000,
+        )
+        actions.append(
+            {
+                "type": "cap_report_chars_for_latency",
+                "max_report_chars": cycle_options["gpt_researcher_max_report_chars"],
+                "reason": f"semantic extraction latency {semantic_latency:.3f}s exceeded target {semantic_target:.3f}s",
+            }
+        )
+
+    if not actions:
+        actions.append(
+            {
+                "type": "continue_current_strategy",
+                "focus": verdict.get("next_focus"),
+                "reason": "no stronger adjustment signal found",
+            }
+        )
+
+    return {
+        "enabled": True,
+        "focus": verdict.get("next_focus"),
+        "actions": actions,
+        "cycle_options": cycle_options,
+        "enqueue_filters": enqueue_filters,
     }
 
 
@@ -981,7 +1092,7 @@ def _load_run(conn, tenant_id: str, run_key: str | None) -> dict[str, Any] | Non
             text(
                 """
                 SELECT id, run_key, status, objective, proposed_count, pruned_count,
-                       finding_count, expansion_trace_json, safety_profile_json,
+                       finding_count, frontier_json, expansion_trace_json, safety_profile_json,
                        skipped_sources_json, started_at, finished_at, error
                 FROM aletheia_iterative_graph_enrichment_runs
                 WHERE project_id = :tenant_id AND run_key = :run_key
@@ -996,7 +1107,7 @@ def _load_run(conn, tenant_id: str, run_key: str | None) -> dict[str, Any] | Non
             text(
                 """
                 SELECT id, run_key, status, objective, proposed_count, pruned_count,
-                       finding_count, expansion_trace_json, safety_profile_json,
+                       finding_count, frontier_json, expansion_trace_json, safety_profile_json,
                        skipped_sources_json, started_at, finished_at, error
                 FROM aletheia_iterative_graph_enrichment_runs
                 WHERE project_id = :tenant_id
@@ -1067,6 +1178,15 @@ def _run_metrics(run: dict[str, Any] | None, elements: list[dict[str, Any]]) -> 
     ontology_part_counts = Counter(_ontology_part(item) for item in elements if _ontology_part(item))
     duplicate_counts = Counter(_dedup_decision(item) for item in elements if _dedup_decision(item))
     semantic_count = sum(type_counts.get(item, 0) for item in SEMANTIC_ELEMENT_TYPES)
+    frontier_items = _json_load((run or {}).get("frontier_json"), [])
+    frontier_keys = []
+    if isinstance(frontier_items, list):
+        for item in frontier_items:
+            if not isinstance(item, dict):
+                continue
+            key = str(item.get("key") or item.get("frontier_identity") or "").strip()
+            if key and key not in frontier_keys:
+                frontier_keys.append(key)
     return {
         "element_count": len(elements),
         "status_counts": dict(sorted(status_counts.items())),
@@ -1079,6 +1199,7 @@ def _run_metrics(run: dict[str, Any] | None, elements: list[dict[str, Any]]) -> 
         "pruned_count": int((run or {}).get("pruned_count") or 0),
         "finding_count": int((run or {}).get("finding_count") or 0),
         "skipped_source_count": len(_json_load((run or {}).get("skipped_sources_json"), [])),
+        "frontier_keys": frontier_keys,
     }
 
 
