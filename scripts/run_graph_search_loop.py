@@ -15,7 +15,7 @@ from tenant_registry import TenantRegistry
 
 def main():
     parser = argparse.ArgumentParser(description="Evaluate approved graph search quality and emit repair frontier suggestions.")
-    parser.add_argument("--tenant", default="maritime-risk")
+    parser.add_argument("--tenant", default="hotpotqa-graph-v1")
     parser.add_argument("--tenants-file", default=None)
     parser.add_argument("--config", default=None)
     parser.add_argument("--limit", type=int, default=200)

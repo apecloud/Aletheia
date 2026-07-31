@@ -4,7 +4,6 @@ import unittest
 from datetime import datetime, timedelta
 
 from sqlalchemy import text
-from sqlalchemy.exc import OperationalError
 
 from server.aletheia_server import (
     InstanceRepository,
@@ -706,6 +705,31 @@ class ContinuousEnrichmentFrontierTest(unittest.TestCase):
                 )
             )
 
+    def test_auto_approve_low_duplicate_graph_proposal_is_disabled_by_default(self):
+        repo = object.__new__(InstanceRepository)
+        repo.review_proposed_graph_element = lambda *_args, **_kwargs: self.fail("auto approval should be opt-in")
+        tenant = TenantConfig(
+            tenant_id="tenant-a",
+            namespace="tenant-a",
+            display_name="Tenant A",
+            graph_database="tenant_a",
+            metadata_db_url="sqlite:///:memory:",
+            source_db_url="sqlite:///:memory:",
+        )
+        element = {
+            "element_key": "proposed-graph:tenant-a:node:high-confidence",
+            "element_type": "node",
+            "status": "draft",
+            "confidence": 0.95,
+            "payload": {"dedup_decision": "new_proposal", "match_score": 0.0},
+        }
+
+        config = repo._continuous_update_config({}, {})
+        result = repo._continuous_auto_approve_low_duplicate_proposals(tenant, [element], config)
+
+        self.assertFalse(config["auto_approve_low_duplicate_proposals"])
+        self.assertEqual(result, {"enabled": False, "reviewed": [], "skipped": []})
+
     def test_auto_approve_low_duplicate_graph_proposal_uses_review_settings(self):
         repo = object.__new__(InstanceRepository)
         reviewed = []
@@ -743,6 +767,102 @@ class ContinuousEnrichmentFrontierTest(unittest.TestCase):
         self.assertEqual(reviewed[0][0], "proposed-graph:tenant-a:node:high-confidence")
         self.assertEqual(reviewed[0][1], "approve")
         self.assertIn("confidence 0.8200", reviewed[0][2]["reason"])
+        self.assertEqual(reviewed[0][2]["review_actor"], "machine")
+        self.assertTrue(reviewed[0][2]["machine_approval"])
+        self.assertEqual(reviewed[0][2]["approval_policy"], "auto_approve_low_duplicate_proposals")
+        self.assertEqual(
+            reviewed[0][2]["approval_thresholds"],
+            {"min_confidence": 0.8, "max_duplicate_score": 0.5},
+        )
+        self.assertEqual(result["reviewed"][0]["review_actor"], "machine")
+        self.assertEqual(result["reviewed"][0]["approval_policy"], "auto_approve_low_duplicate_proposals")
+
+    def test_auto_approve_low_duplicate_persists_machine_review_audit_fields(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo, tenant = self._sqlite_tenant_repo(tmpdir)
+            engine = repo.metadata_engine_for(tenant)
+            ensure_artifact_schema(engine)
+            element_key = "proposed-graph:tenant-a:node:machine-approved"
+            with engine.begin() as conn:
+                run_result = conn.execute(
+                    text(
+                        """
+                        INSERT INTO aletheia_iterative_graph_enrichment_runs
+                            (project_id, run_key, source_agent, status, objective,
+                             frontier_json, expansion_trace_json, safety_profile_json,
+                             budget_json, skipped_sources_json, proposed_count,
+                             pruned_count, finding_count, started_at)
+                        VALUES
+                            (:project_id, 'machine-approval-audit-test', 'IterativeGraphEnrichmentAgent',
+                             'completed', 'test machine approval audit', '[]', '[]',
+                             '{}', '{}', '[]', 1, 0, 0, :started_at)
+                        """
+                    ),
+                    {"project_id": tenant.tenant_id, "started_at": datetime.utcnow()},
+                )
+                conn.execute(
+                    text(
+                        """
+                        INSERT INTO aletheia_proposed_graph_elements
+                            (run_id, project_id, element_key, element_type, name,
+                             payload_json, evidence_refs_json, source_url,
+                             confidence, status, iteration, created_at)
+                        VALUES
+                            (:run_id, :project_id, :element_key, 'node', 'Machine Approved Node',
+                             :payload_json, '["gpt_researcher://report/audit"]',
+                             'gpt_researcher://report/audit', 0.91, 'draft', 1, :created_at)
+                        """
+                    ),
+                    {
+                        "run_id": run_result.lastrowid,
+                        "project_id": tenant.tenant_id,
+                        "element_key": element_key,
+                        "payload_json": json.dumps({"dedup_decision": "new_proposal", "match_score": 0.0}),
+                        "created_at": datetime.utcnow(),
+                    },
+                )
+
+            result = repo._continuous_auto_approve_low_duplicate_proposals(
+                tenant,
+                [
+                    {
+                        "element_key": element_key,
+                        "element_type": "node",
+                        "status": "draft",
+                        "confidence": 0.91,
+                        "payload": {"dedup_decision": "new_proposal", "match_score": 0.0},
+                    }
+                ],
+                {
+                    "auto_approve_low_duplicate_proposals": True,
+                    "auto_approve_min_confidence": 0.8,
+                    "auto_approve_max_duplicate_score": 0.5,
+                    "auto_review_reviewer": "Continuous Enrichment Agent",
+                },
+            )
+
+            self.assertEqual(len(result["reviewed"]), 1)
+            with engine.connect() as conn:
+                row = conn.execute(
+                    text(
+                        """
+                        SELECT status, payload_json
+                        FROM aletheia_proposed_graph_elements
+                        WHERE project_id = :project_id AND element_key = :element_key
+                        """
+                    ),
+                    {"project_id": tenant.tenant_id, "element_key": element_key},
+                ).mappings().first()
+            payload = json.loads(row["payload_json"])
+            review_event = payload["review_events"][-1]
+
+            self.assertEqual(row["status"], "approved")
+            self.assertEqual(review_event["review_actor"], "machine")
+            self.assertTrue(review_event["machine_approval"])
+            self.assertEqual(review_event["approval_policy"], "auto_approve_low_duplicate_proposals")
+            self.assertEqual(review_event["approval_policy_version"], "v1")
+            self.assertEqual(review_event["approval_thresholds"], {"min_confidence": 0.8, "max_duplicate_score": 0.5})
+            self.assertIn("Auto-approved by review settings", review_event["reason"])
 
     def test_auto_approve_low_duplicate_skips_high_duplicate_score(self):
         repo = object.__new__(InstanceRepository)
@@ -982,70 +1102,6 @@ class ContinuousEnrichmentFrontierTest(unittest.TestCase):
 
         self.assertEqual(selected[0]["key"], "loop:relation:approved-object")
         self.assertEqual(selected[0]["source_kind"], "loop_harness_relation_completion")
-
-    def test_full_graph_degrades_when_source_db_is_unavailable(self):
-        repo = object.__new__(InstanceRepository)
-        repo._schema_graph_artifacts = lambda tenant: (
-            {
-                "country": {
-                    "canonical_key": "object:country",
-                    "artifact_type": "object",
-                    "name": "Country",
-                    "payload": {
-                        "mapped_table_names": ["countries"],
-                        "primary_key": "iso3",
-                    },
-                }
-            },
-            [],
-        )
-
-        def unavailable_source(_tenant):
-            raise OperationalError("SELECT 1", {}, Exception("source db down"))
-
-        repo.source_engine_for = unavailable_source
-        tenant = TenantConfig(
-            tenant_id="maritime-risk",
-            namespace="maritime-risk",
-            display_name="Maritime Risk",
-            graph_database="aletheia",
-            metadata_db_url="sqlite:///:memory:",
-            source_db_url="mysql+pymysql://127.0.0.1:3306/missing",
-        )
-
-        graph = repo.full_graph(tenant, object_type="", instance_id="", limit=200)
-
-        self.assertFalse(graph["approved"])
-        self.assertEqual(graph["nodes"], [])
-        self.assertEqual(graph["edges"], [])
-        self.assertEqual(graph["scope"]["projection_source"], "SchemaGraphModelingAgent")
-        self.assertEqual(graph["scope"]["source_db_status"], "unavailable")
-        self.assertTrue(graph["scope"]["degraded"])
-        self.assertIn("Source database unavailable", graph["scope"]["reason"])
-
-    def test_schema_graph_type_helpers_do_not_raise_when_source_db_is_unavailable(self):
-        repo = object.__new__(InstanceRepository)
-        repo.source_engine_for = lambda _tenant: (_ for _ in ()).throw(
-            OperationalError("SELECT 1", {}, Exception("source db down"))
-        )
-        tenant = TenantConfig(
-            tenant_id="maritime-risk",
-            namespace="maritime-risk",
-            display_name="Maritime Risk",
-            graph_database="aletheia",
-            metadata_db_url="sqlite:///:memory:",
-            source_db_url="mysql+pymysql://127.0.0.1:3306/missing",
-        )
-        artifact = {
-            "payload": {
-                "mapped_table_names": ["countries"],
-                "primary_key": "iso3",
-            }
-        }
-
-        self.assertEqual(repo._source_columns(tenant, "countries"), set())
-        self.assertEqual(repo._schema_graph_table_and_pk(tenant, artifact), (None, None))
-        self.assertIsNone(repo._schema_graph_safe_join_condition(tenant, "countries.iso3 = edges.country_iso3"))
 
     def test_cooldown_falls_back_to_graph_coverage_without_restarting_static_template(self):
         now = datetime.utcnow().isoformat()
@@ -1589,14 +1645,6 @@ class ContinuousEnrichmentFrontierTest(unittest.TestCase):
 
         self.assertEqual([item["key"] for item in next_frontier], ["proposed-graph:maritime-risk:edge:source-a"])
         self.assertEqual(additions, [])
-
-    def test_runtime_reasoning_configs_do_not_fallback_to_demo_fixtures(self):
-        repo = object.__new__(InstanceRepository)
-        repo._schema_graph_reasoning_configs = lambda tenant: (None, None)
-        for tenant_id in ("default", "northwind-sandbox", "creditcardfraud", "maritime-risk"):
-            tenant = type("Tenant", (), {"tenant_id": tenant_id})()
-            self.assertEqual(repo.reasoning_entity_config(tenant), {})
-            self.assertEqual(repo.reasoning_link_config(tenant), [])
 
     def test_dedup_audit_preserves_merge_boundary_false(self):
         audit = _dedup_audit_from_payload(

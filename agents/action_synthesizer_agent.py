@@ -1,10 +1,9 @@
 import argparse
 import logging
 import os
-from sqlalchemy import create_engine, inspect, text
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 from pydantic import BaseModel, Field
-from typing import List, Optional
 
 from litellm import completion
 import instructor

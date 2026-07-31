@@ -1,0 +1,251 @@
+[
+  {
+    "qid": "WebQTrn-358",
+    "question": "what movies has taylor lautner been in 2011",
+    "center_node": "person:Taylor Lautner",
+    "topic_type": "person",
+    "topic_entity": "Taylor Lautner",
+    "hop_count": 2,
+    "gold_link_keys": [
+      "person:n:m:film_actor_film",
+      "person:n:m:award_award_winner_awards_won",
+      "award:n:m:award_award_nomination_award_nominee",
+      "award:n:m:award_award_honor_award_winner",
+      "film:n:m:film_performance_actor",
+      "person:n:m:award_award_nominee_award_nominations"
+    ],
+    "answer_entities": [
+      "Field of Dreams 2: Lockout",
+      "Abduction",
+      "The Ridiculous Six",
+      "Northern Lights",
+      "He's a Bully, Charlie Brown"
+    ],
+    "answers": [
+      "Field of Dreams 2: Lockout",
+      "Abduction",
+      "The Ridiculous Six",
+      "Northern Lights",
+      "He's a Bully, Charlie Brown"
+    ]
+  },
+  {
+    "qid": "WebQTrn-361",
+    "question": "what company did henry ford work for",
+    "center_node": "person:Henry Ford",
+    "topic_type": "person",
+    "topic_entity": "Henry Ford",
+    "hop_count": 1,
+    "gold_link_keys": [
+      "person:n:m:organization_organization_founder_organizations_founded",
+      "person:n:m:book_written_work_subjects",
+      "book:n:m:book_written_work_subjects",
+      "person:n:m:book_book_subject_works",
+      "person:n:m:common_image_appears_in_topic_gallery",
+      "person:n:m:symbols_name_source_namesakes",
+      "person:n:m:common_topic_image"
+    ],
+    "answer_entities": [
+      "James F. Flower & Bros",
+      "Ford Motor Company",
+      "Detroit Dry Dock Co",
+      "Henry Ford Company",
+      "Edison Illuminating Company"
+    ],
+    "answers": [
+      "James F. Flower & Bros",
+      "Ford Motor Company",
+      "Detroit Dry Dock Co",
+      "Henry Ford Company",
+      "Edison Illuminating Company"
+    ]
+  },
+  {
+    "qid": "WebQTrn-428",
+    "question": "who was judy garland married to",
+    "center_node": "person:Judy Garland",
+    "topic_type": "person",
+    "topic_entity": "Judy Garland",
+    "hop_count": 2,
+    "gold_link_keys": [
+      "music:n:m:music_album_artist",
+      "film:n:m:music_album_artist",
+      "film:n:m:film_film_directed_by",
+      "person:n:m:film_director_film",
+      "person:n:m:music_artist_album",
+      "person:n:m:people_person_spouse_s",
+      "person:n:m:people_person_children",
+      "person:n:m:people_marriage_spouse",
+      "person:n:m:people_person_parents"
+    ],
+    "answer_entities": [
+      "Sidney Luft",
+      "Mickey Deans",
+      "Mark Herron",
+      "Vincente Minnelli",
+      "David Rose"
+    ],
+    "answers": [
+      "Sidney Luft",
+      "Mickey Deans",
+      "Mark Herron",
+      "Vincente Minnelli",
+      "David Rose"
+    ]
+  },
+  {
+    "qid": "WebQTrn-430",
+    "question": "what disease did helen keller",
+    "center_node": "person:Helen Keller",
+    "topic_type": "person",
+    "topic_entity": "Helen Keller",
+    "hop_count": 1,
+    "gold_link_keys": [
+      "person:n:m:medicine_notable_person_with_medical_condition_condition"
+    ],
+    "answer_entities": [
+      "Hearing loss"
+    ],
+    "answers": [
+      "Hearing loss"
+    ]
+  },
+  {
+    "qid": "WebQTrn-457",
+    "question": "who did ayrton senna drive for",
+    "center_node": "person:Ayrton Senna",
+    "topic_type": "person",
+    "topic_entity": "Ayrton Senna",
+    "hop_count": 2,
+    "gold_link_keys": [
+      "entity:n:m:base_formula1_formula_1_team_member_driver",
+      "person:n:m:base_formula1_formula_1_driver_team_member"
+    ],
+    "answer_entities": [
+      "McLaren",
+      "Williams F1",
+      "Team Lotus",
+      "Toleman"
+    ],
+    "answers": [
+      "McLaren",
+      "Williams F1",
+      "Team Lotus",
+      "Toleman"
+    ]
+  },
+  {
+    "qid": "WebQTrn-459",
+    "question": "where is the best place to vacation in the dominican republic",
+    "center_node": "location:Dominican Republic",
+    "topic_type": "location",
+    "topic_entity": "Dominican Republic",
+    "hop_count": 1,
+    "gold_link_keys": [
+      "location:n:m:travel_travel_destination_tourist_attractions"
+    ],
+    "answer_entities": [
+      "Playa Fronton",
+      "National Palace",
+      "Columbus Lighthouse",
+      "Macao Beach",
+      "Damajaqua Cascades"
+    ],
+    "answers": [
+      "Playa Fronton",
+      "National Palace",
+      "Columbus Lighthouse",
+      "Macao Beach",
+      "Damajaqua Cascades"
+    ]
+  },
+  {
+    "qid": "WebQTrn-483",
+    "question": "what type of music did richard wagner play",
+    "center_node": "person:Richard Wagner",
+    "topic_type": "person",
+    "topic_entity": "Richard Wagner",
+    "hop_count": 1,
+    "gold_link_keys": [
+      "person:n:m:music_artist_genre",
+      "person:n:m:book_book_subject_works",
+      "person:n:m:broadcast_artist_content",
+      "person:n:m:book_author_works_written",
+      "person:n:m:base_kwebbase_kwtopic_has_sentences",
+      "person:n:m:film_music_contributor_film",
+      "fictional:n:m:fictional_universe_fictional_character_occupation",
+      "person:n:m:fictional_universe_fictional_character_occupation"
+    ],
+    "answer_entities": [
+      "Opera",
+      "Classical music",
+      "Romantic music"
+    ],
+    "answers": [
+      "Opera",
+      "Classical music",
+      "Romantic music"
+    ]
+  },
+  {
+    "qid": "WebQTrn-534",
+    "question": "who does michael vick play for",
+    "center_node": "person:Michael Vick",
+    "topic_type": "person",
+    "topic_entity": "Michael Vick",
+    "hop_count": 2,
+    "gold_link_keys": [
+      "person:n:m:sports_pro_athlete_teams",
+      "person:n:m:base_schemastaging_athlete_extra_salary",
+      "entity:n:m:base_schemastaging_athlete_salary_athlete",
+      "sports:n:m:sports_sports_team_roster_player"
+    ],
+    "answer_entities": [
+      "New York Jets"
+    ],
+    "answers": [
+      "New York Jets"
+    ]
+  },
+  {
+    "qid": "WebQTrn-536",
+    "question": "what is anderson silva trained in",
+    "center_node": "person:Anderson Silva",
+    "topic_type": "person",
+    "topic_entity": "Anderson Silva",
+    "hop_count": 1,
+    "gold_link_keys": [
+      "person:n:m:people_person_profession",
+      "person:n:m:common_topic_notable_types"
+    ],
+    "answer_entities": [
+      "Mixed Martial Artist",
+      "Actor"
+    ],
+    "answers": [
+      "Mixed Martial Artist",
+      "Actor"
+    ]
+  },
+  {
+    "qid": "WebQTrn-566",
+    "question": "what style of art does andy warhol do",
+    "center_node": "film:Andy Warhol",
+    "topic_type": "film",
+    "topic_entity": "Andy Warhol",
+    "hop_count": 1,
+    "gold_link_keys": [
+      "film:n:m:symbols_name_source_namesakes",
+      "film:n:m:book_author_works_written",
+      "film:n:m:visual_art_visual_artist_associated_periods_or_movements"
+    ],
+    "answer_entities": [
+      "Modern art",
+      "Pop art"
+    ],
+    "answers": [
+      "Modern art",
+      "Pop art"
+    ]
+  }
+]

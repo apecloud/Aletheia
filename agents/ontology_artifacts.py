@@ -9,6 +9,8 @@ from sqlalchemy.orm import declarative_base, relationship
 
 
 Base = declarative_base()
+METADATA_SCHEMA_BASE_VERSION = "2026_07_07_000_base_metadata_schema"
+METADATA_SCHEMA_TENANT_UNIQUENESS_VERSION = "2026_07_07_001_tenant_scoped_schema_candidates"
 
 
 def _json_dump(value: Any) -> str:
@@ -64,10 +66,13 @@ class ColumnProfile(Base):
 
 class SchemaObjectCandidate(Base):
     __tablename__ = "aletheia_schema_object_candidates"
+    __table_args__ = (
+        UniqueConstraint("project_id", "name", name="uq_aletheia_schema_object_candidates_project_name"),
+    )
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     project_id = Column(String(255), nullable=False, default="default")
-    name = Column(String(255), nullable=False, unique=True)
+    name = Column(String(255), nullable=False)
     description = Column(Text)
     artifact_id = Column(Integer, ForeignKey("aletheia_ontology_artifacts.id"))
     graph_label = Column(String(255))
@@ -86,6 +91,15 @@ class SchemaObjectTableMapping(Base):
 
 class SchemaLinkCandidate(Base):
     __tablename__ = "aletheia_schema_link_candidates"
+    __table_args__ = (
+        UniqueConstraint(
+            "project_id",
+            "source_object_id",
+            "target_object_id",
+            "link_type",
+            name="uq_aletheia_schema_link_candidates_project_endpoints_type",
+        ),
+    )
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     project_id = Column(String(255), nullable=False, default="default")
@@ -123,6 +137,9 @@ class BusinessAction(Base):
 
 class OntologyArtifact(Base):
     __tablename__ = "aletheia_ontology_artifacts"
+    __table_args__ = (
+        UniqueConstraint("project_id", "canonical_key", name="uq_aletheia_artifacts_project_key"),
+    )
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     project_id = Column(String(255), nullable=False, default="default")
@@ -611,11 +628,105 @@ def _rename_legacy_schema_modeling_tables(engine) -> None:
         )
 
 
+def _ensure_schema_migration_table(conn) -> None:
+    conn.execute(
+        text(
+            """
+            CREATE TABLE IF NOT EXISTS aletheia_schema_migrations (
+                version VARCHAR(255) PRIMARY KEY,
+                description TEXT NOT NULL,
+                applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+    )
+
+
+def _record_schema_migration(conn, version: str, description: str) -> None:
+    conn.execute(
+        text(
+            """
+            INSERT INTO aletheia_schema_migrations (version, description)
+            VALUES (:version, :description)
+            ON CONFLICT (version) DO NOTHING
+            """
+        ),
+        {"version": version, "description": description},
+    )
+
+
+def _sqlite_index_columns(conn, index_name: str) -> list[str]:
+    return [row[2] for row in conn.execute(text(f"PRAGMA index_info({index_name})")).fetchall()]
+
+
+def _sqlite_needs_schema_object_candidate_rebuild(conn) -> bool:
+    indexes = conn.execute(text("PRAGMA index_list(aletheia_schema_object_candidates)")).fetchall()
+    for row in indexes:
+        index_name = row[1]
+        unique = bool(row[2])
+        if unique and _sqlite_index_columns(conn, index_name) == ["name"]:
+            return True
+    return False
+
+
+def _sqlite_rebuild_schema_object_candidates_for_tenant_uniqueness(conn) -> None:
+    if not _sqlite_needs_schema_object_candidate_rebuild(conn):
+        return
+    conn.execute(text("ALTER TABLE aletheia_schema_object_candidates RENAME TO aletheia_schema_object_candidates_legacy"))
+    conn.execute(
+        text(
+            """
+            CREATE TABLE aletheia_schema_object_candidates (
+                id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+                project_id VARCHAR(255) NOT NULL DEFAULT 'default',
+                name VARCHAR(255) NOT NULL,
+                description TEXT,
+                artifact_id INTEGER,
+                graph_label VARCHAR(255),
+                extraction_sql TEXT,
+                ngql_schema TEXT,
+                created_at DATETIME
+            )
+            """
+        )
+    )
+    legacy_columns = {
+        row[1]
+        for row in conn.execute(text("PRAGMA table_info(aletheia_schema_object_candidates_legacy)")).fetchall()
+    }
+    select_columns = [
+        "id",
+        "COALESCE(project_id, 'default')" if "project_id" in legacy_columns else "'default'",
+        "name",
+        "description" if "description" in legacy_columns else "NULL",
+        "artifact_id" if "artifact_id" in legacy_columns else "NULL",
+        "graph_label" if "graph_label" in legacy_columns else "NULL",
+        "extraction_sql" if "extraction_sql" in legacy_columns else "NULL",
+        "ngql_schema" if "ngql_schema" in legacy_columns else "NULL",
+        "created_at" if "created_at" in legacy_columns else "CURRENT_TIMESTAMP",
+    ]
+    conn.execute(
+        text(
+            f"""
+            INSERT INTO aletheia_schema_object_candidates
+                (id, project_id, name, description, artifact_id, graph_label,
+                 extraction_sql, ngql_schema, created_at)
+            SELECT {", ".join(select_columns)}
+            FROM aletheia_schema_object_candidates_legacy
+            """
+        )
+    )
+    conn.execute(text("DROP TABLE aletheia_schema_object_candidates_legacy"))
+
+
 def ensure_artifact_schema(engine) -> None:
     _rename_legacy_schema_modeling_tables(engine)
     Base.metadata.create_all(engine)
     if engine.dialect.name == "sqlite":
         with engine.begin() as conn:
+            _ensure_schema_migration_table(conn)
+            _record_schema_migration(conn, METADATA_SCHEMA_BASE_VERSION, "base metadata schema initialized")
+            _sqlite_rebuild_schema_object_candidates_for_tenant_uniqueness(conn)
             rows = conn.execute(text("PRAGMA table_info(aletheia_graph_identity_index)")).fetchall()
             columns = {row[1] for row in rows}
             sqlite_columns = {
@@ -629,11 +740,21 @@ def ensure_artifact_schema(engine) -> None:
                 if column not in columns:
                     conn.execute(text(f"ALTER TABLE aletheia_graph_identity_index ADD COLUMN {column} {column_type}"))
             conn.execute(text("DROP INDEX IF EXISTS uq_aletheia_graph_identity_project_source_key"))
+            conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_aletheia_artifacts_project_key ON aletheia_ontology_artifacts (project_id, canonical_key)"))
+            conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_aletheia_schema_object_candidates_project_name ON aletheia_schema_object_candidates (project_id, name)"))
+            conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_aletheia_schema_link_candidates_project_endpoints_type ON aletheia_schema_link_candidates (project_id, source_object_id, target_object_id, link_type)"))
             conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_aletheia_graph_identity_project_source_kind ON aletheia_graph_identity_index (project_id, source_space, source_key, element_kind)"))
             conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_aletheia_graph_identity_project_space_identity ON aletheia_graph_identity_index (project_id, source_space, identity_key)"))
             conn.execute(text("CREATE INDEX IF NOT EXISTS ix_aletheia_graph_identity_lookup ON aletheia_graph_identity_index (project_id, element_kind, identity_key)"))
+            _record_schema_migration(
+                conn,
+                METADATA_SCHEMA_TENANT_UNIQUENESS_VERSION,
+                "tenant-scoped schema candidate and artifact uniqueness",
+            )
         return
     with engine.begin() as conn:
+        _ensure_schema_migration_table(conn)
+        _record_schema_migration(conn, METADATA_SCHEMA_BASE_VERSION, "base metadata schema initialized")
         conn.execute(text("ALTER TABLE aletheia_artifact_reviews ADD COLUMN IF NOT EXISTS project_id VARCHAR(255) DEFAULT 'default'"))
         conn.execute(text("UPDATE aletheia_artifact_reviews r SET project_id = a.project_id FROM aletheia_ontology_artifacts a WHERE r.artifact_id = a.id AND (r.project_id IS NULL OR r.project_id = 'default')"))
         conn.execute(text("ALTER TABLE aletheia_artifact_reviews ALTER COLUMN project_id SET NOT NULL"))
@@ -651,6 +772,10 @@ def ensure_artifact_schema(engine) -> None:
         conn.execute(text("ALTER TABLE aletheia_schema_link_candidates ADD COLUMN IF NOT EXISTS extraction_sql TEXT"))
         conn.execute(text("ALTER TABLE aletheia_schema_link_candidates ADD COLUMN IF NOT EXISTS ngql_schema TEXT"))
         conn.execute(text("ALTER TABLE aletheia_business_actions ADD COLUMN IF NOT EXISTS artifact_id INTEGER"))
+        conn.execute(text("ALTER TABLE aletheia_schema_object_candidates DROP CONSTRAINT IF EXISTS aletheia_schema_object_candidates_name_key"))
+        conn.execute(text("DROP INDEX IF EXISTS aletheia_schema_object_candidates_name_key"))
+        conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_aletheia_schema_object_candidates_project_name ON aletheia_schema_object_candidates (project_id, name)"))
+        conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_aletheia_schema_link_candidates_project_endpoints_type ON aletheia_schema_link_candidates (project_id, source_object_id, target_object_id, link_type)"))
         conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_aletheia_reasoning_tasks_project_key ON aletheia_reasoning_tasks (project_id, canonical_key)"))
         conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_aletheia_reasoning_runs_project_key ON aletheia_reasoning_runs (project_id, run_key)"))
         conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_aletheia_reasoning_findings_project_key ON aletheia_reasoning_findings (project_id, canonical_key)"))
@@ -674,91 +799,15 @@ def ensure_artifact_schema(engine) -> None:
         conn.execute(text("ALTER TABLE aletheia_graph_identity_index ADD COLUMN IF NOT EXISTS embedding_json TEXT"))
         conn.execute(text("ALTER TABLE aletheia_graph_identity_index ADD COLUMN IF NOT EXISTS vector_fingerprint VARCHAR(128)"))
         conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_aletheia_graph_benchmarks_project_key ON aletheia_graph_deep_research_benchmarks (project_id, benchmark_key)"))
+        _record_schema_migration(
+            conn,
+            METADATA_SCHEMA_TENANT_UNIQUENESS_VERSION,
+            "tenant-scoped schema candidate and artifact uniqueness",
+        )
 
 
 def _project_id_for(row) -> str:
     return getattr(row, "project_id", None) or os.environ.get("ALETHEIA_TENANT", "default")
-
-
-def sync_object_artifact(session, obj: BusinessObject, mapped_tables: list[ExtractedTable]) -> OntologyArtifact:
-    source_refs = [f"table:{table.table_name}" for table in mapped_tables]
-    artifact = upsert_artifact(
-        session,
-        artifact_type="object",
-        natural_key=obj.name,
-        name=obj.name,
-        description=obj.description,
-        payload={
-            "name": obj.name,
-            "description": obj.description,
-            "mapped_table_names": [table.table_name for table in mapped_tables],
-        },
-        source_refs=source_refs,
-        source_agent="ObjectModelerAgent",
-        project_id=_project_id_for(obj),
-    )
-    replace_evidence(
-        session,
-        artifact,
-        [
-            {
-                "evidence_type": "table",
-                "source_ref": f"table:{table.table_name}",
-                "summary": table.table_comment or f"Mapped physical table {table.table_name}",
-                "payload": {
-                    "schema_name": table.schema_name,
-                    "table_name": table.table_name,
-                    "table_comment": table.table_comment,
-                },
-            }
-            for table in mapped_tables
-        ],
-    )
-    obj.artifact_id = artifact.id
-    return artifact
-
-
-def sync_link_artifact(session, link: BusinessLink, source_obj: BusinessObject, target_obj: BusinessObject) -> OntologyArtifact:
-    natural_key = f"{source_obj.name}:{link.link_type}:{target_obj.name}"
-    artifact = upsert_artifact(
-        session,
-        artifact_type="link",
-        natural_key=natural_key,
-        name=f"{source_obj.name} {link.link_type} {target_obj.name}",
-        description=link.description,
-        payload={
-            "source_object_name": source_obj.name,
-            "target_object_name": target_obj.name,
-            "link_type": link.link_type,
-            "description": link.description,
-        },
-        source_refs=[
-            f"object:{source_obj.name}",
-            f"object:{target_obj.name}",
-        ],
-        source_agent="LinkWeaverAgent",
-        project_id=_project_id_for(link),
-    )
-    replace_evidence(
-        session,
-        artifact,
-        [
-            {
-                "evidence_type": "object",
-                "source_ref": f"object:{source_obj.name}",
-                "summary": source_obj.description,
-                "payload": {"artifact_id": source_obj.artifact_id},
-            },
-            {
-                "evidence_type": "object",
-                "source_ref": f"object:{target_obj.name}",
-                "summary": target_obj.description,
-                "payload": {"artifact_id": target_obj.artifact_id},
-            },
-        ],
-    )
-    link.artifact_id = artifact.id
-    return artifact
 
 
 def sync_action_artifact(session, action: BusinessAction) -> OntologyArtifact:

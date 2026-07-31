@@ -1,0 +1,1269 @@
+[
+  {
+    "qid": "5a7149cf5542994082a3e773",
+    "question": "What 2015 British-Canadian-Irish romantic drama was Finola Dwyer a producer of?",
+    "center_node": "5a7149cf5542994082a3e773:finola_dwyer",
+    "answer": "Brooklyn",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 18,
+    "extraction_error": "",
+    "additional_center_nodes": []
+  },
+  {
+    "qid": "5a7320ac5542991f9a20c620",
+    "question": "Which game was created first, About Time or Java?",
+    "center_node": "5a7320ac5542991f9a20c620:about_time_board_game",
+    "answer": "Java",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 2,
+    "extraction_error": "",
+    "additional_center_nodes": [
+      "5a7320ac5542991f9a20c620:about_time_board_game",
+      "5a7320ac5542991f9a20c620:java_board_game"
+    ]
+  },
+  {
+    "qid": "5a714b645542994082a3e78b",
+    "question": "What year did Lindsey Broad star in the movie with Russell Brand and Jonah Hill?",
+    "center_node": "5a714b645542994082a3e78b:lindsey_broad",
+    "answer": "2010",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 4,
+    "extraction_error": "",
+    "additional_center_nodes": []
+  },
+  {
+    "qid": "5a7322a25542991f9a20c634",
+    "question": "Was the Metropolitan Life Insurance Company Tower [Met Life Tower] or the 15 Hudson Yards building designed by the firm of Napoleon LeBrun & Sons?",
+    "center_node": "5a7322a25542991f9a20c634:metropolitan_life_insurance_c_adf2bab6a2",
+    "answer": "The Metropolitan Life Insurance Company Tower",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 3,
+    "extraction_error": "",
+    "additional_center_nodes": [
+      "5a7322a25542991f9a20c634:15_hudson_yards",
+      "5a7322a25542991f9a20c634:metropolitan_life_insurance_c_adf2bab6a2",
+      "5a7322a25542991f9a20c634:napoleon_lebrun"
+    ]
+  },
+  {
+    "qid": "5a714de95542994082a3e7a8",
+    "question": "Alexander Young, also known as George Alexander, is the uncle to which Scottish musician who replaced Malcolm Young in the band AC/DC in 2014?",
+    "center_node": "5a714de95542994082a3e7a8:stevie_young",
+    "answer": "Stephen Crawford Young",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 15,
+    "extraction_error": "",
+    "additional_center_nodes": []
+  },
+  {
+    "qid": "5a73235c5542994cef4bc475",
+    "question": "Was either Craig Melville or Grover Jones born in Indiana?",
+    "center_node": "5a73235c5542994cef4bc475:grover_jones",
+    "answer": "Jones was born in Rosedale, Indiana",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 3,
+    "extraction_error": "",
+    "additional_center_nodes": [
+      "5a73235c5542994cef4bc475:craig_melville",
+      "5a73235c5542994cef4bc475:grover_jones"
+    ]
+  },
+  {
+    "qid": "5a714f6f5542994082a3e7b3",
+    "question": "How many people live in the County serviced by The Collier Area Transit system?",
+    "center_node": "5a714f6f5542994082a3e7b3:collier_area_transit",
+    "answer": "321,520",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 3,
+    "extraction_error": "",
+    "additional_center_nodes": []
+  },
+  {
+    "qid": "5a7323ad5542994cef4bc476",
+    "question": "Which musician is older, Chantal Claret or Max Green?",
+    "center_node": "5a7323ad5542994cef4bc476:chantal_claret",
+    "answer": "Chantal Claret",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 2,
+    "extraction_error": "",
+    "additional_center_nodes": [
+      "5a7323ad5542994cef4bc476:chantal_claret",
+      "5a7323ad5542994cef4bc476:max_green_musician"
+    ]
+  },
+  {
+    "qid": "5a7150c75542994082a3e7be",
+    "question": "What is the capacity of the stadium that hosts games of the team that was coached by Barry Switzer in 1981?",
+    "center_node": "5a7150c75542994082a3e7be:1981_oklahoma_sooners_football_team",
+    "answer": "86,112",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 4,
+    "extraction_error": "",
+    "additional_center_nodes": []
+  },
+  {
+    "qid": "5a7323ef5542994cef4bc477",
+    "question": "Which battle took place first out of the Battle of the Ch'ongch'on River and the Battle of Tarawa?",
+    "center_node": "5a7323ef5542994cef4bc477:battle_of_the_ch_ongch_on_river",
+    "answer": "The Battle of Tarawa",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 2,
+    "extraction_error": "",
+    "additional_center_nodes": [
+      "5a7323ef5542994cef4bc477:battle_of_tarawa",
+      "5a7323ef5542994cef4bc477:battle_of_the_ch_ongch_on_river"
+    ]
+  },
+  {
+    "qid": "5a71646e5542994082a3e80e",
+    "question": "What is the proper name for the steroid used by the retired British track sprinter who is one of the fastest European sprinters in the history of athletics?",
+    "center_node": "5a71646e5542994082a3e80e:dwain_chambers",
+    "answer": "Tetrahydrogestrinone",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 7,
+    "extraction_error": "",
+    "additional_center_nodes": []
+  },
+  {
+    "qid": "5a7324205542994cef4bc478",
+    "question": "Who is a poet, Rumi or Farouk El-Baz?",
+    "center_node": "5a7324205542994cef4bc478:rumi",
+    "answer": "Rumi (30 September 1207 – 17 December 1273), was a 13th-century Persian Sunni Muslim poet",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 10,
+    "extraction_error": "",
+    "additional_center_nodes": [
+      "5a7324205542994cef4bc478:farouk_el_baz",
+      "5a7324205542994cef4bc478:rumi"
+    ]
+  },
+  {
+    "qid": "5a7166395542994082a3e814",
+    "question": "What is the name of the fight song of the university whose main campus is in Lawrence, Kansas and whose branch campuses are in the Kansas City metropolitan area?",
+    "center_node": "5a7166395542994082a3e814:university_of_kansas",
+    "answer": "Kansas Song",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 3,
+    "extraction_error": "",
+    "additional_center_nodes": []
+  },
+  {
+    "qid": "5a7332935542991f9a20c67d",
+    "question": "Which board game was published most recently, Pirate's Cove or Catan?",
+    "center_node": "5a7332935542991f9a20c67d:pirate_s_cove",
+    "answer": "Pirate's Cove",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 3,
+    "extraction_error": "",
+    "additional_center_nodes": [
+      "5a7332935542991f9a20c67d:catan",
+      "5a7332935542991f9a20c67d:pirate_s_cove"
+    ]
+  },
+  {
+    "qid": "5a71674f5542994082a3e819",
+    "question": "When was the magazine Sam Duckworth got his name Get Cape. Wear Cape. Fly from launched?",
+    "center_node": "5a71674f5542994082a3e819:get_cape_wear_cape_fly",
+    "answer": "January 2004",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 3,
+    "extraction_error": "",
+    "additional_center_nodes": []
+  },
+  {
+    "qid": "5a7336bd5542991f9a20c68c",
+    "question": "Which game is a board game, Mensch ärgere dich nicht or Roulette?",
+    "center_node": "5a7336bd5542991f9a20c68c:mensch_rgere_dich_nicht",
+    "answer": "Mensch ärgere Dich nicht",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 9,
+    "extraction_error": "",
+    "additional_center_nodes": [
+      "5a7336bd5542991f9a20c68c:mensch_rgere_dich_nicht",
+      "5a7336bd5542991f9a20c68c:roulette"
+    ]
+  },
+  {
+    "qid": "5a716a9b5542994082a3e821",
+    "question": "What actor from \"Willow\" also starred in \"The Usual Suspects\"?",
+    "center_node": "5a716a9b5542994082a3e821:kevin_pollak",
+    "answer": "Kevin Elliot Pollak",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 8,
+    "extraction_error": "",
+    "additional_center_nodes": []
+  },
+  {
+    "qid": "5a733c925542991f9a20c6b7",
+    "question": "The Polar Bear and Daiquiri are both examples of what?",
+    "center_node": "5a733c925542991f9a20c6b7:polar_bear_cocktail",
+    "answer": "cocktails",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 2,
+    "extraction_error": "",
+    "additional_center_nodes": [
+      "5a733c925542991f9a20c6b7:daiquiri",
+      "5a733c925542991f9a20c6b7:polar_bear",
+      "5a733c925542991f9a20c6b7:polar_bear_battery_electric_locomotive",
+      "5a733c925542991f9a20c6b7:polar_bear_cocktail",
+      "5a733c925542991f9a20c6b7:polar_bear_locomotive"
+    ]
+  },
+  {
+    "qid": "5a716c415542994082a3e827",
+    "question": "Which airline partners with Gogo Inflight Internet and opened in 1984?",
+    "center_node": "5a716c415542994082a3e827:gogo_inflight_internet",
+    "answer": "Virgin Atlantic",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 18,
+    "extraction_error": "",
+    "additional_center_nodes": []
+  },
+  {
+    "qid": "5a733caa5542992359bc32a3",
+    "question": "which board game has been around longer Obsession or Battle Sheep ?",
+    "center_node": "5a733caa5542992359bc32a3:obsession_board_game",
+    "answer": "Obsession",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 2,
+    "extraction_error": "",
+    "additional_center_nodes": [
+      "5a733caa5542992359bc32a3:battle_sheep",
+      "5a733caa5542992359bc32a3:obsession_board_game"
+    ]
+  },
+  {
+    "qid": "5a716dc15542994082a3e82b",
+    "question": "Who is younger Kirk Humphreys or Tom Coburn?",
+    "center_node": "5a716dc15542994082a3e82b:kirk_humphreys",
+    "answer": "Kirk Humphreys",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 2,
+    "extraction_error": "",
+    "additional_center_nodes": []
+  },
+  {
+    "qid": "5a7345185542992359bc32cb",
+    "question": "Which continent are both magazines, Sayidaty and Closer published?",
+    "center_node": "5a7345185542992359bc32cb:sayidaty",
+    "answer": "Europe",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 9,
+    "extraction_error": "",
+    "additional_center_nodes": [
+      "5a7345185542992359bc32cb:closer_magazine",
+      "5a7345185542992359bc32cb:sayidaty"
+    ]
+  },
+  {
+    "qid": "5a716ec85542994082a3e82d",
+    "question": "Which movie was filmed first \"The Guest\" or \"You're Next\"?",
+    "center_node": "5a716ec85542994082a3e82d:the_guest_film",
+    "answer": "You're Next",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 7,
+    "extraction_error": "",
+    "additional_center_nodes": []
+  },
+  {
+    "qid": "5a7345ed5542992359bc32ce",
+    "question": "Which field of studies did Semyon Aranovich Gershgorin and Anatoly Maltsev work in?",
+    "center_node": "5a7345ed5542992359bc32ce:madonna_studies",
+    "answer": "He was a mathematician",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 0,
+    "extraction_error": "Failed to parse JSON from LLM response; finish_reason=stop",
+    "additional_center_nodes": [
+      "5a7345ed5542992359bc32ce:anatoly_maltsev",
+      "5a7345ed5542992359bc32ce:semyon_aranovich_gershgorin"
+    ]
+  },
+  {
+    "qid": "5a716eeb5542994082a3e82e",
+    "question": "What actor starred with Virginia Katherine McMath in Star of Midnight?",
+    "center_node": "5a716eeb5542994082a3e82e:star_of_midnight",
+    "answer": "William Powell",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 3,
+    "extraction_error": "",
+    "additional_center_nodes": []
+  },
+  {
+    "qid": "5a734acf5542991f9a20c6ec",
+    "question": "Which singer is younger, Shirley Manson or Jim Kerr?",
+    "center_node": "5a734acf5542991f9a20c6ec:shirley_manson",
+    "answer": "Shirley Ann Manson",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 2,
+    "extraction_error": "",
+    "additional_center_nodes": [
+      "5a734acf5542991f9a20c6ec:jim_kerr",
+      "5a734acf5542991f9a20c6ec:shirley_manson"
+    ]
+  },
+  {
+    "qid": "5a71717d5542994082a3e834",
+    "question": "What star of \"Attack of the Gryphon\" was also a voice artist in Johnny Bravo?",
+    "center_node": "5a71717d5542994082a3e834:gryphon_film",
+    "answer": "Larry Richard Drake",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 6,
+    "extraction_error": "",
+    "additional_center_nodes": []
+  },
+  {
+    "qid": "5a734ca85542994cef4bc51b",
+    "question": "Alhambra and Tsuro are both examples of what type of game?",
+    "center_node": "5a734ca85542994cef4bc51b:alhambra_board_game",
+    "answer": "tile-based board game",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 5,
+    "extraction_error": "",
+    "additional_center_nodes": [
+      "5a734ca85542994cef4bc51b:alhambra_board_game",
+      "5a734ca85542994cef4bc51b:tsuro"
+    ]
+  },
+  {
+    "qid": "5a7172105542994082a3e837",
+    "question": "What film did Tom Wu appear in that also starred Jason Statham and Ray Liotta?",
+    "center_node": "5a7172105542994082a3e837:tom_wu",
+    "answer": "Revolver",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 12,
+    "extraction_error": "",
+    "additional_center_nodes": []
+  },
+  {
+    "qid": "5a734dad5542994cef4bc522",
+    "question": "In which city are Anadoluhisarı and Church of St. Mary of Blachernae both located?",
+    "center_node": "5a734dad5542994cef4bc522:anadoluhisar",
+    "answer": "Istanbul",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 2,
+    "extraction_error": "",
+    "additional_center_nodes": [
+      "5a734dad5542994cef4bc522:anadoluhisar",
+      "5a734dad5542994cef4bc522:blachernae",
+      "5a734dad5542994cef4bc522:church_of_st_mary_of_blachernae_istanbul"
+    ]
+  },
+  {
+    "qid": "5a7180205542994082a3e856",
+    "question": "The creator of \"Wallace and Gromit\" also created what animation comedy that matched animated zoo animals with a soundtrack of people talking about their homes?",
+    "center_node": "5a7180205542994082a3e856:nick_park",
+    "answer": "Creature Comforts",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 5,
+    "extraction_error": "",
+    "additional_center_nodes": []
+  },
+  {
+    "qid": "5a734db15542994cef4bc523",
+    "question": "Which musician was born first, Constantine Orbelian or Lili Chookasian?",
+    "center_node": "5a734db15542994cef4bc523:lili_chookasian",
+    "answer": "Lili Chookasian",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 2,
+    "extraction_error": "",
+    "additional_center_nodes": [
+      "5a734db15542994cef4bc523:constantine_orbelian",
+      "5a734db15542994cef4bc523:lili_chookasian"
+    ]
+  },
+  {
+    "qid": "5a7182b65542994082a3e85b",
+    "question": "How many European Jews died in the catastrophe of which Eva Hayman is a survivor?",
+    "center_node": "5a7182b65542994082a3e85b:eva_hayman",
+    "answer": "six million",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 5,
+    "extraction_error": "",
+    "additional_center_nodes": []
+  },
+  {
+    "qid": "5a734e6d5542994cef4bc528",
+    "question": "Which canal is located further North, Beaver and Erie Canal or the Dismal Swamp Canal?",
+    "center_node": "5a734e6d5542994cef4bc528:beaver_and_erie_canal",
+    "answer": "The Beaver and Erie Canal",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 2,
+    "extraction_error": "",
+    "additional_center_nodes": [
+      "5a734e6d5542994cef4bc528:beaver_and_erie_canal",
+      "5a734e6d5542994cef4bc528:dismal_swamp_canal"
+    ]
+  },
+  {
+    "qid": "5a7183575542994082a3e85e",
+    "question": "Who was the architect of a Dutch museum dedicated to the arts and history in Amsterdam, located at the Museum Square?",
+    "center_node": "5a7183575542994082a3e85e:rijksmuseum",
+    "answer": "Petrus Josephus Hubertus (Pierre) Cuypers",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 5,
+    "extraction_error": "",
+    "additional_center_nodes": []
+  },
+  {
+    "qid": "5a7350d55542994cef4bc535",
+    "question": "Which movie used more styles of animation and filming, James and the Giant Peach or Tangled ?",
+    "center_node": "5a7350d55542994cef4bc535:james_and_the_giant_peach_film",
+    "answer": "James and the Giant Peach",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 3,
+    "extraction_error": "",
+    "additional_center_nodes": [
+      "5a7350d55542994cef4bc535:james_and_the_giant_peach_film",
+      "5a7350d55542994cef4bc535:tangled"
+    ]
+  },
+  {
+    "qid": "5a7184675542994082a3e864",
+    "question": "What is the manufacturer of the car used by the Ford CD2 platform's design inspiration?",
+    "center_node": "5a7184675542994082a3e864:ford_cd2_platform",
+    "answer": "Mazda",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 3,
+    "extraction_error": "",
+    "additional_center_nodes": []
+  },
+  {
+    "qid": "5a7353795542991f29ee2d82",
+    "question": "Which was published first Timothy McSweeney's Quarterly Concern or Scrye?",
+    "center_node": "5a7353795542991f29ee2d82:timothy_mcsweeney_s_quarterly_concern",
+    "answer": "Timothy McSweeney's Quarterly Concern",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 3,
+    "extraction_error": "",
+    "additional_center_nodes": [
+      "5a7353795542991f29ee2d82:mcsweeney_s",
+      "5a7353795542991f29ee2d82:scrye",
+      "5a7353795542991f29ee2d82:timothy_mcsweeney_s_quarterly_concern"
+    ]
+  },
+  {
+    "qid": "5a7195a05542994082a3e881",
+    "question": "in what year did the Israeli presidential elections take place after the resignation of the seventh president of Israel?",
+    "center_node": "5a7195a05542994082a3e881:israeli_presidential_election_2000",
+    "answer": "2000",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 3,
+    "extraction_error": "",
+    "additional_center_nodes": []
+  },
+  {
+    "qid": "5a73551e5542991f29ee2d84",
+    "question": "Who was born first, Lawrence Ferlinghetti or Luigi Pirandello?",
+    "center_node": "5a73551e5542991f29ee2d84:liol",
+    "answer": "Luigi Pirandello",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 0,
+    "extraction_error": "hard timeout: no response after 45s (proxy/connect hang)",
+    "additional_center_nodes": [
+      "5a73551e5542991f29ee2d84:lawrence_ferlinghetti",
+      "5a73551e5542991f29ee2d84:luigi_pirandello"
+    ]
+  },
+  {
+    "qid": "5a719bf25542994082a3e891",
+    "question": "The astronomer who formulated the theory of stellar nucleosynthesis co-authored what landmark paper?",
+    "center_node": "5a719bf25542994082a3e891:fred_hoyle",
+    "answer": "BFH",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 5,
+    "extraction_error": "",
+    "additional_center_nodes": []
+  },
+  {
+    "qid": "5a735c3a55429901807daff7",
+    "question": "Nikolay Mitrofanovich Krylov and Anatoly Fomenko both held what academic title?",
+    "center_node": "5a735c3a55429901807daff7:nikolay_mitrofanovich_krylov",
+    "answer": "mathematician",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 8,
+    "extraction_error": "",
+    "additional_center_nodes": [
+      "5a735c3a55429901807daff7:anatoly_fomenko",
+      "5a735c3a55429901807daff7:nikolay_mitrofanovich_krylov"
+    ]
+  },
+  {
+    "qid": "5a7211e655429971e9dc923c",
+    "question": "What Finnish Christmas figure, which eventually become more or less conflated with Santa Claus, has modern representations typically made of straw.?",
+    "center_node": "5a7211e655429971e9dc923c:joulupukki",
+    "answer": "The Yule goat",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 5,
+    "extraction_error": "",
+    "additional_center_nodes": []
+  },
+  {
+    "qid": "5a735e9155429901807db00d",
+    "question": "What country is home to both Guadarrama National Park and Doñana National Park?",
+    "center_node": "5a735e9155429901807db00d:guadarrama_national_park",
+    "answer": "Spain",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 2,
+    "extraction_error": "",
+    "additional_center_nodes": [
+      "5a735e9155429901807db00d:do_ana_national_park",
+      "5a735e9155429901807db00d:guadarrama_national_park"
+    ]
+  },
+  {
+    "qid": "5a72120e55429971e9dc923f",
+    "question": "What is the name of the light rail station on the MAX Blue line 7 mi west of Portland, Oregon?",
+    "center_node": "5a72120e55429971e9dc923f:max_blue_line",
+    "answer": "Beaverton Creek",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 18,
+    "extraction_error": "",
+    "additional_center_nodes": []
+  },
+  {
+    "qid": "5a73630655429901807db020",
+    "question": "Who was born first, Antonin Artaud or  Elizabeth Taylor?",
+    "center_node": "5a73630655429901807db020:antonin_artaud",
+    "answer": "Antonin Artaud",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 2,
+    "extraction_error": "",
+    "additional_center_nodes": [
+      "5a73630655429901807db020:antonin_artaud",
+      "5a73630655429901807db020:elizabeth_taylor"
+    ]
+  },
+  {
+    "qid": "5a72125055429971e9dc9241",
+    "question": "What is the scientific name of the true creature featured in \"Creature from the Black Lagoon?",
+    "center_node": "5a72125055429971e9dc9241:eucritta",
+    "answer": "Eucritta melanolimnetes",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 8,
+    "extraction_error": "",
+    "additional_center_nodes": []
+  },
+  {
+    "qid": "5a7363465542991f29ee2dd5",
+    "question": "Which athlete was an American tennis player: Henri Kontinen or Melanie Oudin?",
+    "center_node": "5a7363465542991f29ee2dd5:melanie_oudin",
+    "answer": "Melanie Oudin",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 4,
+    "extraction_error": "",
+    "additional_center_nodes": [
+      "5a7363465542991f29ee2dd5:henri_kontinen",
+      "5a7363465542991f29ee2dd5:melanie_oudin"
+    ]
+  },
+  {
+    "qid": "5a72160e55429971e9dc9253",
+    "question": "Who is the son of the author of the short story \"The Enormous Radio.\"",
+    "center_node": "5a72160e55429971e9dc9253:the_enormous_radio",
+    "answer": "Benjamin Hale Cheever",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 7,
+    "extraction_error": "",
+    "additional_center_nodes": []
+  },
+  {
+    "qid": "5a7380b955429908901be2d4",
+    "question": "Which film is older, Monsters, Inc. or Earth?",
+    "center_node": "5a7380b955429908901be2d4:monsters_inc",
+    "answer": "Monsters, Inc.",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 2,
+    "extraction_error": "",
+    "additional_center_nodes": [
+      "5a7380b955429908901be2d4:earth_2007_film",
+      "5a7380b955429908901be2d4:monsters_inc",
+      "5a7380b955429908901be2d4:monsters_inc_franchise"
+    ]
+  },
+  {
+    "qid": "5a7217f255429971e9dc9260",
+    "question": "Which Member of Parliament for Macclesfield was married to Jane Ann Winterton?",
+    "center_node": "5a7217f255429971e9dc9260:nicholas_winterton",
+    "answer": "Sir Nicholas Raymond Winterton",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 4,
+    "extraction_error": "",
+    "additional_center_nodes": []
+  },
+  {
+    "qid": "5a7380e055429908901be2d6",
+    "question": "Which building is newer, The Spiral, or the New York World Building?",
+    "center_node": "5a7380e055429908901be2d6:the_spiral_new_york_city",
+    "answer": "The Spiral",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 3,
+    "extraction_error": "",
+    "additional_center_nodes": [
+      "5a7380e055429908901be2d6:new_york_world_building",
+      "5a7380e055429908901be2d6:the_spiral_new_york_city"
+    ]
+  },
+  {
+    "qid": "5a721a7655429971e9dc9271",
+    "question": "What actor from the show Murphy Brown also had a role in a show with fellow actor Steve Howey?",
+    "center_node": "5a721a7655429971e9dc9271:christopher_rich_actor",
+    "answer": "Christopher Rich",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 8,
+    "extraction_error": "",
+    "additional_center_nodes": []
+  },
+  {
+    "qid": "5a738225554299623ed4abc3",
+    "question": "Which musical fantasy film is older, Bedknobs and Broomsticks or The Muppet Christmas Carol?",
+    "center_node": "5a738225554299623ed4abc3:bedknobs_and_broomsticks",
+    "answer": "Bedknobs and Broomsticks",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 4,
+    "extraction_error": "",
+    "additional_center_nodes": [
+      "5a738225554299623ed4abc3:a_christmas_carol",
+      "5a738225554299623ed4abc3:bedknobs_and_broomsticks",
+      "5a738225554299623ed4abc3:the_muppet_christmas_carol"
+    ]
+  },
+  {
+    "qid": "5a721b9055429971e9dc9277",
+    "question": "What airline holding company located in Solna Municipality, Sweden owns a technical aircraft maintenance company located in Arlanda, Sweden?",
+    "center_node": "5a721b9055429971e9dc9277:sas_group",
+    "answer": "SAS Group",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 5,
+    "extraction_error": "",
+    "additional_center_nodes": []
+  },
+  {
+    "qid": "5a7385c45542992d56e7e359",
+    "question": "Who was born first, British novelist Doris Lessing or American writer Philip K. Dick?",
+    "center_node": "5a7385c45542992d56e7e359:doris_lessing",
+    "answer": "Doris May Lessing",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 6,
+    "extraction_error": "",
+    "additional_center_nodes": [
+      "5a7385c45542992d56e7e359:doris_lessing",
+      "5a7385c45542992d56e7e359:philip_k_dick"
+    ]
+  },
+  {
+    "qid": "5a721bbc55429971e9dc9279",
+    "question": "Which Grammy Nominated album was created by a band whose members include John Bowman?",
+    "center_node": "5a721bbc55429971e9dc9279:carl_carlton_german_musician",
+    "answer": "Nature's Symphony in 432",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 0,
+    "extraction_error": "hard timeout: no response after 45s (proxy/connect hang)",
+    "additional_center_nodes": []
+  },
+  {
+    "qid": "5a738b855542992d56e7e363",
+    "question": "Which hospital opened first, St. Elizabeths Hospital or Providence Hospital?",
+    "center_node": "5a738b855542992d56e7e363:st_elizabeths_hospital",
+    "answer": "St. Elizabeths Hospital",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 2,
+    "extraction_error": "",
+    "additional_center_nodes": [
+      "5a738b855542992d56e7e363:providence_hospital_washington_d_c",
+      "5a738b855542992d56e7e363:st_elizabeths_hospital"
+    ]
+  },
+  {
+    "qid": "5a721d5a55429971e9dc9283",
+    "question": "What Australian beer is a British style pale ale whose label features a character conceived in 1926?",
+    "center_node": "5a721d5a55429971e9dc9283:ballarat_bitter",
+    "answer": "Ballarat Bitter is a 4.9% (abv) Australian beer",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 5,
+    "extraction_error": "",
+    "additional_center_nodes": []
+  },
+  {
+    "qid": "5a738fb4554299623ed4abf9",
+    "question": "Which of these is further south in China, the Pulandian District or Kaiyuan, Liaoning?",
+    "center_node": "5a738fb4554299623ed4abf9:pulandian_district",
+    "answer": "Pulandian District",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 5,
+    "extraction_error": "",
+    "additional_center_nodes": [
+      "5a738fb4554299623ed4abf9:kaiyuan_liaoning",
+      "5a738fb4554299623ed4abf9:pulandian_district"
+    ]
+  },
+  {
+    "qid": "5a721dfd55429971e9dc928b",
+    "question": "Which of Kylian Hazard's older brothers plays for the German Bundesliga club Borussia Mönchengladbach and the Belgium national team.",
+    "center_node": "5a721dfd55429971e9dc928b:kylian_hazard",
+    "answer": "Thorgan Ganael Francis Hazard",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 12,
+    "extraction_error": "",
+    "additional_center_nodes": []
+  },
+  {
+    "qid": "5a7391b655429978a71e902c",
+    "question": "Who died first, Andrei Platonov or John Masefield?",
+    "center_node": "5a7391b655429978a71e902c:andrei_platonov",
+    "answer": "Andrei Platonov",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 2,
+    "extraction_error": "",
+    "additional_center_nodes": [
+      "5a7391b655429978a71e902c:andrei_platonov",
+      "5a7391b655429978a71e902c:john_masefield"
+    ]
+  },
+  {
+    "qid": "5a7220f055429971e9dc92ac",
+    "question": "What was the Volvo S70 essentially modeled after and was the first all wheel drive Volvo?",
+    "center_node": "5a7220f055429971e9dc92ac:volvo_s70",
+    "answer": "Volvo 850",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 3,
+    "extraction_error": "",
+    "additional_center_nodes": []
+  },
+  {
+    "qid": "5a739323554299623ed4abff",
+    "question": "Which famous mine was in service first, the Salmita Mine or the Kanichee Mine?",
+    "center_node": "5a739323554299623ed4abff:salmita_mine",
+    "answer": "Kanichee Mine",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 6,
+    "extraction_error": "",
+    "additional_center_nodes": [
+      "5a739323554299623ed4abff:kanichee_mine",
+      "5a739323554299623ed4abff:salmita_mine"
+    ]
+  },
+  {
+    "qid": "5a72239a55429971e9dc92cf",
+    "question": "Who was soldier Archie A. Peck's commanding officer during the Meuse-Argonne Offensive?",
+    "center_node": "5a72239a55429971e9dc92cf:archie_a_peck",
+    "answer": "Major Charles White Whittlesey",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 13,
+    "extraction_error": "",
+    "additional_center_nodes": []
+  },
+  {
+    "qid": "5a73977d554299623ed4ac08",
+    "question": "What is the shared country of ancestry between Art Laboe and Scout Tufankjian?",
+    "center_node": "5a73977d554299623ed4ac08:art_laboe",
+    "answer": "Armenian",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 2,
+    "extraction_error": "",
+    "additional_center_nodes": [
+      "5a73977d554299623ed4ac08:art_laboe",
+      "5a73977d554299623ed4ac08:scout_tufankjian"
+    ]
+  },
+  {
+    "qid": "5a7224ab55429971e9dc92dd",
+    "question": "Who was the lead singer of Eighth Wonder and who was born on March, 4th in 1968?",
+    "center_node": "5a7224ab55429971e9dc92dd:patsy_kensit",
+    "answer": "Patricia Jude Francis Kensit",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 8,
+    "extraction_error": "",
+    "additional_center_nodes": []
+  },
+  {
+    "qid": "5a73987c55429978a71e9039",
+    "question": "Which production company was involved with both of the movies A Kid in King Arthur's Court and The Great Locomotive Chase?",
+    "center_node": "5a73987c55429978a71e9039:a_kid_in_king_arthur_s_court",
+    "answer": "Walt Disney Productions",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 3,
+    "extraction_error": "",
+    "additional_center_nodes": [
+      "5a73987c55429978a71e9039:a_kid_in_king_arthur_s_court",
+      "5a73987c55429978a71e9039:the_great_locomotive_chase"
+    ]
+  },
+  {
+    "qid": "5a7228f655429971e9dc9312",
+    "question": "Which \"novel with a key\" was written by John Ehrlichman about the CIA, base on events leading up to the Watergate coverup?",
+    "center_node": "5a7228f655429971e9dc9312:the_company_ehrlichman_novel",
+    "answer": "The Company",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 36,
+    "extraction_error": "",
+    "additional_center_nodes": []
+  },
+  {
+    "qid": "5a739d8755429978a71e9048",
+    "question": "Which publication is older, the Stanford Chaparral or Dime Magazine?",
+    "center_node": "5a739d8755429978a71e9048:stanford_chaparral",
+    "answer": "The Stanford Chaparral",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 2,
+    "extraction_error": "",
+    "additional_center_nodes": [
+      "5a739d8755429978a71e9048:dime_magazine",
+      "5a739d8755429978a71e9048:stanford_chaparral"
+    ]
+  },
+  {
+    "qid": "5a722a6855429971e9dc9320",
+    "question": "What is the character's name for which Anna Leonidovna Kovalchuk won a prize in the legal festival \"Law and Society\"?",
+    "center_node": "5a722a6855429971e9dc9320:anna_kovalchuk",
+    "answer": "Chief Detective Maria Shvetsova",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 6,
+    "extraction_error": "",
+    "additional_center_nodes": []
+  },
+  {
+    "qid": "5a73b8d655429908901be31f",
+    "question": "Which university is further North,  University of New Hampshire or Stony Brook University?",
+    "center_node": "5a73b8d655429908901be31f:university_of_new_hampshire",
+    "answer": "Stony Brook University",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 3,
+    "extraction_error": "",
+    "additional_center_nodes": [
+      "5a73b8d655429908901be31f:stony_brook_university",
+      "5a73b8d655429908901be31f:university_of_new_hampshire"
+    ]
+  },
+  {
+    "qid": "5a722b8655429971e9dc9329",
+    "question": "Who was the writer of These Boots Are Made for Walkin' and who died in 2007?",
+    "center_node": "5a722b8655429971e9dc9329:these_boots_are_made_for_walkin",
+    "answer": "Barton Lee Hazlewood",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 12,
+    "extraction_error": "",
+    "additional_center_nodes": []
+  },
+  {
+    "qid": "5a73bcf055429978a71e909c",
+    "question": "Which novelist wrote under the pen name Walter Ericson: Laura Esquivel or Howard Fast?",
+    "center_node": "5a73bcf055429978a71e909c:howard_fast",
+    "answer": "Howard Melvin Fast",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 12,
+    "extraction_error": "",
+    "additional_center_nodes": [
+      "5a73bcf055429978a71e909c:howard_fast",
+      "5a73bcf055429978a71e909c:laura_esquivel"
+    ]
+  },
+  {
+    "qid": "5a722c2255429971e9dc932c",
+    "question": "What type of development, currently existing in Pasay, is currently being considered for malls such as one in M.A. Roxas Avenue in Clark Freeport, Angeles City in Pampanga Philippines?",
+    "center_node": "5a722c2255429971e9dc932c:sm_lifestyle_city",
+    "answer": "SM Lifestyle Cities",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 5,
+    "extraction_error": "",
+    "additional_center_nodes": []
+  },
+  {
+    "qid": "5a74325055429979e28828b3",
+    "question": "BOTH Skyang Kangri and Pumari Chhish are both what?",
+    "center_node": "5a74325055429979e28828b3:skyang_kangri",
+    "answer": "subrange of the Karakoram range",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 6,
+    "extraction_error": "",
+    "additional_center_nodes": [
+      "5a74325055429979e28828b3:pumari_chhish",
+      "5a74325055429979e28828b3:skyang_kangri"
+    ]
+  },
+  {
+    "qid": "5a722fae55429971e9dc9343",
+    "question": "What is the name of the daughter of the Irish entertainer in the girl band Maxi, Dick and Twink?",
+    "center_node": "5a722fae55429971e9dc9343:adele_king",
+    "answer": "Chloë Alexandra Adele Emily Agnew",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 8,
+    "extraction_error": "",
+    "additional_center_nodes": []
+  },
+  {
+    "qid": "5a7456ec55429979e288290f",
+    "question": "which film came out first, African Cats or Fun and Fancy Free ?",
+    "center_node": "5a7456ec55429979e288290f:fun_and_fancy_free",
+    "answer": "Fun and Fancy Free",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 4,
+    "extraction_error": "",
+    "additional_center_nodes": [
+      "5a7456ec55429979e288290f:african_cats",
+      "5a7456ec55429979e288290f:fancy_free_ballet",
+      "5a7456ec55429979e288290f:fun_and_fancy_free",
+      "5a7456ec55429979e288290f:i_m_settin_fancy_free"
+    ]
+  },
+  {
+    "qid": "5a72334755429971e9dc934c",
+    "question": "\"Heartbreak Hurricane\" was recorded by which country artist, that also goes by the name Ricky Skaggs?",
+    "center_node": "5a72334755429971e9dc934c:heartbreak_hurricane",
+    "answer": "Rickie Lee Skaggs",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 12,
+    "extraction_error": "",
+    "additional_center_nodes": []
+  },
+  {
+    "qid": "5a7458ff55429979e2882918",
+    "question": "That Darn Cat and Honey, I Blew Up the Kid are both what?",
+    "center_node": "5a7458ff55429979e2882918:that_darn_cat_1997_film",
+    "answer": "comedy",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 10,
+    "extraction_error": "",
+    "additional_center_nodes": [
+      "5a7458ff55429979e2882918:honey_i_blew_up_the_kid",
+      "5a7458ff55429979e2882918:that_darn_cat",
+      "5a7458ff55429979e2882918:that_darn_cat_1997_film"
+    ]
+  },
+  {
+    "qid": "5a72339855429971e9dc934d",
+    "question": "Which song reached number 3 on the \"Billboard\" Hot 100 that featured guest vocals fron Allessia Cara And Khalid?",
+    "center_node": "5a72339855429971e9dc934d:1_800_273_8255_song",
+    "answer": "1-800-273-8255",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 4,
+    "extraction_error": "",
+    "additional_center_nodes": []
+  },
+  {
+    "qid": "5a745a6055429974ef308be4",
+    "question": "Which of the following works was completed first, Something Wicked This Way Comes or The Wind in the Willows?",
+    "center_node": "5a745a6055429974ef308be4:the_wind_in_the_willows",
+    "answer": "The Wind in the Willows",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 3,
+    "extraction_error": "",
+    "additional_center_nodes": [
+      "5a745a6055429974ef308be4:something_wicked_this_way_com_9303ee8ad9",
+      "5a745a6055429974ef308be4:something_wicked_this_way_com_b699515a50",
+      "5a745a6055429974ef308be4:something_wicked_this_way_comes_film",
+      "5a745a6055429974ef308be4:something_wicked_this_way_comes_novel",
+      "5a745a6055429974ef308be4:the_wind_in_the_willows"
+    ]
+  },
+  {
+    "qid": "5a72429355429971e9dc9375",
+    "question": "What machine has the same name as another machine created by Ludwig Boltzmann?",
+    "center_node": "5a72429355429971e9dc9375:boltzmann_machine",
+    "answer": "Boltzmann machine",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 14,
+    "extraction_error": "",
+    "additional_center_nodes": []
+  },
+  {
+    "qid": "5a746a4455429974ef308bf6",
+    "question": "Which tennis player is older out of John Peers and Simone Bolelli?",
+    "center_node": "5a746a4455429974ef308bf6:john_peers",
+    "answer": "Simone Bolelli",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 2,
+    "extraction_error": "",
+    "additional_center_nodes": [
+      "5a746a4455429974ef308bf6:john_peers",
+      "5a746a4455429974ef308bf6:simone_bolelli"
+    ]
+  },
+  {
+    "qid": "5a7243915542990c210a4086",
+    "question": "Where is the University of North Carolina at Wilmington, population 112,067 located?",
+    "center_node": "5a7243915542990c210a4086:university_of_north_carolina__7a27dc6869",
+    "answer": "Wilmington, North Carolina",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 5,
+    "extraction_error": "",
+    "additional_center_nodes": []
+  },
+  {
+    "qid": "5a746ddc55429929fddd8423",
+    "question": "Who is older, Thomas Friedman or English author David Lodge?",
+    "center_node": "5a746ddc55429929fddd8423:thomas_friedman",
+    "answer": "David John Lodge CBE",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 16,
+    "extraction_error": "",
+    "additional_center_nodes": [
+      "5a746ddc55429929fddd8423:david_lodge_author",
+      "5a746ddc55429929fddd8423:thomas_friedman"
+    ]
+  },
+  {
+    "qid": "5a7244955542990c210a408a",
+    "question": "What was the name changed to after Allison J71 was modified to a thrust of 7400 lbf?",
+    "center_node": "5a7244955542990c210a408a:allison_j71",
+    "answer": "J35",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 2,
+    "extraction_error": "",
+    "additional_center_nodes": []
+  },
+  {
+    "qid": "5a74701655429979e2882952",
+    "question": "Which band has released the most studio albums, Blonde Redhead or Rob Zombie's band White Zombie?",
+    "center_node": "5a74701655429979e2882952:blonde_redhead",
+    "answer": "Blonde Redhead",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 5,
+    "extraction_error": "",
+    "additional_center_nodes": [
+      "5a74701655429979e2882952:blonde_redhead",
+      "5a74701655429979e2882952:rob_zombie"
+    ]
+  },
+  {
+    "qid": "5a7248665542990c210a40b1",
+    "question": "What is the colloquial name of the professional football team in which striker Frederico Chaves Guedos played?",
+    "center_node": "5a7248665542990c210a40b1:fred_footballer",
+    "answer": "Rooster",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 3,
+    "extraction_error": "",
+    "additional_center_nodes": []
+  },
+  {
+    "qid": "5a74702555429929fddd8428",
+    "question": "Who is older out of Bob Saget, the American comedian, and Indian director S. Shankar?",
+    "center_node": "5a74702555429929fddd8428:bob_saget",
+    "answer": "Robert Lane \"Bob\" Saget",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 2,
+    "extraction_error": "",
+    "additional_center_nodes": [
+      "5a74702555429929fddd8428:bob_saget",
+      "5a74702555429929fddd8428:s_shankar"
+    ]
+  },
+  {
+    "qid": "5a7249b85542990c210a40b9",
+    "question": "Osireion is located to the rear of the temple named after which New Kingdom Nineteenth Dynasty of Egypt pharaoh?",
+    "center_node": "5a7249b85542990c210a40b9:osireion",
+    "answer": "Seti I",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 6,
+    "extraction_error": "",
+    "additional_center_nodes": []
+  },
+  {
+    "qid": "5a74760b55429974ef308c03",
+    "question": "Which composer was born first out of Gaspare Spontini and Wolfgang Amadeus Mozart?",
+    "center_node": "5a74760b55429974ef308c03:wolfgang_amadeus_mozart",
+    "answer": "Gaspare Luigi Pacifico Spontini",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 10,
+    "extraction_error": "",
+    "additional_center_nodes": [
+      "5a74760b55429974ef308c03:amadeus_film",
+      "5a74760b55429974ef308c03:gaspare_spontini",
+      "5a74760b55429974ef308c03:wolfgang_amadeus_mozart"
+    ]
+  },
+  {
+    "qid": "5a724a2b5542990c210a40bc",
+    "question": "What team plays within the Big 12 Conference and has Kevin Bookout playing for them?",
+    "center_node": "5a724a2b5542990c210a40bc:kevin_bookout",
+    "answer": "Oklahoma Sooners men's basketball",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 3,
+    "extraction_error": "",
+    "additional_center_nodes": []
+  },
+  {
+    "qid": "5a747a3755429974ef308c09",
+    "question": "What two occupations did Scott Weiland and Richard Hawley have in common?",
+    "center_node": "5a747a3755429974ef308c09:scott_weiland",
+    "answer": "singer and songwriter",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 6,
+    "extraction_error": "",
+    "additional_center_nodes": [
+      "5a747a3755429974ef308c09:richard_hawley",
+      "5a747a3755429974ef308c09:scott_weiland"
+    ]
+  },
+  {
+    "qid": "5a724ba25542990c210a40c7",
+    "question": "What is the English translation of the social group which Baran Khan Kudezai was a part of?",
+    "center_node": "5a724ba25542990c210a40c7:baran_khan_kudezai",
+    "answer": "grand assembly",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 2,
+    "extraction_error": "",
+    "additional_center_nodes": []
+  },
+  {
+    "qid": "5a747a9a55429929fddd8444",
+    "question": "Which composer lived longer, Maurice Ravel or Paul Hindemith?",
+    "center_node": "5a747a9a55429929fddd8444:maurice_ravel",
+    "answer": "Paul Hindemith",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 4,
+    "extraction_error": "",
+    "additional_center_nodes": [
+      "5a747a9a55429929fddd8444:maurice_ravel",
+      "5a747a9a55429929fddd8444:paul_hindemith"
+    ]
+  },
+  {
+    "qid": "5a7252db5542990c210a4104",
+    "question": "What is the name of the oldest child that attended the Trump campaign-Russian meeting?",
+    "center_node": "5a7252db5542990c210a4104:donald_trump_jr",
+    "answer": "Donald Trump Jr.",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 5,
+    "extraction_error": "",
+    "additional_center_nodes": []
+  },
+  {
+    "qid": "5a74879255429974ef308c1d",
+    "question": "Which park is larger of the two, Doñana National Park or Timanfaya National Park?",
+    "center_node": "5a74879255429974ef308c1d:do_ana_national_park",
+    "answer": "Doñana National Park",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 2,
+    "extraction_error": "",
+    "additional_center_nodes": [
+      "5a74879255429974ef308c1d:do_ana_national_park",
+      "5a74879255429974ef308c1d:timanfaya_national_park"
+    ]
+  },
+  {
+    "qid": "5a7261635542997f8278398a",
+    "question": "Where is the city that Ingrida Ardišauskaitė was born in located in Lithuania?",
+    "center_node": "5a7261635542997f8278398a:ingrida_ardi_auskait",
+    "answer": "a city in north-east Lithuania.",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 2,
+    "extraction_error": "",
+    "additional_center_nodes": []
+  },
+  {
+    "qid": "5a749af055429979e28829b7",
+    "question": "Which Walt Disney film was produced first, The Apple Dumpling Gang or Something Wicked This Way Comes?",
+    "center_node": "5a749af055429979e28829b7:the_apple_dumpling_gang_film",
+    "answer": "The Apple Dumpling Gang",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 7,
+    "extraction_error": "",
+    "additional_center_nodes": [
+      "5a749af055429979e28829b7:something_wicked_this_way_com_9303ee8ad9",
+      "5a749af055429979e28829b7:something_wicked_this_way_comes_film",
+      "5a749af055429979e28829b7:something_wicked_this_way_comes_novel",
+      "5a749af055429979e28829b7:the_apple_dumpling_gang_film"
+    ]
+  }
+]

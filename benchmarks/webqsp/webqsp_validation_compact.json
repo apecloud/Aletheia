@@ -1,0 +1,3716 @@
+[
+  {
+    "id": "WebQTrn-206",
+    "question": "who won golden boot",
+    "answer": [
+      "Robin van Persie",
+      "Cristiano Ronaldo"
+    ],
+    "q_entity": [
+      "Premier League Golden Boot"
+    ],
+    "a_entity": [
+      "Robin van Persie",
+      "Cristiano Ronaldo"
+    ],
+    "graph_size": 68,
+    "graph": [
+      [
+        "Date Discontinued",
+        "type.property.schema",
+        "Award category"
+      ],
+      [
+        "Pulitzer Prize for Poetry",
+        "freebase.valuenotation.has_no_value",
+        "Date Discontinued"
+      ],
+      [
+        "Award category",
+        "type.property.reverse_property",
+        "Winners"
+      ],
+      [
+        "Award category",
+        "type.type.properties",
+        "Winners"
+      ],
+      [
+        "Award category",
+        "freebase.type_profile.strict_included_types",
+        "Abstract"
+      ],
+      [
+        "Award",
+        "type.property.reverse_property",
+        "Nominees"
+      ],
+      [
+        "m.0w3m61v",
+        "award.award_honor.award",
+        "Premier League Golden Boot"
+      ],
+      [
+        "Date Established",
+        "type.property.schema",
+        "Award category"
+      ],
+      [
+        "Award category",
+        "type.type.expected_by",
+        "Award categories"
+      ],
+      [
+        "Award category",
+        "type.type.properties",
+        "Nominees"
+      ],
+      [
+        "Award category",
+        "common.topic.article",
+        "m.02nqvht"
+      ],
+      [
+        "Award category",
+        "type.property.expected_type",
+        "Award category"
+      ],
+      [
+        "Award",
+        "rdf-schema#range",
+        "Award category"
+      ],
+      [
+        "Award category",
+        "freebase.type_profile.strict_included_types",
+        "Non-Agent"
+      ],
+      [
+        "Award category",
+        "type.type.properties",
+        "Presenting Organization"
+      ],
+      [
+        "Award category",
+        "owl#inverseOf",
+        "Winners"
+      ],
+      [
+        "Award",
+        "type.property.expected_type",
+        "Award category"
+      ],
+      [
+        "Award category",
+        "type.type.properties",
+        "Award announcements"
+      ],
+      [
+        "Robin van Persie",
+        "award.award_winner.awards_won",
+        "m.0w41162"
+      ],
+      [
+        "m.0w41162",
+        "award.award_honor.award",
+        "Premier League Golden Boot"
+      ],
+      [
+        "Cristiano Ronaldo",
+        "award.award_winner.awards_won",
+        "m.0w3m61v"
+      ],
+      [
+        "Premier League Golden Boot",
+        "common.topic.article",
+        "m.0by0312"
+      ],
+      [
+        "Pulitzer Prize for Poetry",
+        "common.topic.notable_types",
+        "Award category"
+      ],
+      [
+        "Winners",
+        "rdf-schema#domain",
+        "Award category"
+      ],
+      [
+        "m.0w41162",
+        "award.award_honor.award_winner",
+        "Robin van Persie"
+      ],
+      [
+        "Award category",
+        "type.type.properties",
+        "Date Discontinued"
+      ],
+      [
+        "Award category",
+        "type.type.expected_by",
+        "Award categories"
+      ],
+      [
+        "Premier League Golden Boot",
+        "common.topic.notable_types",
+        "Award category"
+      ],
+      [
+        "Award category",
+        "type.type.expected_by",
+        "Awards Bestowed"
+      ],
+      [
+        "m.0w3m61v",
+        "award.award_honor.award_winner",
+        "Cristiano Ronaldo"
+      ],
+      [
+        "Award category",
+        "type.type.properties",
+        "Nomination announcements"
+      ],
+      [
+        "Premier League Golden Boot",
+        "award.award_category.winners",
+        "m.0w3m61v"
+      ],
+      [
+        "Award category",
+        "freebase.type_profile.strict_included_types",
+        "Topic"
+      ],
+      [
+        "Award category",
+        "freebase.type_profile.kind",
+        "Classification"
+      ],
+      [
+        "Award category",
+        "type.type.domain",
+        "Awards"
+      ],
+      [
+        "Award category",
+        "type.type.properties",
+        "Judges/Jury"
+      ],
+      [
+        "Premier League Golden Boot",
+        "award.award_category.winners",
+        "m.0w4119z"
+      ],
+      [
+        "Premier League Golden Boot",
+        "common.topic.notable_for",
+        "g.1yl5mv_6r"
+      ],
+      [
+        "Award category",
+        "type.type.properties",
+        "Date Established"
+      ],
+      [
+        "Award category",
+        "freebase.type_profile.strict_included_types",
+        "Inanimate"
+      ],
+      [
+        "Premier League Golden Boot",
+        "award.award_category.winners",
+        "m.0w41162"
+      ],
+      [
+        "m.0w4119z",
+        "award.award_honor.award_winner",
+        "Robin van Persie"
+      ],
+      [
+        "Award category",
+        "type.type.expected_by",
+        "Award"
+      ],
+      [
+        "m.0w4119z",
+        "award.award_honor.award",
+        "Premier League Golden Boot"
+      ],
+      [
+        "Award category",
+        "type.type.expected_by",
+        "Category"
+      ],
+      [
+        "Award",
+        "owl#inverseOf",
+        "Nominees"
+      ],
+      [
+        "Award category",
+        "type.type.expected_by",
+        "Award category"
+      ],
+      [
+        "Award category",
+        "rdf-schema#range",
+        "Award category"
+      ],
+      [
+        "Date Discontinued",
+        "rdf-schema#domain",
+        "Award category"
+      ],
+      [
+        "Award category",
+        "freebase.documented_object.documentation",
+        "m.02nqvht"
+      ],
+      [
+        "Robin van Persie",
+        "award.award_winner.awards_won",
+        "m.0w4119z"
+      ],
+      [
+        "Award category",
+        "type.type.expected_by",
+        "Award category"
+      ],
+      [
+        "Award category",
+        "type.type.properties",
+        "Category of"
+      ],
+      [
+        "Award category",
+        "type.type.properties",
+        "Long lists"
+      ],
+      [
+        "Award category",
+        "freebase.type_profile.featured_topics",
+        "Pulitzer Prize for Poetry"
+      ],
+      [
+        "Award category",
+        "type.type.expected_by",
+        "Award"
+      ],
+      [
+        "Winners",
+        "type.property.master_property",
+        "Award category"
+      ],
+      [
+        "Award category",
+        "type.type.properties",
+        "Recurring ceremony"
+      ],
+      [
+        "Winners",
+        "type.property.schema",
+        "Award category"
+      ],
+      [
+        "Award category",
+        "type.type.expected_by",
+        "award"
+      ],
+      [
+        "Award category",
+        "type.type.expected_by",
+        "Award"
+      ],
+      [
+        "Date Established",
+        "rdf-schema#domain",
+        "Award category"
+      ],
+      [
+        "Award category",
+        "type.type.expected_by",
+        "Categories"
+      ],
+      [
+        "Award category",
+        "freebase.type_hints.included_types",
+        "Topic"
+      ],
+      [
+        "Award category",
+        "type.type.properties",
+        "Disciplines or subjects"
+      ],
+      [
+        "Award category",
+        "freebase.type_profile.published",
+        "Published"
+      ],
+      [
+        "Award category",
+        "type.type.expected_by",
+        "Award categories presented"
+      ],
+      [
+        "Award category",
+        "type.type.expected_by",
+        "Awards in this discipline"
+      ]
+    ]
+  },
+  {
+    "id": "WebQTrn-1321",
+    "question": "what city is the university of maryland university college in",
+    "answer": [
+      "Adelphi",
+      "United States of America",
+      "Maryland"
+    ],
+    "q_entity": [
+      "University of Maryland University College"
+    ],
+    "a_entity": [
+      "Adelphi",
+      "United States of America",
+      "Maryland"
+    ],
+    "graph_size": 423,
+    "graph": [
+      [
+        "Goatman",
+        "base.mystery.cryptid.area_of_occurrence",
+        "Prince George's County"
+      ],
+      [
+        "m.0w7z7g8",
+        "education.education.degree",
+        "Bachelor of Arts"
+      ],
+      [
+        "Maryland",
+        "government.political_district.representatives",
+        "m.0_zbq82"
+      ],
+      [
+        "United States of America",
+        "meteorology.cyclone_affected_area.cyclones",
+        "Hurricane Isabel"
+      ],
+      [
+        "m.0k7k43n",
+        "measurement_unit.dated_money_value.currency",
+        "United States Dollar"
+      ],
+      [
+        "College/University",
+        "freebase.type_hints.included_types",
+        "Educational Institution"
+      ],
+      [
+        "College/University",
+        "base.descriptive_names.names.descriptive_name",
+        "m.0123p367"
+      ],
+      [
+        "Heriot-Watt University",
+        "common.topic.notable_types",
+        "College/University"
+      ],
+      [
+        "Location",
+        "freebase.type_hints.included_types",
+        "Topic"
+      ],
+      [
+        "m.0h40dx7",
+        "education.education.student",
+        "William J. Boarman"
+      ],
+      [
+        "Navy Blue",
+        "common.topic.notable_types",
+        "Color"
+      ],
+      [
+        "Prince George's County",
+        "location.administrative_division.second_level_division_of",
+        "United States of America"
+      ],
+      [
+        "Organization",
+        "freebase.type_profile.published",
+        "Published"
+      ],
+      [
+        "University of Maryland University College",
+        "education.educational_institution.students_graduates",
+        "m.0h7tgk8"
+      ],
+      [
+        "College/University",
+        "freebase.type_hints.included_types",
+        "Organization"
+      ],
+      [
+        "John William Vessey, Jr.",
+        "people.person.nationality",
+        "United States of America"
+      ],
+      [
+        "Street Address 2",
+        "rdf-schema#domain",
+        "Address"
+      ],
+      [
+        "Robert T. Hastings, Jr.",
+        "people.person.education",
+        "m.0hnjgzg"
+      ],
+      [
+        "m.0zw1w0n",
+        "freebase.valuenotation.has_value",
+        "Major/Field Of Study"
+      ],
+      [
+        "Prince George's County",
+        "location.us_county.hud_county_place",
+        "Adelphi"
+      ],
+      [
+        "University of Maryland University College",
+        "education.educational_institution.students_graduates",
+        "m.04hsnnv"
+      ],
+      [
+        "Adelphi",
+        "location.hud_foreclosure_area.bls_unemployment_rate",
+        "m.07gznd8"
+      ],
+      [
+        "United States of America",
+        "base.biblioness.bibs_topic.subsumes",
+        "United States of America"
+      ],
+      [
+        "James N. Robey",
+        "people.person.education",
+        "m.04hq_fp"
+      ],
+      [
+        "United States, with Territories",
+        "base.aareas.schema.administrative_area.administrative_children",
+        "United States of America"
+      ],
+      [
+        "m.0g5cr3q",
+        "education.education.institution",
+        "University of Maryland University College"
+      ],
+      [
+        "Dokuz Eyl\u00fcl University",
+        "education.educational_institution_campus.educational_institution",
+        "Dokuz Eyl\u00fcl University"
+      ],
+      [
+        "University of Maryland University College",
+        "education.university.number_of_undergraduates",
+        "m.0k7qrhs"
+      ],
+      [
+        "Headquarters",
+        "rdf-schema#domain",
+        "Organization"
+      ],
+      [
+        "University of Essex Online",
+        "organization.organization.organization_type",
+        "Public university"
+      ],
+      [
+        "m.0h8167c",
+        "organization.leadership.person",
+        "Susan C. Aldridge"
+      ],
+      [
+        "m.0cnp1lg",
+        "location.mailing_address.country",
+        "United States of America"
+      ],
+      [
+        "Public university",
+        "organization.organization_type.organizations_of_this_type",
+        "Rhine-Waal University of Applied Sciences"
+      ],
+      [
+        "University of Maryland University College",
+        "education.educational_institution.students_graduates",
+        "m.0hnhcxw"
+      ],
+      [
+        "Maryland",
+        "base.aareas.schema.administrative_area.capital",
+        "Annapolis"
+      ],
+      [
+        "m.0hnjgzg",
+        "education.education.student",
+        "Robert T. Hastings, Jr."
+      ],
+      [
+        "College/University",
+        "base.descriptive_names.names.descriptive_name",
+        "m.012c3llf"
+      ],
+      [
+        "US Census Designated Place",
+        "freebase.type_profile.published",
+        "Published"
+      ],
+      [
+        "m.0h8169q",
+        "measurement_unit.dated_money_value.currency",
+        "United States Dollar"
+      ],
+      [
+        "m.0gx5w55",
+        "education.education.student",
+        "Frederick H. Bealefeld III"
+      ],
+      [
+        "College/University",
+        "type.type.properties",
+        "Fraternities and sororities"
+      ],
+      [
+        "College/University",
+        "base.descriptive_names.names.descriptive_name",
+        "m.012nnm2d"
+      ],
+      [
+        "Susan C. Aldridge",
+        "business.board_member.leader_of",
+        "m.0h8167c"
+      ],
+      [
+        "Public university",
+        "organization.organization_type.organizations_of_this_type",
+        "University of Essex Online"
+      ],
+      [
+        "m.0k7k47_",
+        "measurement_unit.dated_money_value.currency",
+        "United States Dollar"
+      ],
+      [
+        "Heriot-Watt University",
+        "education.educational_institution.campuses",
+        "Heriot-Watt University"
+      ],
+      [
+        "Elizabeth Bobo",
+        "people.person.education",
+        "m.0g5c0db"
+      ],
+      [
+        "University of Maryland University College",
+        "education.educational_institution.students_graduates",
+        "m.0g5dgf0"
+      ],
+      [
+        "Maryland",
+        "location.location.time_zones",
+        "Eastern Time Zone"
+      ],
+      [
+        "Maryland",
+        "freebase.valuenotation.is_reviewed",
+        "Minimum wage"
+      ],
+      [
+        "Joseph Tydings",
+        "people.person.education",
+        "m.0g5djj8"
+      ],
+      [
+        "m.04f94wv",
+        "education.education.major_field_of_study",
+        "Business Administration"
+      ],
+      [
+        "m.0g5dcqk",
+        "education.education.student",
+        "Barbara A. Frush"
+      ],
+      [
+        "University of Maryland University College",
+        "education.educational_institution.students_graduates",
+        "m.04hs86v"
+      ],
+      [
+        "m.04hq_fp",
+        "education.education.student",
+        "James N. Robey"
+      ],
+      [
+        "m.0k7fm52",
+        "measurement_unit.dated_money_value.currency",
+        "United States Dollar"
+      ],
+      [
+        "Maryland",
+        "base.aareas.schema.administrative_area.administrative_parent",
+        "United States of America"
+      ],
+      [
+        "United States of America",
+        "location.country.first_level_divisions",
+        "Maryland"
+      ],
+      [
+        "m.0k7flyq",
+        "measurement_unit.dated_money_value.currency",
+        "United States Dollar"
+      ],
+      [
+        "m.0g5dgf0",
+        "education.education.institution",
+        "University of Maryland University College"
+      ],
+      [
+        "Daniel J. Watermeier",
+        "people.person.education",
+        "m.0zw1w0n"
+      ],
+      [
+        "College/University",
+        "base.descriptive_names.names.descriptive_name",
+        "m.012svnyq"
+      ],
+      [
+        "United States of America",
+        "base.biblioness.bibs_topic.is_really",
+        "United States of America"
+      ],
+      [
+        "Public university",
+        "common.topic.notable_for",
+        "g.126sphpy1"
+      ],
+      [
+        "m.0h427p4",
+        "education.education.institution",
+        "University of Maryland University College"
+      ],
+      [
+        "m.0g5c0db",
+        "education.education.student",
+        "Elizabeth Bobo"
+      ],
+      [
+        "University of Maryland University College",
+        "education.educational_institution.students_graduates",
+        "m.04hgz52"
+      ],
+      [
+        "Prince George's County",
+        "base.mystery.cryptid_area_of_occurrence.cryptid_s_found_here",
+        "Goatman"
+      ],
+      [
+        "Street Address 2",
+        "type.property.schema",
+        "Address"
+      ],
+      [
+        "College/University",
+        "base.descriptive_names.names.descriptive_name",
+        "m.0_yx_c2"
+      ],
+      [
+        "m.0g5dcqk",
+        "education.education.institution",
+        "University of Maryland University College"
+      ],
+      [
+        "University of Maryland University College",
+        "organization.organization.leadership",
+        "m.0h8167c"
+      ],
+      [
+        "College/University",
+        "common.topic.article",
+        "m.021y5v6"
+      ],
+      [
+        "Dale Dye",
+        "people.person.nationality",
+        "United States of America"
+      ],
+      [
+        "m.0cnp1lg",
+        "location.mailing_address.state_province_region",
+        "Maryland"
+      ],
+      [
+        "20783",
+        "location.postal_code.country",
+        "United States of America"
+      ],
+      [
+        "East Devon College",
+        "education.educational_institution.school_type",
+        "Public university"
+      ],
+      [
+        "College/University",
+        "type.type.expected_by",
+        "Institution"
+      ],
+      [
+        "Public university",
+        "organization.organization_type.organizations_of_this_type",
+        "Dokuz Eyl\u00fcl University"
+      ],
+      [
+        "College/University",
+        "type.type.properties",
+        "Domestic tuition"
+      ],
+      [
+        "University of Maryland University College",
+        "organization.organization.headquarters",
+        "m.0cnp1lg"
+      ],
+      [
+        "Adelphi",
+        "location.hud_foreclosure_area.total_residential_addresses",
+        "m.07gznd1"
+      ],
+      [
+        "m.04hvzx9",
+        "education.education.institution",
+        "University of Maryland University College"
+      ],
+      [
+        "Maryland",
+        "base.folklore.mythical_creature_location.mythical_creature_s",
+        "Goatman"
+      ],
+      [
+        "20783",
+        "location.location.containedby",
+        "Prince George's County"
+      ],
+      [
+        "College/University",
+        "type.type.expected_by",
+        "Host"
+      ],
+      [
+        "University of Maryland University College",
+        "education.university.number_of_postgraduates",
+        "m.0k7fl3s"
+      ],
+      [
+        "Adelphi",
+        "common.topic.image",
+        "Location of Adelphi, Maryland"
+      ],
+      [
+        "m.0n1gvyk",
+        "education.education.student",
+        "Jalen Rose"
+      ],
+      [
+        "Adelphi",
+        "common.topic.image",
+        "Adelphi Mill 1"
+      ],
+      [
+        "University of Maryland University College",
+        "education.university.domestic_tuition",
+        "m.0h6_sn1"
+      ],
+      [
+        "University of Maryland University College",
+        "common.topic.article",
+        "m.02mw1m"
+      ],
+      [
+        "College/University",
+        "freebase.type_profile.strict_included_types",
+        "Topic"
+      ],
+      [
+        "United States, with Territories",
+        "base.aareas.schema.earth.sovereign_domain.sovereign_state",
+        "United States of America"
+      ],
+      [
+        "Street Address 4",
+        "rdf-schema#domain",
+        "Address"
+      ],
+      [
+        "Dokuz Eyl\u00fcl University",
+        "organization.organization.organization_type",
+        "Public university"
+      ],
+      [
+        "College/University",
+        "type.type.expected_by",
+        "School"
+      ],
+      [
+        "University of Maryland University College",
+        "education.educational_institution.students_graduates",
+        "m.0g5cr3q"
+      ],
+      [
+        "Prince George's County",
+        "location.location.containedby",
+        "Maryland"
+      ],
+      [
+        "Rhine-Waal University of Applied Sciences",
+        "organization.organization.organization_type",
+        "Public university"
+      ],
+      [
+        "m.0n1gvyk",
+        "freebase.valuenotation.has_value",
+        "Start Date"
+      ],
+      [
+        "Navy Blue",
+        "base.schemastaging.visual_color_extra.srgb",
+        "m.010q_4pn"
+      ],
+      [
+        "Domestic tuition",
+        "type.property.schema",
+        "College/University"
+      ],
+      [
+        "Location",
+        "freebase.type_profile.published",
+        "Published"
+      ],
+      [
+        "United States of America",
+        "location.country.currency_used",
+        "United States Dollar"
+      ],
+      [
+        "m.0_zbq82",
+        "government.government_position_held.jurisdiction_of_office",
+        "Maryland"
+      ],
+      [
+        "m.0g5c0db",
+        "education.education.institution",
+        "University of Maryland University College"
+      ],
+      [
+        "Adelphi",
+        "location.statistical_region.population",
+        "m.04mdp41"
+      ],
+      [
+        "University of Maryland University College",
+        "education.university.domestic_tuition",
+        "m.0k7flyq"
+      ],
+      [
+        "Ray Lewis",
+        "people.person.nationality",
+        "United States of America"
+      ],
+      [
+        "College/University",
+        "type.type.properties",
+        "International tuition"
+      ],
+      [
+        "m.07729f1",
+        "education.education.institution",
+        "University of Maryland University College"
+      ],
+      [
+        "International tuition",
+        "rdf-schema#domain",
+        "College/University"
+      ],
+      [
+        "m.0h99h15",
+        "organization.organization_relationship.child",
+        "University of Maryland University College"
+      ],
+      [
+        "Mike Ertel",
+        "people.person.education",
+        "m.0wk3gtt"
+      ],
+      [
+        "University of Maryland University College",
+        "education.educational_institution.students_graduates",
+        "m.0g5djj8"
+      ],
+      [
+        "College/University",
+        "type.type.expected_by",
+        "Founding school"
+      ],
+      [
+        "m.0wlndkt",
+        "education.education.student",
+        "Thom Tillis"
+      ],
+      [
+        "m.0vmw8b2",
+        "education.education.student",
+        "Hakan Fidan"
+      ],
+      [
+        "International tuition",
+        "type.property.schema",
+        "College/University"
+      ],
+      [
+        "College/University",
+        "freebase.type_profile.strict_included_types",
+        "Organization"
+      ],
+      [
+        "United States, with Territories",
+        "base.aareas.schema.administrative_area.subdividing_place",
+        "United States of America"
+      ],
+      [
+        "Public university",
+        "organization.organization_type.organizations_of_this_type",
+        "Heriot-Watt University"
+      ],
+      [
+        "m.0h99h15",
+        "organization.organization_relationship.parent",
+        "University System of Maryland"
+      ],
+      [
+        "College/University",
+        "type.type.domain",
+        "Education"
+      ],
+      [
+        "Northumbria University London",
+        "education.educational_institution.campuses",
+        "Northumbria University London"
+      ],
+      [
+        "m.04hs86v",
+        "education.education.institution",
+        "University of Maryland University College"
+      ],
+      [
+        "Annapolis",
+        "location.hud_county_place.place",
+        "Annapolis"
+      ],
+      [
+        "University of Maryland University College",
+        "education.educational_institution.phone_number",
+        "m.0h8166h"
+      ],
+      [
+        "m.03lm9c8",
+        "common.webpage.topic",
+        "University of Maryland University College"
+      ],
+      [
+        "Federal Institute of Santa Catarina",
+        "education.educational_institution_campus.educational_institution",
+        "Federal Institute of Santa Catarina"
+      ],
+      [
+        "Alan G. Whicher",
+        "people.person.education",
+        "m.0j186t7"
+      ],
+      [
+        "m.0w7z7g8",
+        "education.education.institution",
+        "University of Maryland University College"
+      ],
+      [
+        "College/University",
+        "type.type.expected_by",
+        "Doctorate Degree From"
+      ],
+      [
+        "Street Address 3",
+        "rdf-schema#domain",
+        "Address"
+      ],
+      [
+        "m.0cnp1lg",
+        "freebase.valuenotation.has_no_value",
+        "Street Address 4"
+      ],
+      [
+        "m.0n1gvyk",
+        "education.education.institution",
+        "University of Maryland University College"
+      ],
+      [
+        "University of Maryland University College",
+        "education.educational_institution.students_graduates",
+        "m.0wlndkt"
+      ],
+      [
+        "Adam Robert Sahlberg",
+        "people.person.nationality",
+        "United States of America"
+      ],
+      [
+        "Lee Whitnum",
+        "people.person.nationality",
+        "United States of America"
+      ],
+      [
+        "Bob Hastings",
+        "people.person.education",
+        "m.0h7tgk8"
+      ],
+      [
+        "Dokuz Eyl\u00fcl University",
+        "education.educational_institution.campuses",
+        "Dokuz Eyl\u00fcl University"
+      ],
+      [
+        "Hakan Fidan",
+        "people.person.education",
+        "m.0vmw8b2"
+      ],
+      [
+        "University of Maryland University College",
+        "education.educational_institution.students_graduates",
+        "m.0h40dx7"
+      ],
+      [
+        "Annapolis",
+        "base.biblioness.bibs_location.country",
+        "United States of America"
+      ],
+      [
+        "Adelphi",
+        "location.hud_foreclosure_area.estimated_number_of_mortgages",
+        "m.07gzncm"
+      ],
+      [
+        "University of Maryland University College",
+        "common.topic.notable_for",
+        "g.125dx7jqd"
+      ],
+      [
+        "Heriot-Watt University",
+        "organization.organization.organization_type",
+        "Public university"
+      ],
+      [
+        "m.0k8xnyn",
+        "measurement_unit.dated_money_value.currency",
+        "United States Dollar"
+      ],
+      [
+        "m.04hsnnv",
+        "education.education.student",
+        "William D. Houser"
+      ],
+      [
+        "College/University",
+        "freebase.type_profile.published",
+        "Published"
+      ],
+      [
+        "Northumbria University London",
+        "education.educational_institution_campus.educational_institution",
+        "Northumbria University London"
+      ],
+      [
+        "Hurricane Isabel",
+        "meteorology.tropical_cyclone.affected_areas",
+        "United States of America"
+      ],
+      [
+        "Public university",
+        "common.topic.image",
+        "Keller-hall3"
+      ],
+      [
+        "Maryland",
+        "meteorology.cyclone_affected_area.cyclones",
+        "Hurricane Isabel"
+      ],
+      [
+        "m.0g5cckf",
+        "education.education.institution",
+        "University of Maryland University College"
+      ],
+      [
+        "College/University",
+        "type.type.expected_by",
+        "Universities"
+      ],
+      [
+        "Federal Institute of Santa Catarina",
+        "freebase.valuenotation.is_reviewed",
+        "Headquarters"
+      ],
+      [
+        "University of Maryland University College",
+        "education.educational_institution.school_type",
+        "Public university"
+      ],
+      [
+        "Emmanuel Armah Kofi Buah",
+        "people.person.education",
+        "m.010fy0_f"
+      ],
+      [
+        "m.0cnp1lg",
+        "freebase.valuenotation.has_no_value",
+        "Street Address 3"
+      ],
+      [
+        "College/University",
+        "type.type.expected_by",
+        "Colleges and Universities"
+      ],
+      [
+        "Dokuz Eyl\u00fcl University",
+        "common.topic.notable_types",
+        "College/University"
+      ],
+      [
+        "University of Maryland University College",
+        "education.educational_institution.colors",
+        "Goldenrod"
+      ],
+      [
+        "m.04f94wv",
+        "education.education.institution",
+        "University of Maryland University College"
+      ],
+      [
+        "University of Maryland University College",
+        "common.topic.webpage",
+        "m.03lm9c8"
+      ],
+      [
+        "m.0g5cv8m",
+        "education.education.institution",
+        "University of Maryland University College"
+      ],
+      [
+        "m.0cnp1lg",
+        "location.mailing_address.postal_code",
+        "20783"
+      ],
+      [
+        "m.03lm9c8",
+        "common.webpage.resource",
+        "Official Website"
+      ],
+      [
+        "m.0hnhcxw",
+        "education.education.institution",
+        "University of Maryland University College"
+      ],
+      [
+        "Adelphi",
+        "location.location.geolocation",
+        "m.02khnfp"
+      ],
+      [
+        "University of Maryland University College",
+        "education.educational_institution.students_graduates",
+        "m.0g5cckf"
+      ],
+      [
+        "University of Maryland University College",
+        "education.university.local_tuition",
+        "m.0k7fm52"
+      ],
+      [
+        "m.0h7tgk8",
+        "education.education.student",
+        "Bob Hastings"
+      ],
+      [
+        "m.0j186t7",
+        "education.education.student",
+        "Alan G. Whicher"
+      ],
+      [
+        "Area codes 240 and 301",
+        "location.location.containedby",
+        "Maryland"
+      ],
+      [
+        "Rhine-Waal University of Applied Sciences",
+        "education.educational_institution_campus.educational_institution",
+        "Rhine-Waal University of Applied Sciences"
+      ],
+      [
+        "m.0gx5w55",
+        "education.education.institution",
+        "University of Maryland University College"
+      ],
+      [
+        "College/University",
+        "base.descriptive_names.names.descriptive_name",
+        "m.011clh9l"
+      ],
+      [
+        "University of Maryland University College",
+        "education.educational_institution.students_graduates",
+        "m.0w7z5fm"
+      ],
+      [
+        "Goldenrod",
+        "common.topic.notable_types",
+        "Color"
+      ],
+      [
+        "m.04hvzx9",
+        "education.education.student",
+        "Frank D. Celebrezze Jr."
+      ],
+      [
+        "United States of America",
+        "location.location.containedby",
+        "United States, with Territories"
+      ],
+      [
+        "United States of America",
+        "freebase.valuenotation.is_reviewed",
+        "Minimum wage"
+      ],
+      [
+        "m.04hs86v",
+        "education.education.student",
+        "Dale Dye"
+      ],
+      [
+        "East Devon College",
+        "education.educational_institution.campuses",
+        "East Devon College"
+      ],
+      [
+        "University of Maryland University College",
+        "education.educational_institution.students_graduates",
+        "m.0g5djy9"
+      ],
+      [
+        "University of Maryland University College Library",
+        "base.schemastaging.scholastic_library.institution",
+        "University of Maryland University College"
+      ],
+      [
+        "US Census Designated Place",
+        "freebase.type_profile.strict_included_types",
+        "Topic"
+      ],
+      [
+        "m.0h8167c",
+        "organization.leadership.role",
+        "President"
+      ],
+      [
+        "m.0cnp1lg",
+        "location.location.geolocation",
+        "m.0cppyr5"
+      ],
+      [
+        "Barbara A. Frush",
+        "people.person.education",
+        "m.0g5dcqk"
+      ],
+      [
+        "University of Maryland University College",
+        "education.university.local_tuition",
+        "m.0k7k47_"
+      ],
+      [
+        "m.0h8167c",
+        "organization.leadership.organization",
+        "University of Maryland University College"
+      ],
+      [
+        "United States Dollar",
+        "finance.currency.countries_used",
+        "United States of America"
+      ],
+      [
+        "m.0wk3gtt",
+        "education.education.student",
+        "Mike Ertel"
+      ],
+      [
+        "University of Maryland University College",
+        "education.university.number_of_postgraduates",
+        "m.0ng7vb7"
+      ],
+      [
+        "Frank D. Celebrezze Jr.",
+        "people.person.education",
+        "m.04hvzx9"
+      ],
+      [
+        "Annapolis",
+        "location.location.containedby",
+        "Maryland"
+      ],
+      [
+        "Public university",
+        "organization.organization_type.organizations_of_this_type",
+        "Northumbria University London"
+      ],
+      [
+        "Acceptance rate",
+        "rdf-schema#domain",
+        "College/University"
+      ],
+      [
+        "Maryland",
+        "government.governmental_jurisdiction.governing_officials",
+        "m.0_zbq82"
+      ],
+      [
+        "College/University",
+        "type.type.expected_by",
+        "University Affiliation"
+      ],
+      [
+        "Domestic tuition",
+        "rdf-schema#domain",
+        "College/University"
+      ],
+      [
+        "University of Maryland University College",
+        "education.educational_institution.students_graduates",
+        "m.0g5cv8m"
+      ],
+      [
+        "m.0hnjgzg",
+        "education.education.institution",
+        "University of Maryland University College"
+      ],
+      [
+        "Official Website",
+        "common.resource.annotations",
+        "m.03lm9c8"
+      ],
+      [
+        "Organization",
+        "freebase.type_profile.strict_included_types",
+        "Topic"
+      ],
+      [
+        "College/University",
+        "type.type.properties",
+        "Number of postgraduates"
+      ],
+      [
+        "University of Maryland University College",
+        "education.educational_institution.faculty",
+        "m.0k8xnq0"
+      ],
+      [
+        "University of Maryland University College",
+        "education.educational_institution.students_graduates",
+        "m.04f94wv"
+      ],
+      [
+        "m.0g5djj8",
+        "education.education.student",
+        "Joseph Tydings"
+      ],
+      [
+        "University of Maryland University College",
+        "base.schemastaging.educational_institution_extra.libraries",
+        "University of Maryland University College Library"
+      ],
+      [
+        "Federal Institute of Santa Catarina",
+        "education.educational_institution.school_type",
+        "Public university"
+      ],
+      [
+        "Heriot-Watt University",
+        "education.educational_institution.school_type",
+        "Public university"
+      ],
+      [
+        "Robert R. Neall",
+        "people.person.education",
+        "m.0g5cr3q"
+      ],
+      [
+        "Public university",
+        "common.topic.article",
+        "m.05jxkm"
+      ],
+      [
+        "Daniel J. Watermeier",
+        "people.person.nationality",
+        "United States of America"
+      ],
+      [
+        "Joseph Tydings",
+        "people.person.nationality",
+        "United States of America"
+      ],
+      [
+        "University",
+        "freebase.equivalent_topic.equivalent_type",
+        "College/University"
+      ],
+      [
+        "Rhine-Waal University of Applied Sciences",
+        "education.educational_institution.campuses",
+        "Rhine-Waal University of Applied Sciences"
+      ],
+      [
+        "m.0g5dgf0",
+        "education.education.student",
+        "Ray Lewis"
+      ],
+      [
+        "Annapolis",
+        "location.location.time_zones",
+        "Eastern Time Zone"
+      ],
+      [
+        "m.0zw1w0n",
+        "education.education.institution",
+        "University of Maryland University College"
+      ],
+      [
+        "Adelphi",
+        "common.topic.notable_types",
+        "US Census Designated Place"
+      ],
+      [
+        "Adam Robert Sahlberg",
+        "people.person.education",
+        "m.0g5djy9"
+      ],
+      [
+        "Acceptance rate",
+        "type.property.schema",
+        "College/University"
+      ],
+      [
+        "University of Maryland University College",
+        "location.location.containedby",
+        "United States of America"
+      ],
+      [
+        "m.010fy0_f",
+        "education.education.institution",
+        "University of Maryland University College"
+      ],
+      [
+        "m.0hnhcxw",
+        "education.education.student",
+        "Lee Whitnum"
+      ],
+      [
+        "Headquarters",
+        "type.property.expected_type",
+        "Address"
+      ],
+      [
+        "m.0g5cv8m",
+        "education.education.student",
+        "Edward J. Perkins"
+      ],
+      [
+        "University of Maryland University College",
+        "education.university.local_tuition",
+        "m.0k7k43n"
+      ],
+      [
+        "Annapolis",
+        "location.location.containedby",
+        "United States of America"
+      ],
+      [
+        "College/University",
+        "freebase.documented_object.documentation",
+        "m.021y5v6"
+      ],
+      [
+        "University of Maryland University College",
+        "education.university.local_tuition",
+        "m.0h6_smv"
+      ],
+      [
+        "University of Maryland University College",
+        "education.educational_institution.phone_number",
+        "m.0h8166n"
+      ],
+      [
+        "Annapolis",
+        "base.biblioness.bibs_location.state",
+        "Maryland"
+      ],
+      [
+        "Maryland",
+        "location.us_state.capital",
+        "Annapolis"
+      ],
+      [
+        "Organization",
+        "type.type.properties",
+        "Headquarters"
+      ],
+      [
+        "Maryland",
+        "location.administrative_division.first_level_division_of",
+        "United States of America"
+      ],
+      [
+        "m.0h6_sn1",
+        "measurement_unit.dated_money_value.currency",
+        "United States Dollar"
+      ],
+      [
+        "Federal Institute of Santa Catarina",
+        "common.topic.notable_types",
+        "College/University"
+      ],
+      [
+        "Adelphi",
+        "common.topic.article",
+        "m.0twdr"
+      ],
+      [
+        "Public university",
+        "organization.organization_type.organizations_of_this_type",
+        "East Devon College"
+      ],
+      [
+        "College/University",
+        "freebase.type_profile.strict_included_types",
+        "Educational Institution"
+      ],
+      [
+        "m.0g5djy9",
+        "education.education.student",
+        "Adam Robert Sahlberg"
+      ],
+      [
+        "Linda R. Gooden",
+        "people.person.nationality",
+        "United States of America"
+      ],
+      [
+        "m.0zw1w0n",
+        "education.education.degree",
+        "PhD"
+      ],
+      [
+        "m.0zw1w0n",
+        "freebase.valuenotation.has_value",
+        "End Date"
+      ],
+      [
+        "University of Maryland University College",
+        "common.topic.notable_types",
+        "College/University"
+      ],
+      [
+        "m.0zw1w0n",
+        "freebase.valuenotation.has_value",
+        "Start Date"
+      ],
+      [
+        "United States Dollar",
+        "base.coinsdaily.coin_type.country",
+        "United States of America"
+      ],
+      [
+        "m.04f94wv",
+        "education.education.student",
+        "Linda R. Gooden"
+      ],
+      [
+        "University of Maryland University College",
+        "education.university.domestic_tuition",
+        "m.0k8xnyn"
+      ],
+      [
+        "m.0cnp1lg",
+        "common.topic.notable_types",
+        "Location"
+      ],
+      [
+        "Public university",
+        "common.topic.image",
+        "Universidade Federal do Parana 4 Curitiba Parana"
+      ],
+      [
+        "m.0g5cr3q",
+        "education.education.student",
+        "Robert R. Neall"
+      ],
+      [
+        "College/University",
+        "type.type.expected_by",
+        "Institution"
+      ],
+      [
+        "University of Maryland University College",
+        "education.educational_institution.students_graduates",
+        "m.0w7z7g8"
+      ],
+      [
+        "East Devon College",
+        "common.topic.notable_types",
+        "College/University"
+      ],
+      [
+        "m.0cnp1lg",
+        "freebase.valuenotation.has_no_value",
+        "Street Address 2"
+      ],
+      [
+        "m.0k8xmqr",
+        "measurement_unit.dated_money_value.currency",
+        "United States Dollar"
+      ],
+      [
+        "Adelphi",
+        "location.hud_county_place.place",
+        "Adelphi"
+      ],
+      [
+        "Public university",
+        "organization.organization_type.organizations_of_this_type",
+        "Federal Institute of Santa Catarina"
+      ],
+      [
+        "University of Maryland University College",
+        "location.location.containedby",
+        "Maryland"
+      ],
+      [
+        "Dokuz Eyl\u00fcl University",
+        "freebase.valuenotation.is_reviewed",
+        "Headquarters"
+      ],
+      [
+        "University of Maryland University College",
+        "education.educational_institution.students_graduates",
+        "m.0g5c0tp"
+      ],
+      [
+        "United States of America",
+        "location.location.time_zones",
+        "Eastern Time Zone"
+      ],
+      [
+        "Local tuition",
+        "rdf-schema#domain",
+        "College/University"
+      ],
+      [
+        "m.0w7z5fm",
+        "education.education.degree",
+        "Bachelor's degree"
+      ],
+      [
+        "University of Maryland University College",
+        "education.educational_institution.students_graduates",
+        "m.0wk3gtt"
+      ],
+      [
+        "Lee Whitnum",
+        "people.person.education",
+        "m.0hnhcxw"
+      ],
+      [
+        "Ray Lewis",
+        "people.person.education",
+        "m.0g5dgf0"
+      ],
+      [
+        "University of Maryland University College",
+        "education.educational_institution_campus.educational_institution",
+        "University of Maryland University College"
+      ],
+      [
+        "William D. Houser",
+        "people.person.nationality",
+        "United States of America"
+      ],
+      [
+        "Adelphi",
+        "location.location.contains",
+        "University of Maryland University College"
+      ],
+      [
+        "University of Maryland University College",
+        "education.educational_institution.colors",
+        "Navy Blue"
+      ],
+      [
+        "College/University",
+        "type.type.expected_by",
+        "University"
+      ],
+      [
+        "Bob Hastings",
+        "people.person.nationality",
+        "United States of America"
+      ],
+      [
+        "m.0h40dx7",
+        "education.education.institution",
+        "University of Maryland University College"
+      ],
+      [
+        "m.04hq_fp",
+        "education.education.institution",
+        "University of Maryland University College"
+      ],
+      [
+        "Organization",
+        "freebase.type_profile.strict_included_types",
+        "Agent"
+      ],
+      [
+        "m.04f94wv",
+        "education.education.degree",
+        "Bachelor of Science"
+      ],
+      [
+        "University of Maryland University College",
+        "freebase.valuenotation.is_reviewed",
+        "Headquarters"
+      ],
+      [
+        "William J. Boarman",
+        "people.person.education",
+        "m.0h40dx7"
+      ],
+      [
+        "m.0_zbq82",
+        "government.government_position_held.district_represented",
+        "Maryland"
+      ],
+      [
+        "Thom Tillis",
+        "people.person.education",
+        "m.0wlndkt"
+      ],
+      [
+        "United States of America",
+        "location.administrative_division.first_level_division_of",
+        "United States, with Territories"
+      ],
+      [
+        "Public university",
+        "base.schemastaging.context_name.pronunciation",
+        "g.125_kgh23"
+      ],
+      [
+        "University of Maryland University College",
+        "location.location.containedby",
+        "Adelphi"
+      ],
+      [
+        "Northumbria University London",
+        "education.educational_institution.school_type",
+        "Public university"
+      ],
+      [
+        "Adelphi",
+        "location.location.containedby",
+        "Maryland"
+      ],
+      [
+        "Street Address 3",
+        "type.property.schema",
+        "Address"
+      ],
+      [
+        "United States of America",
+        "base.aareas.schema.administrative_area.subdivides_place",
+        "United States, with Territories"
+      ],
+      [
+        "m.0n1gvyk",
+        "education.education.major_field_of_study",
+        "Management"
+      ],
+      [
+        "Local tuition",
+        "type.property.schema",
+        "College/University"
+      ],
+      [
+        "University of Maryland University College",
+        "education.educational_institution.students_graduates",
+        "m.0j186t7"
+      ],
+      [
+        "College/University",
+        "base.descriptive_names.names.descriptive_name",
+        "m.012b_jb_"
+      ],
+      [
+        "Heriot-Watt University",
+        "education.educational_institution_campus.educational_institution",
+        "Heriot-Watt University"
+      ],
+      [
+        "United States, with Territories",
+        "location.country.first_level_divisions",
+        "United States of America"
+      ],
+      [
+        "Navy Blue",
+        "common.topic.notable_for",
+        "g.125d5v1z3"
+      ],
+      [
+        "Navy Blue",
+        "base.schemastaging.visual_color_extra.cmyk",
+        "m.010q_4qh"
+      ],
+      [
+        "University of Maryland University College",
+        "education.educational_institution.students_graduates",
+        "m.04hq_fp"
+      ],
+      [
+        "Maryland",
+        "base.mystery.cryptid_area_of_occurrence.cryptid_s_found_here",
+        "Goatman"
+      ],
+      [
+        "m.04hsnnv",
+        "education.education.institution",
+        "University of Maryland University College"
+      ],
+      [
+        "University of Maryland University College",
+        "organization.organization.phone_number",
+        "m.0nhffxy"
+      ],
+      [
+        "Adelphi",
+        "location.hud_county_place.county",
+        "Prince George's County"
+      ],
+      [
+        "m.0g5djj8",
+        "education.education.institution",
+        "University of Maryland University College"
+      ],
+      [
+        "Adelphi",
+        "location.hud_foreclosure_area.estimated_number_foreclosures",
+        "m.07gzncd"
+      ],
+      [
+        "College/University",
+        "freebase.type_profile.equivalent_topic",
+        "College"
+      ],
+      [
+        "United States of America",
+        "base.aareas.schema.administrative_area.administrative_parent",
+        "United States, with Territories"
+      ],
+      [
+        "Prince George's County",
+        "location.location.time_zones",
+        "Eastern Time Zone"
+      ],
+      [
+        "University of Maryland University College",
+        "organization.organization.parent",
+        "m.0h99h15"
+      ],
+      [
+        "College/University",
+        "type.type.properties",
+        "Local tuition"
+      ],
+      [
+        "College/University",
+        "type.type.properties",
+        "Acceptance rate"
+      ],
+      [
+        "Public university",
+        "common.topic.image",
+        "Berkeley glade afternoon"
+      ],
+      [
+        "William D. Houser",
+        "people.person.education",
+        "m.04hsnnv"
+      ],
+      [
+        "Dale Dye",
+        "people.person.education",
+        "m.04hs86v"
+      ],
+      [
+        "College/University",
+        "type.type.expected_by",
+        "Parent Institution"
+      ],
+      [
+        "College/University",
+        "base.descriptive_names.names.descriptive_name",
+        "m.012w712g"
+      ],
+      [
+        "m.0g5djy9",
+        "education.education.institution",
+        "University of Maryland University College"
+      ],
+      [
+        "United States of America",
+        "location.country.administrative_divisions",
+        "Maryland"
+      ],
+      [
+        "m.0zw1w0n",
+        "education.education.student",
+        "Daniel J. Watermeier"
+      ],
+      [
+        "Goatman",
+        "base.mystery.cryptid.area_of_occurrence",
+        "Maryland"
+      ],
+      [
+        "College/University",
+        "type.type.expected_by",
+        "Best Overall"
+      ],
+      [
+        "m.010fy0_f",
+        "education.education.student",
+        "Emmanuel Armah Kofi Buah"
+      ],
+      [
+        "m.04hgz52",
+        "education.education.student",
+        "Thomas E. Hutchins"
+      ],
+      [
+        "University of Maryland University College",
+        "education.educational_institution.students_graduates",
+        "m.0g5c0db"
+      ],
+      [
+        "m.0wlndkt",
+        "education.education.institution",
+        "University of Maryland University College"
+      ],
+      [
+        "University of Maryland University College",
+        "education.educational_institution.students_graduates",
+        "m.07729f1"
+      ],
+      [
+        "College/University",
+        "type.type.properties",
+        "Departments"
+      ],
+      [
+        "Number of postgraduates",
+        "type.property.schema",
+        "College/University"
+      ],
+      [
+        "United States of America",
+        "base.locations.countries.states_provinces_within",
+        "Maryland"
+      ],
+      [
+        "Frederick H. Bealefeld III",
+        "people.person.education",
+        "m.0gx5w55"
+      ],
+      [
+        "Street Address 4",
+        "type.property.schema",
+        "Address"
+      ],
+      [
+        "University of Maryland University College",
+        "education.educational_institution.students_graduates",
+        "m.0vmw8b2"
+      ],
+      [
+        "m.0h427p4",
+        "education.education.student",
+        "Donald Kirk"
+      ],
+      [
+        "Navy Blue",
+        "base.schemastaging.visual_color_extra.hsv",
+        "m.010q_4wf"
+      ],
+      [
+        "College/University",
+        "freebase.type_profile.equivalent_topic",
+        "University"
+      ],
+      [
+        "Number of postgraduates",
+        "rdf-schema#domain",
+        "College/University"
+      ],
+      [
+        "College/University",
+        "type.type.expected_by",
+        "Medical School Affiliation"
+      ],
+      [
+        "Linda R. Gooden",
+        "people.person.education",
+        "m.04f94wv"
+      ],
+      [
+        "Adelphi",
+        "location.hud_foreclosure_area.ofheo_price_change",
+        "m.07gzndg"
+      ],
+      [
+        "College/University",
+        "type.type.expected_by",
+        "University"
+      ],
+      [
+        "University of Maryland University College",
+        "education.educational_institution.students_graduates",
+        "m.0n1gvyk"
+      ],
+      [
+        "East Devon College",
+        "education.educational_institution_campus.educational_institution",
+        "East Devon College"
+      ],
+      [
+        "Rhine-Waal University of Applied Sciences",
+        "education.educational_institution.school_type",
+        "Public university"
+      ],
+      [
+        "m.0vmw8b2",
+        "education.education.institution",
+        "University of Maryland University College"
+      ],
+      [
+        "m.03lm9c8",
+        "common.webpage.category",
+        "Official Website"
+      ],
+      [
+        "Public university",
+        "common.topic.notable_types",
+        "School category"
+      ],
+      [
+        "m.07729f1",
+        "education.education.student",
+        "Vivek Kundra"
+      ],
+      [
+        "Vivek Kundra",
+        "people.person.education",
+        "m.07729f1"
+      ],
+      [
+        "Maryland",
+        "location.location.containedby",
+        "United States of America"
+      ],
+      [
+        "College/University",
+        "type.type.expected_by",
+        "Universit\u00e4t"
+      ],
+      [
+        "College/University",
+        "type.type.properties",
+        "Number of doctoral candidates"
+      ],
+      [
+        "Headquarters",
+        "rdf-schema#range",
+        "Address"
+      ],
+      [
+        "University of Maryland University College",
+        "education.educational_institution.students_graduates",
+        "m.0gx5w55"
+      ],
+      [
+        "m.04hgz52",
+        "education.education.institution",
+        "University of Maryland University College"
+      ],
+      [
+        "Edward J. Perkins",
+        "people.person.education",
+        "m.0g5cv8m"
+      ],
+      [
+        "Adelphi",
+        "location.hud_foreclosure_area.total_90_day_vacant_residential_addresses",
+        "m.07gzncv"
+      ],
+      [
+        "College/University",
+        "type.type.properties",
+        "Number of undergraduates"
+      ],
+      [
+        "m.0j186t7",
+        "education.education.institution",
+        "University of Maryland University College"
+      ],
+      [
+        "Maryland",
+        "location.administrative_division.country",
+        "United States of America"
+      ],
+      [
+        "University of Maryland University College",
+        "education.educational_institution.students_graduates",
+        "m.0zw1w0n"
+      ],
+      [
+        "Adelphi",
+        "location.statistical_region.population",
+        "g.11bymknh31"
+      ],
+      [
+        "US Census Designated Place",
+        "freebase.type_hints.included_types",
+        "Location"
+      ],
+      [
+        "University of Maryland University College",
+        "education.educational_institution.students_graduates",
+        "m.010fy0_f"
+      ],
+      [
+        "Goldenrod",
+        "common.topic.article",
+        "m.068sqy"
+      ],
+      [
+        "Northumbria University London",
+        "organization.organization.organization_type",
+        "Public university"
+      ],
+      [
+        "University of Maryland University College",
+        "education.educational_institution.students_graduates",
+        "m.04hvzx9"
+      ],
+      [
+        "College/University",
+        "freebase.type_profile.kind",
+        "Definition"
+      ],
+      [
+        "Hurricane Isabel",
+        "meteorology.tropical_cyclone.affected_areas",
+        "Maryland"
+      ],
+      [
+        "Organization",
+        "freebase.type_hints.included_types",
+        "Topic"
+      ],
+      [
+        "Goatman",
+        "base.folklore.mythical_creature.area_of_occurrence",
+        "Maryland"
+      ],
+      [
+        "David B. Mitchell",
+        "people.person.education",
+        "m.0g5cckf"
+      ],
+      [
+        "m.0h6_smv",
+        "measurement_unit.dated_money_value.currency",
+        "United States Dollar"
+      ],
+      [
+        "Jalen Rose",
+        "people.person.nationality",
+        "United States of America"
+      ],
+      [
+        "University of Maryland University College",
+        "education.educational_institution.students_graduates",
+        "m.0h427p4"
+      ],
+      [
+        "University of Maryland University College",
+        "organization.endowed_organization.endowment",
+        "m.0h8169q"
+      ],
+      [
+        "Maryland",
+        "base.biblioness.bibs_location.country",
+        "United States of America"
+      ],
+      [
+        "Dokuz Eyl\u00fcl University",
+        "education.educational_institution.school_type",
+        "Public university"
+      ],
+      [
+        "m.0n1gvyk",
+        "education.education.degree",
+        "Bachelor of Science"
+      ],
+      [
+        "College/University",
+        "freebase.type_profile.strict_included_types",
+        "Agent"
+      ],
+      [
+        "Adelphi",
+        "location.location.time_zones",
+        "Eastern Time Zone"
+      ],
+      [
+        "Navy Blue",
+        "common.topic.article",
+        "m.02rnmj"
+      ],
+      [
+        "m.0g5c0tp",
+        "education.education.institution",
+        "University of Maryland University College"
+      ],
+      [
+        "Maryland",
+        "base.locations.states_and_provences.country",
+        "United States of America"
+      ],
+      [
+        "United States of America",
+        "base.aareas.schema.administrative_area.administrative_children",
+        "Maryland"
+      ],
+      [
+        "Federal Institute of Santa Catarina",
+        "education.educational_institution.campuses",
+        "Federal Institute of Santa Catarina"
+      ],
+      [
+        "Maryland",
+        "location.location.containedby",
+        "United States, with Territories"
+      ],
+      [
+        "Federal Institute of Santa Catarina",
+        "organization.organization.organization_type",
+        "Public university"
+      ],
+      [
+        "University of Maryland University College",
+        "education.educational_institution.students_graduates",
+        "m.0g5dcqk"
+      ],
+      [
+        "College/University",
+        "type.type.expected_by",
+        "Academic Institution"
+      ],
+      [
+        "Adelphi",
+        "location.hud_foreclosure_area.hhuniv",
+        "m.07gznc5"
+      ],
+      [
+        "Rhine-Waal University of Applied Sciences",
+        "common.topic.notable_types",
+        "College/University"
+      ],
+      [
+        "Adelphi",
+        "common.topic.notable_for",
+        "g.1259_bf_v"
+      ],
+      [
+        "m.0h7tgk8",
+        "education.education.institution",
+        "University of Maryland University College"
+      ],
+      [
+        "University of Maryland University College",
+        "education.educational_institution.students_graduates",
+        "m.0hnjgzg"
+      ],
+      [
+        "m.0cnp1lg",
+        "common.topic.notable_for",
+        "g.1255tcf8d"
+      ],
+      [
+        "University System of Maryland",
+        "organization.organization.child",
+        "m.0h99h15"
+      ],
+      [
+        "Headquarters",
+        "type.property.schema",
+        "Organization"
+      ],
+      [
+        "College/University",
+        "base.descriptive_names.names.descriptive_name",
+        "m.010nwf11"
+      ],
+      [
+        "University of Maryland University College",
+        "education.educational_institution.campuses",
+        "University of Maryland University College"
+      ],
+      [
+        "Adelphi",
+        "location.location.containedby",
+        "Prince George's County"
+      ],
+      [
+        "Thomas E. Hutchins",
+        "people.person.education",
+        "m.04hgz52"
+      ],
+      [
+        "Adelphi",
+        "base.wikipedia_infobox.settlement.area_code",
+        "Area codes 240 and 301"
+      ],
+      [
+        "University of Maryland University College",
+        "location.location.geolocation",
+        "m.0jlczln"
+      ],
+      [
+        "m.0w7z5fm",
+        "education.education.institution",
+        "University of Maryland University College"
+      ],
+      [
+        "m.0g5c0tp",
+        "education.education.student",
+        "John William Vessey, Jr."
+      ],
+      [
+        "m.0g5cckf",
+        "education.education.student",
+        "David B. Mitchell"
+      ],
+      [
+        "Donald Kirk",
+        "people.person.education",
+        "m.0h427p4"
+      ],
+      [
+        "College/University",
+        "freebase.type_hints.included_types",
+        "Topic"
+      ],
+      [
+        "University of Maryland University College",
+        "education.university.domestic_tuition",
+        "m.0k8xmqr"
+      ],
+      [
+        "Heriot-Watt University",
+        "education.educational_institution.school_type",
+        "University"
+      ],
+      [
+        "Goldenrod",
+        "common.topic.notable_for",
+        "g.125f8s2p6"
+      ],
+      [
+        "East Devon College",
+        "organization.organization.organization_type",
+        "Public university"
+      ],
+      [
+        "Jalen Rose",
+        "people.person.education",
+        "m.0n1gvyk"
+      ],
+      [
+        "College/University",
+        "type.type.expected_by",
+        "Taught at"
+      ],
+      [
+        "University of Maryland University College",
+        "education.university.number_of_undergraduates",
+        "m.0h77tc0"
+      ],
+      [
+        "m.0wk3gtt",
+        "education.education.institution",
+        "University of Maryland University College"
+      ],
+      [
+        "John William Vessey, Jr.",
+        "people.person.education",
+        "m.0g5c0tp"
+      ],
+      [
+        "US Census Designated Place",
+        "freebase.type_hints.included_types",
+        "Topic"
+      ]
+    ]
+  },
+  {
+    "id": "WebQTrn-1741",
+    "question": "who played carlton banks",
+    "answer": [
+      "Alfonso Ribeiro"
+    ],
+    "q_entity": [
+      "Carlton Banks"
+    ],
+    "a_entity": [
+      "Alfonso Ribeiro"
+    ],
+    "graph_size": 241,
+    "graph": [
+      [
+        "m.02_1x1x",
+        "base.gender.personal_gender_identity.gender_identity",
+        "Male"
+      ],
+      [
+        "Male",
+        "medicine.risk_factor.diseases",
+        "Stroke"
+      ],
+      [
+        "Pancreatic cancer",
+        "medicine.icd_9_cm_classification.includes_classifications",
+        "Pancreatic cancer"
+      ],
+      [
+        "Male",
+        "medicine.risk_factor.diseases",
+        "Amyotrophic lateral sclerosis"
+      ],
+      [
+        "Character",
+        "type.property.expected_type",
+        "TV Character"
+      ],
+      [
+        "Stroke",
+        "medicine.disease.risk_factors",
+        "Hair loss"
+      ],
+      [
+        "TV Character",
+        "type.type.properties",
+        "Final TV Appearance"
+      ],
+      [
+        "Character",
+        "owl#inverseOf",
+        "Appeared In TV Episodes"
+      ],
+      [
+        "heart attack",
+        "medicine.disease.parent_disease",
+        "Cardiovascular disease"
+      ],
+      [
+        "Male",
+        "medicine.risk_factor.diseases",
+        "Transient ischemic attack"
+      ],
+      [
+        "Male",
+        "base.skosbase.vocabulary_equivalent_topic.equivalent_concept",
+        "Males"
+      ],
+      [
+        "m.05bvk3z",
+        "base.animalnames.animal_specific_name_relationship.gender",
+        "Male"
+      ],
+      [
+        "Male",
+        "medicine.risk_factor.diseases",
+        "Paget's disease of bone"
+      ],
+      [
+        "m.0d5218t",
+        "biology.hybrid_parentage.parent_sex",
+        "Male"
+      ],
+      [
+        "Male",
+        "medicine.risk_factor.diseases",
+        "Gout"
+      ],
+      [
+        "Male",
+        "medicine.risk_factor.diseases",
+        "Meningococcal disease"
+      ],
+      [
+        "Male",
+        "medicine.risk_factor.diseases",
+        "Barrett's esophagus"
+      ],
+      [
+        "TV Character",
+        "type.type.expected_by",
+        "Character"
+      ],
+      [
+        "Abdominal aortic aneurysm",
+        "medicine.disease.parent_disease",
+        "Cardiovascular disease"
+      ],
+      [
+        "Male",
+        "medicine.risk_factor.diseases",
+        "Prostate cancer"
+      ],
+      [
+        "Male",
+        "common.topic.notable_for",
+        "g.1255p_jgc"
+      ],
+      [
+        "Male",
+        "medicine.risk_factor.diseases",
+        "Hodgkin's lymphoma"
+      ],
+      [
+        "TV Character",
+        "type.type.expected_by",
+        "Character"
+      ],
+      [
+        "Epilepsy",
+        "medicine.disease.risk_factors",
+        "Male"
+      ],
+      [
+        "Stroke",
+        "medicine.disease.risk_factors",
+        "Male"
+      ],
+      [
+        "heart attack",
+        "people.cause_of_death.parent_cause_of_death",
+        "Cardiovascular disease"
+      ],
+      [
+        "m.0j7v__g",
+        "biology.hybrid_parentage.parent_sex",
+        "Male"
+      ],
+      [
+        "Male",
+        "base.gender.gender_identity.people",
+        "m.07n73w_"
+      ],
+      [
+        "Male",
+        "medicine.risk_factor.diseases",
+        "Liver tumour"
+      ],
+      [
+        "Attention deficit hyperactivity disorder",
+        "medicine.risk_factor.diseases",
+        "Alcohol abuse"
+      ],
+      [
+        "SFX Award for Best Actor",
+        "award.award_category.disciplines_or_subjects",
+        "Male"
+      ],
+      [
+        "Male",
+        "biology.hybrid_parent_gender.hybrids",
+        "m.0j7v__g"
+      ],
+      [
+        "Parkinson's disease",
+        "medicine.disease.symptoms",
+        "Seborrheic dermatitis"
+      ],
+      [
+        "m.02_98hd",
+        "base.gender.personal_gender_identity.gender_identity",
+        "Male"
+      ],
+      [
+        "m.0gxvt_4",
+        "base.gender.personal_gender_identity.gender_identity",
+        "Male"
+      ],
+      [
+        "Male",
+        "medicine.risk_factor.diseases",
+        "Antisocial personality disorder"
+      ],
+      [
+        "TV Character",
+        "freebase.type_profile.strict_included_types",
+        "Topic"
+      ],
+      [
+        "TV Character",
+        "type.type.properties",
+        "Appeared In TV Episode Segments"
+      ],
+      [
+        "Male",
+        "base.gender.gender_identity.people",
+        "m.04mmfr8"
+      ],
+      [
+        "Alfonso Ribeiro",
+        "tv.tv_actor.starring_roles",
+        "m.02slfzb"
+      ],
+      [
+        "Male",
+        "common.topic.article",
+        "m.05zpq8"
+      ],
+      [
+        "The Fresh Prince of Bel-Air - Season 5",
+        "tv.tv_series_season.series",
+        "The Fresh Prince of Bel-Air"
+      ],
+      [
+        "Alfonso Ribeiro",
+        "people.person.gender",
+        "Male"
+      ],
+      [
+        "Male",
+        "base.animalnames.animal_gender.animal_names",
+        "m.0kfyrt3"
+      ],
+      [
+        "Character",
+        "type.property.reverse_property",
+        "Programs in which this was a regular character"
+      ],
+      [
+        "Male",
+        "medicine.risk_factor.diseases",
+        "Cardiovascular disease"
+      ],
+      [
+        "Fictional Character",
+        "freebase.type_profile.published",
+        "Published"
+      ],
+      [
+        "Male",
+        "medicine.risk_factor.diseases",
+        "Pyloric stenosis"
+      ],
+      [
+        "Male",
+        "medicine.risk_factor.diseases",
+        "Retroperitoneal fibrosis"
+      ],
+      [
+        "Male",
+        "base.animalnames.animal_gender.animal_names",
+        "m.05bvkm6"
+      ],
+      [
+        "Male",
+        "medicine.risk_factor.diseases",
+        "Anaplastic thyroid cancer"
+      ],
+      [
+        "Male",
+        "base.gender.gender_identity.people",
+        "m.09td39b"
+      ],
+      [
+        "Male",
+        "base.thoroughbredracing.thoroughbred_racehorse_sex.horses_of_this_sex",
+        "Phone Trick"
+      ],
+      [
+        "Male",
+        "biology.hybrid_parent_gender.hybrids",
+        "m.0blp580"
+      ],
+      [
+        "m.0blp5sr",
+        "biology.hybrid_parentage.parent_sex",
+        "Male"
+      ],
+      [
+        "Male",
+        "medicine.risk_factor.diseases",
+        "Kidney Stone"
+      ],
+      [
+        "Male",
+        "base.animalnames.animal_gender.animal_names",
+        "m.05cckn4"
+      ],
+      [
+        "Carlton Banks",
+        "common.topic.notable_types",
+        "TV Character"
+      ],
+      [
+        "Male",
+        "biology.hybrid_parent_gender.hybrids",
+        "m.0d521lm"
+      ],
+      [
+        "Fictional Character",
+        "freebase.type_profile.strict_included_types",
+        "Topic"
+      ],
+      [
+        "Bladder cancer",
+        "medicine.disease.risk_factors",
+        "Male"
+      ],
+      [
+        "Male",
+        "medicine.risk_factor.diseases",
+        "Non-gonococcal urethritis"
+      ],
+      [
+        "Parkinson's disease",
+        "medicine.icd_9_cm_classification.parent_classification",
+        "Parkinson's disease"
+      ],
+      [
+        "Attention deficit hyperactivity disorder",
+        "medicine.disease.risk_factors",
+        "Male"
+      ],
+      [
+        "TV Character",
+        "type.type.domain",
+        "TV"
+      ],
+      [
+        "Male",
+        "medicine.risk_factor.diseases",
+        "Urethritis"
+      ],
+      [
+        "Male",
+        "medicine.risk_factor.diseases",
+        "Benign prostatic hyperplasia"
+      ],
+      [
+        "Character",
+        "type.property.expected_type",
+        "TV Character"
+      ],
+      [
+        "Male",
+        "base.animalnames.animal_gender.animal_names",
+        "m.05bvklm"
+      ],
+      [
+        "Male",
+        "medicine.risk_factor.diseases",
+        "Athlete's foot"
+      ],
+      [
+        "TV Character",
+        "freebase.type_profile.strict_included_types",
+        "Non-Agent"
+      ],
+      [
+        "Male",
+        "medicine.risk_factor.diseases",
+        "Dupuytren's contracture"
+      ],
+      [
+        "Abdominal aortic aneurysm",
+        "medicine.disease.risk_factors",
+        "Stroke"
+      ],
+      [
+        "Character",
+        "rdf-schema#range",
+        "TV Character"
+      ],
+      [
+        "Male",
+        "medicine.risk_factor.diseases",
+        "Actinic keratosis"
+      ],
+      [
+        "Male",
+        "medicine.risk_factor.diseases",
+        "Ectodermal dysplasia"
+      ],
+      [
+        "m.02slfzb",
+        "tv.regular_tv_appearance.actor",
+        "Alfonso Ribeiro"
+      ],
+      [
+        "Character",
+        "owl#inverseOf",
+        "Programs in which this was a regular character"
+      ],
+      [
+        "Abdominal aortic aneurysm",
+        "medicine.disease.risk_factors",
+        "Male"
+      ],
+      [
+        "Male",
+        "medicine.risk_factor.diseases",
+        "Parkinson's disease"
+      ],
+      [
+        "Male",
+        "medicine.risk_factor.diseases",
+        "Leprosy"
+      ],
+      [
+        "Amyotrophic lateral sclerosis",
+        "medicine.disease.risk_factors",
+        "Male"
+      ],
+      [
+        "Pancreatic cancer",
+        "medicine.icd_9_cm_classification.parent_classification",
+        "Pancreatic cancer"
+      ],
+      [
+        "Male",
+        "medicine.risk_factor.diseases",
+        "Attention deficit hyperactivity disorder"
+      ],
+      [
+        "Male",
+        "common.topic.image",
+        "male.jpg"
+      ],
+      [
+        "Male",
+        "medicine.risk_factor.diseases",
+        "Kaposi's sarcoma"
+      ],
+      [
+        "TV Character",
+        "type.type.expected_by",
+        "Character"
+      ],
+      [
+        "Male",
+        "medicine.risk_factor.diseases",
+        "Burn"
+      ],
+      [
+        "Male",
+        "medicine.risk_factor.diseases",
+        "Club foot"
+      ],
+      [
+        "Male",
+        "medicine.risk_factor.diseases",
+        "Abdominal aortic aneurysm"
+      ],
+      [
+        "m.0d522bn",
+        "biology.hybrid_parentage.parent_sex",
+        "Male"
+      ],
+      [
+        "Parkinson's disease",
+        "medicine.icd_9_cm_classification.includes_classifications",
+        "Parkinson's disease"
+      ],
+      [
+        "Cardiovascular disease",
+        "people.cause_of_death.parent_cause_of_death",
+        "Cardiovascular disease"
+      ],
+      [
+        "Cardiovascular disease",
+        "medicine.disease_cause.diseases",
+        "Transient ischemic attack"
+      ],
+      [
+        "Carlton Banks",
+        "fictional_universe.fictional_character.gender",
+        "Male"
+      ],
+      [
+        "m.02slfzb",
+        "tv.regular_tv_appearance.series",
+        "The Fresh Prince of Bel-Air"
+      ],
+      [
+        "Male",
+        "medicine.risk_factor.diseases",
+        "Ventricular tachycardia"
+      ],
+      [
+        "Abdominal aortic aneurysm",
+        "medicine.disease.risk_factors",
+        "heart attack"
+      ],
+      [
+        "Male",
+        "medicine.risk_factor.diseases",
+        "Gastritis"
+      ],
+      [
+        "Male",
+        "medicine.risk_factor.diseases",
+        "Non-Hodgkin lymphoma"
+      ],
+      [
+        "Male",
+        "medicine.risk_factor.diseases",
+        "Sebaceous cyst"
+      ],
+      [
+        "heart attack",
+        "medicine.risk_factor.diseases",
+        "Abdominal aortic aneurysm"
+      ],
+      [
+        "Male",
+        "medicine.risk_factor.diseases",
+        "Tetralogy of Fallot"
+      ],
+      [
+        "m.07n73w_",
+        "base.gender.personal_gender_identity.gender_identity",
+        "Male"
+      ],
+      [
+        "Male",
+        "base.gender.gender_identity.people",
+        "m.02zd4tr"
+      ],
+      [
+        "The Fresh Prince of Bel-Air - Season 6",
+        "tv.tv_series_season.series",
+        "The Fresh Prince of Bel-Air"
+      ],
+      [
+        "TV Character",
+        "freebase.type_profile.published",
+        "Published"
+      ],
+      [
+        "Male",
+        "medicine.risk_factor.diseases",
+        "Epilepsy"
+      ],
+      [
+        "Male",
+        "medicine.risk_factor.diseases",
+        "Stuttering"
+      ],
+      [
+        "Carlton Banks",
+        "tv.tv_character.appeared_in_tv_program",
+        "m.02slfzb"
+      ],
+      [
+        "Stroke",
+        "medicine.risk_factor.diseases",
+        "Abdominal aortic aneurysm"
+      ],
+      [
+        "Carlton Banks",
+        "common.topic.article",
+        "m.0bdz96"
+      ],
+      [
+        "Male",
+        "base.gender.gender_identity.people",
+        "m.0gxvv0h"
+      ],
+      [
+        "Character",
+        "rdf-schema#range",
+        "TV Character"
+      ],
+      [
+        "Male",
+        "medicine.risk_factor.diseases",
+        "Alcohol abuse"
+      ],
+      [
+        "Male",
+        "base.gender.gender_identity.people",
+        "m.02_98hd"
+      ],
+      [
+        "Massimo Zanini",
+        "freebase.domain_profile.category",
+        "Male"
+      ],
+      [
+        "Male",
+        "base.animalnames.animal_gender.animal_names",
+        "m.0kfyrw1"
+      ],
+      [
+        "m.0kfyrvl",
+        "base.animalnames.animal_specific_name_relationship.gender",
+        "Male"
+      ],
+      [
+        "Epilepsy",
+        "medicine.disease.risk_factors",
+        "Stroke"
+      ],
+      [
+        "m.05bvjyj",
+        "base.animalnames.animal_specific_name_relationship.gender",
+        "Male"
+      ],
+      [
+        "TV Character",
+        "type.type.properties",
+        "Programs in which this was a regular character"
+      ],
+      [
+        "Male",
+        "medicine.risk_factor.diseases",
+        "Emphysema"
+      ],
+      [
+        "Phone Trick",
+        "biology.organism.sex",
+        "Male"
+      ],
+      [
+        "Male",
+        "base.schemastaging.context_name.pronunciation",
+        "m.011sf4j6"
+      ],
+      [
+        "Male",
+        "medicine.risk_factor.diseases",
+        "Golfer's elbow"
+      ],
+      [
+        "Kidney cancer",
+        "medicine.disease.risk_factors",
+        "Male"
+      ],
+      [
+        "Male",
+        "biology.hybrid_parent_gender.hybrids",
+        "m.0d5218t"
+      ],
+      [
+        "m.04mmfr8",
+        "base.gender.personal_gender_identity.gender_identity",
+        "Male"
+      ],
+      [
+        "Male",
+        "medicine.risk_factor.diseases",
+        "Kawasaki disease"
+      ],
+      [
+        "Cardiovascular disease",
+        "medicine.disease.parent_disease",
+        "Cardiovascular disease"
+      ],
+      [
+        "Cardiovascular disease",
+        "medicine.disease.risk_factors",
+        "Male"
+      ],
+      [
+        "m.0gxvv0q",
+        "base.gender.personal_gender_identity.gender_identity",
+        "Male"
+      ],
+      [
+        "Male",
+        "medicine.risk_factor.diseases",
+        "Pectus excavatum"
+      ],
+      [
+        "Male",
+        "medicine.risk_factor.diseases",
+        "Corneal abrasion"
+      ],
+      [
+        "Cardiovascular disease",
+        "people.cause_of_death.includes_causes_of_death",
+        "Cardiovascular disease"
+      ],
+      [
+        "m.05bvjy3",
+        "base.animalnames.animal_specific_name_relationship.gender",
+        "Male"
+      ],
+      [
+        "Male",
+        "base.gender.gender_identity.people",
+        "m.04j64q8"
+      ],
+      [
+        "m.02zd4tr",
+        "base.gender.personal_gender_identity.gender_identity",
+        "Male"
+      ],
+      [
+        "TV Character",
+        "type.type.properties",
+        "Appeared In TV Episodes"
+      ],
+      [
+        "TV Character",
+        "freebase.type_hints.included_types",
+        "Topic"
+      ],
+      [
+        "Male",
+        "medicine.risk_factor.diseases",
+        "Inguinal hernia"
+      ],
+      [
+        "Abdominal aortic aneurysm",
+        "medicine.disease.risk_factors",
+        "Transient ischemic attack"
+      ],
+      [
+        "m.04j647l",
+        "base.gender.personal_gender_identity.gender_identity",
+        "Male"
+      ],
+      [
+        "Fictional Character",
+        "freebase.type_profile.strict_included_types",
+        "Non-Agent"
+      ],
+      [
+        "Male",
+        "freebase.domain_category.domains",
+        "Massimo Zanini"
+      ],
+      [
+        "Male",
+        "base.gender.gender_identity.people",
+        "m.0gxvt_4"
+      ],
+      [
+        "Male",
+        "medicine.risk_factor.diseases",
+        "Kidney cancer"
+      ],
+      [
+        "Fictional Character",
+        "freebase.type_profile.strict_included_types",
+        "Abstract"
+      ],
+      [
+        "Fictional Character",
+        "freebase.type_profile.kind",
+        "Portrayal"
+      ],
+      [
+        "The Fresh Prince of Bel-Air",
+        "tv.tv_program.seasons",
+        "The Fresh Prince of Bel-Air - Season 5"
+      ],
+      [
+        "TV Character",
+        "freebase.type_hints.included_types",
+        "Fictional Character"
+      ],
+      [
+        "Male",
+        "base.gender.gender_identity.people",
+        "m.02_1x1x"
+      ],
+      [
+        "TV Character",
+        "freebase.type_profile.kind",
+        "Annotation"
+      ],
+      [
+        "Male",
+        "fictional_universe.fictional_setting.fictional_characters_born_here",
+        "Shadow Figure"
+      ],
+      [
+        "Male",
+        "base.gender.gender_identity.people",
+        "m.04j647l"
+      ],
+      [
+        "heart attack",
+        "medicine.disease.risk_factors",
+        "Male"
+      ],
+      [
+        "Male",
+        "medicine.risk_factor.diseases",
+        "heart attack"
+      ],
+      [
+        "Pancreatic cancer",
+        "medicine.disease.risk_factors",
+        "Male"
+      ],
+      [
+        "Male",
+        "medicine.risk_factor.diseases",
+        "Urolithiasis"
+      ],
+      [
+        "Phone Trick",
+        "base.thoroughbredracing.thoroughbred_racehorse.sex",
+        "Male"
+      ],
+      [
+        "TV Character",
+        "type.type.properties",
+        "Reason for final TV appearance"
+      ],
+      [
+        "TV Character",
+        "type.type.expected_by",
+        "Character"
+      ],
+      [
+        "TV Character",
+        "common.topic.article",
+        "m.021_knl"
+      ],
+      [
+        "The Fresh Prince of Bel-Air - Season 6",
+        "tv.tv_series_season.regular_cast",
+        "m.02slfzb"
+      ],
+      [
+        "Male",
+        "base.animalnames.animal_gender.animal_names",
+        "m.05bvk3z"
+      ],
+      [
+        "Male",
+        "base.animalnames.animal_gender.animal_names",
+        "m.0kfyrv7"
+      ],
+      [
+        "TV Character",
+        "freebase.type_profile.kind",
+        "Portrayal"
+      ],
+      [
+        "Male",
+        "base.animalnames.animal_gender.animal_names",
+        "m.0kfyrvl"
+      ],
+      [
+        "Male",
+        "medicine.risk_factor.diseases",
+        "Seborrheic dermatitis"
+      ],
+      [
+        "Character",
+        "type.property.reverse_property",
+        "Appeared In TV Episodes"
+      ],
+      [
+        "m.0gxvv0h",
+        "base.gender.personal_gender_identity.gender_identity",
+        "Male"
+      ],
+      [
+        "Cardiovascular disease",
+        "people.cause_of_death.includes_causes_of_death",
+        "Myocardial Ischemia"
+      ],
+      [
+        "m.02slfzb",
+        "tv.regular_tv_appearance.character",
+        "Carlton Banks"
+      ],
+      [
+        "Male",
+        "medicine.risk_factor.diseases",
+        "Hypospadias"
+      ],
+      [
+        "Male",
+        "medicine.risk_factor.diseases",
+        "Hair loss"
+      ],
+      [
+        "m.05cckn4",
+        "base.animalnames.animal_specific_name_relationship.gender",
+        "Male"
+      ],
+      [
+        "Male",
+        "base.gender.gender_identity.people",
+        "m.0gxvv0q"
+      ],
+      [
+        "m.05bvkm6",
+        "base.animalnames.animal_specific_name_relationship.gender",
+        "Male"
+      ],
+      [
+        "Male",
+        "freebase.domain_category.domains",
+        "neilplus's types"
+      ],
+      [
+        "m.0kfyrv7",
+        "base.animalnames.animal_specific_name_relationship.gender",
+        "Male"
+      ],
+      [
+        "heart attack",
+        "medicine.symptom.symptom_of",
+        "Myocardial Ischemia"
+      ],
+      [
+        "Male",
+        "medicine.risk_factor.diseases",
+        "Bladder cancer"
+      ],
+      [
+        "The Fresh Prince of Bel-Air",
+        "tv.tv_program.seasons",
+        "The Fresh Prince of Bel-Air - Season 6"
+      ],
+      [
+        "Male",
+        "medicine.risk_factor.diseases",
+        "Syphilis"
+      ],
+      [
+        "The Fresh Prince of Bel-Air",
+        "tv.tv_program.regular_cast",
+        "m.02slfzb"
+      ],
+      [
+        "Male",
+        "common.topic.notable_types",
+        "Risk Factor"
+      ],
+      [
+        "The Fresh Prince of Bel-Air - Season 5",
+        "tv.tv_series_season.regular_cast",
+        "m.02slfzb"
+      ],
+      [
+        "TV Character",
+        "freebase.type_profile.strict_included_types",
+        "Abstract"
+      ],
+      [
+        "Parkinson's disease",
+        "medicine.disease.risk_factors",
+        "Male"
+      ],
+      [
+        "Male",
+        "medicine.risk_factor.diseases",
+        "Ankylosing spondylitis"
+      ],
+      [
+        "Male",
+        "medicine.risk_factor.diseases",
+        "Hirschsprung's disease"
+      ],
+      [
+        "Stroke",
+        "medicine.disease.risk_factors",
+        "Transient ischemic attack"
+      ],
+      [
+        "Male",
+        "medicine.risk_factor.diseases",
+        "Multiple myeloma"
+      ],
+      [
+        "Male",
+        "medicine.risk_factor.diseases",
+        "Aortic aneurysm"
+      ],
+      [
+        "Male",
+        "medicine.risk_factor.diseases",
+        "Kyphosis"
+      ],
+      [
+        "m.05bvklm",
+        "base.animalnames.animal_specific_name_relationship.gender",
+        "Male"
+      ],
+      [
+        "Carlton Banks",
+        "common.topic.notable_for",
+        "g.125fbmc2f"
+      ],
+      [
+        "Male",
+        "medicine.risk_factor.diseases",
+        "Myocardial Ischemia"
+      ],
+      [
+        "m.0bm6pqb",
+        "biology.hybrid_parentage.parent_sex",
+        "Male"
+      ],
+      [
+        "Male",
+        "sports.sports_gender.sports_teams",
+        "Vive Targi Kielce"
+      ],
+      [
+        "Prostate cancer",
+        "medicine.disease.risk_factors",
+        "Male"
+      ],
+      [
+        "Burn",
+        "medicine.disease.risk_factors",
+        "Male"
+      ],
+      [
+        "m.02slfzb",
+        "tv.regular_tv_appearance.seasons",
+        "The Fresh Prince of Bel-Air - Season 6"
+      ],
+      [
+        "Stroke",
+        "medicine.disease.parent_disease",
+        "Cardiovascular disease"
+      ],
+      [
+        "m.09td39b",
+        "base.gender.personal_gender_identity.gender_identity",
+        "Male"
+      ],
+      [
+        "Male",
+        "medicine.risk_factor.diseases",
+        "Nephrotic syndrome"
+      ],
+      [
+        "TV Character",
+        "type.type.properties",
+        "First TV appearance"
+      ],
+      [
+        "Male",
+        "biology.hybrid_parent_gender.hybrids",
+        "m.0zm9_69"
+      ],
+      [
+        "Male",
+        "medicine.risk_factor.diseases",
+        "Pancreatic cancer"
+      ],
+      [
+        "m.0kfyrt3",
+        "base.animalnames.animal_specific_name_relationship.gender",
+        "Male"
+      ],
+      [
+        "TV Character",
+        "freebase.type_profile.strict_included_types",
+        "Fictional Character"
+      ],
+      [
+        "m.0blp580",
+        "biology.hybrid_parentage.parent_sex",
+        "Male"
+      ],
+      [
+        "Male",
+        "base.animalnames.animal_gender.animal_names",
+        "m.05bvjy3"
+      ],
+      [
+        "Male",
+        "biology.hybrid_parent_gender.hybrids",
+        "m.0bm6pqb"
+      ],
+      [
+        "Male",
+        "biology.hybrid_parent_gender.hybrids",
+        "m.0d522bn"
+      ],
+      [
+        "Male",
+        "base.gender.gender_identity.people",
+        "m.04j64rh"
+      ],
+      [
+        "Male",
+        "base.animalnames.animal_gender.animal_names",
+        "m.05bvjyj"
+      ],
+      [
+        "Stroke",
+        "medicine.risk_factor.diseases",
+        "Epilepsy"
+      ],
+      [
+        "Male",
+        "biology.hybrid_parent_gender.hybrids",
+        "m.0hzxnsy"
+      ],
+      [
+        "m.0zm9_69",
+        "biology.hybrid_parentage.parent_sex",
+        "Male"
+      ],
+      [
+        "m.0d521lm",
+        "biology.hybrid_parentage.parent_sex",
+        "Male"
+      ],
+      [
+        "Male",
+        "award.award_discipline.awards_in_this_discipline",
+        "SFX Award for Best Actor"
+      ],
+      [
+        "Male",
+        "common.topic.subjects",
+        "m.01313_lt"
+      ],
+      [
+        "TV Character",
+        "type.type.expected_by",
+        "Character"
+      ],
+      [
+        "Esophageal cancer",
+        "medicine.disease.risk_factors",
+        "Male"
+      ],
+      [
+        "Male",
+        "medicine.risk_factor.diseases",
+        "Obstructive sleep apnea"
+      ],
+      [
+        "Male",
+        "biology.hybrid_parent_gender.hybrids",
+        "m.0blp5sr"
+      ],
+      [
+        "Male",
+        "medicine.risk_factor.diseases",
+        "Esophageal cancer"
+      ],
+      [
+        "m.0hzxnsy",
+        "biology.hybrid_parentage.parent_sex",
+        "Male"
+      ],
+      [
+        "m.04j64rh",
+        "base.gender.personal_gender_identity.gender_identity",
+        "Male"
+      ],
+      [
+        "Male",
+        "medicine.risk_factor.diseases",
+        "Autism"
+      ],
+      [
+        "Male",
+        "medicine.risk_factor.diseases",
+        "Acute myeloid leukemia"
+      ],
+      [
+        "TV Character",
+        "freebase.documented_object.documentation",
+        "m.021_knl"
+      ],
+      [
+        "TV Character",
+        "type.type.expected_by",
+        "Members of TV Characters group"
+      ],
+      [
+        "m.0kfyrw1",
+        "base.animalnames.animal_specific_name_relationship.gender",
+        "Male"
+      ],
+      [
+        "m.04j64q8",
+        "base.gender.personal_gender_identity.gender_identity",
+        "Male"
+      ],
+      [
+        "Fictional Character",
+        "freebase.type_hints.included_types",
+        "Topic"
+      ],
+      [
+        "Cardiovascular disease",
+        "people.cause_of_death.includes_causes_of_death",
+        "heart attack"
+      ],
+      [
+        "heart attack",
+        "medicine.disease.symptoms",
+        "Ventricular tachycardia"
+      ],
+      [
+        "m.02slfzb",
+        "tv.regular_tv_appearance.seasons",
+        "The Fresh Prince of Bel-Air - Season 5"
+      ]
+    ]
+  }
+]

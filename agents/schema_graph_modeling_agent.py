@@ -1,11 +1,12 @@
 import argparse
+from copy import deepcopy
 import json
 import os
 import re
 from dataclasses import dataclass
 from typing import Any, Iterable
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator, model_validator
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.orm import sessionmaker
 
@@ -37,6 +38,140 @@ class SchemaTable(BaseModel):
     column_value_samples: dict[str, list[Any]] = Field(default_factory=dict)
 
 
+SCHEMA_GRAPH_CONTRACT_VERSION = "schema_graph_contract_v1"
+SCHEMA_GRAPH_MIN_COMPATIBLE_VERSION = "schema_graph_contract_v1"
+SCHEMA_GRAPH_REVIEW_BOUNDARY = "draft_only_until_human_review"
+SCHEMA_GRAPH_CONTRACT_CONSTRAINTS = {
+    "entity_type": [
+        "node_type evidence must include at least one source-backed entry",
+        "node_type keys are stable graph keys derived from schema evidence",
+        "primary_key, when present, names the best source primary key",
+        "mapped_tables, primary_key, and properties must reference source schema tables and columns",
+        "confidence must be between 0 and 1 inclusive",
+    ],
+    "relation_type": [
+        "edge_type evidence must include at least one source-backed entry",
+        "source_node_key and target_node_key must reference node_types when node_types are present",
+        "source_table, target_table, join columns, and edge properties must reference source schema tables and columns",
+        "metrics and derived values belong in edge properties rather than separate ontology objects",
+        "confidence must be between 0 and 1 inclusive",
+    ],
+    "review": [
+        "drafts remain draft-only until human review",
+        "canonical ontology writes are not allowed from this agent",
+        "artifact specs carry schema_contract_version and prompt_version",
+    ],
+}
+SCHEMA_GRAPH_COMPATIBILITY = {
+    "breaking_changes_require_major_version": [
+        "removing or renaming node/edge fields consumed by artifact_specs",
+        "changing review_boundary semantics",
+        "tightening endpoint, evidence, confidence, or rejected-candidate constraints for persisted drafts",
+        "changing object/link artifact payload meanings",
+    ],
+    "minor_compatible_changes": [
+        "adding optional fields to node_types, edge_types, or rejected_candidates",
+        "adding artifact payload metadata while preserving existing keys",
+        "loosening validation bounds without invalidating existing persisted drafts",
+    ],
+    "migration_required_for": [
+        "natural-key or primary-key reinterpretation",
+        "source_node_key or target_node_key semantic changes",
+        "canonical_write_boundary or review-gate behavior changes",
+    ],
+}
+
+
+@dataclass(frozen=True)
+class SchemaTraceabilityIssue:
+    code: str
+    path: str
+    message: str
+    artifact_key: str | None = None
+    table: str | None = None
+    column: str | None = None
+
+    def as_dict(self) -> dict[str, Any]:
+        payload = {
+            "code": self.code,
+            "path": self.path,
+            "message": self.message,
+        }
+        if self.artifact_key:
+            payload["artifact_key"] = self.artifact_key
+        if self.table:
+            payload["table"] = self.table
+        if self.column:
+            payload["column"] = self.column
+        return payload
+
+
+class SchemaTraceabilityValidationError(ValueError):
+    def __init__(self, errors: list[SchemaTraceabilityIssue]):
+        self.errors = [error.as_dict() for error in errors]
+        super().__init__(
+            "schema traceability validation failed: "
+            + "; ".join(f"{error.code} at {error.path}" for error in errors[:5])
+        )
+
+
+@dataclass
+class SchemaTraceabilityValidationResult:
+    errors: list[SchemaTraceabilityIssue]
+
+    @property
+    def valid(self) -> bool:
+        return not self.errors
+
+    def error_dicts(self) -> list[dict[str, Any]]:
+        return [error.as_dict() for error in self.errors]
+
+    def raise_for_errors(self) -> None:
+        if self.errors:
+            raise SchemaTraceabilityValidationError(self.errors)
+
+
+@dataclass(frozen=True)
+class OntologyConsistencyIssue:
+    code: str
+    path: str
+    message: str
+    artifact_key: str | None = None
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "code": self.code,
+            "path": self.path,
+            "message": self.message,
+            "artifact_key": self.artifact_key or "",
+        }
+
+
+class OntologyConsistencyValidationError(ValueError):
+    def __init__(self, errors: list[OntologyConsistencyIssue]):
+        self.errors = [error.as_dict() for error in errors]
+        super().__init__(
+            "ontology consistency validation failed: "
+            + "; ".join(f"{error.code} at {error.path}" for error in errors[:5])
+        )
+
+
+@dataclass
+class OntologyConsistencyValidationResult:
+    errors: list[OntologyConsistencyIssue]
+
+    @property
+    def valid(self) -> bool:
+        return not self.errors
+
+    def error_dicts(self) -> list[dict[str, Any]]:
+        return [error.as_dict() for error in self.errors]
+
+    def raise_for_errors(self) -> None:
+        if self.errors:
+            raise OntologyConsistencyValidationError(self.errors)
+
+
 class GraphNodeTypeDraft(BaseModel):
     key: str = Field(description="Stable snake_case node type key inferred from schema evidence")
     name: str = Field(description="Human readable node type name")
@@ -46,6 +181,15 @@ class GraphNodeTypeDraft(BaseModel):
     properties: list[str] = Field(default_factory=list, description="Source columns exposed as node properties")
     evidence: list[str] = Field(default_factory=list, description="Table/column/comment/FK evidence")
     confidence: float = Field(ge=0.0, le=1.0)
+    subclass_of: list[str] = Field(default_factory=list, description="Parent node type keys this type inherits from")
+    disjoint_with: list[str] = Field(default_factory=list, description="Node type keys that must not share instances with this type")
+
+    @field_validator("evidence")
+    @classmethod
+    def evidence_must_be_explicit(cls, value: list[str]) -> list[str]:
+        if not any(str(item or "").strip() for item in value):
+            raise ValueError("node_type evidence must include at least one source-backed entry")
+        return value
 
 
 class GraphEdgeTypeDraft(BaseModel):
@@ -61,14 +205,53 @@ class GraphEdgeTypeDraft(BaseModel):
     properties: list[str] = Field(default_factory=list, description="Source columns exposed as edge/fact properties")
     evidence: list[str] = Field(default_factory=list)
     confidence: float = Field(ge=0.0, le=1.0)
+    domain: list[str] = Field(default_factory=list, description="Allowed source node type keys for this relation (defaults to source_node_key)")
+    range: list[str] = Field(default_factory=list, description="Allowed target node type keys for this relation (defaults to target_node_key)")
+
+    @field_validator("evidence")
+    @classmethod
+    def evidence_must_be_explicit(cls, value: list[str]) -> list[str]:
+        if not any(str(item or "").strip() for item in value):
+            raise ValueError("edge_type evidence must include at least one source-backed entry")
+        return value
 
 
 class GraphModelDraft(BaseModel):
+    schema_version: str = Field(default=SCHEMA_GRAPH_CONTRACT_VERSION)
+    min_compatible_version: str = Field(default=SCHEMA_GRAPH_MIN_COMPATIBLE_VERSION)
     node_types: list[GraphNodeTypeDraft] = Field(default_factory=list)
     edge_types: list[GraphEdgeTypeDraft] = Field(default_factory=list)
     rejected_candidates: list[dict[str, Any]] = Field(default_factory=list)
     assumptions: list[str] = Field(default_factory=list)
-    review_boundary: str = "draft_only_until_human_review"
+    review_boundary: str = SCHEMA_GRAPH_REVIEW_BOUNDARY
+    contract_constraints: dict[str, list[str]] = Field(default_factory=lambda: deepcopy(SCHEMA_GRAPH_CONTRACT_CONSTRAINTS))
+    compatibility: dict[str, list[str]] = Field(default_factory=lambda: deepcopy(SCHEMA_GRAPH_COMPATIBILITY))
+
+    @model_validator(mode="after")
+    def validate_draft_contract(self) -> "GraphModelDraft":
+        if self.schema_version != SCHEMA_GRAPH_CONTRACT_VERSION:
+            raise ValueError(f"schema_version must be {SCHEMA_GRAPH_CONTRACT_VERSION}")
+        if self.min_compatible_version != SCHEMA_GRAPH_MIN_COMPATIBLE_VERSION:
+            raise ValueError(f"min_compatible_version must be {SCHEMA_GRAPH_MIN_COMPATIBLE_VERSION}")
+        if self.review_boundary != SCHEMA_GRAPH_REVIEW_BOUNDARY:
+            raise ValueError(f"review_boundary must be {SCHEMA_GRAPH_REVIEW_BOUNDARY}")
+
+        node_keys = {node.key for node in self.node_types}
+        if node_keys:
+            for edge in self.edge_types:
+                if edge.source_node_key not in node_keys:
+                    raise ValueError(f"edge_type {edge.key} source_node_key must reference a node_type")
+                if edge.target_node_key not in node_keys:
+                    raise ValueError(f"edge_type {edge.key} target_node_key must reference a node_type")
+
+        for index, candidate in enumerate(self.rejected_candidates):
+            if not str(candidate.get("name") or "").strip():
+                raise ValueError(f"rejected_candidates[{index}].name is required")
+            if not str(candidate.get("reason") or "").strip():
+                raise ValueError(f"rejected_candidates[{index}].reason is required")
+            if not str(candidate.get("suggested_graph_treatment") or "").strip():
+                raise ValueError(f"rejected_candidates[{index}].suggested_graph_treatment is required")
+        return self
 
 
 @dataclass
@@ -118,6 +301,32 @@ def _table_evidence(metadata_dump: list[dict[str, Any]], mapped_tables: Iterable
                 hint += f" semantic_type:{semantic_type}"
             evidence.append(hint)
     return evidence
+
+
+def _schema_table_column_index(schema_dump: list[dict[str, Any]]) -> dict[str, set[str]]:
+    table_columns: dict[str, set[str]] = {}
+    for table in schema_dump:
+        table_name = str(table.get("table_name") or "").strip()
+        if not table_name:
+            continue
+        columns = set()
+        for column in table.get("columns") or []:
+            column_name = str(column.get("name") or column.get("column") or "").strip()
+            if column_name:
+                columns.add(column_name)
+        table_columns[table_name] = columns
+    return table_columns
+
+
+def _qualified_column_refs(value: Any) -> list[tuple[str, str]]:
+    if value is None:
+        return []
+    text_value = json.dumps(value, ensure_ascii=False, sort_keys=True) if isinstance(value, (dict, list)) else str(value)
+    return re.findall(r"\b([A-Za-z_][A-Za-z0-9_$]*)\.([A-Za-z_][A-Za-z0-9_$]*)\b", text_value)
+
+
+def _artifact_key(artifact_type: str, natural_key: str) -> str:
+    return f"{artifact_type}:{natural_key}"
 
 
 class SchemaGraphModelingAgent:
@@ -269,11 +478,15 @@ Decision tests before creating each edge_type:
 If the relation is only a measurement/assertion/claim, put it in rejected_candidates with suggested graph/fact treatment instead of inventing a durable ontology link.
 
 Return a GraphModelDraft JSON object with:
+- schema_version
+- min_compatible_version
 - node_types
 - edge_types
 - rejected_candidates
 - assumptions
 - review_boundary
+- contract_constraints
+- compatibility
 
 Coverage requirement:
 - Every source table and every non-empty source column must be traceable in the output as one of: node_type.primary_key, node_type.properties, edge_type.properties, edge join/key evidence, rejected_candidates[].suggested_graph_treatment, or assumptions.
@@ -387,6 +600,10 @@ Raw schema:
                         "properties": node.properties,
                         "llm_inferred": True,
                         "prompt_version": prompt_version,
+                        "schema_contract_version": draft.schema_version,
+                        "min_compatible_schema_contract_version": draft.min_compatible_version,
+                        "schema_contract_constraints": draft.contract_constraints,
+                        "schema_contract_compatibility": draft.compatibility,
                         "canonical_write_boundary": draft.review_boundary,
                     },
                     "source_refs": [f"table:{table}" for table in node.mapped_tables],
@@ -412,6 +629,10 @@ Raw schema:
                         "edge_properties": edge.properties,
                         "llm_inferred": True,
                         "prompt_version": prompt_version,
+                        "schema_contract_version": draft.schema_version,
+                        "min_compatible_schema_contract_version": draft.min_compatible_version,
+                        "schema_contract_constraints": draft.contract_constraints,
+                        "schema_contract_compatibility": draft.compatibility,
                         "canonical_write_boundary": draft.review_boundary,
                     },
                     "source_refs": [f"table:{edge.source_table}", f"table:{edge.target_table}"],
@@ -425,14 +646,366 @@ Raw schema:
         return self.artifact_specs_for_draft(draft, prompt_version=self.prompt_version)
 
     @classmethod
+    def validate_schema_traceability(
+        cls,
+        draft: GraphModelDraft,
+        schema_dump: list[dict[str, Any]],
+        *,
+        require_full_column_coverage: bool = True,
+    ) -> SchemaTraceabilityValidationResult:
+        table_columns = _schema_table_column_index(schema_dump)
+        errors: list[SchemaTraceabilityIssue] = []
+        traced_tables: set[str] = set()
+        traced_columns: set[tuple[str, str]] = set()
+        nodes_by_key = {node.key: node for node in draft.node_types}
+
+        def add_error(
+            code: str,
+            path: str,
+            message: str,
+            *,
+            artifact_key: str | None = None,
+            table: str | None = None,
+            column: str | None = None,
+        ) -> None:
+            errors.append(
+                SchemaTraceabilityIssue(
+                    code=code,
+                    path=path,
+                    message=message,
+                    artifact_key=artifact_key,
+                    table=table,
+                    column=column,
+                )
+            )
+
+        def trace_table(table: str, path: str, artifact_key: str) -> bool:
+            if table not in table_columns:
+                add_error(
+                    "unknown_table",
+                    path,
+                    f"{artifact_key} references unknown source table {table!r}",
+                    artifact_key=artifact_key,
+                    table=table,
+                )
+                return False
+            traced_tables.add(table)
+            return True
+
+        def trace_column_ref(
+            value: str | None,
+            allowed_tables: Iterable[str],
+            path: str,
+            artifact_key: str,
+            *,
+            required: bool = False,
+        ) -> None:
+            if not value:
+                if required:
+                    add_error(
+                        "missing_column_ref",
+                        path,
+                        f"{artifact_key} must reference a source column",
+                        artifact_key=artifact_key,
+                    )
+                return
+
+            column_ref = str(value).strip()
+            allowed = [table for table in allowed_tables if table]
+            qualified_refs = _qualified_column_refs(column_ref)
+            if qualified_refs:
+                for table, column in qualified_refs:
+                    if table not in allowed:
+                        add_error(
+                            "column_table_mismatch",
+                            path,
+                            f"{artifact_key} column reference {table}.{column} is outside allowed tables {allowed}",
+                            artifact_key=artifact_key,
+                            table=table,
+                            column=column,
+                        )
+                        continue
+                    if trace_table(table, path, artifact_key):
+                        if column not in table_columns[table]:
+                            add_error(
+                                "unknown_column",
+                                path,
+                                f"{artifact_key} references unknown source column {table}.{column}",
+                                artifact_key=artifact_key,
+                                table=table,
+                                column=column,
+                            )
+                        else:
+                            traced_columns.add((table, column))
+                return
+
+            matches = [table for table in allowed if table in table_columns and column_ref in table_columns[table]]
+            if not matches:
+                add_error(
+                    "unknown_column",
+                    path,
+                    f"{artifact_key} references source column {column_ref!r} that is not present on allowed tables {allowed}",
+                    artifact_key=artifact_key,
+                    column=column_ref,
+                )
+                return
+            for table in matches:
+                traced_tables.add(table)
+                traced_columns.add((table, column_ref))
+
+        def trace_text_refs(value: Any, path: str, artifact_key: str, allowed_tables: Iterable[str] | None = None) -> None:
+            allowed = set(allowed_tables or table_columns.keys())
+            for table, column in _qualified_column_refs(value):
+                if table not in allowed:
+                    add_error(
+                        "column_table_mismatch",
+                        path,
+                        f"{artifact_key} column reference {table}.{column} is outside allowed tables {sorted(allowed)}",
+                        artifact_key=artifact_key,
+                        table=table,
+                        column=column,
+                    )
+                    continue
+                if trace_table(table, path, artifact_key):
+                    if column not in table_columns[table]:
+                        add_error(
+                            "unknown_column",
+                            path,
+                            f"{artifact_key} references unknown source column {table}.{column}",
+                            artifact_key=artifact_key,
+                            table=table,
+                            column=column,
+                        )
+                    else:
+                        traced_columns.add((table, column))
+
+        for node_index, node in enumerate(draft.node_types):
+            artifact_key = _artifact_key("object", node.key)
+            if not node.mapped_tables:
+                add_error(
+                    "missing_mapped_table",
+                    f"node_types[{node_index}].mapped_tables",
+                    f"{artifact_key} must map to at least one source table",
+                    artifact_key=artifact_key,
+                )
+            for table_index, table in enumerate(node.mapped_tables):
+                trace_table(table, f"node_types[{node_index}].mapped_tables[{table_index}]", artifact_key)
+            trace_column_ref(
+                node.primary_key,
+                node.mapped_tables,
+                f"node_types[{node_index}].primary_key",
+                artifact_key,
+                required=False,
+            )
+            for property_index, property_name in enumerate(node.properties):
+                trace_column_ref(
+                    property_name,
+                    node.mapped_tables,
+                    f"node_types[{node_index}].properties[{property_index}]",
+                    artifact_key,
+                    required=True,
+                )
+            trace_text_refs(node.evidence, f"node_types[{node_index}].evidence", artifact_key)
+
+        for edge_index, edge in enumerate(draft.edge_types):
+            artifact_key = _artifact_key("link", edge.key)
+            allowed_tables = [edge.source_table, edge.target_table]
+            source_node = nodes_by_key.get(edge.source_node_key)
+            target_node = nodes_by_key.get(edge.target_node_key)
+            if source_node and edge.source_table not in source_node.mapped_tables:
+                add_error(
+                    "edge_source_table_mismatch",
+                    f"edge_types[{edge_index}].source_table",
+                    f"{artifact_key} source_table {edge.source_table!r} is not mapped by source node {edge.source_node_key!r}",
+                    artifact_key=artifact_key,
+                    table=edge.source_table,
+                )
+            if target_node and edge.target_table not in target_node.mapped_tables:
+                add_error(
+                    "edge_target_table_mismatch",
+                    f"edge_types[{edge_index}].target_table",
+                    f"{artifact_key} target_table {edge.target_table!r} is not mapped by target node {edge.target_node_key!r}",
+                    artifact_key=artifact_key,
+                    table=edge.target_table,
+                )
+            trace_table(edge.source_table, f"edge_types[{edge_index}].source_table", artifact_key)
+            trace_table(edge.target_table, f"edge_types[{edge_index}].target_table", artifact_key)
+            for property_index, property_name in enumerate(edge.properties):
+                trace_column_ref(
+                    property_name,
+                    allowed_tables,
+                    f"edge_types[{edge_index}].properties[{property_index}]",
+                    artifact_key,
+                    required=True,
+                )
+            trace_text_refs(edge.join_condition, f"edge_types[{edge_index}].join_condition", artifact_key, allowed_tables)
+            trace_text_refs(edge.evidence, f"edge_types[{edge_index}].evidence", artifact_key, allowed_tables)
+
+        for candidate_index, candidate in enumerate(draft.rejected_candidates):
+            name = str(candidate.get("name") or f"candidate_{candidate_index}")
+            trace_text_refs(
+                candidate,
+                f"rejected_candidates[{candidate_index}]",
+                _artifact_key("rejected_candidate", stable_graph_key(name)),
+            )
+        for assumption_index, assumption in enumerate(draft.assumptions):
+            trace_text_refs(
+                assumption,
+                f"assumptions[{assumption_index}]",
+                _artifact_key("assumption", str(assumption_index)),
+            )
+
+        if require_full_column_coverage:
+            for table, columns in table_columns.items():
+                if table not in traced_tables:
+                    add_error(
+                        "untraced_table",
+                        f"schema[{table}].table_name",
+                        f"source table {table!r} is not traceable to any draft node, edge, rejected candidate, or assumption",
+                        table=table,
+                    )
+                for column in sorted(columns):
+                    if (table, column) not in traced_columns:
+                        add_error(
+                            "untraced_column",
+                            f"schema[{table}].columns[{column}]",
+                            f"source column {table}.{column} is not traceable to any draft property, key, join/evidence, rejected candidate, or assumption",
+                            table=table,
+                            column=column,
+                        )
+
+        return SchemaTraceabilityValidationResult(errors)
+
+    @classmethod
+    def validate_ontology_consistency(
+        cls,
+        draft: GraphModelDraft,
+    ) -> OntologyConsistencyValidationResult:
+        errors: list[OntologyConsistencyIssue] = []
+        node_keys = {node.key for node in draft.node_types}
+        nodes_by_key = {node.key: node for node in draft.node_types}
+
+        def add_error(code: str, path: str, message: str, *, artifact_key: str | None = None) -> None:
+            errors.append(OntologyConsistencyIssue(code=code, path=path, message=message, artifact_key=artifact_key))
+
+        # --- subclass hierarchy cycle detection ---
+        subclass_graph: dict[str, list[str]] = {}
+        for node in draft.node_types:
+            for parent in node.subclass_of:
+                if parent not in node_keys:
+                    add_error(
+                        "subclass_of_unknown",
+                        f"node_types[{node.key}].subclass_of",
+                        f"node_type {node.key!r} declares subclass_of {parent!r} which is not a declared node_type",
+                        artifact_key=f"object:{node.key}",
+                    )
+                else:
+                    subclass_graph.setdefault(node.key, []).append(parent)
+
+        if subclass_graph:
+            WHITE, GRAY, BLACK = 0, 1, 2
+            color: dict[str, int] = {key: WHITE for key in node_keys}
+
+            def dfs(node_key: str, path: list[str]) -> None:
+                color[node_key] = GRAY
+                path.append(node_key)
+                for parent in subclass_graph.get(node_key, []):
+                    if color.get(parent) == GRAY:
+                        cycle = path[path.index(parent):] + [parent]
+                        add_error(
+                            "subclass_cycle",
+                            f"node_types[{parent}].subclass_of",
+                            f"subclass hierarchy cycle detected: {' -> '.join(cycle)}",
+                            artifact_key=f"object:{parent}",
+                        )
+                    elif color.get(parent) == WHITE:
+                        dfs(parent, path)
+                path.pop()
+                color[node_key] = BLACK
+
+            for key in node_keys:
+                if color[key] == WHITE:
+                    dfs(key, [])
+
+        # --- domain/range compatibility ---
+        for edge in draft.edge_types:
+            artifact_key = f"link:{edge.key}"
+            declared_domain = edge.domain or [edge.source_node_key]
+            declared_range = edge.range or [edge.target_node_key]
+
+            if edge.source_node_key not in declared_domain:
+                add_error(
+                    "domain_mismatch",
+                    f"edge_types[{edge.key}].source_node_key",
+                    f"edge_type {edge.key!r} source_node_key {edge.source_node_key!r} is not in declared domain {declared_domain}",
+                    artifact_key=artifact_key,
+                )
+
+            if edge.target_node_key not in declared_range:
+                add_error(
+                    "range_mismatch",
+                    f"edge_types[{edge.key}].target_node_key",
+                    f"edge_type {edge.key!r} target_node_key {edge.target_node_key!r} is not in declared range {declared_range}",
+                    artifact_key=artifact_key,
+                )
+
+            for dom_key in declared_domain:
+                if dom_key not in node_keys:
+                    add_error(
+                        "domain_unknown_node",
+                        f"edge_types[{edge.key}].domain",
+                        f"edge_type {edge.key!r} domain references unknown node_type {dom_key!r}",
+                        artifact_key=artifact_key,
+                    )
+
+            for rng_key in declared_range:
+                if rng_key not in node_keys:
+                    add_error(
+                        "range_unknown_node",
+                        f"edge_types[{edge.key}].range",
+                        f"edge_type {edge.key!r} range references unknown node_type {rng_key!r}",
+                        artifact_key=artifact_key,
+                    )
+
+        # --- disjointness violation ---
+        # If two node types declare disjoint_with each other (or one declares
+        # the other), an edge connecting both as source and target violates
+        # disjointness because the same relation would require an instance to
+        # belong to both disjoint types.
+        disjoint_pairs: set[tuple[str, str]] = set()
+        for node in draft.node_types:
+            for other in node.disjoint_with:
+                if other in node_keys and other != node.key:
+                    disjoint_pairs.add(tuple(sorted({node.key, other})))
+
+        if disjoint_pairs:
+            for edge in draft.edge_types:
+                pair = tuple(sorted({edge.source_node_key, edge.target_node_key}))
+                if len(pair) == 2 and pair in disjoint_pairs:
+                    add_error(
+                        "disjointness_violation",
+                        f"edge_types[{edge.key}]",
+                        f"edge_type {edge.key!r} connects disjoint node types {edge.source_node_key!r} and {edge.target_node_key!r}",
+                        artifact_key=f"link:{edge.key}",
+                    )
+
+        return OntologyConsistencyValidationResult(errors)
+
+    @classmethod
     def persist_draft_artifacts_in_session(
         cls,
         session,
         draft: GraphModelDraft,
         *,
+        source_schema: list[dict[str, Any]] | None = None,
         project_id: str | None = None,
         source_agent: str | None = None,
     ) -> list[str]:
+        if source_schema is not None:
+            cls.validate_schema_traceability(draft, source_schema).raise_for_errors()
+
+        cls.validate_ontology_consistency(draft).raise_for_errors()
+
         canonical_keys: list[str] = []
         for spec in cls.artifact_specs_for_draft(draft):
             artifact = upsert_artifact(
@@ -458,6 +1031,7 @@ Raw schema:
                         "summary": evidence,
                         "payload": {
                             "prompt_version": cls.prompt_version,
+                            "schema_contract_version": draft.schema_version,
                             "artifact": spec["natural_key"],
                             "review_boundary": draft.review_boundary,
                         },
@@ -469,13 +1043,14 @@ Raw schema:
             canonical_keys.append(artifact.canonical_key)
         return canonical_keys
 
-    def persist_draft_artifacts(self, draft: GraphModelDraft) -> list[str]:
+    def persist_draft_artifacts(self, draft: GraphModelDraft, *, source_schema: list[dict[str, Any]] | None = None) -> list[str]:
         if self.Session is None:
             raise ValueError("metadata_db_url is required to persist artifacts")
         with self.Session() as session:
             canonical_keys = self.persist_draft_artifacts_in_session(
                 session,
                 draft,
+                source_schema=source_schema,
                 project_id=self.project_id,
                 source_agent=self.source_agent,
             )
@@ -498,7 +1073,7 @@ Raw schema:
             sample_size=sample_size,
         )
         draft = self.infer_graph_model_with_llm(schema_dump)
-        artifacts = self.persist_draft_artifacts(draft) if persist else []
+        artifacts = self.persist_draft_artifacts(draft, source_schema=schema_dump) if persist else []
         return SchemaGraphModelingResult(schema=schema_dump, draft=draft, artifacts=artifacts)
 
 
@@ -530,6 +1105,7 @@ def main() -> None:
     output = {
         "tenant": args.tenant,
         "prompt_version": agent.prompt_version,
+        "schema_contract_version": result.draft.schema_version,
         "schema_table_count": len(result.schema),
         "draft": result.draft.model_dump(),
         "artifacts": result.artifacts,

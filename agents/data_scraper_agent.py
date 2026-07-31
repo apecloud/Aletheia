@@ -2,7 +2,6 @@ import os
 import requests
 import pandas as pd
 from sqlalchemy import create_engine
-from urllib.parse import urlparse
 import argparse
 import logging
 
@@ -105,4 +104,4 @@ if __name__ == "__main__":
     args = parser.parse_args()
     
     scraper = GenericDataScraper(db_url=args.db)
-    ok = scraper.download_and_import(source_url=args.url, table_name=args.table, file_type=args.type)
+    scraper.download_and_import(source_url=args.url, table_name=args.table, file_type=args.type)

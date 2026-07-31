@@ -7,7 +7,6 @@ from typing import Any, Iterable
 
 
 DEFAULT_GOLDEN = Path(__file__).parent / "fixtures" / "northwind_golden.json"
-DEFAULT_OPTIONAL = Path(__file__).parent / "fixtures" / "northwind_optional.json"
 
 
 def normalize_name(value: str) -> str:
@@ -50,14 +49,6 @@ class OntologyLink:
 class OntologySnapshot:
     objects: tuple[OntologyObject, ...]
     links: tuple[OntologyLink, ...]
-
-    @property
-    def object_keys(self) -> set[str]:
-        return {obj.key for obj in self.objects}
-
-    @property
-    def link_keys(self) -> set[str]:
-        return {link.key for link in self.links}
 
 
 def _first_present(record: dict[str, Any], names: Iterable[str], default: Any = None) -> Any:

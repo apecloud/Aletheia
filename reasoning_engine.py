@@ -1,12 +1,16 @@
 """
 Aletheia Universal Reasoning Engine
 ====================================
-Schema-agnostic deep analysis for any entity type. Discovers table structures,
-column types, FK relationships, and aggregatable dimensions at runtime from
-approved schema-graph projection metadata, SQL introspection, and ontology
-artifact descriptions. Legacy ENTITY_CONFIG/LINK_CONFIG fixtures are repository
-fallbacks only when approved SchemaGraphModelingAgent projection metadata is not
-available.
+Schema-agnostic deep analysis for any entity type. Retrieval is graph-native:
+the repository (self.repo) fetches an entity and its neighborhood as plain
+node/edge dicts, and this engine plans which relations/entity mentions a
+question needs (via the LLM planner), walks paths between named centers, and
+composes findings -- with no dependency on SQL introspection or raw
+SQLAlchemy engines. Entity/link configuration and relation descriptions come
+from approved schema-graph projection metadata and ontology artifact
+descriptions, with legacy ENTITY_CONFIG/LINK_CONFIG fixtures as repository
+fallbacks only when approved SchemaGraphModelingAgent projection metadata is
+not available.
 
 Usage:
     from reasoning_engine import ReasoningEngine
@@ -15,8 +19,12 @@ Usage:
 """
 
 import json
-from datetime import datetime
-from sqlalchemy import inspect, text
+import os
+import re
+from collections import deque
+from dataclasses import dataclass, field
+
+from llm_planner import LLMPlanner, PlannerMapping
 
 
 def _jsonable(value):
@@ -25,36 +33,44 @@ def _jsonable(value):
     return value
 
 
-def _fmt_number(v):
-    if isinstance(v, float):
-        if v == int(v):
-            return str(int(v))
-        return f"{v:,.2f}"
-    return f"{v:,}" if isinstance(v, int) else str(v)
-
-
-def _quote_ident(name):
-    return "`" + str(name).replace("`", "``") + "`"
-
-
-class TableMeta:
-    __slots__ = ("table", "pk_col", "fk_cols", "date_cols", "numeric_cols", "text_cols", "all_cols")
-
-    def __init__(self, table, pk_col, fk_cols, date_cols, numeric_cols, text_cols, all_cols):
-        self.table = table
-        self.pk_col = pk_col
-        self.fk_cols = fk_cols
-        self.date_cols = date_cols
-        self.numeric_cols = numeric_cols
-        self.text_cols = text_cols
-        self.all_cols = all_cols
-
-
 class ReasoningEngine:
+    LEXICAL_RECALL_STOPWORDS = {
+        "a",
+        "an",
+        "and",
+        "are",
+        "did",
+        "do",
+        "does",
+        "for",
+        "he",
+        "her",
+        "his",
+        "in",
+        "is",
+        "it",
+        "of",
+        "on",
+        "she",
+        "the",
+        "this",
+        "to",
+        "was",
+        "were",
+        "what",
+        "when",
+        "where",
+        "which",
+        "who",
+        "whom",
+        "whose",
+    }
 
-    def __init__(self, instance_repository):
+    def __init__(self, instance_repository, llm_planner=None, lexical_hint_config=None):
         self.repo = instance_repository
-        self._table_meta_cache = {}
+        self._llm_planner = llm_planner
+        self._lexical_hint_config_override = lexical_hint_config
+        self._lexical_hint_config_cache = None
 
     def _entity_config(self, tenant):
         if hasattr(self.repo, "reasoning_entity_config"):
@@ -66,67 +82,52 @@ class ReasoningEngine:
             return self.repo.reasoning_link_config(tenant)
         return getattr(self.repo, "LINK_CONFIG")
 
-    # ------------------------------------------------------------------
-    # Step 1: Schema introspection
-    # ------------------------------------------------------------------
-
-    def _introspect_table(self, engine, table_name, tenant=None):
-        cache_key = f"{id(engine)}:{table_name}"
-        if cache_key in self._table_meta_cache:
-            return self._table_meta_cache[cache_key]
-
-        with engine.connect() as conn:
-            rows = conn.execute(text(f"DESCRIBE `{table_name}`")).fetchall()
-
-        pk_col = None
-        fk_cols = set()
-        date_cols = []
-        numeric_cols = []
-        text_cols = []
-        all_cols = []
-
-        for row in rows:
-            col_name = row[0]
-            col_type = (row[1] or "").lower()
-            col_key = (row[3] or "").upper() if len(row) > 3 else ""
-            all_cols.append(col_name)
-
-            if col_key == "PRI":
-                pk_col = col_name
-
-            col_lower = col_name.lower()
-            if "date" in col_type or "time" in col_type:
-                date_cols.append(col_name)
-            elif any(t in col_type for t in ("int", "float", "double", "decimal", "numeric")):
-                numeric_cols.append(col_name)
-            elif any(t in col_type for t in ("char", "text", "varchar")):
-                # Heuristic: text columns named *date* or *time* are likely dates
-                if any(hint in col_lower for hint in ("date", "_at", "_time", "timestamp")):
-                    date_cols.append(col_name)
-                else:
-                    text_cols.append(col_name)
-
-        for lc in self._link_config(tenant) if tenant is not None else getattr(self.repo, "LINK_CONFIG"):
-            if lc["fk_table"] == table_name:
-                fk_cols.add(lc["fk_col"])
-                if lc.get("target_fk"):
-                    fk_cols.add(lc["target_fk"])
-
-        for cfg in (self._entity_config(tenant) if tenant is not None else getattr(self.repo, "ENTITY_CONFIG")).values():
-            if cfg["table"] == table_name:
-                fk_cols.add(cfg["pk"])
-
-        meta = TableMeta(
-            table=table_name,
-            pk_col=pk_col,
-            fk_cols=fk_cols,
-            date_cols=date_cols,
-            numeric_cols=[c for c in numeric_cols if c not in fk_cols and c != pk_col],
-            text_cols=text_cols,
-            all_cols=all_cols,
+    def _default_lexical_hint_config_path(self) -> str:
+        return os.path.join(
+            os.path.dirname(__file__),
+            "config",
+            "reasoning_lexical_hints.webqsp_freebase.json",
         )
-        self._table_meta_cache[cache_key] = meta
-        return meta
+
+    def _load_lexical_hint_config_file(self, path: str) -> dict:
+        try:
+            with open(path) as f:
+                payload = json.load(f)
+        except (OSError, json.JSONDecodeError):
+            return {}
+        return payload if isinstance(payload, dict) else {}
+
+    def _lexical_hint_config(self, tenant: str | None = None) -> dict:
+        """Return reviewable lexical hint configuration.
+
+        Binding order is explicit: constructor override, repository hook,
+        environment path, then the checked-in WebQSP/Freebase defaults. A repo
+        can bind hints to a tenant or ontology by implementing
+        reasoning_lexical_hint_config(tenant).
+        """
+        if self._lexical_hint_config_override is not None:
+            return self._lexical_hint_config_override
+
+        if hasattr(self.repo, "reasoning_lexical_hint_config"):
+            try:
+                payload = self.repo.reasoning_lexical_hint_config(tenant)
+            except TypeError:
+                payload = self.repo.reasoning_lexical_hint_config()
+            if isinstance(payload, dict):
+                return payload
+
+        path = os.environ.get("ALETHEIA_REASONING_LEXICAL_HINTS_PATH", "").strip()
+        if path.lower() in {"0", "false", "off", "none", "disabled"}:
+            return {}
+        if not path:
+            path = self._default_lexical_hint_config_path()
+
+        cache_key = path
+        if self._lexical_hint_config_cache and self._lexical_hint_config_cache[0] == cache_key:
+            return self._lexical_hint_config_cache[1]
+        payload = self._load_lexical_hint_config_file(path)
+        self._lexical_hint_config_cache = (cache_key, payload)
+        return payload
 
     # ------------------------------------------------------------------
     # Step 2: Artifact descriptions
@@ -140,9 +141,14 @@ class ReasoningEngine:
     # Step 3: Format entity properties
     # ------------------------------------------------------------------
 
-    def _format_properties(self, row, cfg, source_engine, tenant=None):
-        meta = self._introspect_table(source_engine, cfg["table"], tenant=tenant)
-        skip = meta.fk_cols | {meta.pk_col}
+    def _format_properties(self, row):
+        """Format an entity's own properties for display, excluding its
+        identifier and label. A graph-backed row is already a flat property
+        dict -- unlike a SQL row, it has no foreign-key columns to filter out
+        (a graph vertex's relationships live as real edges, never as extra
+        row columns), so no schema introspection is needed to know what to
+        skip."""
+        skip = {"id", "label"}
         import re
         _date_re = re.compile(r"^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}")
         props = []
@@ -158,512 +164,6 @@ class ReasoningEngine:
                 v_str = v_str[:10]
             props.append({"col": k, "value": v_str})
         return props
-
-    def _source_key_profile(self, tenant, object_type, instance_id, cfg, depth=1):
-        """Aggregate source tables that share the center entity key.
-
-        This intentionally uses schema evidence (shared key columns, numeric
-        columns, and candidate label columns) instead of domain-coded graph
-        relation names, so it can improve sparse graph profiles without
-        minting ontology or graph semantics.
-        """
-        source_engine = self.repo.source_engine_for(tenant)
-        center_table = cfg.get("table")
-        key_col = cfg.get("pk")
-        if not center_table or not key_col:
-            return None
-        inspector = inspect(source_engine)
-        try:
-            table_names = inspector.get_table_names()
-        except Exception:
-            return None
-
-        allowed_tables = set()
-        try:
-            with self.repo.metadata_engine_for(tenant).connect() as conn:
-                artifact_rows = conn.execute(
-                    text(
-                        """
-                        SELECT source_refs_json, payload_json
-                        FROM aletheia_ontology_artifacts
-                        WHERE project_id = :tenant_id AND status = 'approved'
-                        """
-                    ),
-                    {"tenant_id": tenant.tenant_id},
-                ).mappings().all()
-            for artifact in artifact_rows:
-                source_refs = artifact.get("source_refs_json") or []
-                if isinstance(source_refs, str):
-                    source_refs = json.loads(source_refs or "[]")
-                for ref in source_refs or []:
-                    if isinstance(ref, str) and ref.startswith("table:"):
-                        allowed_tables.add(ref.removeprefix("table:"))
-
-                payload = artifact.get("payload_json") or {}
-                if isinstance(payload, str):
-                    payload = json.loads(payload or "{}")
-                for table in payload.get("mapped_table_names") or []:
-                    allowed_tables.add(table)
-                for key in ("source_table", "target_table"):
-                    if payload.get(key):
-                        allowed_tables.add(payload[key])
-        except Exception:
-            allowed_tables = set()
-        if allowed_tables:
-            table_names = [table for table in table_names if table in allowed_tables]
-
-        related_tables = []
-        total_rows = 0
-        numeric_totals = {}
-        label_candidates = ("canal", "chokepoint", "strait", "route", "corridor", "port", "location")
-        risk_metric_hints = ("risk", "impacted", "impact", "at_risk", "share", "dependency", "v_canal", "q_canal", "revenue")
-        top_paths = []
-        second_hop_paths = []
-
-        with source_engine.connect() as conn:
-            for table in table_names:
-                try:
-                    meta = self._introspect_table(source_engine, table, tenant=tenant)
-                except Exception:
-                    continue
-                if key_col not in meta.all_cols:
-                    continue
-                qt = _quote_ident(table)
-                qk = _quote_ident(key_col)
-                try:
-                    row_count = int(conn.execute(
-                        text(f"SELECT COUNT(*) FROM {qt} WHERE {qk} = :id"),
-                        {"id": instance_id},
-                    ).scalar() or 0)
-                except Exception:
-                    continue
-                if row_count <= 0:
-                    continue
-
-                total_rows += row_count
-                label_col = next((c for c in meta.all_cols if c.lower() in label_candidates), None)
-                distinct_labels = 0
-                if label_col:
-                    try:
-                        distinct_labels = int(conn.execute(
-                            text(f"SELECT COUNT(DISTINCT {_quote_ident(label_col)}) FROM {qt} WHERE {qk} = :id AND {_quote_ident(label_col)} IS NOT NULL"),
-                            {"id": instance_id},
-                        ).scalar() or 0)
-                    except Exception:
-                        distinct_labels = 0
-
-                metric_cols = [
-                    c for c in meta.numeric_cols
-                    if c != key_col and any(hint in c.lower() for hint in risk_metric_hints)
-                ][:8]
-                table_totals = {}
-                if metric_cols:
-                    expr = ", ".join(f"COALESCE(SUM({_quote_ident(c)}), 0) AS {_quote_ident('sum_' + c)}" for c in metric_cols)
-                    try:
-                        sums = conn.execute(
-                            text(f"SELECT {expr} FROM {qt} WHERE {qk} = :id"),
-                            {"id": instance_id},
-                        ).mappings().first()
-                    except Exception:
-                        sums = None
-                    if sums:
-                        for col in metric_cols:
-                            val = float(sums.get("sum_" + col) or 0)
-                            table_totals[col] = val
-                            numeric_totals[col] = numeric_totals.get(col, 0.0) + val
-
-                if label_col and metric_cols:
-                    preferred = next((c for c in metric_cols if "at_risk" in c.lower()), None)
-                    preferred = preferred or next((c for c in metric_cols if "impacted" in c.lower()), None)
-                    preferred = preferred or next((c for c in metric_cols if "v_canal" in c.lower()), None)
-                    preferred = preferred or metric_cols[0]
-                    try:
-                        top_rows = conn.execute(
-                            text(
-                                f"SELECT {_quote_ident(label_col)} AS label, "
-                                f"COUNT(*) AS cnt, COALESCE(SUM({_quote_ident(preferred)}), 0) AS metric "
-                                f"FROM {qt} WHERE {qk} = :id AND {_quote_ident(label_col)} IS NOT NULL "
-                                f"GROUP BY {_quote_ident(label_col)} ORDER BY metric DESC LIMIT 5"
-                            ),
-                            {"id": instance_id},
-                        ).mappings().all()
-                    except Exception:
-                        top_rows = []
-                    for top in top_rows:
-                        label_value = str(top["label"])
-                        top_paths.append({
-                            "table": table,
-                            "label_col": label_col,
-                            "label": label_value,
-                            "metric": preferred,
-                            "metric_value": float(top["metric"] or 0),
-                            "row_count": int(top["cnt"] or 0),
-                        })
-                        if int(depth or 1) >= 2:
-                            try:
-                                peer_rows = conn.execute(
-                                    text(
-                                        f"SELECT {qk} AS peer_key, "
-                                        f"COUNT(*) AS cnt, COALESCE(SUM({_quote_ident(preferred)}), 0) AS metric "
-                                        f"FROM {qt} "
-                                        f"WHERE {_quote_ident(label_col)} = :label AND {qk} != :id "
-                                        f"GROUP BY {qk} ORDER BY metric DESC LIMIT 12"
-                                    ),
-                                    {"label": label_value, "id": instance_id},
-                                ).mappings().all()
-                            except Exception:
-                                peer_rows = []
-                            if peer_rows:
-                                second_hop_paths.append({
-                                    "table": table,
-                                    "label_col": label_col,
-                                    "label": label_value,
-                                    "metric": preferred,
-                                    "metric_value": float(top["metric"] or 0),
-                                    "peer_count": len(peer_rows),
-                                    "top_peers": [
-                                        {
-                                            "key": str(peer["peer_key"]),
-                                            "metric_value": float(peer["metric"] or 0),
-                                            "row_count": int(peer["cnt"] or 0),
-                                        }
-                                        for peer in peer_rows
-                                    ],
-                                })
-
-                related_tables.append({
-                    "table": table,
-                    "key_col": key_col,
-                    "row_count": row_count,
-                    "label_col": label_col,
-                    "distinct_labels": distinct_labels,
-                    "metric_totals": table_totals,
-                })
-
-        if not related_tables:
-            return None
-        top_paths.sort(key=lambda item: item.get("metric_value", 0), reverse=True)
-        second_hop_paths.sort(key=lambda item: item.get("metric_value", 0), reverse=True)
-        return {
-            "center_key_col": key_col,
-            "scope_depth": int(depth or 1),
-            "related_tables": related_tables,
-            "total_key_rows": total_rows,
-            "numeric_totals": numeric_totals,
-            "top_paths": top_paths[:8],
-            "second_hop_paths": second_hop_paths[:8],
-        }
-
-    # ------------------------------------------------------------------
-    # Step 4: Peer ranking (unchanged logic, moved here)
-    # ------------------------------------------------------------------
-
-    def _peer_rankings(self, tenant, object_type, instance_id):
-        entity_config = self._entity_config(tenant)
-        link_config = self._link_config(tenant)
-        cfg = entity_config.get(object_type.lower())
-        if not cfg:
-            return []
-        rankings = []
-        source_engine = self.repo.source_engine_for(tenant)
-        with source_engine.connect() as conn:
-            for lc in link_config:
-                if lc["from"] != object_type.lower() or lc.get("reverse"):
-                    continue
-                fk_table, fk_col = lc["fk_table"], lc["fk_col"]
-                try:
-                    rows = conn.execute(text(
-                        f"SELECT `{fk_col}` AS fk, COUNT(*) AS cnt "
-                        f"FROM `{fk_table}` WHERE `{fk_col}` IS NOT NULL "
-                        f"GROUP BY `{fk_col}` ORDER BY cnt DESC"
-                    )).mappings().all()
-                except Exception:
-                    continue
-                if not rows:
-                    continue
-                counts = {str(r["fk"]): int(r["cnt"]) for r in rows}
-                total_peers = len(counts)
-                my_count = counts.get(str(instance_id), 0)
-                sorted_counts = sorted(counts.values(), reverse=True)
-                rank = sorted_counts.index(my_count) + 1 if my_count in sorted_counts else total_peers
-                avg_count = sum(sorted_counts) / total_peers if total_peers else 0
-                max_count = sorted_counts[0] if sorted_counts else 0
-                percentile = round((total_peers - rank) / max(total_peers - 1, 1) * 100) if total_peers > 1 else 100
-                level = "high" if percentile >= 75 else ("average" if percentile >= 40 else "low")
-                rankings.append({
-                    "link": lc["link"],
-                    "target_type": lc["to"],
-                    "fk_table": fk_table,
-                    "fk_col": fk_col,
-                    "my_count": my_count,
-                    "rank": rank,
-                    "total_peers": total_peers,
-                    "percentile": percentile,
-                    "avg": round(avg_count, 1),
-                    "max": max_count,
-                    "level": level,
-                })
-        return rankings
-
-    # ------------------------------------------------------------------
-    # Step 5: Per-link deep aggregation
-    # ------------------------------------------------------------------
-
-    def _link_deep_stats(self, tenant, object_type, instance_id, lc, ranking):
-        """For one link, compute numeric stats, date range, top counterparties, time bucketing."""
-        source_engine = self.repo.source_engine_for(tenant)
-        entity_config = self._entity_config(tenant)
-        link_config = self._link_config(tenant)
-        meta = self._introspect_table(source_engine, lc["fk_table"], tenant=tenant)
-        fk_col = lc["fk_col"]
-        result = {"link": lc["link"], "target_type": lc["to"]}
-
-        with source_engine.connect() as conn:
-            # Numeric column aggregation
-            agg_cols = [c for c in meta.numeric_cols if c != fk_col]
-            if agg_cols:
-                agg_exprs = []
-                for c in agg_cols:
-                    agg_exprs.append(f"COALESCE(SUM(`{c}`), 0) AS `sum_{c}`")
-                    agg_exprs.append(f"COALESCE(AVG(`{c}`), 0) AS `avg_{c}`")
-                sql = (
-                    f"SELECT COUNT(*) AS cnt, {', '.join(agg_exprs)} "
-                    f"FROM `{meta.table}` WHERE `{fk_col}` = :id"
-                )
-                try:
-                    row = conn.execute(text(sql), {"id": instance_id}).mappings().first()
-                    if row:
-                        numeric_stats = {}
-                        for c in agg_cols:
-                            numeric_stats[c] = {
-                                "sum": float(row[f"sum_{c}"] or 0),
-                                "avg": float(row[f"avg_{c}"] or 0),
-                            }
-                        result["numeric_stats"] = numeric_stats
-                        result["row_count"] = int(row["cnt"] or 0)
-                except Exception:
-                    pass
-
-            # Date range
-            if meta.date_cols:
-                date_col = meta.date_cols[0]
-                try:
-                    row = conn.execute(text(
-                        f"SELECT MIN(`{date_col}`) AS d_min, MAX(`{date_col}`) AS d_max "
-                        f"FROM `{meta.table}` WHERE `{fk_col}` = :id"
-                    ), {"id": instance_id}).mappings().first()
-                    if row and row["d_min"]:
-                        result["date_range"] = {
-                            "col": date_col,
-                            "min": str(_jsonable(row["d_min"]))[:10],
-                            "max": str(_jsonable(row["d_max"]))[:10],
-                        }
-                except Exception:
-                    pass
-
-            # Top-N counterparties (other FK columns on the same table)
-            other_fks = []
-            for other_lc in link_config:
-                if other_lc["fk_table"] == meta.table and other_lc["fk_col"] != fk_col:
-                    other_fks.append((other_lc["fk_col"], other_lc["to"] if other_lc["from"] == lc["to"] else other_lc["from"]))
-            if lc.get("target_fk"):
-                other_fks.append((lc["target_fk"], lc["to"]))
-
-            for other_fk, other_type in other_fks[:2]:
-                other_cfg = entity_config.get(other_type.lower())
-                try:
-                    top_rows = conn.execute(text(
-                        f"SELECT `{other_fk}` AS fk_val, COUNT(*) AS cnt "
-                        f"FROM `{meta.table}` WHERE `{fk_col}` = :id AND `{other_fk}` IS NOT NULL "
-                        f"GROUP BY `{other_fk}` ORDER BY cnt DESC LIMIT 5"
-                    ), {"id": instance_id}).mappings().all()
-                    if top_rows:
-                        top_list = []
-                        for tr in top_rows:
-                            label = str(tr["fk_val"])
-                            if other_cfg:
-                                try:
-                                    entity_row = self.repo._fetch_entity(tenant, other_type, str(tr["fk_val"]))
-                                    if entity_row:
-                                        node = self.repo._entity_node(tenant, other_type, entity_row)
-                                        label = node.get("label", label) if node else label
-                                except Exception:
-                                    pass
-                            top_list.append({"id": str(tr["fk_val"]), "label": label, "count": int(tr["cnt"])})
-                        result.setdefault("top_counterparties", {})[other_type] = {
-                            "fk_col": other_fk,
-                            "items": top_list,
-                            "total_distinct": len(top_rows),
-                        }
-                except Exception:
-                    pass
-
-            # Count distinct counterparties
-            for other_fk, other_type in other_fks[:2]:
-                try:
-                    cnt = conn.execute(text(
-                        f"SELECT COUNT(DISTINCT `{other_fk}`) AS cnt "
-                        f"FROM `{meta.table}` WHERE `{fk_col}` = :id AND `{other_fk}` IS NOT NULL"
-                    ), {"id": instance_id}).scalar()
-                    result.setdefault("distinct_counterparties", {})[other_type] = int(cnt or 0)
-                except Exception:
-                    pass
-
-            # Time bucketing
-            if meta.date_cols:
-                date_col = meta.date_cols[0]
-                try:
-                    yearly = conn.execute(text(
-                        f"SELECT YEAR(`{date_col}`) AS yr, COUNT(*) AS cnt "
-                        f"FROM `{meta.table}` WHERE `{fk_col}` = :id AND `{date_col}` IS NOT NULL "
-                        f"GROUP BY YEAR(`{date_col}`) ORDER BY yr"
-                    ), {"id": instance_id}).mappings().all()
-                    if yearly:
-                        result["yearly"] = [{"year": int(r["yr"]), "count": int(r["cnt"])} for r in yearly if r["yr"]]
-                except Exception:
-                    pass
-
-        return result
-
-    # ------------------------------------------------------------------
-    # Step 6: Multi-hop value aggregation (n:m detail tables)
-    # ------------------------------------------------------------------
-
-    def _multihop_value(self, tenant, object_type, instance_id):
-        """For n:m links via detail tables, compute value aggregation and category breakdown.
-
-        Discovers both direct paths (entity has n:m link with target_fk) and
-        indirect paths (entity → 1:n → intermediary → n:m via detail table).
-        """
-        source_engine = self.repo.source_engine_for(tenant)
-        results = []
-
-        # Collect (detail_lc, inter_table, inter_pk, inter_fk) tuples to process
-        chains = []
-        entity_config = self._entity_config(tenant)
-        link_config = self._link_config(tenant)
-
-        for lc in link_config:
-            if not lc.get("target_fk"):
-                continue
-
-            if lc["from"] == object_type.lower():
-                # Direct n:m from this entity type — find the intermediary
-                detail_table = lc["fk_table"]
-                fk_col = lc["fk_col"]
-                for olc in link_config:
-                    if olc["from"] == object_type.lower() and olc["to"] != lc["to"]:
-                        inter_cfg = entity_config.get(olc["to"])
-                        if inter_cfg and inter_cfg["pk"] == fk_col:
-                            chains.append((lc, inter_cfg["table"], inter_cfg["pk"], olc["fk_col"]))
-                            break
-            else:
-                # Indirect: entity → 1:n → intermediary, and intermediary has the n:m link
-                inter_type = lc["from"]
-                for bridge_lc in link_config:
-                    if bridge_lc["from"] == object_type.lower() and bridge_lc["to"] == inter_type and not bridge_lc.get("reverse"):
-                        inter_cfg = entity_config.get(inter_type)
-                        if inter_cfg:
-                            chains.append((lc, inter_cfg["table"], inter_cfg["pk"], bridge_lc["fk_col"]))
-                            break
-
-        for lc, inter_table, inter_pk, inter_fk in chains:
-            detail_table = lc["fk_table"]
-            fk_col = lc["fk_col"]
-            target_fk = lc["target_fk"]
-            meta = self._introspect_table(source_engine, detail_table, tenant=tenant)
-
-            value_cols = [c for c in meta.numeric_cols if c not in meta.fk_cols]
-            if len(value_cols) < 2:
-                continue
-
-            col_a, col_b = value_cols[0], value_cols[1]
-            discount_col = value_cols[2] if len(value_cols) > 2 else None
-
-            if discount_col:
-                val_expr = f"COALESCE(SUM(d.`{col_a}` * d.`{col_b}` * (1 - d.`{discount_col}`)), 0)"
-            else:
-                val_expr = f"COALESCE(SUM(d.`{col_a}` * d.`{col_b}`), 0)"
-
-            with source_engine.connect() as conn:
-                try:
-                    my_value = conn.execute(text(
-                        f"SELECT {val_expr} AS val "
-                        f"FROM `{inter_table}` i "
-                        f"JOIN `{detail_table}` d ON d.`{fk_col}` = i.`{inter_pk}` "
-                        f"WHERE i.`{inter_fk}` = :id"
-                    ), {"id": instance_id}).scalar()
-                    my_value = float(my_value or 0)
-                except Exception:
-                    continue
-
-                try:
-                    total_value = conn.execute(text(
-                        f"SELECT {val_expr} AS val FROM `{detail_table}` d"
-                    )).scalar()
-                    total_value = float(total_value or 0)
-                except Exception:
-                    total_value = 0
-
-                try:
-                    peer_rows = conn.execute(text(
-                        f"SELECT i.`{inter_fk}` AS fk, {val_expr} AS val "
-                        f"FROM `{inter_table}` i "
-                        f"JOIN `{detail_table}` d ON d.`{fk_col}` = i.`{inter_pk}` "
-                        f"GROUP BY i.`{inter_fk}` ORDER BY val DESC"
-                    )).mappings().all()
-                    values_list = [float(r["val"]) for r in peer_rows]
-                    value_rank = values_list.index(my_value) + 1 if my_value in values_list else len(values_list)
-                    value_total_peers = len(values_list)
-                except Exception:
-                    value_rank = None
-                    value_total_peers = None
-
-                category_breakdown = []
-                target_type = lc["to"]
-                target_cfg = entity_config.get(target_type)
-                if target_cfg:
-                    for cat_lc in link_config:
-                        if cat_lc["to"] == target_type and cat_lc["from"] != object_type.lower() and not cat_lc.get("target_fk"):
-                            cat_type = cat_lc["from"]
-                            cat_cfg = entity_config.get(cat_type)
-                            if not cat_cfg:
-                                continue
-                            cat_fk = cat_lc["fk_col"]
-                            try:
-                                cat_rows = conn.execute(text(
-                                    f"SELECT ct.`{cat_cfg['label_cols'][0]}` AS cat_label, "
-                                    f"COUNT(DISTINCT i.`{inter_pk}`) AS cnt, "
-                                    f"{val_expr} AS val "
-                                    f"FROM `{inter_table}` i "
-                                    f"JOIN `{detail_table}` d ON d.`{fk_col}` = i.`{inter_pk}` "
-                                    f"JOIN `{target_cfg['table']}` t ON t.`{target_cfg['pk']}` = d.`{target_fk}` "
-                                    f"JOIN `{cat_cfg['table']}` ct ON ct.`{cat_cfg['pk']}` = t.`{cat_fk}` "
-                                    f"WHERE i.`{inter_fk}` = :id "
-                                    f"GROUP BY ct.`{cat_cfg['label_cols'][0]}` "
-                                    f"ORDER BY val DESC LIMIT 5"
-                                ), {"id": instance_id}).mappings().all()
-                                category_breakdown = [
-                                    {"label": r["cat_label"], "count": int(r["cnt"]), "value": float(r["val"])}
-                                    for r in cat_rows
-                                ]
-                            except Exception:
-                                pass
-                            break
-
-                results.append({
-                    "link": lc["link"],
-                    "detail_table": detail_table,
-                    "value_expr": f"{col_a} * {col_b}" + (f" * (1-{discount_col})" if discount_col else ""),
-                    "my_value": my_value,
-                    "total_value": total_value,
-                    "value_share": my_value / total_value if total_value else 0,
-                    "value_rank": value_rank,
-                    "value_total_peers": value_total_peers,
-                    "category_breakdown": category_breakdown,
-                })
-
-        return results
 
     # ------------------------------------------------------------------
     # Step 7: Self-referencing link resolution
@@ -683,29 +183,809 @@ class ReasoningEngine:
         return refs
 
     # ------------------------------------------------------------------
+    # LLM-enhanced question-to-relation mapping
+    # ------------------------------------------------------------------
+
+    def _get_llm_planner(self):
+        """Lazily initialize the LLM planner if not provided.
+
+        Only activates when explicitly enabled via constructor argument
+        or the ALETHEIA_LLM_PLANNER_ENABLED environment variable.
+        This prevents tests and non-LLM deployments from making
+        network calls.
+        """
+        if self._llm_planner is not None:
+            return self._llm_planner
+        if not os.environ.get("ALETHEIA_LLM_PLANNER_ENABLED", "").lower() in ("1", "true", "yes"):
+            return None
+        try:
+            self._llm_planner = LLMPlanner()
+        except Exception:
+            self._llm_planner = None
+        return self._llm_planner
+
+    def _llm_map_question_to_relations(
+        self,
+        question: str,
+        topic_type: str,
+        link_config: list[dict],
+        descriptions: dict[str, str],
+    ) -> PlannerMapping:
+        """Use LLM to map question to relevant relation types.
+
+        Returns a PlannerMapping. Empty mapping means LLM is unavailable,
+        failed, or intentionally fell back to keyword planning.
+        Falls back to empty sets if LLM is unavailable or fails.
+        """
+        planner = self._get_llm_planner()
+        if planner is None:
+            return PlannerMapping()
+
+        result = planner.map_question_to_relations(
+            question=question,
+            topic_type=topic_type,
+            link_config=link_config,
+            descriptions=descriptions,
+            capabilities=self.RETRIEVAL_CAPABILITIES,
+        )
+
+        if result.used_fallback or not result.matched_link_keys:
+            # Preserve selected_capabilities/entity_mentions even when no
+            # relation was matched -- a pure entity-comparison question may
+            # legitimately select zero relations while still needing its
+            # capabilities/entity_mentions judgment carried through.
+            return PlannerMapping(
+                latency_ms=result.latency_ms,
+                model=result.model,
+                used_fallback=result.used_fallback,
+                error=result.error,
+                error_type=getattr(result, "error_type", ""),
+                selected_capabilities=set() if result.used_fallback else set(result.selected_capabilities),
+                entity_mentions=[] if result.used_fallback else list(result.entity_mentions),
+            )
+
+        return result
+
+    @staticmethod
+    def _env_bool(name: str, default: bool) -> bool:
+        value = os.environ.get(name)
+        if value is None:
+            return default
+        return value.strip().lower() in ("1", "true", "yes", "on")
+
+    @staticmethod
+    def _env_int(name: str, default: int) -> int:
+        value = os.environ.get(name)
+        if value is None or not value.strip():
+            return default
+        try:
+            return int(value)
+        except ValueError:
+            return default
+
+    @staticmethod
+    def _env_float(name: str, default: float) -> float:
+        value = os.environ.get(name)
+        if value is None or not value.strip():
+            return default
+        try:
+            return float(value)
+        except ValueError:
+            return default
+
+    def _rank_llm_link_keys(self, llm_mapping: PlannerMapping) -> list[str]:
+        """Return LLM-selected link keys in model rank order when available."""
+        ranked = []
+        seen = set()
+        for key in llm_mapping.ranked_link_keys:
+            if key in llm_mapping.matched_link_keys and key not in seen:
+                ranked.append(key)
+                seen.add(key)
+
+        remaining = [
+            key for key in llm_mapping.matched_link_keys
+            if key not in seen
+        ]
+        remaining.sort(
+            key=lambda key: (-llm_mapping.confidence_scores.get(key, 0.0), key)
+        )
+        return ranked + remaining
+
+    @staticmethod
+    def _hint_tokens(values) -> set[str]:
+        if not isinstance(values, list):
+            return set()
+        return {str(value).lower() for value in values if str(value).strip()}
+
+    def _lexical_hint_matches_question(self, rule: dict, question_terms: set[str]) -> bool:
+        when_any = self._hint_tokens(rule.get("when_any"))
+        if when_any and not (when_any & question_terms):
+            return False
+        when_all = self._hint_tokens(rule.get("when_all"))
+        if when_all and not when_all.issubset(question_terms):
+            return False
+        unless_any = self._hint_tokens(rule.get("unless_any"))
+        if unless_any and (unless_any & question_terms):
+            return False
+        return True
+
+    def _lexical_hint_matches_text(self, rule: dict, link_key: str, relation_text: str) -> bool:
+        key_text = link_key.lower()
+        full_text = relation_text.lower()
+        key_any = self._hint_tokens(rule.get("link_contains_any"))
+        if key_any and not any(token in key_text for token in key_any):
+            return False
+        key_all = self._hint_tokens(rule.get("link_contains_all"))
+        if key_all and not all(token in key_text for token in key_all):
+            return False
+        relation_any = self._hint_tokens(rule.get("relation_contains_any"))
+        if relation_any and not any(token in full_text for token in relation_any):
+            return False
+        relation_all = self._hint_tokens(rule.get("relation_contains_all"))
+        if relation_all and not all(token in full_text for token in relation_all):
+                return False
+        return True
+
+    def _lexical_hint_matches_link_context(
+        self,
+        rule: dict,
+        object_type: str = "",
+        link_metadata: dict | None = None,
+    ) -> bool:
+        if not link_metadata:
+            has_context = False
+            from_type = ""
+            to_type = ""
+        else:
+            has_context = True
+            from_type = str(link_metadata.get("from", "")).lower()
+            to_type = str(link_metadata.get("to", "")).lower()
+        topic_type = (object_type or "").lower()
+
+        if "from_is_topic" in rule:
+            if not has_context or not topic_type or (from_type == topic_type) is not bool(rule["from_is_topic"]):
+                return False
+        if "to_is_topic" in rule:
+            if not has_context or not topic_type or (to_type == topic_type) is not bool(rule["to_is_topic"]):
+                return False
+        if "unless_from_is_topic" in rule and bool(rule["unless_from_is_topic"]):
+            if has_context and topic_type and from_type == topic_type:
+                return False
+        if "unless_to_is_topic" in rule and bool(rule["unless_to_is_topic"]):
+            if has_context and topic_type and to_type == topic_type:
+                return False
+
+        from_any = self._hint_tokens(rule.get("from_any"))
+        if from_any and from_type not in from_any:
+            return False
+        to_any = self._hint_tokens(rule.get("to_any"))
+        if to_any and to_type not in to_any:
+            return False
+        object_any = self._hint_tokens(rule.get("object_type_any"))
+        if object_any and topic_type not in object_any:
+            return False
+        return True
+
+    def _question_relation_terms(self, question: str, lexical_hint_config: dict | None = None) -> list[str]:
+        terms = [
+            term for term in re.findall(r"[a-z0-9]+", (question or "").lower())
+            if term not in self.LEXICAL_RECALL_STOPWORDS
+        ]
+        expanded = list(terms)
+        term_set = set(terms)
+        for rule in (lexical_hint_config or {}).get("term_expansions", []):
+            if not isinstance(rule, dict):
+                continue
+            if self._lexical_hint_matches_question(rule, term_set):
+                expanded.extend(str(term).lower() for term in rule.get("add", []) if str(term).strip())
+        return expanded
+
+    def _link_config_by_key(self, link_config: list[dict] | None) -> dict[str, dict]:
+        return {lc["link"]: lc for lc in (link_config or []) if lc.get("link")}
+
+    def _topic_compatible_link_key(
+        self,
+        link_key: str,
+        object_type: str,
+        link_by_key: dict[str, dict],
+    ) -> bool:
+        if not object_type:
+            return True
+        lc = link_by_key.get(link_key)
+        if not lc:
+            return False
+        obj = object_type.lower()
+        return lc.get("from", "").lower() == obj or lc.get("to", "").lower() == obj
+
+    def _topic_compatibility_rank(
+        self,
+        link_key: str,
+        object_type: str,
+        link_by_key: dict[str, dict],
+    ) -> int:
+        if not object_type:
+            return 0
+        lc = link_by_key.get(link_key)
+        if not lc:
+            return 2
+        obj = object_type.lower()
+        if lc.get("from", "").lower() == obj:
+            return 0
+        if lc.get("to", "").lower() == obj:
+            return 1
+        return 2
+
+    def _topic_direction_rank(
+        self,
+        link_key: str,
+        object_type: str,
+        link_by_key: dict[str, dict],
+    ) -> int:
+        """Prefer center-to-answer links over reverse aliases when scores tie."""
+        if not object_type:
+            return 0
+        lc = link_by_key.get(link_key)
+        if not lc:
+            return 2
+        obj = object_type.lower()
+        if lc.get("from", "").lower() == obj:
+            return 0
+        if lc.get("to", "").lower() == obj:
+            return 1
+        return 2
+
+    def _rerank_topic_compatible_link_keys(
+        self,
+        ranked: list[str],
+        object_type: str,
+        link_config: list[dict] | None,
+    ) -> list[str]:
+        """Prefer relations whose domain/range touches the topic type.
+
+        WebQSP relation sets contain many cross-domain candidates. The LLM can
+        rank semantically adjacent but wrong-domain relations above usable topic
+        relations. Keep the model's relative order inside each bucket, but put
+        topic-compatible links first when they exist.
+        """
+        if not ranked or not object_type or not link_config:
+            return ranked
+        link_by_key = self._link_config_by_key(link_config)
+        if not any(self._topic_compatible_link_key(key, object_type, link_by_key) for key in ranked):
+            return ranked
+        return sorted(
+            ranked,
+            key=lambda key: self._topic_compatibility_rank(key, object_type, link_by_key),
+        )
+
+    def _configured_relation_bonus(
+        self,
+        question: str,
+        link_key: str,
+        relation_text: str,
+        lexical_hint_config: dict | None = None,
+        object_type: str = "",
+        link_metadata: dict | None = None,
+    ) -> int:
+        q_terms = set(re.findall(r"[a-z0-9]+", (question or "").lower()))
+        bonus = 0
+        for rule in (lexical_hint_config or {}).get("relation_bonuses", []):
+            if not isinstance(rule, dict):
+                continue
+            if not self._lexical_hint_matches_question(rule, q_terms):
+                continue
+            if not self._lexical_hint_matches_text(rule, link_key, relation_text):
+                continue
+            if not self._lexical_hint_matches_link_context(rule, object_type, link_metadata):
+                continue
+            try:
+                bonus += int(rule.get("bonus", 0))
+            except (TypeError, ValueError):
+                continue
+        return bonus
+
+    def _lexical_recall_link_keys(
+        self,
+        question: str,
+        link_config: list[dict] | None,
+        descriptions: dict[str, str] | None,
+        limit: int,
+        object_type: str = "",
+        lexical_hint_config: dict | None = None,
+    ) -> list[str]:
+        """Bounded lexical recall guard for relations the LLM ranked too low."""
+        if limit <= 0 or not link_config:
+            return []
+
+        question_terms = self._question_relation_terms(question, lexical_hint_config)
+        if not question_terms:
+            return []
+
+        descriptions = descriptions or {}
+        link_by_key = self._link_config_by_key(link_config)
+        scored = []
+        for lc in link_config:
+            link_key = lc["link"]
+            if object_type and not self._topic_compatible_link_key(link_key, object_type, link_by_key):
+                continue
+            relation_text = " ".join([
+                link_key,
+                descriptions.get(link_key, ""),
+                lc.get("from", ""),
+                lc.get("to", ""),
+            ]).lower()
+            relation_terms = re.findall(r"[a-z0-9]+", relation_text)
+            if not relation_terms:
+                continue
+            score = sum(relation_terms.count(term) for term in question_terms)
+            score += self._configured_relation_bonus(
+                question,
+                link_key,
+                relation_text,
+                lexical_hint_config,
+                object_type=object_type,
+                link_metadata=lc,
+            )
+            if score > 0:
+                scored.append((
+                    score,
+                    self._topic_direction_rank(link_key, object_type, link_by_key),
+                    link_key,
+                ))
+
+        scored.sort(key=lambda item: (-item[0], item[1], item[2]))
+        selected = []
+        seen = set()
+        for _, _, key in scored:
+            if key in seen:
+                continue
+            selected.append(key)
+            seen.add(key)
+            if len(selected) >= limit:
+                break
+        return selected
+
+    def _llm_convergence_trace(
+        self,
+        llm_mapping: PlannerMapping,
+        question: str = "",
+        link_config: list[dict] | None = None,
+        descriptions: dict[str, str] | None = None,
+        object_type: str = "",
+        lexical_hint_config: dict | None = None,
+    ) -> dict:
+        """Return convergence output plus diagnostic trace without changing policy."""
+        ranked = self._rank_llm_link_keys(llm_mapping)
+        ranked = self._rerank_topic_compatible_link_keys(ranked, object_type, link_config)
+        min_confidence = self._env_float("ALETHEIA_LLM_PLANNER_MIN_CONFIDENCE", 0.0)
+        top_k = self._env_int("ALETHEIA_LLM_PLANNER_TOP_K", 10)
+        lexical_recall_k = self._env_int("ALETHEIA_LLM_PLANNER_LEXICAL_RECALL_K", 2)
+        trace = {
+            "llm_ranked_link_keys": list(ranked),
+            "min_confidence": min_confidence,
+            "top_k": top_k,
+            "lexical_recall_k": lexical_recall_k,
+            "confidence_filtered_link_keys": [],
+            "top_k_link_keys": [],
+            "truncated_link_keys": [],
+            "lexical_recall_keys": [],
+            "selected_after_convergence_keys": [],
+            "selection_sources": {},
+        }
+        ranked_before_confidence = list(ranked)
+        if min_confidence > 0:
+            ranked = [
+                key for key in ranked
+                if llm_mapping.confidence_scores.get(key, 0.0) >= min_confidence
+            ]
+            trace["confidence_filtered_link_keys"] = [
+                key for key in ranked_before_confidence if key not in ranked
+            ]
+
+        ranked_before_top_k = list(ranked)
+        if top_k > 0:
+            ranked = ranked[:top_k]
+            trace["truncated_link_keys"] = ranked_before_top_k[top_k:]
+        trace["top_k_link_keys"] = list(ranked)
+
+        converged = set(ranked)
+        lexical_keys = self._lexical_recall_link_keys(
+            question,
+            link_config,
+            descriptions,
+            lexical_recall_k,
+            object_type=object_type,
+            lexical_hint_config=lexical_hint_config,
+        )
+        trace["lexical_recall_keys"] = list(lexical_keys)
+        converged.update(lexical_keys)
+        trace["selected_after_convergence_keys"] = sorted(converged)
+        selection_sources = {}
+        for key in converged:
+            sources = []
+            if key in ranked:
+                sources.append("llm_top_k")
+            if key in lexical_keys:
+                sources.append("lexical_recall")
+            selection_sources[key] = sources
+        trace["selection_sources"] = selection_sources
+        return trace
+
+    # ------------------------------------------------------------------
+    # Question-to-path planning
+    # ------------------------------------------------------------------
+
+    @dataclass
+    class QuestionPathPlan:
+        """Describes which retrieval paths to execute based on question analysis."""
+        question: str | None = None
+        selected_link_keys: set[str] = field(default_factory=set)
+        selected_target_types: set[str] = field(default_factory=set)
+        keyword_link_keys: set[str] = field(default_factory=set)
+        llm_link_keys: set[str] = field(default_factory=set)
+        llm_ranked_link_keys: list[str] = field(default_factory=list)
+        llm_confidence_scores: dict[str, float] = field(default_factory=dict)
+        llm_convergence_applied: bool = False
+        lexical_recall_keys: list[str] = field(default_factory=list)
+        selected_after_convergence_keys: list[str] = field(default_factory=list)
+        llm_confidence_filtered_link_keys: list[str] = field(default_factory=list)
+        llm_truncated_link_keys: list[str] = field(default_factory=list)
+        llm_top_k_link_keys: list[str] = field(default_factory=list)
+        planner_selection_sources: dict[str, list[str]] = field(default_factory=dict)
+        planner_convergence_config: dict[str, int | float] = field(default_factory=dict)
+        admissible_chains: list[tuple[str, str]] = field(default_factory=list)
+        include_rankings: bool = True
+        include_link_stats: bool = True
+        include_value_aggs: bool = True
+        include_source_key_profile: bool = True
+        include_self_refs: bool = True
+        is_full_aggregation: bool = True
+        # Specific named entities the question refers to, when it names
+        # more than one -- not tied to any particular question "type"
+        # (comparison, relationship-check, joint analysis, ...); a question
+        # naming zero/one entity leaves this empty. Resolving these text
+        # spans to real instance ids (see _resolve_entity_mentions) is
+        # optional and only happens when the caller supplies candidate_labels.
+        entity_mentions: list[str] = field(default_factory=list)
+        resolved_entity_centers: list[str] = field(default_factory=list)
+
+    # Open registry of retrieval capabilities this engine can execute, each
+    # tied to a concrete method below -- NOT a fixed taxonomy of "question
+    # types". Passed to the LLM planner (see _llm_map_question_to_relations)
+    # so it can select which ones this question needs; extending the engine
+    # with a new capability only means adding an entry here, never touching
+    # QuestionPathPlan's schema or the planner's prompt structure.
+    #
+    # Empty for now: "rankings"/"link_stats"/"value_aggregation"/
+    # "source_key_profile" were SQL-join-only features (peer ranking via
+    # GROUP BY, per-link aggregation, multi-hop value totals, shared-source-key
+    # profiling) with no graph-native replacement built yet, so there is
+    # nothing to advertise to the LLM planner -- retrieval today is path-
+    # finding + relational derivation over real graph edges.
+    RETRIEVAL_CAPABILITIES: dict[str, str] = {}
+
+    # Default synonym-to-entity-type mapping (configurable per tenant/domain).
+    # Keys are lowercase synonyms/paraphrases; values are the canonical
+    # entity type keys they should resolve to.
+    DEFAULT_ENTITY_TYPE_SYNONYMS: dict[str, list[str]] = {
+        "evidence": ["risk_indicator"],
+        "hazard signal": ["risk_indicator"],
+        "indicator": ["risk_indicator"],
+        "barrier": ["chokepoint"],
+        "strait": ["chokepoint"],
+        "canal": ["chokepoint"],
+        "alternative route": ["trade_route"],
+        "shipping route": ["trade_route"],
+        "disruption": ["chokepoint"],
+        "dependency": ["trade_dependency"],
+        "trade flow": ["trade_dependency"],
+        "finding": ["risk_finding"],
+        "risk result": ["systemic_risk_result"],
+        "systemic risk": ["systemic_risk_result"],
+        "impact": ["systemic_risk_result"],
+        "action": ["mitigation_action"],
+        "recommendation": ["mitigation_action"],
+        "mitigation": ["mitigation_action"],
+        "nation": ["country"],
+        "state": ["country"],
+    }
+
+    def _resolve_entity_types_from_question(
+        self,
+        question: str,
+        known_types: set[str],
+        synonym_map: dict[str, list[str]] | None = None,
+    ) -> set[str]:
+        """Resolve entity types from question using synonym/paraphrase mapping.
+
+        Returns the set of canonical entity type keys that the question
+        references via synonyms or paraphrases, even when the exact type
+        name is not present in the question text.
+        """
+        if not question:
+            return set()
+
+        q_lower = question.lower()
+        q_normalized = q_lower.replace("_", " ")
+        synonyms = synonym_map if synonym_map is not None else self.DEFAULT_ENTITY_TYPE_SYNONYMS
+        resolved: set[str] = set()
+
+        for synonym, type_keys in synonyms.items():
+            synonym_spaced = synonym.replace("_", " ")
+            if synonym in q_lower or synonym_spaced in q_normalized:
+                for tk in type_keys:
+                    if tk.lower() in known_types:
+                        resolved.add(tk.lower())
+
+        return resolved
+
+    @staticmethod
+    def _strip_parenthetical_and_normalize(text: str) -> str:
+        stripped = re.sub(r"\s*\([^)]*\)", "", text or "").strip()
+        return re.sub(r"[^0-9a-z ]+", " ", stripped.lower()).split()
+
+    @classmethod
+    def _resolve_entity_mentions(cls, entity_mentions: list[str], candidate_labels: list[str]) -> list[str]:
+        """Which of a known set of entity labels match the LLM's extracted mentions?
+
+        Matches each candidate label (disambiguating suffixes like "(1574)"
+        stripped before matching) against the LLM's own extracted entity
+        mentions (``PlannerMapping.entity_mentions``) rather than
+        re-scanning the raw question text, since the LLM's extraction is the
+        more precise signal (avoids false positives from incidental token
+        overlap elsewhere in the question). Not tied to any question "type"
+        -- this serves any question naming multiple specific entities,
+        whatever the
+        reason (comparison, relationship-check, joint analysis, ...).
+        """
+        mention_tokens = set()
+        for mention in entity_mentions:
+            mention_tokens |= set(re.sub(r"[^0-9a-z ]+", " ", (mention or "").lower()).split())
+        resolved = []
+        for label in candidate_labels:
+            core_tokens = cls._strip_parenthetical_and_normalize(label)
+            if core_tokens and all(tok in mention_tokens for tok in core_tokens):
+                resolved.append(label)
+        return resolved
+
+    def _plan_question_paths(
+        self,
+        question,
+        object_type,
+        entity_config,
+        link_config,
+        descriptions,
+        lexical_hint_config=None,
+        candidate_labels=None,
+    ):
+        """Map a reasoning question to type-constrained retrieval paths.
+
+        Inspired by OntGQA planner-judge: the planner predicts which entity
+        types and relation types are relevant to the question, then constrains
+        the admissible retrieval paths. When the question is absent or does not
+        match any known type, falls back to full aggregation.
+        """
+        plan = self.QuestionPathPlan(
+            question=question,
+            selected_link_keys=set(),
+            selected_target_types=set(),
+            admissible_chains=[],
+            is_full_aggregation=True,
+        )
+        lexical_hint_config = self._lexical_hint_config() if lexical_hint_config is None else lexical_hint_config
+        if not question or not question.strip():
+            return plan
+
+        q_lower = question.lower()
+
+        known_types = {k.lower() for k in entity_config.keys()}
+        for lc in link_config:
+            known_types.add(lc["to"].lower())
+            known_types.add(lc["from"].lower())
+
+        # Build bidirectional adjacency: forward (from->to) and reverse (to->from)
+        links_from = {}
+        links_to = {}
+        for lc in link_config:
+            links_from.setdefault(lc["from"].lower(), []).append(lc)
+            links_to.setdefault(lc["to"].lower(), []).append(lc)
+
+        # Normalize underscores to spaces for natural-language matching
+        q_normalized = q_lower.replace("_", " ")
+
+        # Resolve synonyms/paraphrases to entity type names before exact matching
+        synonym_resolved_types = self._resolve_entity_types_from_question(
+            question, known_types
+        )
+
+        matched_types = set()
+        for t in known_types:
+            t_spaced = t.replace("_", " ")
+            if t in q_lower or t_spaced in q_normalized:
+                matched_types.add(t)
+            elif t + "s" in q_lower or t_spaced + "s" in q_normalized:
+                matched_types.add(t)
+            elif t + "es" in q_lower or t_spaced + "es" in q_normalized:
+                matched_types.add(t)
+            elif t.endswith("y") and (t[:-1] + "ies" in q_lower or t_spaced[:-1] + "ies" in q_normalized):
+                matched_types.add(t)
+
+        # Merge synonym-resolved types into matched_types
+        matched_types |= synonym_resolved_types
+
+        # LLM-enhanced mapping: primary path for question->relation selection.
+        # Rank and confidence are preserved so downstream planning can reduce
+        # fanout without losing the fallback keyword path.
+        llm_mapping = self._llm_map_question_to_relations(
+            question, object_type, link_config, descriptions
+        )
+        llm_link_keys = set(llm_mapping.matched_link_keys)
+        llm_ranked_link_keys = self._rank_llm_link_keys(llm_mapping)
+        plan.llm_link_keys = llm_link_keys
+        plan.llm_ranked_link_keys = llm_ranked_link_keys
+        plan.llm_confidence_scores = dict(llm_mapping.confidence_scores)
+
+        # Retrieval capabilities are selected by the LLM itself against the
+        # open RETRIEVAL_CAPABILITIES registry (see llm_planner.DEFAULT_SYSTEM_PROMPT),
+        # not keyword matching -- when the LLM is unavailable/fails
+        # (used_fallback=True) this stays empty, which leaves the plan at
+        # its safe is_full_aggregation=True default below rather than guessing.
+        selected_capabilities = llm_mapping.selected_capabilities
+        plan.entity_mentions = list(llm_mapping.entity_mentions)
+        if llm_mapping.entity_mentions and candidate_labels:
+            plan.resolved_entity_centers = self._resolve_entity_mentions(
+                llm_mapping.entity_mentions, candidate_labels
+            )
+
+        llm_types = {t.lower() for t in llm_mapping.matched_entity_types}
+        if llm_types:
+            matched_types |= llm_types
+
+        keyword_link_keys = set()
+        obj_lower = object_type.lower()
+
+        # Forward links: center entity is the "from" side
+        for lc in link_config:
+            if lc["from"] != obj_lower:
+                continue
+            target = lc["to"].lower()
+            link_key = lc["link"]
+            link_desc = (descriptions.get(link_key, "") or "").lower()
+            if target in matched_types:
+                keyword_link_keys.add(link_key)
+            elif link_desc:
+                # Match on description words, excluding the center entity type
+                # itself (otherwise every question about a chokepoint matches
+                # links whose description merely mentions "chokepoint").
+                desc_words = [w for w in link_desc.split()
+                              if len(w) > 3 and w != obj_lower]
+                if any(word in q_lower for word in desc_words):
+                    keyword_link_keys.add(link_key)
+
+        # Reverse links: center entity is the "to" side
+        for lc in link_config:
+            if lc["to"] != obj_lower:
+                continue
+            source_type = lc["from"].lower()
+            link_key = lc["link"]
+            link_desc = (descriptions.get(link_key, "") or "").lower()
+            if source_type in matched_types:
+                keyword_link_keys.add(link_key)
+            elif link_desc:
+                desc_words = [w for w in link_desc.split()
+                              if len(w) > 3 and w != obj_lower]
+                if any(word in q_lower for word in desc_words):
+                    keyword_link_keys.add(link_key)
+
+        # 2-hop chain enumeration (bidirectional)
+        admissible_chains: list[tuple[str, str]] = []
+        if len(matched_types) >= 2:
+            for link_a in links_from.get(obj_lower, []):
+                # Forward+forward: obj ->A-> mid ->B-> target
+                mid_type = link_a["to"].lower()
+                for link_b in links_from.get(mid_type, []):
+                    if link_b["to"].lower() in matched_types and link_b["to"].lower() != obj_lower:
+                        admissible_chains.append((link_a["link"], link_b["link"]))
+                        keyword_link_keys.add(link_a["link"])
+                # Forward+reverse: obj ->A-> mid <-B- target
+                for link_b in links_to.get(mid_type, []):
+                    if link_b["from"].lower() in matched_types and link_b["from"].lower() != obj_lower:
+                        admissible_chains.append((link_a["link"], link_b["link"]))
+                        keyword_link_keys.add(link_a["link"])
+
+            for link_a in links_to.get(obj_lower, []):
+                # Reverse+forward: obj <-A- mid ->B-> target
+                mid_type = link_a["from"].lower()
+                for link_b in links_from.get(mid_type, []):
+                    if link_b["to"].lower() in matched_types and link_b["to"].lower() != obj_lower:
+                        admissible_chains.append((link_a["link"], link_b["link"]))
+                        keyword_link_keys.add(link_a["link"])
+                # Reverse+reverse: obj <-A- mid <-B- target
+                for link_b in links_to.get(mid_type, []):
+                    if link_b["from"].lower() in matched_types and link_b["from"].lower() != obj_lower:
+                        admissible_chains.append((link_a["link"], link_b["link"]))
+                        keyword_link_keys.add(link_a["link"])
+
+        convergence_enabled = (
+            (bool(llm_link_keys) or (bool(llm_mapping.model) and not llm_mapping.used_fallback))
+            and self._env_bool("ALETHEIA_LLM_PLANNER_CONVERGENCE_ENABLED", True)
+        )
+        include_keyword_union = self._env_bool(
+            "ALETHEIA_LLM_PLANNER_INCLUDE_KEYWORD_UNION", False
+        )
+        if convergence_enabled:
+            convergence_trace = self._llm_convergence_trace(
+                llm_mapping,
+                question=question,
+                link_config=link_config,
+                descriptions=descriptions,
+                object_type=object_type,
+                lexical_hint_config=lexical_hint_config,
+            )
+            converged_llm_keys = set(convergence_trace["selected_after_convergence_keys"])
+            plan.lexical_recall_keys = list(convergence_trace["lexical_recall_keys"])
+            plan.selected_after_convergence_keys = list(convergence_trace["selected_after_convergence_keys"])
+            plan.llm_confidence_filtered_link_keys = list(convergence_trace["confidence_filtered_link_keys"])
+            plan.llm_truncated_link_keys = list(convergence_trace["truncated_link_keys"])
+            plan.llm_top_k_link_keys = list(convergence_trace["top_k_link_keys"])
+            plan.planner_selection_sources = {
+                key: list(value)
+                for key, value in convergence_trace["selection_sources"].items()
+            }
+            plan.planner_convergence_config = {
+                "min_confidence": convergence_trace["min_confidence"],
+                "top_k": convergence_trace["top_k"],
+                "lexical_recall_k": convergence_trace["lexical_recall_k"],
+            }
+            if converged_llm_keys and include_keyword_union:
+                matched_link_keys = keyword_link_keys | converged_llm_keys
+            elif converged_llm_keys:
+                matched_link_keys = converged_llm_keys
+                plan.llm_convergence_applied = True
+            else:
+                matched_link_keys = set(keyword_link_keys)
+        else:
+            matched_link_keys = set(keyword_link_keys) | llm_link_keys
+
+        plan.keyword_link_keys = set(keyword_link_keys)
+
+        if matched_link_keys or matched_types or selected_capabilities:
+            plan.is_full_aggregation = False
+            if matched_link_keys:
+                plan.selected_link_keys = matched_link_keys
+            else:
+                # Fallback: include both forward and reverse links from this entity
+                plan.selected_link_keys = {lc["link"] for lc in link_config
+                                           if lc["from"] == obj_lower or lc["to"] == obj_lower}
+            plan.selected_target_types = matched_types
+            plan.include_rankings = "rankings" in selected_capabilities or bool(matched_link_keys)
+            plan.include_link_stats = "link_stats" in selected_capabilities or bool(matched_link_keys)
+            plan.include_value_aggs = "value_aggregation" in selected_capabilities
+            plan.include_source_key_profile = "source_key_profile" in selected_capabilities or not matched_link_keys
+            plan.include_self_refs = True
+            plan.admissible_chains = admissible_chains
+
+        return plan
+
+    # ------------------------------------------------------------------
     # Main entry: analyze
     # ------------------------------------------------------------------
 
-    def analyze(self, tenant, center_node, question=None, depth=1, limit=200):
+    def _gather_center_data(self, tenant, center_node, entity_config, link_config, path_plan, depth, limit):
+        """Fetch + assemble everything ``_compose``/``_compose_relational`` need
+        for ONE center. Extracted from ``analyze()`` so multi-center
+        resolution can call this once per center without duplicating the
+        single-center pipeline. Returns None if the entity/graph isn't found
+        (same "not found" semantics as the single-center path)."""
         if not center_node or ":" not in center_node:
             return None
         object_type, instance_id = center_node.split(":", 1)
-        entity_config = self._entity_config(tenant)
-        link_config = self._link_config(tenant)
         cfg = entity_config.get(object_type.lower())
         if not cfg:
             return None
 
         row = self.repo._fetch_entity(tenant, object_type, instance_id)
         if not row:
-            return {
-                "title": f"{center_node} profile unavailable",
-                "profile_summary": f"{center_node} not found in the controlled data source.",
-                "key_facts": [],
-                "business_interpretation": ["Entity record missing — cannot perform analysis."],
-                "evidence_limits": [f"Missing {object_type} source table record."],
-                "next_questions": ["Verify entity ID exists in the current tenant data source."],
-            }
+            return None
 
         graph = self.repo.neighborhood(tenant, object_type, instance_id, depth=depth, limit=limit)
         if not graph or not graph.get("approved"):
@@ -715,9 +995,7 @@ class ReasoningEngine:
         label = center.get("label") or center_node
         nodes = graph.get("nodes") or []
         edges = graph.get("edges") or []
-        source_engine = self.repo.source_engine_for(tenant)
 
-        # --- Artifact descriptions ---
         desc_keys = [cfg.get("artifact", f"object:{object_type}")]
         for lc in link_config:
             if lc["from"] == object_type.lower() or lc["to"] == object_type.lower():
@@ -725,60 +1003,286 @@ class ReasoningEngine:
         descriptions = self._artifact_descriptions(tenant, desc_keys)
         entity_desc = descriptions.get(cfg.get("artifact", ""), "")
 
-        # --- Self-referencing resolution ---
-        self_refs = self._resolve_self_refs(tenant, object_type, row, cfg)
+        self_refs = self._resolve_self_refs(tenant, object_type, row, cfg) if path_plan.include_self_refs else {}
+        props = self._format_properties(row)
 
-        # --- Properties ---
-        props = self._format_properties(row, cfg, source_engine, tenant=tenant)
+        # Bucketed by (type, connecting relation) when the neighbor has a
+        # direct edge to this center, not just type -- a single-TAG graph
+        # tenant (every vertex the same "type") would otherwise dump every
+        # neighbor into one undifferentiated bucket, and _compose's "first 5
+        # + N more" narrative sampling would truncate away whichever
+        # relation actually answers the question on any tenant with more
+        # than a handful of neighbors of the same type. Multi-hop neighbors
+        # (no direct edge to this center) fall back to a type-only bucket,
+        # same as before.
+        center_id = center.get("id")
+        relation_by_neighbor_id = {}
+        for edge in edges:
+            if edge.get("source") == center_id:
+                relation_by_neighbor_id[edge.get("target")] = edge.get("label", "")
+            elif edge.get("target") == center_id:
+                relation_by_neighbor_id[edge.get("source")] = edge.get("label", "")
 
-        # --- Peer rankings ---
-        rankings = self._peer_rankings(tenant, object_type, instance_id)
-
-        # --- Deep per-link stats ---
-        link_stats = []
-        for r in rankings:
-            lc = next((l for l in link_config if l["link"] == r["link"]), None)
-            if lc:
-                stats = self._link_deep_stats(tenant, object_type, instance_id, lc, r)
-                link_stats.append(stats)
-
-        # --- Multi-hop value ---
-        value_aggs = self._multihop_value(tenant, object_type, instance_id)
-
-        # --- Source-key profile ---
-        # Some tenants have reviewed graph projections whose semantics are
-        # carried by source-table evidence rather than legacy LINK_CONFIG rows.
-        # Use shared source keys to produce degree/metric evidence without
-        # inventing graph writes or ontology terms.
-        source_key_profile = self._source_key_profile(tenant, object_type, instance_id, cfg, depth=depth)
-
-        # --- Neighbors by type (from graph) ---
         neighbors_by_type = {}
         for node in nodes:
-            if node.get("id") == center.get("id"):
+            if node.get("id") == center_id:
                 continue
             ntype = node.get("type", "unknown")
-            neighbors_by_type.setdefault(ntype, []).append(node)
+            relation = relation_by_neighbor_id.get(node.get("id"))
+            bucket_key = f"{ntype}: {relation}" if relation else ntype
+            neighbors_by_type.setdefault(bucket_key, []).append(node)
 
-        # --- Compose ---
+        return {
+            "center_node": center_node,
+            "object_type": object_type,
+            "instance_id": instance_id,
+            "label": label,
+            "cfg": cfg,
+            "entity_desc": entity_desc,
+            "descriptions": descriptions,
+            "props": props,
+            "self_refs": self_refs,
+            "neighbors_by_type": neighbors_by_type,
+            "nodes": nodes,
+            "edges": edges,
+        }
+
+    @staticmethod
+    def _find_path_between_centers(center_node, target_center_node, nodes, edges):
+        """BFS over one center's own fetched neighborhood (nodes/edges) for a
+        real graph path to another specific center.
+
+        This is tried BEFORE any LLM reasoning for comparison questions --
+        if two named entities are actually connected in the graph (e.g. "X
+        acquired Y"), that connection IS the answer, more reliable than an
+        LLM guessing from independent facts. Returns the ordered list of
+        edge dicts forming the shortest path, ``[]`` if the two centers are
+        literally the same node, or ``None`` if unreachable within this
+        neighborhood (which is already bounded by the caller's depth/limit).
+        """
+        if center_node == target_center_node:
+            return []
+        adjacency = {}
+        for edge in edges or []:
+            source = edge.get("source")
+            target = edge.get("target")
+            if not source or not target:
+                continue
+            adjacency.setdefault(source, []).append(edge)
+            adjacency.setdefault(target, []).append({**edge, "source": target, "target": source, "_reversed": True})
+
+        visited = {center_node}
+        queue = deque([(center_node, [])])
+        while queue:
+            node_id, path = queue.popleft()
+            for edge in adjacency.get(node_id, []):
+                other = edge.get("target")
+                if not other or other in visited:
+                    continue
+                next_path = path + [edge]
+                if other == target_center_node:
+                    return next_path
+                visited.add(other)
+                queue.append((other, next_path))
+        return None
+
+    def _llm_derive_relational_answer(self, question, centers_data):
+        """When no direct graph path connects the named centers, derive an
+        answer via one LLM call given each center's own relevant facts --
+        explicitly EXCLUDING each center's own identity/label from what's
+        sent, so the model must reason from the actual facts rather than
+        recognizing which name happens to match. Not comparison-specific --
+        serves any question naming multiple entities, whatever shape the
+        answer takes (picking one center, naming a trait shared by several
+        of them, describing a relationship, ...). Returns a dict with
+        resolution metadata; gracefully degrades (no crash) if the LLM
+        planner isn't available/enabled."""
+        planner = self._get_llm_planner()
+        if planner is None:
+            return {
+                "resolution": "unavailable",
+                "answer": None,
+                "supporting_center_nodes": [],
+                "supporting_labels": [],
+                "reasoning": "LLM planner not enabled -- cannot derive an answer without a direct graph path.",
+                "error": "llm_planner_unavailable",
+            }
+
+        centers_facts = []
+        for data in centers_data:
+            facts = []
+            for prop in data.get("props") or []:
+                facts.append({"relation": prop.get("col", ""), "value": prop.get("value", "")})
+            if not facts:
+                # Graph-native entities (a single Nebula TAG with no
+                # per-vertex properties beyond id/label) carry their real
+                # facts as edges, not row columns -- fall back to this
+                # center's own 1-hop neighbor edges (already gathered by
+                # _gather_center_data via neighborhood()) rather than
+                # sending the LLM an empty fact list. Only engages when
+                # props is empty, so SQL tenants with real column data are
+                # unaffected.
+                instance_id = data.get("instance_id", "")
+                nodes_by_id = {n.get("id"): n for n in data.get("nodes") or []}
+                for edge in data.get("edges") or []:
+                    if edge.get("source") == instance_id:
+                        neighbor = nodes_by_id.get(edge.get("target"), {})
+                    elif edge.get("target") == instance_id:
+                        neighbor = nodes_by_id.get(edge.get("source"), {})
+                    else:
+                        continue
+                    if neighbor.get("label"):
+                        facts.append({"relation": edge.get("label", ""), "value": neighbor["label"]})
+            centers_facts.append({
+                "center_node": data["center_node"],
+                # Deliberately no "label"/identity field here -- the model
+                # must derive the answer from the facts, not from
+                # recognizing a name, closing the leakage bug found in the
+                # HotpotQA Nebula benchmark (see GraphHitJudge's Dain
+                # Rauscher Wessels/Berenberg Bank case).
+                "facts": facts,
+            })
+
+        derivation = planner.derive_relational_answer(question, centers_facts)
+        if derivation.used_fallback:
+            return {
+                "resolution": "llm_reasoning",
+                "answer": None,
+                "supporting_center_nodes": [],
+                "supporting_labels": [],
+                "reasoning": "",
+                "error": derivation.error,
+                "error_type": derivation.error_type,
+            }
+
+        by_center_node = {d["center_node"]: d for d in centers_data}
+        supporting_labels = [
+            by_center_node[c]["label"] for c in derivation.supporting_center_nodes if c in by_center_node
+        ]
+        return {
+            "resolution": "llm_reasoning",
+            "answer": derivation.answer,
+            "supporting_center_nodes": list(derivation.supporting_center_nodes),
+            "supporting_labels": supporting_labels,
+            "reasoning": derivation.reasoning,
+            "error": "",
+        }
+
+    def _analyze_multi_center(self, tenant, center_node, additional_center_nodes, question,
+                               entity_config, link_config, path_plan, depth, limit):
+        """Multi-center resolution flow: gather each center independently
+        (same per-center pipeline as single-entity analyze()), try a direct
+        graph path between them first, and only fall back to LLM reasoning
+        over each center's own facts when no such path exists. General
+        mechanism -- doesn't assume WHY multiple entities were named
+        (comparison, relationship-check, joint analysis, ...)."""
+        all_center_nodes = [center_node] + additional_center_nodes
+        centers_data = []
+        for node in all_center_nodes:
+            data = self._gather_center_data(tenant, node, entity_config, link_config, path_plan, depth, limit)
+            if data is None:
+                return {
+                    "title": f"{node} profile unavailable",
+                    "profile_summary": f"{node} not found in the controlled data source -- cannot relate.",
+                    "key_facts": [],
+                    "business_interpretation": ["Entity record missing for one of the named centers."],
+                    "evidence_limits": [f"Missing source table record for {node}."],
+                    "next_questions": [],
+                }
+            centers_data.append(data)
+
+        relation = None
+        for other in centers_data[1:]:
+            path = self._find_path_between_centers(
+                centers_data[0]["center_node"], other["center_node"],
+                centers_data[0]["nodes"], centers_data[0]["edges"],
+            )
+            if path is not None:
+                relation = {
+                    "resolution": "path_found",
+                    "path": path,
+                    "answer": None,
+                    "supporting_center_nodes": [],
+                    "supporting_labels": [],
+                    "reasoning": f"Direct graph path found between {centers_data[0]['label']} and {other['label']}.",
+                    "error": "",
+                }
+                break
+
+        if relation is None:
+            relation = self._llm_derive_relational_answer(question, centers_data)
+            relation.setdefault("path", None)
+
+        return self._compose_relational(centers_data, relation, question, path_plan)
+
+    def analyze(self, tenant, center_node, question=None, depth=1, limit=200, additional_center_nodes=None):
+        if not center_node or ":" not in center_node:
+            return None
+        object_type, instance_id = center_node.split(":", 1)
+        entity_config = self._entity_config(tenant)
+        link_config = self._link_config(tenant)
+        cfg = entity_config.get(object_type.lower())
+        if not cfg:
+            return None
+
+        # --- Question-driven path planning (shared across all centers when
+        # comparing -- the question is asked once, not once per center) ---
+        desc_keys = [cfg.get("artifact", f"object:{object_type}")]
+        for lc in link_config:
+            if lc["from"] == object_type.lower() or lc["to"] == object_type.lower():
+                desc_keys.append(lc["link"])
+        descriptions_for_plan = self._artifact_descriptions(tenant, desc_keys)
+        path_plan = self._plan_question_paths(
+            question,
+            object_type,
+            entity_config,
+            link_config,
+            descriptions_for_plan,
+            lexical_hint_config=self._lexical_hint_config(tenant),
+        )
+
+        # Deduplicated against the primary and each other -- extraction
+        # pipelines sometimes name the primary center again as one of its
+        # own "additional" mentions, which would otherwise make
+        # _analyze_multi_center/_find_path_between_centers find a trivial
+        # zero-hop "path" from the primary to itself and short-circuit
+        # before ever considering a real second entity.
+        deduped_additional = [n for n in dict.fromkeys(additional_center_nodes or []) if n and n != center_node]
+        if deduped_additional:
+            return self._analyze_multi_center(
+                tenant, center_node, deduped_additional, question,
+                entity_config, link_config, path_plan, depth, limit,
+            )
+
+        data = self._gather_center_data(tenant, center_node, entity_config, link_config, path_plan, depth, limit)
+        if data is None:
+            row = self.repo._fetch_entity(tenant, object_type, instance_id)
+            if not row:
+                return {
+                    "title": f"{center_node} profile unavailable",
+                    "profile_summary": f"{center_node} not found in the controlled data source.",
+                    "key_facts": [],
+                    "business_interpretation": ["Entity record missing — cannot perform analysis."],
+                    "evidence_limits": [f"Missing {object_type} source table record."],
+                    "next_questions": ["Verify entity ID exists in the current tenant data source."],
+                }
+            return None
+
         return self._compose(
-            center_node=center_node,
-            object_type=object_type,
-            instance_id=instance_id,
-            label=label,
-            cfg=cfg,
-            entity_desc=entity_desc,
-            descriptions=descriptions,
-            props=props,
-            self_refs=self_refs,
-            rankings=rankings,
-            link_stats=link_stats,
-            value_aggs=value_aggs,
-            source_key_profile=source_key_profile,
-            neighbors_by_type=neighbors_by_type,
-            nodes=nodes,
-            edges=edges,
+            center_node=data["center_node"],
+            object_type=data["object_type"],
+            instance_id=data["instance_id"],
+            label=data["label"],
+            cfg=data["cfg"],
+            entity_desc=data["entity_desc"],
+            descriptions=data["descriptions"],
+            props=data["props"],
+            self_refs=data["self_refs"],
+            neighbors_by_type=data["neighbors_by_type"],
+            nodes=data["nodes"],
+            edges=data["edges"],
             question=question,
+            path_plan=path_plan,
         )
 
     # ------------------------------------------------------------------
@@ -786,8 +1290,7 @@ class ReasoningEngine:
     # ------------------------------------------------------------------
 
     def _build_narrative(self, label, object_type, entity_desc, props, self_refs,
-                         rankings, link_stats, value_aggs, neighbors_by_type, question,
-                         source_key_profile=None):
+                         neighbors_by_type, question, path_plan=None):
         """Synthesize computed data into an analytical paragraph."""
         sentences = []
 
@@ -800,178 +1303,55 @@ class ReasoningEngine:
             ref = list(self_refs.values())[0]
             identity += f", reporting to {ref['label']}"
 
-        # Activity level sentence
-        if source_key_profile and source_key_profile.get("related_tables"):
-            business_summary = self._source_key_business_summary(
-                label,
-                object_type,
-                source_key_profile,
-                neighbors_by_type,
-            )
-            if business_summary:
-                sentences.append(business_summary)
-            top_paths = source_key_profile.get("top_paths") or []
-            second_hop_paths = source_key_profile.get("second_hop_paths") or []
-            table_count = len(source_key_profile.get("related_tables") or [])
-            row_count = source_key_profile.get("total_key_rows", 0)
-            distinct_labels = sum(int(t.get("distinct_labels") or 0) for t in source_key_profile.get("related_tables") or [])
-            if top_paths:
-                top_text = ", ".join(
-                    f"{p['label']} ({p['metric']} {_fmt_number(p['metric_value'])})"
-                    for p in top_paths[:3]
-                )
-                sentences.append(
-                    f"{identity} has {row_count} source rows across {table_count} related source table(s), "
-                    f"covering {distinct_labels} distinct path labels. The largest current exposure paths are {top_text}."
-                )
-                if second_hop_paths:
-                    peer_text = "; ".join(
-                        f"{p['label']} also connects {', '.join(peer['key'] for peer in p.get('top_peers', [])[:4])}"
-                        for p in second_hop_paths[:3]
-                    )
-                    sentences.append(
-                        f"At depth {source_key_profile.get('scope_depth', 1)}, shared-path context adds peer countries through the same path labels: {peer_text}."
-                    )
-            else:
-                sentences.append(
-                    f"{identity} has {row_count} source rows across {table_count} related source table(s), "
-                    f"with {distinct_labels} distinct connected path labels in the controlled source data."
-                )
-        elif rankings:
-            r = rankings[0]
-            ratio = r["my_count"] / r["avg"] if r["avg"] > 0 else 1
-            if r["level"] == "high":
-                sentences.append(
-                    f"{identity} is a high-activity {object_type} with {r['my_count']} {r['target_type']}(s), "
-                    f"ranking #{r['rank']} out of {r['total_peers']} peers — "
-                    f"{ratio:.1f}x the average of {r['avg']}."
-                )
-            elif r["level"] == "low":
-                sentences.append(
-                    f"{identity} shows below-average activity with {r['my_count']} {r['target_type']}(s), "
-                    f"ranking #{r['rank']} out of {r['total_peers']} peers "
-                    f"(avg {r['avg']}, max {r['max']})."
-                )
-            else:
-                sentences.append(
-                    f"{identity} has {r['my_count']} {r['target_type']}(s), "
-                    f"ranking #{r['rank']} out of {r['total_peers']} peers — "
-                    f"near the average of {r['avg']}."
-                )
-        else:
-            sentences.append(f"{identity} is present in the approved graph with {sum(len(v) for v in neighbors_by_type.values())} related entities.")
+        sentences.append(f"{identity} is present in the approved graph with {sum(len(v) for v in neighbors_by_type.values())} related entities.")
 
-        # Value contribution sentence
-        for va in value_aggs:
-            share_pct = round(va["value_share"] * 100, 1)
-            sentences.append(
-                f"Revenue contribution is {_fmt_number(va['my_value'])} "
-                f"({share_pct}% of the {_fmt_number(va['total_value'])} total)"
-                + (f", ranked #{va['value_rank']}/{va['value_total_peers']} by value" if va.get("value_rank") else "")
-                + "."
-            )
-            # Category concentration
-            cats = va.get("category_breakdown", [])
-            if cats:
-                top_cat = cats[0]
-                top_share = round(top_cat["value"] / va["my_value"] * 100) if va["my_value"] > 0 else 0
-                if top_share > 30:
-                    sentences.append(
-                        f"Revenue is concentrated in {top_cat['label']} ({top_share}% of total), "
-                        f"followed by {cats[1]['label']}" + (f" and {cats[2]['label']}" if len(cats) > 2 else "") + "."
-                    )
-                elif len(cats) >= 3:
-                    sentences.append(
-                        f"Revenue is diversified across {cats[0]['label']}, {cats[1]['label']}, and {cats[2]['label']}."
-                    )
-
-        # Trend sentence
-        for i, r in enumerate(rankings):
-            stats = link_stats[i] if i < len(link_stats) else {}
-            yearly = stats.get("yearly", [])
-            if len(yearly) >= 2:
-                first_yr, last_yr = yearly[0], yearly[-1]
-                peak = max(yearly, key=lambda y: y["count"])
-                if last_yr["count"] > first_yr["count"] * 1.3:
-                    sentences.append(
-                        f"Activity grew from {first_yr['count']} ({first_yr['year']}) to {last_yr['count']} ({last_yr['year']})"
-                        + (f", peaking at {peak['count']} in {peak['year']}" if peak != last_yr else "")
-                        + " — an upward trajectory."
-                    )
-                elif first_yr["count"] > last_yr["count"] * 1.3:
-                    sentences.append(
-                        f"Activity declined from {first_yr['count']} ({first_yr['year']}) to {last_yr['count']} ({last_yr['year']})"
-                        + (f" after peaking at {peak['count']} in {peak['year']}" if peak != first_yr else "")
-                        + " — a downward trend worth investigating."
-                    )
-                else:
-                    sentences.append(
-                        f"Activity has been stable across {len(yearly)} years "
-                        f"({first_yr['count']}–{last_yr['count']} {r['target_type']}(s) per year)."
-                    )
-
-        # Counterparty concentration
-        for i, r in enumerate(rankings):
-            stats = link_stats[i] if i < len(link_stats) else {}
-            distinct = stats.get("distinct_counterparties", {})
-            top_cps = stats.get("top_counterparties", {})
-            for cp_type, cp_data in top_cps.items():
-                items = cp_data.get("items", [])
-                total_distinct = distinct.get(cp_type, 0)
-                if items and total_distinct > 0 and r["my_count"] > 0:
-                    top_share = round(items[0]["count"] / r["my_count"] * 100)
-                    if top_share > 20:
-                        sentences.append(
-                            f"Top {cp_type} {items[0]['label']} accounts for {top_share}% of activity "
-                            f"across {total_distinct} distinct {cp_type}(s) — moderate concentration risk."
-                        )
-                    else:
-                        sentences.append(
-                            f"Activity is spread across {total_distinct} distinct {cp_type}(s), "
-                            f"with no single {cp_type} exceeding {top_share}% — well diversified."
-                        )
+        # Question-focused summary when path_plan is available
+        if path_plan and not path_plan.is_full_aggregation and question:
+            targets = sorted(path_plan.selected_target_types) if path_plan.selected_target_types else []
+            if targets:
+                target_text = ", ".join(targets)
+                sentences.append(
+                    f"Analysis focused on {target_text} based on the question: \"{question}\"."
+                )
 
         return " ".join(sentences)
-
-    def _source_key_business_summary(self, label, object_type, source_key_profile, neighbors_by_type):
-        related_tables = source_key_profile.get("related_tables") or []
-        top_paths = source_key_profile.get("top_paths") or []
-        table_names = {str(table.get("table") or "") for table in related_tables}
-        metric_names = {str(path.get("metric") or "").lower() for path in top_paths}
-        neighbor_types = {str(key): len(value) for key, value in (neighbors_by_type or {}).items()}
-        country_count = neighbor_types.get("Country", 0)
-        is_maritime = object_type == "MaritimeChokepoint" or any(name.startswith("maritime_") for name in table_names)
-        if is_maritime:
-            exposure_terms = []
-            if any("trade_at_risk" in metric for metric in metric_names):
-                exposure_terms.append("trade-at-risk")
-            if any(metric in {"v_canal", "q_canal"} for metric in metric_names):
-                exposure_terms.append("canal-flow concentration")
-            exposure_text = " and ".join(exposure_terms) if exposure_terms else "source-backed exposure"
-            country_text = f" across {country_count} country dependencies" if country_count else ""
-            return (
-                f"{label} is a maritime operational risk priority, not just a connected graph node: "
-                f"the approved evidence ties it to {exposure_text}{country_text}. "
-                "The business implication is that disruption should be reviewed for shipping continuity, trade exposure, rerouting pressure, and monitoring escalation."
-            )
-        if top_paths:
-            return (
-                f"{label} has business-relevant exposure in the approved source evidence. "
-                "Review should focus on whether the highest-value paths create concentration, continuity, or counterparty risk."
-            )
-        return ""
 
     # ------------------------------------------------------------------
     # Compose structured output
     # ------------------------------------------------------------------
 
     def _compose(self, *, center_node, object_type, instance_id, label, cfg,
-                 entity_desc, descriptions, props, self_refs, rankings,
-                 link_stats, value_aggs, source_key_profile, neighbors_by_type, nodes, edges, question):
+                 entity_desc, descriptions, props, self_refs, neighbors_by_type, nodes, edges, question,
+                 path_plan=None):
 
         key_facts = []
         interpretations = []
         source_table = cfg.get("table", object_type)
+
+        if path_plan and not path_plan.is_full_aggregation:
+            selected = sorted(path_plan.selected_link_keys) if path_plan.selected_link_keys else []
+            key_facts.append({
+                "label": "question_path_plan",
+                "value": f"Selected paths: {', '.join(selected) if selected else 'all matching'}; targets: {', '.join(sorted(path_plan.selected_target_types)) if path_plan.selected_target_types else 'all'}",
+                "source_ref": "question_driven_path_planner",
+            })
+            if path_plan.llm_link_keys:
+                ranked = path_plan.llm_ranked_link_keys[:5]
+                ranked_text = ", ".join(
+                    f"{key} ({path_plan.llm_confidence_scores.get(key, 0.0):.2f})"
+                    for key in ranked
+                )
+                key_facts.append({
+                    "label": "llm_question_path_plan",
+                    "value": (
+                        f"LLM ranked {len(path_plan.llm_link_keys)} relation(s); "
+                        f"selected {len(path_plan.selected_link_keys)} after convergence; "
+                        f"keyword candidates {len(path_plan.keyword_link_keys)}; "
+                        f"convergence={'on' if path_plan.llm_convergence_applied else 'off'}; "
+                        f"top: {ranked_text if ranked_text else 'none'}"
+                    ),
+                    "source_ref": "llm_question_path_planner",
+                })
 
         # -- Base info --
         if props:
@@ -987,186 +1367,8 @@ class ReasoningEngine:
         if entity_desc:
             interpretations.append(f"[{object_type} definition] {entity_desc}")
 
-        # -- Per-link ranking + deep stats --
-        for i, r in enumerate(rankings):
-            link_desc = descriptions.get(r["link"], "")
-            role_text = link_desc.split(".")[0].strip() if link_desc else f"related {r['target_type']}"
-            top_pct = 100 - r["percentile"] if r["percentile"] < 100 else 1
-
-            # Ranking fact
-            fact_parts = [
-                f"{r['my_count']} {r['target_type']}(s)",
-                f"ranked #{r['rank']}/{r['total_peers']} (top {top_pct}%)",
-                f"avg {r['avg']}, max {r['max']}, {r['level']}",
-            ]
-
-            # Enrich with deep stats
-            stats = link_stats[i] if i < len(link_stats) else {}
-
-            if stats.get("date_range"):
-                dr = stats["date_range"]
-                fact_parts.append(f"period {dr['min']} to {dr['max']}")
-
-            if stats.get("numeric_stats"):
-                for col_name, ns in stats["numeric_stats"].items():
-                    if ns["sum"] > 0:
-                        fact_parts.append(f"{col_name} total {_fmt_number(ns['sum'])}, avg {_fmt_number(ns['avg'])}")
-
-            if stats.get("distinct_counterparties"):
-                for cp_type, cnt in stats["distinct_counterparties"].items():
-                    fact_parts.append(f"{cnt} distinct {cp_type}(s)")
-
-            key_facts.append({
-                "label": f"{r['target_type']} ranking",
-                "value": "; ".join(fact_parts),
-                "source_ref": f"{r['fk_table']} GROUP BY {object_type}",
-                "context": role_text,
-            })
-
-            # Top counterparties
-            if stats.get("top_counterparties"):
-                for cp_type, cp_data in stats["top_counterparties"].items():
-                    items = cp_data["items"]
-                    top_text = ", ".join(f"{it['label']} ({it['count']})" for it in items[:5])
-                    top_count = items[0]["count"] if items else 0
-                    total = r["my_count"]
-                    share = round(top_count / total * 100) if total else 0
-                    key_facts.append({
-                        "label": f"top {cp_type}(s)",
-                        "value": top_text,
-                        "source_ref": f"{stats.get('link', '')} counterparties",
-                    })
-                    if share > 25:
-                        interpretations.append(
-                            f"Top {cp_type} ({items[0]['label']}) accounts for {share}% of {label}'s {r['target_type']}(s) — concentrated dependency."
-                        )
-
-            # Yearly trend
-            if stats.get("yearly"):
-                yearly = stats["yearly"]
-                trend_text = ", ".join(f"{y['year']}: {y['count']}" for y in yearly)
-                peak = max(yearly, key=lambda y: y["count"])
-                key_facts.append({
-                    "label": f"{r['target_type']} yearly trend",
-                    "value": trend_text,
-                    "source_ref": f"{r['fk_table']} yearly",
-                })
-                if len(yearly) > 1:
-                    first, last = yearly[0]["count"], yearly[-1]["count"]
-                    if last > first * 1.5:
-                        interpretations.append(f"{label}'s {r['target_type']} volume grew significantly: {first} → {last} (peak {peak['year']}: {peak['count']}).")
-                    elif first > last * 1.5:
-                        interpretations.append(f"{label}'s {r['target_type']} volume declined: {first} → {last}.")
-
-            # Ranking interpretation
-            if r["my_count"] == 0:
-                interpretations.append(f"{label} has no directly related {r['target_type']}(s).")
-            elif r["level"] == "high":
-                interpretations.append(
-                    f"{label}'s {r['target_type']} count ({r['my_count']}) ranks #{r['rank']}/{r['total_peers']}, "
-                    f"significantly above avg {r['avg']} — high activity entity."
-                    + (f" Context: {link_desc.split('.')[0]}." if link_desc else "")
-                )
-            elif r["level"] == "low":
-                interpretations.append(
-                    f"{label}'s {r['target_type']} count ({r['my_count']}) ranks #{r['rank']}/{r['total_peers']}, "
-                    f"below avg {r['avg']} — review activity level or data completeness."
-                )
-            else:
-                interpretations.append(
-                    f"{label}'s {r['target_type']} count ({r['my_count']}) ranks #{r['rank']}/{r['total_peers']}, "
-                    f"near avg {r['avg']} — average level."
-                )
-
-        if source_key_profile and source_key_profile.get("related_tables"):
-            related_tables = source_key_profile.get("related_tables") or []
-            top_paths = source_key_profile.get("top_paths") or []
-            total_key_rows = source_key_profile.get("total_key_rows", 0)
-            distinct_path_labels = sum(int(t.get("distinct_labels") or 0) for t in related_tables)
-            key_facts.append({
-                "label": "source-key degree",
-                "value": (
-                    f"{total_key_rows} matching source rows across {len(related_tables)} source table(s); "
-                    f"{distinct_path_labels} distinct path label(s)"
-                ),
-                "source_ref": f"source tables sharing {source_key_profile.get('center_key_col')}",
-            })
-            table_text = "; ".join(
-                f"{t['table']}: {t['row_count']} rows"
-                + (f", {t['distinct_labels']} distinct {t['label_col']}" if t.get("label_col") else "")
-                for t in related_tables[:6]
-            )
-            key_facts.append({
-                "label": "connected source tables",
-                "value": table_text,
-                "source_ref": "schema/profile evidence",
-            })
-            if top_paths:
-                path_text = "; ".join(
-                    f"{p['label']} via {p['table']} ({p['metric']} {_fmt_number(p['metric_value'])}, {p['row_count']} rows)"
-                    for p in top_paths[:5]
-                )
-                key_facts.append({
-                    "label": "top chokepoint/risk paths",
-                    "value": path_text,
-                    "source_ref": "source-key metric aggregation",
-                })
-                business_summary = self._source_key_business_summary(label, object_type, source_key_profile, neighbors_by_type)
-                if business_summary:
-                    interpretations.append(business_summary)
-                interpretations.append(
-                    f"Evidence basis: {total_key_rows} controlled source rows support the exposure readout; the metric details should stay in evidence review rather than become the business conclusion."
-                )
-            else:
-                interpretations.append(
-                    f"{label} has {total_key_rows} source-backed relationship rows, but no numeric risk/trade metric column was found for ranking connected paths."
-                )
-            second_hop_paths = source_key_profile.get("second_hop_paths") or []
-            if second_hop_paths:
-                second_hop_text = "; ".join(
-                    f"{p['label']} -> {', '.join(peer['key'] for peer in p.get('top_peers', [])[:6])}"
-                    for p in second_hop_paths[:5]
-                )
-                key_facts.append({
-                    "label": f"depth-{source_key_profile.get('scope_depth', 2)} shared path peers",
-                    "value": second_hop_text,
-                    "source_ref": "source-key path peer aggregation",
-                })
-                interpretations.append(
-                    f"Depth {source_key_profile.get('scope_depth', 2)} changes the reading from a single-country profile to shared-path exposure: "
-                    f"{', '.join(p['label'] for p in second_hop_paths[:3])} connect {label} with other high-exposure countries such as "
-                    f"{', '.join(peer['key'] for p in second_hop_paths[:2] for peer in p.get('top_peers', [])[:3])}."
-                )
-
-        # -- Multi-hop value aggregation --
-        for va in value_aggs:
-            share_pct = round(va["value_share"] * 100, 1)
-            key_facts.append({
-                "label": f"value ({va['value_expr']})",
-                "value": (
-                    f"{_fmt_number(va['my_value'])} "
-                    f"({share_pct}% of total {_fmt_number(va['total_value'])})"
-                    + (f", ranked #{va['value_rank']}/{va['value_total_peers']}" if va.get("value_rank") else "")
-                ),
-                "source_ref": f"{va['detail_table']} aggregation",
-            })
-            if va.get("category_breakdown"):
-                cat_text = "; ".join(f"{c['label']}: {_fmt_number(c['value'])} ({c['count']} items)" for c in va["category_breakdown"][:5])
-                key_facts.append({
-                    "label": "breakdown by category",
-                    "value": cat_text,
-                    "source_ref": f"{va['detail_table']} + category join",
-                })
-            if share_pct > 0:
-                rank_text = f", ranked #{va['value_rank']}/{va['value_total_peers']}" if va.get("value_rank") else ""
-                interpretations.append(
-                    f"{label} contributes {share_pct}% of total value ({_fmt_number(va['my_value'])} / {_fmt_number(va['total_value'])}){rank_text}."
-                )
-
-        # -- Unranked neighbor types --
+        # -- Neighbors, bucketed by (type, connecting relation) --
         for ntype, nlist in sorted(neighbors_by_type.items()):
-            if any(r["target_type"] == ntype.lower() for r in rankings):
-                continue
             samples = ", ".join(n.get("label", n["id"]) for n in nlist[:5])
             suffix = f" and {len(nlist) - 5} more" if len(nlist) > 5 else ""
             key_facts.append({
@@ -1180,48 +1382,17 @@ class ReasoningEngine:
 
         # --- Profile summary (analytical narrative) ---
         profile_summary = self._build_narrative(
-            label, object_type, entity_desc, props, self_refs,
-            rankings, link_stats, value_aggs, neighbors_by_type, question,
-            source_key_profile=source_key_profile,
+            label, object_type, entity_desc, props, self_refs, neighbors_by_type, question,
+            path_plan=path_plan,
         )
-
-        # --- Title ---
-        ranking_highlights = []
-        for r in rankings:
-            ranking_highlights.append(f"{r['my_count']} {r['target_type']}(s) (#{r['rank']}/{r['total_peers']}, {r['level']})")
-        value_highlights = []
-        for va in value_aggs:
-            value_highlights.append(f"value {_fmt_number(va['my_value'])} ({round(va['value_share'] * 100, 1)}% share)")
-        source_key_highlights = []
-        if source_key_profile and source_key_profile.get("related_tables"):
-            source_key_highlights.append(f"{source_key_profile.get('total_key_rows', 0)} source rows")
-            top_paths = source_key_profile.get("top_paths") or []
-            if top_paths:
-                source_key_highlights.append(f"top path {top_paths[0]['label']}")
-        title_parts = source_key_highlights[:2] or ranking_highlights[:2]
-        if value_highlights and len(title_parts) < 2:
-            title_parts.extend(value_highlights[:1])
-        source_tables = [
-            str(t.get("table") or "")
-            for t in (source_key_profile or {}).get("related_tables", [])
-        ]
-        source_profile_label = (
-            "Maritime Exposure Profile"
-            if any(table.startswith("maritime_") for table in source_tables)
-            else "Source Evidence Profile"
-        )
-        title = f"{label} {source_profile_label if source_key_profile else 'Business Profile'}"
-        if title_parts:
-            title += ": " + ", ".join(title_parts)
 
         return {
-            "title": title,
+            "title": f"{label} Business Profile",
             "profile_summary": profile_summary,
             "key_facts": key_facts,
             "business_interpretation": interpretations,
             "evidence_limits": [
                 f"Profile based on {source_table} source table and approved graph controlled aggregation.",
-                "Rankings reflect a current snapshot — no time-series trends or external benchmarks.",
                 "Conclusions are based solely on the approved graph; external benchmarks, thresholds, and unapproved evidence are not included.",
             ],
             "next_questions": [
@@ -1237,50 +1408,90 @@ class ReasoningEngine:
                 "neighbor_count": len(nodes) - 1,
                 "edge_count": len(edges),
                 "neighbor_types": {k: len(v) for k, v in neighbors_by_type.items()},
-                "rankings": rankings,
-                "link_stats": link_stats,
-                "value_aggregations": value_aggs,
-                "source_key_profile": source_key_profile,
             },
         }
 
-    # ------------------------------------------------------------------
-    # Streaming analysis (yields step events)
-    # ------------------------------------------------------------------
+    def _compose_relational(self, centers_data, relation, question, path_plan):
+        """Compose the final result for a multi-center question, mirroring
+        ``_compose``'s shape (title/profile_summary/key_facts/
+        business_interpretation/evidence_limits/next_questions/metrics) but
+        relating N centers instead of profiling one. General mechanism --
+        doesn't assume WHY multiple entities were named (comparison,
+        relationship-check, joint analysis, ...)."""
+        labels = [d["label"] for d in centers_data]
+        resolution = relation.get("resolution")
 
-    def analyze_streaming(self, tenant, center_node, question=None):
-        """Yields (event_name, data) tuples for SSE streaming."""
-        if not center_node or ":" not in center_node:
-            yield ("error", {"message": "No center_node provided"})
-            return
-        object_type, instance_id = center_node.split(":", 1)
-        entity_config = self._entity_config(tenant)
-        link_config = self._link_config(tenant)
-        cfg = entity_config.get(object_type.lower())
-        if not cfg:
-            yield ("error", {"message": f"Unknown entity type: {object_type}"})
-            return
+        key_facts = [{
+            "label": f"{d['label']} attributes",
+            "value": "; ".join(f"{p['col']}: {p['value']}" for p in (d.get("props") or [])[:8]) or "(no properties)",
+            "source_ref": d["center_node"],
+        } for d in centers_data]
 
-        steps = ["graph_query", "base_entity"]
-        relevant_links = [lc for lc in link_config if lc["from"] == object_type.lower() and not lc.get("reverse")]
-        for lc in relevant_links:
-            steps.append(f"link_analysis:{lc['link']}")
-        nm_links = [lc for lc in link_config if lc["from"] == object_type.lower() and lc.get("target_fk")]
-        if nm_links:
-            steps.append("value_aggregation")
-        steps.append("compose_narrative")
-
-        yield ("plan", {"query_plan": [f"Step {i+1}: {s}" for i, s in enumerate(steps)], "steps": steps})
-
-        result = self.analyze(tenant, center_node, question)
-
-        step_idx = 0
-        for s in steps:
-            step_idx += 1
-            yield ("step", {"tool": s, "status": "completed", "step": step_idx, "total": len(steps)})
-
-        if result:
-            yield ("evidence", {"evidence_paths": result.get("metrics", {}).get("rankings", [])})
-            yield ("structured_answer", {"structured_answer": result})
+        if resolution == "path_found":
+            path = relation.get("path") or []
+            path_text = " -> ".join(
+                f"{edge.get('label') or edge.get('link_key') or 'relation'}"
+                for edge in path
+            ) or "(direct)"
+            title = f"{' & '.join(labels)}: connected in graph"
+            profile_summary = (
+                f"{labels[0]} and {labels[-1]} are directly connected in the approved graph "
+                f"via: {path_text}."
+            )
+            interpretations = [
+                f"Resolution method: direct graph path ({len(path)} hop(s)) -- no LLM reasoning was needed.",
+            ]
+            answer = None
+            supporting_labels = []
+        elif resolution == "llm_reasoning" and relation.get("answer"):
+            answer = relation["answer"]
+            supporting_labels = relation.get("supporting_labels") or []
+            title = f"{' & '.join(labels)}: {answer}"
+            support_text = (
+                f" (supported by {', '.join(supporting_labels)})" if supporting_labels else ""
+            )
+            profile_summary = (
+                f"{answer}{support_text} -- derived from each center's own facts "
+                f"(no direct graph path connects {' and '.join(labels)}). Reasoning: {relation.get('reasoning', '')}"
+            )
+            interpretations = [
+                "Resolution method: LLM reasoning over facts only "
+                "(each center's own name/identity was withheld from the model).",
+            ]
         else:
-            yield ("error", {"message": "Analysis produced no result"})
+            answer = None
+            supporting_labels = []
+            title = f"{' & '.join(labels)}: unresolved"
+            profile_summary = (
+                f"Could not determine an answer for {' & '.join(labels)}: "
+                f"{relation.get('reasoning') or relation.get('error') or 'no direct graph path and no LLM available.'}"
+            )
+            interpretations = ["Resolution method: none -- neither a graph path nor LLM reasoning was available."]
+
+        return {
+            "title": title,
+            "profile_summary": profile_summary,
+            "key_facts": key_facts,
+            "business_interpretation": interpretations,
+            "evidence_limits": [
+                "Based solely on the approved graph and each center's own extracted "
+                "facts -- no external knowledge was used.",
+                "LLM reasoning (when used) only sees relevant facts, never the centers' own "
+                "names, to avoid the model picking a name it merely recognizes as familiar.",
+            ],
+            "next_questions": [],
+            "metrics": {
+                "centers": [
+                    {"center_node": d["center_node"], "label": d["label"]}
+                    for d in centers_data
+                ],
+                "resolution": resolution,
+                "path": relation.get("path"),
+                "answer": answer,
+                "supporting_center_nodes": relation.get("supporting_center_nodes") or [],
+                "supporting_labels": supporting_labels,
+                "reasoning": relation.get("reasoning", ""),
+                "error": relation.get("error", ""),
+            },
+        }
+

@@ -1,0 +1,905 @@
+[
+  {
+    "qid": "5a7344e95542991f9a20c6ce",
+    "question": "What song was number 4 on the charts when a song from FutureSex/LoveSounds was number 1?",
+    "center_node": "5a7344e95542991f9a20c6ce:sexyback",
+    "additional_center_nodes": [
+      "5a7344e95542991f9a20c6ce:futuresex_lovesound"
+    ],
+    "answer": "Rudebox",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 13,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a7360235542991f29ee2dc7",
+    "question": "What types of activities occur in both the Bennington and Bridgewater Triangles?",
+    "center_node": "5a7360235542991f29ee2dc7:bennington_triangle",
+    "additional_center_nodes": [
+      "5a7360235542991f29ee2dc7:bridgewater_triangle"
+    ],
+    "answer": "alleged paranormal phenomena",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 13,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a739d8c55429905862fe073",
+    "question": "Near which town did the family of author of the \"Adventures of Huckleberry Finn\" own several tracts of land?",
+    "center_node": "5a739d8c55429905862fe073:santa_fe_missouri",
+    "additional_center_nodes": [
+      "5a739d8c55429905862fe073:adventures_of_huckleberry_finn",
+      "5a739d8c55429905862fe073:mark_twain"
+    ],
+    "answer": "Santa Fe",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 4,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a7b01645542992d025e6734",
+    "question": "What property do the films Sweet Crude and Tunisian Victory share?",
+    "center_node": "5a7b01645542992d025e6734:tunisian_victory",
+    "additional_center_nodes": [
+      "5a7b01645542992d025e6734:sweet_crude"
+    ],
+    "answer": "documentary",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 9,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a73d33e5542992d56e7e3a9",
+    "question": "What is a crime that is punishable by the type of sentence that Madame Le Corbeau received in Canada?",
+    "center_node": "5a73d33e5542992d56e7e3a9:madame_le_corbeau",
+    "additional_center_nodes": [
+      "5a73d33e5542992d56e7e3a9:capital_punishment"
+    ],
+    "answer": "capital crimes or capital offences",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 14,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a73d3ea5542992d56e7e3af",
+    "question": "Which Native American activist was known for his involvement in the American Indian Movement which addresses incidents of police harassment and racism against Native Americans?",
+    "center_node": "5a73d3ea5542992d56e7e3af:american_indian_movement",
+    "additional_center_nodes": [],
+    "answer": "Arlo Looking Cloud",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 12,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a73d951554299623ed4ac77",
+    "question": "A holdout is an accessory used by cheats in order for them to recieve what?",
+    "center_node": "5a73d951554299623ed4ac77:holdout_gambling",
+    "additional_center_nodes": [],
+    "answer": "reward",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 2,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a74122f55429929fddd83da",
+    "question": "What was the lead single from Boys Like Girls album on which frontman, Martin Johnson co-wrote a song with Taylor Swift? A: Love Drunk",
+    "center_node": "5a74122f55429929fddd83da:love_drunk_boys_like_girls_song",
+    "additional_center_nodes": [
+      "5a74122f55429929fddd83da:boys_like_girls",
+      "5a74122f55429929fddd83da:love_drunk"
+    ],
+    "answer": "Love Drunk",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 51,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a7412b655429979e28828a1",
+    "question": "Who was the husband of the prominent Walton family member who died after John died in 2005?",
+    "center_node": "5a7412b655429979e28828a1:walton_family",
+    "additional_center_nodes": [],
+    "answer": "Sam Walton",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 38,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a74167455429929fddd83dc",
+    "question": "On which continent did Pia Miller make her appearance, in the teen magazine, Dolly?",
+    "center_node": "5a74167455429929fddd83dc:pia_miller",
+    "additional_center_nodes": [
+      "5a74167455429929fddd83dc:dolly_magazine"
+    ],
+    "answer": "Australia",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 8,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a74655b55429974ef308bf0",
+    "question": "Which film industry would have films in which Ilya Khrzhanovsky would be the director?",
+    "center_node": "5a74655b55429974ef308bf0:ilya_khrzhanovsky",
+    "additional_center_nodes": [],
+    "answer": "The cinema of Russia",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 9,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a7ca95b55429935c91b5287",
+    "question": "Who lived longer, American author Owen Wister or Canadian author Lucy Maud Montgomery?",
+    "center_node": "5a7ca95b55429935c91b5287:lucy_maud_montgomery",
+    "additional_center_nodes": [
+      "5a7ca95b55429935c91b5287:owen_wister"
+    ],
+    "answer": "Owen Wister",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 6,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a75321555429916b0164290",
+    "question": "What is the title of the person who is Head of the Department of Biological Sciences at the University of Lincoln",
+    "center_node": "5a75321555429916b0164290:daniel_mills_biologist",
+    "additional_center_nodes": [],
+    "answer": "Doctor",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 4,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a753c8c55429916b01642ab",
+    "question": "What song from the fourth studio album made by The Who reached No.4 on the UK charts and No. 19 o nthe U.S. \"Billboard\" Hot 100?",
+    "center_node": "5a753c8c55429916b01642ab:pinball_wizard",
+    "additional_center_nodes": [
+      "5a753c8c55429916b01642ab:tommy_album"
+    ],
+    "answer": "Tommy",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 6,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a75639255429916b01642f7",
+    "question": "What role did Ben Keaton play in the british film East is East written by Ayub Khan-Din?",
+    "center_node": "5a75639255429916b01642f7:ben_keaton",
+    "additional_center_nodes": [
+      "5a75639255429916b01642f7:ayub_khan_din",
+      "5a75639255429916b01642f7:east_is_east_1999_film"
+    ],
+    "answer": "a priest",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 23,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a7e7ed05542991319bc94c2",
+    "question": "Which magazine is older, Gallery or Dime Magazine?",
+    "center_node": "5a7e7ed05542991319bc94c2:dime_magazine",
+    "additional_center_nodes": [
+      "5a7e7ed05542991319bc94c2:gallery_magazine"
+    ],
+    "answer": "arose on the \"Playboy\" magazine pattern in the 1970s.",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 5,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a7efd2f5542994959419a9c",
+    "question": "Which band opened for more major international acts, Blessid Union of Souls or Blue Peter?",
+    "center_node": "5a7efd2f5542994959419a9c:blue_peter_band",
+    "additional_center_nodes": [
+      "5a7efd2f5542994959419a9c:blessid_union_of_souls"
+    ],
+    "answer": "Blue Peter",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 12,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a75a4135542992d0ec05fcd",
+    "question": "The Woodvale Historic District was built buy a company headquartered where?",
+    "center_node": "5a75a4135542992d0ec05fcd:woodvale_historic_district",
+    "additional_center_nodes": [],
+    "answer": "Rockhill Furnace, Pennsylvania",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 2,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a7fa08d55429969796c1af7",
+    "question": "Were the board games, Clans and Drunter und Drüber, both created by Leo Colovini?",
+    "center_node": "5a7fa08d55429969796c1af7:clans_board_game",
+    "additional_center_nodes": [
+      "5a7fa08d55429969796c1af7:drunter_und_dr_ber",
+      "5a7fa08d55429969796c1af7:leo_colovini"
+    ],
+    "answer": "Drunter und Drüber is a multiplayer board game invented by Klaus Teuber",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 2,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a75e05c55429976ec32bc5f",
+    "question": "Brown State Fishing Lake is in a country that has a population of how many inhabitants ?",
+    "center_node": "5a75e05c55429976ec32bc5f:brown_state_fishing_lake",
+    "additional_center_nodes": [],
+    "answer": "9,984",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 4,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a75e06155429976ec32bc60",
+    "question": "Who was the running mate of the man about whose candidacy the 2016 book Insane Clown President: Dispatches from the 2016 Circus documents?",
+    "center_node": "5a75e06155429976ec32bc60:insane_clown_president",
+    "additional_center_nodes": [],
+    "answer": "Mike Pence",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 3,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a75e60e55429976ec32bc88",
+    "question": "During the Carnival in Rio de Janeiro who is the official singer of the samba school Mangueira?",
+    "center_node": "5a75e60e55429976ec32bc88:jamel_o",
+    "additional_center_nodes": [
+      "5a75e60e55429976ec32bc88:esta_o_primeira_de_mangueira"
+    ],
+    "answer": "José Bispo Clementino dos Santos",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 6,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a804f01554299485f5985bf",
+    "question": "Which magazine has more issues per month, Club or Pro Football Weekly",
+    "center_node": "5a804f01554299485f5985bf:club_magazine",
+    "additional_center_nodes": [
+      "5a804f01554299485f5985bf:pro_football_weekly"
+    ],
+    "answer": "Pro Football Weekly",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 2,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a7619765542992db9473728",
+    "question": "In 1632, where was one of the most highly acclaimed English architects born?",
+    "center_node": "5a7619765542992db9473728:christopher_wren",
+    "additional_center_nodes": [],
+    "answer": "East Knoyle",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 4,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a762f4755429976ec32bd44",
+    "question": "What conference is the team that is head coached by the uncle of Scott Turner?",
+    "center_node": "5a762f4755429976ec32bd44:scott_turner_american_football_coach",
+    "additional_center_nodes": [
+      "5a762f4755429976ec32bd44:fiu_panthers_football"
+    ],
+    "answer": "Conference USA",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 3,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a7630105542992d0ec0605a",
+    "question": "What album was released by 1948-born French composer in 1998?",
+    "center_node": "5a7630105542992d0ec0605a:jean_michel_jarre",
+    "additional_center_nodes": [],
+    "answer": "Odyssey Through O",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 12,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a81e8a0554299676cceb157",
+    "question": "Which band has more members, Chvrches or Goodbye Mr. Mackenzie?",
+    "center_node": "5a81e8a0554299676cceb157:chvrches",
+    "additional_center_nodes": [
+      "5a81e8a0554299676cceb157:goodbye_mr_mackenzie"
+    ],
+    "answer": "Goodbye Mr Mackenzie",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 11,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a81f10055429903bc27ba06",
+    "question": "Sum 41 and Passion Pit have what in common?",
+    "center_node": "5a81f10055429903bc27ba06:sum_41",
+    "additional_center_nodes": [
+      "5a81f10055429903bc27ba06:passion_pit"
+    ],
+    "answer": "Passion Pit is an American indietronica band",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 8,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a81fbc25542990a1d231f09",
+    "question": "Are Sandy Mayer and Billy Martin both more successful at doubles than singles, in terms of tournament wins?",
+    "center_node": "5a81fbc25542990a1d231f09:sandy_mayer",
+    "additional_center_nodes": [
+      "5a81fbc25542990a1d231f09:billy_martin_tennis"
+    ],
+    "answer": "yes",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 4,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a831af855429954d2e2ec1e",
+    "question": "Are the 1908 Ex parte Young and 1948 McCollum v. Board of Education United States Supreme Court cases related to each other in any way?",
+    "center_node": "5a831af855429954d2e2ec1e:ex_parte_young",
+    "additional_center_nodes": [
+      "5a831af855429954d2e2ec1e:mccollum_v_board_of_education"
+    ],
+    "answer": "no",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 9,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a76b56d554299373536017b",
+    "question": "Where is the magazine headquartered that Robert W. McElroy writes for?",
+    "center_node": "5a76b56d554299373536017b:robert_w_mcelroy",
+    "additional_center_nodes": [],
+    "answer": "Manhattan",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 2,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a76bbe85542993735360191",
+    "question": "Which American spy thriller TV series, which was developed by Howard Gordon and Alex Gansa, had a fourth season episode titled \"Krieg Nicht Lieb?\"",
+    "center_node": "5a76bbe85542993735360191:krieg_nicht_lieb",
+    "additional_center_nodes": [],
+    "answer": "Homeland",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 0,
+    "extraction_error": "hard timeout: no response after 60s (proxy/connect hang)"
+  },
+  {
+    "qid": "5a835e215542992ef85e2296",
+    "question": "Between Pine and Butea, which genus has the greatest number of species?",
+    "center_node": "5a835e215542992ef85e2296:pine",
+    "additional_center_nodes": [
+      "5a835e215542992ef85e2296:butea"
+    ],
+    "answer": "\"Pinus\"",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 2,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a837121554299123d8c2128",
+    "question": "Q1: Which mountain is located in China, Kirat Chuli or Kangpenqing?",
+    "center_node": "5a837121554299123d8c2128:kangpenqing",
+    "additional_center_nodes": [
+      "5a837121554299123d8c2128:kirat_chuli"
+    ],
+    "answer": "Kangpenqing (also Gang Benchhen) is a mountain in the Baiku Himalayas of Tibet, China.",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 2,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a77101d5542994aec3b71d7",
+    "question": "Who was born in 1922 and published a book in 1985 by Delacorte Press?",
+    "center_node": "5a77101d5542994aec3b71d7:kurt_vonnegut",
+    "additional_center_nodes": [],
+    "answer": "Kurt Vonnegut",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 47,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a77174f55429966f1a36c4c",
+    "question": "Simone de Beauvoir partnered with the person whose journal would be called what?",
+    "center_node": "5a77174f55429966f1a36c4c:simone_de_beauvoir_prize",
+    "additional_center_nodes": [],
+    "answer": "Les Temps modernes",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 10,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a7717635542994aec3b71e3",
+    "question": "Who is the writer for an American teen sitcom created by Kim Bass for Nickelodeon?",
+    "center_node": "5a7717635542994aec3b71e3:list_of_every_witch_way_episodes",
+    "additional_center_nodes": [
+      "5a7717635542994aec3b71e3:kim_bass"
+    ],
+    "answer": "Wayne Conley",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 6,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a844fd35542990548d0b274",
+    "question": "What occupation did Nicholas Christopher and Roger Ebert share?",
+    "center_node": "5a844fd35542990548d0b274:roger_ebert",
+    "additional_center_nodes": [
+      "5a844fd35542990548d0b274:nicholas_christopher"
+    ],
+    "answer": "author",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 7,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a771ead55429966f1a36c7c",
+    "question": "Who starred as an American attorney in Grey Gardens?",
+    "center_node": "5a771ead55429966f1a36c7c:phelan_beale",
+    "additional_center_nodes": [
+      "5a771ead55429966f1a36c7c:grey_gardens_2009_film"
+    ],
+    "answer": "Ken Howard",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 5,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a84a4e35542992a431d1a81",
+    "question": "Does Jimmy Barnes have more hits, both solo and in a group, than Yang Seung-ho has with his group?",
+    "center_node": "5a84a4e35542992a431d1a81:jimmy_barnes",
+    "additional_center_nodes": [
+      "5a84a4e35542992a431d1a81:yang_seung_ho"
+    ],
+    "answer": "yes",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 12,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a772e465542994aec3b7209",
+    "question": "What do Wrigley Park and social networks have in common?",
+    "center_node": "5a772e465542994aec3b7209:wrigley_park",
+    "additional_center_nodes": [],
+    "answer": "Neighbourhood",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 3,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a8518a75542994c784ddaf7",
+    "question": "What type of structure does 277 Park Avenue and 126 Madison Avenue have in common?",
+    "center_node": "5a8518a75542994c784ddaf7:277_park_avenue",
+    "additional_center_nodes": [
+      "5a8518a75542994c784ddaf7:126_madison_avenue"
+    ],
+    "answer": "building",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 2,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a7766b15542993569682d7e",
+    "question": "What was the location of the execution of Roger David Casement, the Irish Nationalist who made made efforts during World War I to gain German military aid for the 1916 Easter Rising that sought to gain Irish independence?",
+    "center_node": "5a7766b15542993569682d7e:roger_casement",
+    "additional_center_nodes": [],
+    "answer": "Casement's Fort",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 0,
+    "extraction_error": "hard timeout: no response after 60s (proxy/connect hang)"
+  },
+  {
+    "qid": "5a776f8555429972597f1534",
+    "question": "Which politician represents a city on the Flathead Indian Reservation?",
+    "center_node": "5a776f8555429972597f1534:greg_hertz",
+    "additional_center_nodes": [
+      "5a776f8555429972597f1534:flathead_indian_reservation",
+      "5a776f8555429972597f1534:polson_montana"
+    ],
+    "answer": "Gregory J. Hertz",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 7,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a776fc15542997042120a3a",
+    "question": "What is the mascot of the oldest private university in Georgia?",
+    "center_node": "5a776fc15542997042120a3a:mercer_university",
+    "additional_center_nodes": [],
+    "answer": "The Bears",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 3,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a87136e5542991e771816b2",
+    "question": "Does Il trovatore have less acts than La rondine",
+    "center_node": "5a87136e5542991e771816b2:il_trovatore",
+    "additional_center_nodes": [
+      "5a87136e5542991e771816b2:la_rondine"
+    ],
+    "answer": "no",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 2,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a7776b955429967ab10519e",
+    "question": "The 2004 romantic drama film based on Shake'spears play of the same name was produced by whom?",
+    "center_node": "5a7776b955429967ab10519e:the_merchant_of_venice_2004_film",
+    "additional_center_nodes": [],
+    "answer": "Julia Verdin",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 4,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a7781c955429949eeb29ea8",
+    "question": "What former two-weight world champion is represented by boxing managed Ziggy Rozalski?",
+    "center_node": "5a7781c955429949eeb29ea8:tomasz_adamek",
+    "additional_center_nodes": [
+      "5a7781c955429949eeb29ea8:ziggy_rozalski"
+    ],
+    "answer": "Tomasz Adamek",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 10,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a876b265542993e715abf33",
+    "question": "Who was a more acclaimed guitarist Stephen Christian or Joe Gooch?",
+    "center_node": "5a876b265542993e715abf33:stephen_christian",
+    "additional_center_nodes": [
+      "5a876b265542993e715abf33:joe_gooch"
+    ],
+    "answer": "and lead guitarist",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 7,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a876f785542993e715abf42",
+    "question": "Which person, William Blake Herron or John Carpenter, held more diverse roles in the movie industry?",
+    "center_node": "5a876f785542993e715abf42:john_carpenter",
+    "additional_center_nodes": [
+      "5a876f785542993e715abf42:william_blake_herron"
+    ],
+    "answer": "musician, editor and composer.",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 9,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a8781b65542993e715abf8f",
+    "question": "Are David O. Russell and Tony Gatlif from the same country?",
+    "center_node": "5a8781b65542993e715abf8f:david_o_russell",
+    "additional_center_nodes": [
+      "5a8781b65542993e715abf8f:tony_gatlif"
+    ],
+    "answer": "no",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 2,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a778c215542995d831811ba",
+    "question": "When was the folk dance style Johannes Brahms' Liebeslieder Waltzes were written for most popular?",
+    "center_node": "5a778c215542995d831811ba:liebeslieder_walzer_op_52_brahms",
+    "additional_center_nodes": [],
+    "answer": "end of the 18th century",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 3,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a7796e05542992a6e59df0f",
+    "question": "What country is the theme park served by the Huis Ten Bosch train service themed on?",
+    "center_node": "5a7796e05542992a6e59df0f:huis_ten_bosch_train",
+    "additional_center_nodes": [],
+    "answer": "Netherlands",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 5,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a7797175542992a6e59df10",
+    "question": "Where were the presenters of the 2016 Brit Awards from?",
+    "center_node": "5a7797175542992a6e59df10:2016_brit_awards",
+    "additional_center_nodes": [],
+    "answer": "Newcastle upon Tyne, England",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 1,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a77984d5542992a6e59df14",
+    "question": "What occupation do Henry Moore and John Wesley have in common?",
+    "center_node": "5a77984d5542992a6e59df14:john_wesley",
+    "additional_center_nodes": [
+      "5a77984d5542992a6e59df14:henry_moore_biographer"
+    ],
+    "answer": "minister",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 4,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a886211554299206df2b24a",
+    "question": "Were the films Tonka and 101 Dalmatians released in the same decade?",
+    "center_node": "5a886211554299206df2b24a:tonka_film",
+    "additional_center_nodes": [
+      "5a886211554299206df2b24a:101_dalmatians_1996_film"
+    ],
+    "answer": "1958 Walt Disney Western adventure film",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 3,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a77a4fd5542997042120abc",
+    "question": "Which professional footballer played for Kadji Sports Academy as a youth and went on to be the most decorated African player of all time?",
+    "center_node": "5a77a4fd5542997042120abc:samuel_eto_o",
+    "additional_center_nodes": [
+      "5a77a4fd5542997042120abc:kadji_sports_academy"
+    ],
+    "answer": "Samuel Eto'o Fils",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 44,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a88a23f5542997e5c09a652",
+    "question": "Which director, Chris O'Dea or Lucky McKee,  is a Master of Fine Arts graduate of the UCLA School of Theater, Film and Television?",
+    "center_node": "5a88a23f5542997e5c09a652:chris_o_dea",
+    "additional_center_nodes": [
+      "5a88a23f5542997e5c09a652:lucky_mckee"
+    ],
+    "answer": "Edward Lucky McKee",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 9,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a88b3b4554299206df2b336",
+    "question": "What type of art does The Consul and Arlecchino have in common?",
+    "center_node": "5a88b3b4554299206df2b336:the_consul",
+    "additional_center_nodes": [
+      "5a88b3b4554299206df2b336:arlecchino_opera"
+    ],
+    "answer": "music",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 2,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a77b6535542995d83181274",
+    "question": "What is the English translation of the noodle similar to Taglierini that is not tagliatelle?",
+    "center_node": "5a77b6535542995d83181274:taglierini",
+    "additional_center_nodes": [
+      "5a77b6535542995d83181274:tagliatelle"
+    ],
+    "answer": "little hairs",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 5,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a77d65055429949eeb29f7b",
+    "question": "How many species of Hawaiian hibiscus do not have white flowers?",
+    "center_node": "5a77d65055429949eeb29f7b:hawaiian_hibiscus",
+    "additional_center_nodes": [],
+    "answer": "250",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 4,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a77e62b5542992a6e59dfea",
+    "question": "What is the birthplace of the musician responsible for creating The Motion Makes Me Last?",
+    "center_node": "5a77e62b5542992a6e59dfea:the_motion_makes_me_last",
+    "additional_center_nodes": [],
+    "answer": "Tennessee",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 10,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a8ad8305542992d82986f9d",
+    "question": "Are Todd Haynes and Chris Columbus of the same nationality?",
+    "center_node": "5a8ad8305542992d82986f9d:todd_haynes",
+    "additional_center_nodes": [
+      "5a8ad8305542992d82986f9d:chris_columbus_filmmaker"
+    ],
+    "answer": "yes",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 2,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a78ad26554299148911f913",
+    "question": "Aleksandr Dugin, the father of fascism, came to prominence during which era in Russia?",
+    "center_node": "5a78ad26554299148911f913:aleksandr_dugin",
+    "additional_center_nodes": [],
+    "answer": "20th-century",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 21,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a8b3c5b55429971feec4684",
+    "question": "Are Milk Lake, Taiwan and Larnaca Salt Lake both located in Asia?",
+    "center_node": "5a8b3c5b55429971feec4684:milk_lake_taiwan",
+    "additional_center_nodes": [
+      "5a8b3c5b55429971feec4684:larnaca_salt_lake"
+    ],
+    "answer": "no",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 3,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a78c235554299078472775d",
+    "question": "A celebrity magazine that has featured Snoop Dogg and footballers such as Riyad Mahrez and the creator's team-mate Juan Mata was launched by which former Manchester United player?",
+    "center_node": "5a78c235554299078472775d:5_magazine",
+    "additional_center_nodes": [
+      "5a78c235554299078472775d:juan_mata"
+    ],
+    "answer": "Ferdinand",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 8,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a78d38455429970f5fffd94",
+    "question": "Who is one other client that is represented by the same person that also represents a barrister at Doughty Street Chambers?",
+    "center_node": "5a78d38455429970f5fffd94:amal_clooney",
+    "additional_center_nodes": [
+      "5a78d38455429970f5fffd94:doughty_street_chambers",
+      "5a78d38455429970f5fffd94:justin_smith_milliner"
+    ],
+    "answer": "Angelina Jolie",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 16,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a8c30f6554299240d9c20d1",
+    "question": "Were The Bomb and Rolling Papers released in the same year?",
+    "center_node": "5a8c30f6554299240d9c20d1:the_bomb_film",
+    "additional_center_nodes": [
+      "5a8c30f6554299240d9c20d1:rolling_papers_wiz_khalifa_album"
+    ],
+    "answer": "yes",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 3,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a78f89055429974737f792b",
+    "question": "In his book Mathematical Foundations of Quantum Mechanics, John von Neuman devles into which major field?",
+    "center_node": "5a78f89055429974737f792b:mathematical_foundations_of_q_21a64772ef",
+    "additional_center_nodes": [
+      "5a78f89055429974737f792b:john_von_neumann"
+    ],
+    "answer": "physics",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 8,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a8c620c554299240d9c2141",
+    "question": "Are Karl Shapiro and Elie Wiesel both American writers?",
+    "center_node": "5a8c620c554299240d9c2141:karl_shapiro",
+    "additional_center_nodes": [
+      "5a8c620c554299240d9c2141:elie_wiesel"
+    ],
+    "answer": "no",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 4,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a8d5ec2554299585d9e37c4",
+    "question": "Are Lycoris and Ammi both native to southern Asia?",
+    "center_node": "5a8d5ec2554299585d9e37c4:lycoris_plant",
+    "additional_center_nodes": [
+      "5a8d5ec2554299585d9e37c4:ammi_plant"
+    ],
+    "answer": "yes",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 2,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a8d838955429941ae14dfe5",
+    "question": "Eleventh Dream Day and The Shins are both rock bands from where?",
+    "center_node": "5a8d838955429941ae14dfe5:phil_ek",
+    "additional_center_nodes": [],
+    "answer": "United States",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 0,
+    "extraction_error": "hard timeout: no response after 60s (proxy/connect hang)"
+  },
+  {
+    "qid": "5a793d335542994bb9456fca",
+    "question": "Amil Grove appeared in what  British tabloid published by News UK?",
+    "center_node": "5a793d335542994bb9456fca:amii_grove",
+    "additional_center_nodes": [],
+    "answer": "Amii Anne J. Grove",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 4,
+    "extraction_error": ""
+  }
+]

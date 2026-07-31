@@ -1,18 +1,20 @@
 {
-  "default_tenant": "default",
+  "default_tenant": "hotpotqa-graph-v1",
   "tenants": [
     {
-      "tenant_id": "default",
-      "namespace": "northwind",
-      "display_name": "Northwind Demo",
-      "graph_database": "aletheia",
+      "tenant_id": "hotpotqa-graph-v1",
+      "namespace": "hotpotqa_graph_v1",
+      "display_name": "HotpotQA (Nebula graph-native)",
+      "graph_database": "hotpotqa_kg",
+      "relation_catalog_scope": "hotpotqa",
       "status": "active"
     },
     {
-      "tenant_id": "northwind-sandbox",
-      "namespace": "northwind_sandbox",
-      "display_name": "Northwind Sandbox",
-      "graph_database": "aletheia_sandbox",
+      "tenant_id": "webqsp-graph-v1",
+      "namespace": "webqsp_graph_v1",
+      "display_name": "WebQSP (Nebula graph-native)",
+      "graph_database": "webqsp_kg",
+      "relation_catalog_scope": "webqsp",
       "status": "active"
     }
   ]

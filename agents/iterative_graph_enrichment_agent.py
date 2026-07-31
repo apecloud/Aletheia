@@ -1641,14 +1641,6 @@ def _evidence_excerpt(text: str, terms: list[str], limit: int = 280) -> str:
     return normalized[start:end].strip()[:limit].rstrip()
 
 
-def _entity_key(entity_type: str, label: str) -> str:
-    return f"{entity_type}:{label}"
-
-
-def _entity_description(entity_type: str, label: str, source_title: str) -> str:
-    return f"{entity_type} extracted from {source_title or 'research evidence'}: {label}."
-
-
 def _ontology_candidate(artifact_type: str, label: str, description: str, **extra: Any) -> dict[str, Any]:
     candidate = {
         "artifact_type": artifact_type,
@@ -2736,53 +2728,6 @@ def _research_semantic_proposals(
     return elements
 
 
-def _heuristic_graph_semantics_fallback(frontier_item: dict[str, Any], result, summary: str) -> dict[str, Any]:
-    """Legacy/dev smoke extractor with no tenant/domain term dictionaries."""
-    source_text = _clean_text(" ".join([result.title or "", result.snippet or "", summary or ""]), 1600)
-    terms = _extract_terms(source_text)
-    source_ref = result.url
-    source_title = result.title or source_ref
-    ontology_candidates: list[dict[str, Any]] = []
-    nodes: list[dict[str, Any]] = []
-    edges: list[dict[str, Any]] = []
-
-    # Dedupe ontology candidate labels while keeping the richer first version.
-    deduped_candidates = []
-    seen_candidates = set()
-    for candidate in ontology_candidates:
-        key = (candidate.get("artifact_type"), candidate.get("label"))
-        if key in seen_candidates:
-            continue
-        seen_candidates.add(key)
-        deduped_candidates.append(candidate)
-
-    return {
-        "prompt_version": GRAPH_EXTRACTION_PROMPT_VERSION,
-        "prompt_contract": GRAPH_EXTRACTION_PROMPT,
-        "extraction_source": "heuristic_fallback",
-        "source": {"url": source_ref, "title": source_title},
-        "schema_context": {"projection_source": "heuristic_fallback", "node_types": [], "edge_types": []},
-        "terms": terms,
-        "ontology_candidates": deduped_candidates,
-        "nodes": nodes,
-        "edges": edges,
-        "quality": {
-            "node_count": len(nodes),
-            "edge_count": len(edges),
-            "has_properties": all(bool(item.get("properties")) for item in [*nodes, *edges]),
-            "has_descriptions": all(bool(item.get("description")) for item in [*nodes, *edges]),
-            "has_evidence_quotes": all(bool(item.get("evidence_quote")) for item in [*nodes, *edges]),
-            "extraction_steps": [
-                "identify ontology candidate types and relation schemas",
-                "extract typed nodes with descriptions and properties",
-                "extract typed binary edges with relation semantics and edge properties",
-                "attach evidence quote, source_url, confidence, and review boundary",
-                "leave ontology/formal graph writes disabled until review",
-            ],
-        },
-    }
-
-
 def _append_unique(items: list[str], value: Any, *, excluded: list[dict[str, str]] | None = None, reason: str = "low_signal") -> None:
     if value is None:
         return
@@ -2798,13 +2743,6 @@ def _append_unique(items: list[str], value: Any, *, excluded: list[dict[str, str
     if text not in items:
         items.append(text)
 
-
-def _query_from_term_groups(groups: list[list[str]], *, excluded: list[dict[str, str]] | None = None, limit: int = 18) -> str:
-    terms: list[str] = []
-    for group in groups:
-        for term in group:
-            _append_unique(terms, term, excluded=excluded)
-    return " ".join(terms[:limit]).strip()
 
 
 _SEARCH_INSTRUCTION_TERMS = {
@@ -2880,17 +2818,6 @@ def _append_search_term(items: list[str], value: Any, *, excluded: list[dict[str
         return
     if text not in items:
         items.append(text)
-
-
-def _objective_search_hints(objective: str) -> list[str]:
-    hints: list[str] = []
-    for match in re.finditer(r"\b[A-Z][A-Za-z0-9-]*(?:\s+[A-Z][A-Za-z0-9-]*){0,3}\b", objective or ""):
-        _append_search_term(hints, match.group(0))
-    for term in re.split(r"[^A-Za-z0-9_/-]+", objective or ""):
-        if len(term) < 5:
-            continue
-        _append_search_term(hints, term)
-    return hints[:5]
 
 
 def _query_from_search_terms(groups: list[list[str]], *, excluded: list[dict[str, str]] | None = None, limit: int = 8) -> str:
@@ -3394,9 +3321,6 @@ class IterativeGraphEnrichmentAgent:
             )
         return frontier
 
-    def _query_for_frontier(self, item: dict[str, Any], objective: str) -> str:
-        return self._query_plan_for_frontier(item, objective)["query"]
-
     def _query_plan_for_frontier(self, item: dict[str, Any], objective: str) -> dict[str, Any]:
         return _graph_context_query_plan(item, objective, self.tenant)
 
@@ -3628,43 +3552,6 @@ class IterativeGraphEnrichmentAgent:
             show_progress=False,
         )
         return self._normalize_langextract_documents(result), "ok"
-
-    def _node_labels_for_schema_type(
-        self,
-        node_type: dict[str, Any],
-        *,
-        source_text: str,
-        frontier_item: dict[str, Any],
-        entities: list[str],
-    ) -> list[str]:
-        key = str(node_type.get("key") or "").lower()
-        name = str(node_type.get("name") or "").lower()
-        properties = " ".join(str(item).lower() for item in (node_type.get("properties") or []))
-        schema_text = " ".join([key, name, properties])
-        frontier_text = " ".join(
-            str(value or "").lower()
-            for value in (frontier_item.get("key"), frontier_item.get("name"), frontier_item.get("artifact_type"))
-        )
-        labels: list[str] = []
-        looks_like_code_type = any(token in schema_text for token in ("iso", "code", "economy"))
-        if looks_like_code_type:
-            for entity in entities:
-                if re.fullmatch(r"[A-Z0-9]{2,5}", entity):
-                    _append_unique(labels, entity)
-            return labels[:5]
-
-        type_tokens = {token for token in re.split(r"[^a-z0-9]+", schema_text) if len(token) >= 4}
-        frontier_mentions_type = bool(type_tokens and any(token in frontier_text for token in type_tokens))
-        if not frontier_mentions_type:
-            return []
-        for entity in entities:
-            if re.fullmatch(r"[A-Z0-9]{2,5}", entity):
-                continue
-            if entity.lower() in {"schema", "graph", "modeling", "agent"}:
-                continue
-            if entity.lower() in source_text.lower():
-                _append_unique(labels, entity)
-        return labels[:4]
 
     def _relation_phrase_between(self, source_text: str, source_label: str, target_label: str) -> str | None:
         text = _clean_text(source_text, 2000)

@@ -35,11 +35,24 @@ class TenantConfig:
     metadata_db_url: str
     source_db_url: str
     status: str = "active"
+    # graph_database doubles as the Nebula space name -- every tenant is
+    # graph-native (the SQL retrieval engine was retired), so there's no
+    # backend distinction left to encode here. relation_catalog_scope
+    # defaults to tenant_id when unset.
+    graph_tag_name: str = "HotpotEntity"
+    graph_edge_type: str = "RELATION"
+    graph_object_type: str = "entity"
+    graph_ip: str = "127.0.0.1"
+    graph_port: int = 9669
+    graph_user: str = "root"
+    graph_password: str = "nebula"
+    relation_catalog_scope: str = ""
 
     def public_dict(self) -> dict:
         data = asdict(self)
         data.pop("metadata_db_url", None)
         data.pop("source_db_url", None)
+        data.pop("graph_password", None)
         return data
 
 
@@ -68,33 +81,44 @@ class TenantRegistry:
                     metadata_db_url=item.get("metadata_db_url") or metadata_url,
                     source_db_url=item.get("source_db_url") or source_url,
                     status=item.get("status", "active"),
+                    graph_tag_name=item.get("graph_tag_name", "HotpotEntity"),
+                    graph_edge_type=item.get("graph_edge_type", "RELATION"),
+                    graph_object_type=item.get("graph_object_type", "entity"),
+                    graph_ip=item.get("graph_ip", "127.0.0.1"),
+                    graph_port=item.get("graph_port", 9669),
+                    graph_user=item.get("graph_user", "root"),
+                    graph_password=item.get("graph_password", "nebula"),
+                    relation_catalog_scope=item.get("relation_catalog_scope") or item["tenant_id"],
                 )
                 for item in config.get("tenants", [])
             ]
             tenants = cls._merge_metadata_tenants(tenants, metadata_url, source_url, graph_database)
             return cls(tenants, config.get("default_tenant") or os.environ.get("ALETHEIA_TENANT"))
 
-        default_id = os.environ.get("ALETHEIA_TENANT", "default")
-        default_namespace = os.environ.get("ALETHEIA_NAMESPACE", "northwind")
-        default_display = os.environ.get("ALETHEIA_TENANT_DISPLAY", "Northwind Demo")
-        default_tenant = TenantConfig(
-            tenant_id=default_id,
-            namespace=default_namespace,
-            display_name=default_display,
-            graph_database=graph_database,
+        # No config/tenants.json and no ALETHEIA_TENANTS_FILE/_JSON override --
+        # fall back to the two graph-native tenants built this session
+        # (scripts/import_hotpotqa_nebula_tenant.py, scripts/import_webqsp_graph_tenant.py)
+        # rather than the retired SQL-backed Northwind demo tenants.
+        hotpotqa_tenant = TenantConfig(
+            tenant_id=os.environ.get("ALETHEIA_TENANT", "hotpotqa-graph-v1"),
+            namespace="hotpotqa_graph_v1",
+            display_name="HotpotQA (Nebula graph-native)",
+            graph_database=os.environ.get("ALETHEIA_GRAPH_SPACE", "hotpotqa_kg"),
             metadata_db_url=metadata_url,
             source_db_url=source_url,
+            relation_catalog_scope="hotpotqa",
         )
-        sandbox_tenant = TenantConfig(
-            tenant_id=os.environ.get("ALETHEIA_SANDBOX_TENANT", "northwind-sandbox"),
-            namespace=os.environ.get("ALETHEIA_SANDBOX_NAMESPACE", "northwind_sandbox"),
-            display_name=os.environ.get("ALETHEIA_SANDBOX_DISPLAY", "Northwind Sandbox"),
-            graph_database=os.environ.get("ALETHEIA_SANDBOX_GRAPH_SPACE", f"{graph_database}_sandbox"),
+        webqsp_tenant = TenantConfig(
+            tenant_id="webqsp-graph-v1",
+            namespace="webqsp_graph_v1",
+            display_name="WebQSP (Nebula graph-native)",
+            graph_database="webqsp_kg",
             metadata_db_url=metadata_url,
             source_db_url=source_url,
+            relation_catalog_scope="webqsp",
         )
-        tenants = cls._merge_metadata_tenants([default_tenant, sandbox_tenant], metadata_url, source_url, graph_database)
-        return cls(tenants, default_id)
+        tenants = cls._merge_metadata_tenants([hotpotqa_tenant, webqsp_tenant], metadata_url, source_url, graph_database)
+        return cls(tenants, hotpotqa_tenant.tenant_id)
 
     @staticmethod
     def _load_raw_config(config_path: str | None) -> dict | None:

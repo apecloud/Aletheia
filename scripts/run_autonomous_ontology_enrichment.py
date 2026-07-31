@@ -554,8 +554,8 @@ def run_cycle_with_timeout(args):
 
 def main():
     parser = argparse.ArgumentParser(description="Run autonomous ontology coverage enrichment cycles.")
-    parser.add_argument("--tenant", default="maritime-risk")
-    parser.add_argument("--session-key", default="continuous:maritime-risk:default")
+    parser.add_argument("--tenant", default="hotpotqa-graph-v1")
+    parser.add_argument("--session-key", default="continuous:hotpotqa-graph-v1:default")
     parser.add_argument("--sleep-seconds", type=float, default=45)
     parser.add_argument("--max-cycles", type=int, default=0, help="0 means run forever")
     parser.add_argument("--objective", default=DEFAULT_OBJECTIVE)
@@ -584,7 +584,7 @@ def main():
     parser.add_argument("--semantic-openrouter-model", default=None)
     parser.add_argument("--dedup-verifier-provider", choices=["gemini", "openrouter"], default=None)
     parser.add_argument("--dedup-openrouter-model", default=None)
-    parser.add_argument("--loop-config", default="config/enrichment_loop.maritime-risk.json")
+    parser.add_argument("--loop-config", default=None, help="Path to a loop-config JSON overlay; falls back to load_loop_config's built-in defaults when unset.")
     parser.add_argument("--loop-report-file", default=None)
     parser.add_argument("--evaluate-only", action="store_true", help="Evaluate the latest or specified run without starting a new cycle.")
     parser.add_argument("--run-key", default=None, help="Run key to evaluate with --evaluate-only.")

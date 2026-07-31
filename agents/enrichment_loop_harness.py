@@ -78,21 +78,6 @@ DEFAULT_LOOP_CONFIG: dict[str, Any] = {
 }
 
 
-ONTOLOGY_PARTS = {
-    "abstract_class",
-    "class",
-    "concrete_object",
-    "object_instance",
-    "instance",
-    "relation",
-    "property",
-    "event",
-    "action",
-    "function",
-    "policy",
-}
-
-
 SEMANTIC_ELEMENT_TYPES = {
     "situation",
     "metric_observation",
@@ -1399,10 +1384,6 @@ def _decide_next_focus(
         "reasons": reasons,
         "frontier_count": frontier_count if session is not None else None,
     }
-
-
-def _exceeds_latency(latency: dict[str, Any], targets: dict[str, Any]) -> bool:
-    return bool(_latency_reasons(latency, targets))
 
 
 def _latency_reasons(latency: dict[str, Any], targets: dict[str, Any]) -> list[str]:

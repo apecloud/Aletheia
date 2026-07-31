@@ -22,19 +22,17 @@ from urllib.parse import parse_qs, quote, unquote, urlparse
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.append(str(ROOT))
 sys.path.append(str(ROOT / "agents"))
+sys.path.append(str(ROOT / "scripts"))
 
-from sqlalchemy import bindparam, create_engine, inspect, text
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy import bindparam, create_engine, text
 from sqlalchemy.orm import sessionmaker
 
 from reasoning_engine import ReasoningEngine
 from reasoning_finding_framework import (  # noqa: E402
     DEEP_GRAPH_REQUIRED_STEPS as REASONING_DEEP_GRAPH_REQUIRED_STEPS,
     deep_graph_profile,
-    display_label_from_question,
     entity_profile_aggregate_evidence,
     finding_canonical_boundary,
-    paths_with_peer,
     plain_reasoning_conclusion,
     plain_reasoning_title,
     review_graph_scope_action,
@@ -45,7 +43,6 @@ from iterative_graph_enrichment_agent import (  # noqa: E402
     _configured_api_key,
     _edge_fact_identity_compatible,
     _edge_fact_identity_parts,
-    _graph_context_query_plan,
 )
 from ontology_quality import concrete_object_quality  # noqa: E402
 from ontology_artifacts import ensure_artifact_schema, upsert_artifact  # noqa: E402
@@ -747,14 +744,6 @@ def _is_current_graph_proposal(row_status, payload):
     return decision not in GRAPH_DUPLICATE_DEDUP_DECISIONS
 
 
-def _fmt_number(value):
-    if isinstance(value, float):
-        if value == int(value):
-            return str(int(value))
-        return f"{value:,.2f}"
-    return f"{value:,}" if isinstance(value, int) else str(value)
-
-
 def _slug(value):
     return re.sub(r"[^a-z0-9]+", "-", str(value).lower()).strip("-") or "scope"
 
@@ -763,31 +752,6 @@ def _jsonable(value):
     if hasattr(value, "isoformat"):
         return value.isoformat()
     return value
-
-
-def _field_property_from_row(row, table_name):
-    key = row.get("COLUMN_KEY") or ""
-    primary_key = True if key == "PRI" else None if not key else False
-    foreign_key = True if key == "MUL" else None if not key else False
-    return {
-        "name": row.get("COLUMN_NAME"),
-        "source_table": table_name,
-        "qualified_name": f"{table_name}.{row.get('COLUMN_NAME')}",
-        "data_type": row.get("DATA_TYPE"),
-        "column_type": row.get("COLUMN_TYPE") or row.get("DATA_TYPE"),
-        "nullable": row.get("IS_NULLABLE") == "YES",
-        "primary_key": primary_key,
-        "foreign_key": foreign_key,
-        "key_role": "primary_key" if key == "PRI" else "foreign_key" if key == "MUL" else "unknown",
-        "default": row.get("COLUMN_DEFAULT"),
-        "extra": row.get("EXTRA") or "",
-        "comment": row.get("COLUMN_COMMENT") or "",
-        "max_length": row.get("CHARACTER_MAXIMUM_LENGTH"),
-        "numeric_precision": row.get("NUMERIC_PRECISION"),
-        "numeric_scale": row.get("NUMERIC_SCALE"),
-        "ordinal_position": row.get("ORDINAL_POSITION"),
-        "maps_to_property": row.get("COLUMN_NAME"),
-    }
 
 
 def _require_reason(action, reason):
@@ -913,7 +877,6 @@ class ReviewRepository:
         self.tenant_registry = tenant_registry
         self.ensure_schema = ensure_schema
         self.engines = {}
-        self.source_engines = {}
 
     def tenant(self, tenant_id=None):
         return self.tenant_registry.get(tenant_id)
@@ -927,64 +890,6 @@ class ReviewRepository:
                 ensure_artifact_schema(engine)
             self.tenant_registry.ensure_metadata(engine)
         return engine
-
-    def source_engine_for(self, tenant):
-        engine = self.source_engines.get(tenant.source_db_url)
-        if engine is None:
-            engine = create_engine(tenant.source_db_url)
-            self.source_engines[tenant.source_db_url] = engine
-        return engine
-
-    def source_table_schema(self, tenant, table_name):
-        try:
-            with self.source_engine_for(tenant).connect() as conn:
-                rows = conn.execute(
-                    text(
-                        """
-                        SELECT COLUMN_NAME, DATA_TYPE, COLUMN_TYPE, IS_NULLABLE, COLUMN_KEY,
-                               COLUMN_DEFAULT, EXTRA, CHARACTER_MAXIMUM_LENGTH,
-                               NUMERIC_PRECISION, NUMERIC_SCALE, ORDINAL_POSITION, COLUMN_COMMENT
-                        FROM information_schema.COLUMNS
-                        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = :table_name
-                        ORDER BY ORDINAL_POSITION
-                        """
-                    ),
-                    {"table_name": table_name},
-                ).mappings().all()
-            fields = [_field_property_from_row(row, table_name) for row in rows]
-            return {
-                "table": table_name,
-                "schema_source": "live" if fields else "degraded",
-                "columns": [field["name"] for field in fields],
-                "fields": fields,
-                **({} if fields else {"degraded": True, "degraded_reason": "source table was reachable but no columns were found"}),
-            }
-        except Exception as exc:
-            return {
-                "table": table_name,
-                "schema_source": "degraded",
-                "columns": [],
-                "fields": [],
-                "degraded": True,
-                "degraded_reason": "source database connection failed",
-                "connection_error": _safe_error_message(exc),
-            }
-
-    def source_schemas_for_artifact(self, tenant, artifact):
-        canonical_key = artifact.get("canonical_key") or ""
-        payload = artifact.get("payload") or {}
-        artifact_type = artifact.get("artifact_type")
-        table_names = set()
-        if artifact_type == "link" and payload.get("source_table") and payload.get("target_table"):
-            table_names.add(payload["source_table"])
-            table_names.add(payload["target_table"])
-        elif artifact_type == "object":
-            mapped_tables = payload.get("mapped_table_names") or payload.get("mapped_tables") or []
-            table_names.update(table for table in mapped_tables if table)
-        schemas = {}
-        for table in table_names:
-            schemas[table] = self.source_table_schema(tenant, table)
-        return schemas
 
     def list_artifacts(self, tenant, filters):
         conditions = ["project_id = :tenant_id"]
@@ -1147,10 +1052,7 @@ class ReviewRepository:
             ).mappings().all()
         result = _artifact_to_dict(artifact)
         result["tenant"] = tenant.public_dict()
-        result["source_schema"] = _ontology_source_schema(
-            result,
-            self.source_schemas_for_artifact(tenant, result),
-        )
+        result["source_schema"] = _ontology_source_schema(result)
         result["canonical"] = {
             "status": result["status"],
             "version": result["version"],
@@ -1387,14 +1289,41 @@ class InstanceRepository:
         self.tenant_registry = tenant_registry
         self.ensure_schema = ensure_schema
         self.metadata_engines = {}
-        self.source_engines = {}
         self.reasoning_repository = None
         self._continuous_scheduler_lock = threading.Lock()
         self._continuous_scheduler_thread = None
         self._continuous_scheduler_stop = None
+        self._graph_repos = {}
 
     def tenant(self, tenant_id=None):
         return self.tenant_registry.get(tenant_id)
+
+    def _graph_repo_for(self, tenant):
+        """Lazily construct/cache a GraphInstanceRepository for a
+        backend="graph" tenant -- ReasoningEngine's SQL-retrieval core was
+        retired, so such tenants delegate entirely to real Nebula traversal
+        (see agents/graph_instance_repository.py) instead of the SQL logic
+        the rest of this class implements. Cached per tenant_id since each
+        instance owns its own Nebula connection."""
+        cached = self._graph_repos.get(tenant.tenant_id)
+        if cached is not None:
+            return cached
+        from graph_instance_repository import GraphInstanceRepository
+
+        repo = GraphInstanceRepository(
+            space=tenant.graph_database,
+            tag_name=tenant.graph_tag_name,
+            edge_type=tenant.graph_edge_type,
+            object_type=tenant.graph_object_type,
+            nebula_ip=tenant.graph_ip,
+            nebula_port=tenant.graph_port,
+            nebula_user=tenant.graph_user,
+            nebula_password=tenant.graph_password,
+            relation_catalog_db_url=tenant.metadata_db_url,
+            relation_catalog_scope=tenant.relation_catalog_scope or tenant.tenant_id,
+        )
+        self._graph_repos[tenant.tenant_id] = repo
+        return repo
 
     def metadata_engine_for(self, tenant):
         engine = self.metadata_engines.get(tenant.metadata_db_url)
@@ -1405,47 +1334,9 @@ class InstanceRepository:
                 ensure_artifact_schema(engine)
         return engine
 
-    def source_engine_for(self, tenant):
-        engine = self.source_engines.get(tenant.source_db_url)
-        if engine is None:
-            engine = create_engine(tenant.source_db_url)
-            self.source_engines[tenant.source_db_url] = engine
-        return engine
-
-    def _cfg_key(self, object_type, entity_config=None):
-        entity_config = entity_config or {}
-        raw = str(object_type or "").strip()
-        if not raw:
-            return ""
-        snake = re.sub(r"(?<!^)(?=[A-Z])", "_", raw).replace("-", "_").lower()
-        compact = re.sub(r"[^a-z0-9]", "", raw.lower())
-        for key in entity_config:
-            key_compact = re.sub(r"[^a-z0-9]", "", key.lower())
-            if raw.lower() == key.lower() or snake == key.lower() or compact == key_compact:
-                return key
-        return raw.lower()
-
-    def _cfg_type(self, cfg, fallback):
-        return cfg.get("type") or str(fallback).capitalize()
-
-    def _artifact_statuses(self, tenant, keys):
-        with self.metadata_engine_for(tenant).connect() as conn:
-            rows = conn.execute(
-                text(
-                    """
-                    SELECT canonical_key, name, artifact_type, status, version, payload_json, description
-                    FROM aletheia_ontology_artifacts
-                    WHERE project_id = :tenant_id AND canonical_key = ANY(:keys)
-                    """
-                ),
-                {"tenant_id": tenant.tenant_id, "keys": list(keys)},
-            ).mappings().all()
-        return {row["canonical_key"]: dict(row) for row in rows}
-
     def types(self, tenant, include_draft=False):
-        schema_types = self._schema_graph_types(tenant)
         ontology_types = self._ontology_concrete_object_types(tenant, include_draft=include_draft)
-        merged = self._merge_instance_types(schema_types, ontology_types)
+        merged = self._merge_instance_types([], ontology_types)
         if merged:
             return {"tenant": tenant.public_dict(), "types": merged, "approved": True}
         return {
@@ -1456,7 +1347,7 @@ class InstanceRepository:
         }
 
     def search(self, tenant, object_type, query, limit=25, include_draft=False):
-        schema_search = self._schema_graph_search(tenant, object_type, query, limit=limit)
+        schema_search = None
         ontology_instances = self._ontology_concrete_object_search(
             tenant,
             object_type,
@@ -1528,26 +1419,7 @@ class InstanceRepository:
         return None
 
     def detail(self, tenant, object_type, instance_id):
-        schema_detail = self._schema_graph_detail(tenant, object_type, instance_id)
-        if schema_detail is not None:
-            ontology_detail = self._ontology_concrete_object_detail(tenant, object_type, instance_id)
-            if ontology_detail:
-                aliases = list(dict.fromkeys((schema_detail.get("aliases") or []) + (ontology_detail.get("aliases") or [])))
-                if ontology_detail.get("label") and ontology_detail.get("label") != schema_detail.get("label"):
-                    aliases.append(ontology_detail.get("label"))
-                return {
-                    **schema_detail,
-                    "aliases": list(dict.fromkeys([alias for alias in aliases if alias])),
-                    "ontology_concrete_object": ontology_detail.get("ontology_concrete_object"),
-                    "projection_source": self._join_projection_sources(
-                        schema_detail.get("projection_source"),
-                        ontology_detail.get("projection_source"),
-                    ),
-                }
-        ontology_detail = self._ontology_concrete_object_detail(tenant, object_type, instance_id)
-        if ontology_detail is not None:
-            return ontology_detail
-        return None
+        return self._ontology_concrete_object_detail(tenant, object_type, instance_id)
 
     def _join_projection_sources(self, *sources):
         items = []
@@ -1667,9 +1539,6 @@ class InstanceRepository:
                 "description": str(description or "").strip(),
                 "source": source,
             }
-
-        for item in self._schema_graph_types(tenant) or []:
-            add_class(item.get("label") or item.get("type"), item.get("description"), source="schema_graph")
 
         try:
             with self.metadata_engine_for(tenant).connect() as conn:
@@ -2123,691 +1992,27 @@ class InstanceRepository:
             "projection_source": "OntologyRelationInstance",
         }
 
-    def _schema_graph_artifacts(self, tenant):
-        with self.metadata_engine_for(tenant).connect() as conn:
-            rows = conn.execute(
-                text(
-                    """
-                    SELECT canonical_key, artifact_type, name, payload_json, confidence
-                    FROM aletheia_ontology_artifacts
-                    WHERE project_id = :tenant_id
-                      AND status = 'approved'
-                      AND source_agent = 'SchemaGraphModelingAgent'
-                    ORDER BY artifact_type, canonical_key
-                    """
-                ),
-                {"tenant_id": tenant.tenant_id},
-            ).mappings().all()
-        objects = {}
-        links = []
-        for row in rows:
-            payload = _load_json(row["payload_json"], {})
-            if payload.get("prompt_version") != "schema_graph_modeling_v1" or payload.get("llm_inferred") is not True:
-                continue
-            item = {**dict(row), "payload": payload}
-            natural_key = row["canonical_key"].split(":", 1)[1] if ":" in row["canonical_key"] else row["canonical_key"]
-            if row["artifact_type"] == "object":
-                objects[natural_key] = item
-            elif row["artifact_type"] == "link":
-                links.append(item)
-        return objects, links
-
-    def _schema_graph_node_type(self, artifact):
-        return re.sub(r"[^0-9A-Za-z]", "", artifact["name"]) or artifact["canonical_key"].split(":", 1)[-1]
-
-    def _source_columns(self, tenant, table):
-        try:
-            inspector = inspect(self.source_engine_for(tenant))
-            table_names = inspector.get_table_names()
-        except (SQLAlchemyError, OSError):
-            return set()
-        if table not in table_names:
-            return set()
-        try:
-            return {column["name"] for column in inspector.get_columns(table)}
-        except (SQLAlchemyError, OSError):
-            return set()
-
-    def _schema_graph_safe_join_condition(self, tenant, join_condition):
-        match = re.fullmatch(r"\s*([A-Za-z_][A-Za-z0-9_]*)\.([A-Za-z_][A-Za-z0-9_]*)\s*=\s*([A-Za-z_][A-Za-z0-9_]*)\.([A-Za-z_][A-Za-z0-9_]*)\s*", str(join_condition or ""))
-        if not match:
-            return None
-        left_table, left_col, right_table, right_col = match.groups()
-        try:
-            source_tables = set(inspect(self.source_engine_for(tenant)).get_table_names())
-        except (SQLAlchemyError, OSError):
-            return None
-        if left_table not in source_tables or right_table not in source_tables:
-            return None
-        if left_col not in self._source_columns(tenant, left_table) or right_col not in self._source_columns(tenant, right_table):
-            return None
-        return f"{left_table}.{left_col} = {right_table}.{right_col}"
-
-    def _schema_graph_join_parts(self, tenant, join_condition):
-        safe = self._schema_graph_safe_join_condition(tenant, join_condition)
-        if not safe:
-            return None
-        match = re.fullmatch(r"([A-Za-z_][A-Za-z0-9_]*)\.([A-Za-z_][A-Za-z0-9_]*) = ([A-Za-z_][A-Za-z0-9_]*)\.([A-Za-z_][A-Za-z0-9_]*)", safe)
-        if not match:
-            return None
-        left_table, left_col, right_table, right_col = match.groups()
-        return {
-            "condition": safe,
-            "left_table": left_table,
-            "left_col": left_col,
-            "right_table": right_table,
-            "right_col": right_col,
-        }
-
-    def _schema_graph_same_row_link(self, tenant, source_table, target_table, source_pk, target_pk):
-        if not source_table or source_table != target_table:
-            return False
-        columns = self._source_columns(tenant, source_table)
-        return source_pk in columns and target_pk in columns
-
-    def _schema_graph_edge_property_columns(self, tenant, payload, table):
-        columns = self._source_columns(tenant, table)
-        result = []
-        for column in payload.get("edge_properties") or payload.get("properties") or []:
-            column = str(column or "")
-            if column in columns and column not in result:
-                result.append(column)
-        return result
-
-    def _schema_graph_edge_property_select(self, columns, table=None):
-        prefix = f"{table}." if table else ""
-        return "".join(f", {prefix}{column} AS edge_prop_{idx}" for idx, column in enumerate(columns))
-
-    def _schema_graph_edge_properties_from_row(self, row, columns):
-        properties = {}
-        for idx, column in enumerate(columns):
-            properties[column] = _jsonable(row.get(f"edge_prop_{idx}"))
-        return properties
-
-    def _schema_graph_object_artifact(self, tenant, object_type):
-        objects, _ = self._schema_graph_artifacts(tenant)
-        compact_type = re.sub(r"[^0-9A-Za-z]", "", str(object_type or "")).lower()
-        for key, artifact in objects.items():
-            compact_name = re.sub(r"[^0-9A-Za-z]", "", artifact["name"]).lower()
-            compact_key = re.sub(r"[^0-9A-Za-z]", "", key).lower()
-            compact_canonical = re.sub(r"[^0-9A-Za-z]", "", artifact["canonical_key"].split(":", 1)[-1]).lower()
-            if compact_type in {compact_name, compact_key, compact_canonical}:
-                return key, artifact
-        return None, None
-
-    def _schema_graph_table_and_pk(self, tenant, artifact):
-        try:
-            source_tables = set(inspect(self.source_engine_for(tenant)).get_table_names())
-        except (SQLAlchemyError, OSError):
-            return None, None
-        table = next((item for item in artifact["payload"].get("mapped_table_names") or [] if item in source_tables), None)
-        pk = artifact["payload"].get("primary_key")
-        if not table or not pk or pk not in self._source_columns(tenant, table):
-            return None, None
-        return table, pk
-
-    def _schema_graph_node(self, tenant, artifact, table, pk_value):
-        node_type = self._schema_graph_node_type(artifact)
-        return {
-            "id": f"{node_type}:{pk_value}",
-            "tenant_id": tenant.tenant_id,
-            "namespace": tenant.namespace,
-            "graph_database": tenant.graph_database,
-            "type": node_type,
-            "label": str(pk_value),
-            "source_table": table,
-            "source_pk": f"{artifact['payload'].get('primary_key')}={pk_value}",
-            "ontology_artifact": artifact["canonical_key"],
-            "status": "approved",
-            "projection_source": "SchemaGraphModelingAgent",
-        }
-
-    def _schema_graph_types(self, tenant):
-        objects, _ = self._schema_graph_artifacts(tenant)
-        result = []
-        for artifact in objects.values():
-            table, _ = self._schema_graph_table_and_pk(tenant, artifact)
-            if not table:
-                continue
-            type_name = self._schema_graph_node_type(artifact)
-            result.append(
-                {
-                    "type": type_name,
-                    "label": artifact.get("name") or type_name,
-                    "table": table,
-                    "ontology_artifact": artifact["canonical_key"],
-                    "artifact_status": "approved",
-                    "approved": True,
-                    "tenant_id": tenant.tenant_id,
-                    "projection_source": "SchemaGraphModelingAgent",
-                }
-            )
-        return result
-
-    def _schema_graph_search(self, tenant, object_type, query, limit=25):
-        _, artifact = self._schema_graph_object_artifact(tenant, object_type)
-        if not artifact:
-            return None
-        table, pk = self._schema_graph_table_and_pk(tenant, artifact)
-        if not table or not pk:
-            return None
-        limit = max(1, min(int(limit), 100))
-        query = str(query or "")
-        columns = self._source_columns(tenant, table)
-        label_columns = [
-            column
-            for column in artifact["payload"].get("properties", [])
-            if column in columns and column != pk
-        ][:4]
-        conditions = [f"CAST({table}.{pk} AS CHAR) = :query"]
-        for column in label_columns:
-            conditions.append(f"CAST({table}.{column} AS CHAR) LIKE :like_query")
-        where = " OR ".join(conditions)
-        params = {"query": query, "like_query": f"%{query}%", "limit": limit}
-        with self.source_engine_for(tenant).connect() as conn:
-            rows = conn.execute(
-                text(
-                    f"SELECT DISTINCT {table}.{pk} AS node_pk "
-                    f"FROM {table} "
-                    f"WHERE (:query = '' OR {where}) "
-                    f"ORDER BY {table}.{pk} LIMIT :limit"
-                ),
-                params,
-            ).mappings().all()
-        return {
-            "instances": [
-                self._schema_graph_node(tenant, artifact, table, row["node_pk"])
-                for row in rows
-            ],
-            "approved": True,
-            "artifact_status": "approved",
-            "tenant": tenant.public_dict(),
-            "projection_source": "SchemaGraphModelingAgent",
-        }
-
-    def _schema_graph_detail(self, tenant, object_type, instance_id):
-        _, artifact = self._schema_graph_object_artifact(tenant, object_type)
-        if not artifact:
-            return None
-        table, pk = self._schema_graph_table_and_pk(tenant, artifact)
-        if not table or not pk:
-            return None
-        with self.source_engine_for(tenant).connect() as conn:
-            row = conn.execute(
-                text(f"SELECT * FROM {table} WHERE {pk} = :pk LIMIT 1"),
-                {"pk": instance_id},
-            ).mappings().first()
-        if not row:
-            return None
-        node = self._schema_graph_node(tenant, artifact, table, instance_id)
-        row_dict = dict(row)
-        graph = self._schema_graph_neighborhood(tenant, object_type, instance_id, depth=1, limit=300)
-        by_relation = {}
-        if graph and graph.get("approved"):
-            for edge in graph.get("edges", []):
-                relation = edge.get("link_key") or edge.get("label") or "edge"
-                by_relation[relation] = by_relation.get(relation, 0) + 1
-        return {
-            **node,
-            "source_row": self._row(row_dict),
-            "key_properties": {
-                key: _jsonable(row_dict.get(key))
-                for key in dict.fromkeys([pk, *artifact["payload"].get("properties", [])])
-                if key in row_dict
-            },
-            "relations_summary": {
-                "nodes": len(graph.get("nodes", [])) if graph and graph.get("approved") else 1,
-                "edges": len(graph.get("edges", [])) if graph and graph.get("approved") else 0,
-                "by_relation": by_relation,
-                "projection_source": "SchemaGraphModelingAgent",
-            },
-        }
-
     def _fetch_entity(self, tenant, object_type, instance_id):
-        """Fetch an entity row from the reviewed SchemaGraph projection.
-
-        ReasoningEngine historically called repository-level `_fetch_entity`
-        and `_entity_node` helpers. Keep that narrow adapter, but source it only
-        from approved SchemaGraphModelingAgent artifacts so tenants without a
-        reviewed projection do not fall back to example fixture schemas.
-        """
-        _, artifact = self._schema_graph_object_artifact(tenant, object_type)
-        if not artifact:
-            return None
-        table, pk = self._schema_graph_table_and_pk(tenant, artifact)
-        if not table or not pk:
-            return None
-        with self.source_engine_for(tenant).connect() as conn:
-            row = conn.execute(
-                text(f"SELECT * FROM {table} WHERE {pk} = :pk LIMIT 1"),
-                {"pk": instance_id},
-            ).mappings().first()
-        return dict(row) if row else None
+        """Fetch an entity row -- ReasoningEngine calls this repository-level
+        adapter directly. All tenants are graph-backed now; this delegates
+        to GraphInstanceRepository unconditionally."""
+        return self._graph_repo_for(tenant)._fetch_entity(tenant.tenant_id, object_type, instance_id)
 
     def _entity_node(self, tenant, object_type, row):
-        _, artifact = self._schema_graph_object_artifact(tenant, object_type)
-        if not artifact or not row:
-            return None
-        table, pk = self._schema_graph_table_and_pk(tenant, artifact)
-        if not table or not pk or pk not in row:
-            return None
-        return self._schema_graph_node(tenant, artifact, table, row[pk])
-
-    def _schema_graph_reasoning_configs(self, tenant):
-        objects, links = self._schema_graph_artifacts(tenant)
-        if not objects:
-            return None, None
-        entity_config = {}
-        object_meta = {}
-        for natural_key, artifact in objects.items():
-            table, pk = self._schema_graph_table_and_pk(tenant, artifact)
-            if not table or not pk:
-                continue
-            type_name = self._schema_graph_node_type(artifact)
-            cfg = {
-                "artifact": artifact["canonical_key"],
-                "table": table,
-                "pk": pk,
-                "label_cols": [pk],
-                "type": type_name,
-                "projection_source": "SchemaGraphModelingAgent",
-            }
-            entity_config[natural_key] = cfg
-            entity_config[type_name.lower()] = cfg
-            object_meta[natural_key] = {"artifact": artifact, "table": table, "pk": pk, "type": type_name}
-
-        link_config = []
-        for link in links:
-            payload = link["payload"]
-            source_key = payload.get("source_object_key")
-            target_key = payload.get("target_object_key")
-            source_meta = object_meta.get(source_key)
-            target_meta = object_meta.get(target_key)
-            join = self._schema_graph_join_parts(tenant, payload.get("join_condition"))
-            source_table = payload.get("source_table")
-            target_table = payload.get("target_table")
-            same_row_link = self._schema_graph_same_row_link(
-                tenant,
-                source_table,
-                target_table,
-                source_meta["pk"] if source_meta else None,
-                target_meta["pk"] if target_meta else None,
-            )
-            if not source_meta or not target_meta or (not join and not same_row_link):
-                continue
-            if join and {source_table, target_table} != {join["left_table"], join["right_table"]} and source_table != target_table:
-                continue
-            # Reasoning treats link config as "source object -> rows carrying
-            # the source key". For approved SchemaGraphModelingAgent links, use
-            # the source table/key from the reviewed artifact instead of the
-            # old fixture convention.
-            fk_table, fk_col = source_table, source_meta["pk"]
-            link_config.append({
-                "link": link["canonical_key"],
-                "from": source_key,
-                "to": target_key,
-                "fk_table": fk_table,
-                "fk_col": fk_col,
-                "source_table": source_table,
-                "target_table": target_table,
-                "source_pk": source_meta["pk"],
-                "target_pk": target_meta["pk"],
-                "edge_properties": self._schema_graph_edge_property_columns(tenant, payload, source_table),
-                "join_condition": join["condition"] if join else None,
-                "same_row_link": same_row_link,
-                "projection_source": "SchemaGraphModelingAgent",
-            })
-        return entity_config, link_config
+        return self._graph_repo_for(tenant)._entity_node(tenant.tenant_id, object_type, row)
 
     def reasoning_entity_config(self, tenant):
-        entity_config, _ = self._schema_graph_reasoning_configs(tenant)
-        return entity_config or {}
+        return self._graph_repo_for(tenant).reasoning_entity_config(tenant.tenant_id)
 
     def reasoning_link_config(self, tenant):
-        _, link_config = self._schema_graph_reasoning_configs(tenant)
-        return link_config or []
-
-    def _schema_graph_neighborhood(self, tenant, object_type, instance_id, depth=1, limit=200):
-        objects, links = self._schema_graph_artifacts(tenant)
-        if not objects:
-            return None
-        object_key, center_artifact = self._schema_graph_object_artifact(tenant, object_type)
-        if not center_artifact:
-            return None
-        center_table, center_pk = self._schema_graph_table_and_pk(tenant, center_artifact)
-        if not center_table or not center_pk:
-            return None
-        depth = max(1, min(int(depth), 2))
-        requested_limit = int(limit)
-        limit = max(1, min(requested_limit, 300))
-        with self.source_engine_for(tenant).connect() as conn:
-            center_exists = conn.execute(
-                text(f"SELECT 1 FROM {center_table} WHERE {center_pk} = :pk LIMIT 1"),
-                {"pk": instance_id},
-            ).first()
-            if not center_exists:
-                return None
-
-            center = self._schema_graph_node(tenant, center_artifact, center_table, instance_id)
-            nodes = [center]
-            edges = []
-            seen_nodes = {center["id"]}
-            seen_edges = set()
-            allowed_node_types = {center["type"]}
-            allowed_link_keys = []
-
-            def remember_node(node):
-                if node and node["id"] not in seen_nodes:
-                    nodes.append(node)
-                    seen_nodes.add(node["id"])
-                return node
-
-            for link in links:
-                payload = link["payload"]
-                source_key = payload.get("source_object_key")
-                target_key = payload.get("target_object_key")
-                if object_key not in {source_key, target_key}:
-                    continue
-                source_artifact = objects.get(source_key)
-                target_artifact = objects.get(target_key)
-                if not source_artifact or not target_artifact:
-                    continue
-                source_node_table, source_pk = self._schema_graph_table_and_pk(tenant, source_artifact)
-                target_node_table, target_pk = self._schema_graph_table_and_pk(tenant, target_artifact)
-                source_table = payload.get("source_table")
-                target_table = payload.get("target_table")
-                join = self._schema_graph_join_parts(tenant, payload.get("join_condition"))
-                same_row_link = self._schema_graph_same_row_link(tenant, source_table, target_table, source_pk, target_pk)
-                if not source_table or not target_table or (not join and not same_row_link):
-                    continue
-                edge_property_columns = self._schema_graph_edge_property_columns(tenant, payload, source_table)
-                edge_property_select = self._schema_graph_edge_property_select(edge_property_columns, None if same_row_link else source_table)
-                if object_key == source_key:
-                    other_artifact, other_node_table, other_table, other_pk = target_artifact, target_node_table, target_table, target_pk
-                    where_table, where_pk = source_table, source_pk
-                else:
-                    other_artifact, other_node_table, other_table, other_pk = source_artifact, source_node_table, source_table, source_pk
-                    where_table, where_pk = target_table, target_pk
-                try:
-                    if same_row_link:
-                        rows = conn.execute(
-                            text(
-                                f"SELECT DISTINCT {other_pk} AS other_pk{edge_property_select} "
-                                f"FROM {source_table} "
-                                f"WHERE {where_pk} = :pk AND {other_pk} IS NOT NULL "
-                                f"ORDER BY {other_pk} LIMIT :lim"
-                            ),
-                            {"pk": instance_id, "lim": limit},
-                        ).mappings().all()
-                    else:
-                        rows = conn.execute(
-                            text(
-                                f"SELECT DISTINCT {other_table}.{other_pk} AS other_pk{edge_property_select} "
-                                f"FROM {source_table} JOIN {target_table} ON {join['condition']} "
-                                f"WHERE {where_table}.{where_pk} = :pk AND {other_table}.{other_pk} IS NOT NULL "
-                                f"ORDER BY {other_table}.{other_pk} LIMIT :lim"
-                            ),
-                            {"pk": instance_id, "lim": limit},
-                        ).mappings().all()
-                except Exception:
-                    continue
-                allowed_link_keys.append(link["canonical_key"])
-                for row in rows:
-                    other_node = remember_node(self._schema_graph_node(tenant, other_artifact, other_node_table, row["other_pk"]))
-                    allowed_node_types.add(other_node["type"])
-                    source_node = center if object_key == source_key else other_node
-                    target_node = other_node if object_key == source_key else center
-                    edge_id = f"{source_node['id']}->{target_node['id']}:{link['canonical_key']}"
-                    if edge_id in seen_edges:
-                        continue
-                    seen_edges.add(edge_id)
-                    edge = {
-                        "id": edge_id,
-                        "tenant_id": tenant.tenant_id,
-                        "source": source_node["id"],
-                        "target": target_node["id"],
-                        "link_key": link["canonical_key"],
-                        "label": link["name"],
-                        "status": "approved",
-                        "projection_source": "SchemaGraphModelingAgent",
-                    }
-                    edge_properties = self._schema_graph_edge_properties_from_row(row, edge_property_columns)
-                    if edge_properties:
-                        edge["properties"] = edge_properties
-                    edges.append(edge)
-                    if len(nodes) >= limit and len(edges) >= limit:
-                        break
-
-        return {
-            "approved": True,
-            "tenant": tenant.public_dict(),
-            "graph_database": tenant.graph_database,
-            "depth": depth,
-            "limit": limit,
-            "limits": {"requested_limit": requested_limit, "applied_limit": limit, "hard_limit": 300, "truncated": len(nodes) >= limit or len(edges) >= limit},
-            "center": center,
-            "nodes": nodes[:limit],
-            "edges": edges[:limit],
-            "scope": {
-                "tenant_id": tenant.tenant_id,
-                "center_node": center["id"],
-                "type": center["type"],
-                "id": str(instance_id),
-                "depth": depth,
-                "node_limit": limit,
-                "edge_limit": limit,
-                "allowed_node_types": sorted(allowed_node_types),
-                "allowed_link_keys": allowed_link_keys,
-                "approved_only": True,
-                "projection_source": "SchemaGraphModelingAgent",
-            },
-        }
-
-    def _schema_graph_full_graph(self, tenant, object_type=None, instance_id=None, limit=200):
-        objects, links = self._schema_graph_artifacts(tenant)
-        if not objects:
-            return None
-        requested_limit = int(limit)
-        limit = max(1, min(requested_limit, 300))
-        nodes = []
-        edges = []
-        seen_nodes = set()
-        seen_edges = set()
-
-        def remember_node(node):
-            if node and node["id"] not in seen_nodes:
-                nodes.append(node)
-                seen_nodes.add(node["id"])
-            return node
-
-        def remember_edge(edge):
-            if not edge or not edge.get("id") or edge["id"] in seen_edges:
-                return False
-            seen_edges.add(edge["id"])
-            edges.append(edge)
-            return True
-
-        try:
-            source_engine = self.source_engine_for(tenant)
-            inspector = inspect(source_engine)
-            source_tables = set(inspector.get_table_names())
-        except (SQLAlchemyError, OSError) as exc:
-            return self._schema_graph_source_unavailable_graph(
-                tenant,
-                object_type=object_type,
-                instance_id=instance_id,
-                limit=requested_limit,
-                reason=exc,
-            )
-        per_type_limit = max(1, min(40, limit // max(len(objects), 1) + 1))
-
-        center = None
-        if object_type and instance_id:
-            center_graph = self._schema_graph_neighborhood(tenant, object_type, instance_id, depth=1, limit=limit)
-            if center_graph and center_graph.get("approved"):
-                center = center_graph.get("center")
-                for node in center_graph.get("nodes") or []:
-                    remember_node(node)
-                for edge in center_graph.get("edges") or []:
-                    remember_edge(edge)
-
-        try:
-            with source_engine.connect() as conn:
-                for artifact in objects.values():
-                    payload = artifact["payload"]
-                    pk = payload.get("primary_key")
-                    table = next((item for item in payload.get("mapped_table_names") or [] if item in source_tables), None)
-                    if not table or not pk or pk not in self._source_columns(tenant, table):
-                        continue
-                    rows = conn.execute(
-                        text(f"SELECT DISTINCT {table}.{pk} AS node_pk FROM {table} WHERE {table}.{pk} IS NOT NULL ORDER BY {table}.{pk} LIMIT :limit"),
-                        {"limit": per_type_limit},
-                    ).mappings().all()
-                    for row in rows:
-                        remember_node(self._schema_graph_node(tenant, artifact, table, row["node_pk"]))
-                        if len(nodes) >= limit:
-                            break
-                    if len(nodes) >= limit:
-                        break
-
-                for link in links:
-                    payload = link["payload"]
-                    source_artifact = objects.get(payload.get("source_object_key"))
-                    target_artifact = objects.get(payload.get("target_object_key"))
-                    source_table = payload.get("source_table")
-                    target_table = payload.get("target_table")
-                    join_condition = self._schema_graph_safe_join_condition(tenant, payload.get("join_condition"))
-                    source_pk = source_artifact["payload"].get("primary_key") if source_artifact else None
-                    target_pk = target_artifact["payload"].get("primary_key") if target_artifact else None
-                    same_row_link = self._schema_graph_same_row_link(tenant, source_table, target_table, source_pk, target_pk)
-                    if not source_artifact or not target_artifact or not source_table or not target_table or (not join_condition and not same_row_link):
-                        continue
-                    if source_table not in source_tables or target_table not in source_tables:
-                        continue
-                    if source_pk not in self._source_columns(tenant, source_table) or target_pk not in self._source_columns(tenant, target_table):
-                        continue
-                    edge_property_columns = self._schema_graph_edge_property_columns(tenant, payload, source_table)
-                    edge_property_select = self._schema_graph_edge_property_select(edge_property_columns, None if same_row_link else source_table)
-                    try:
-                        if same_row_link:
-                            rows = conn.execute(
-                                text(
-                                    f"SELECT DISTINCT {source_pk} AS source_pk, {target_pk} AS target_pk{edge_property_select} "
-                                    f"FROM {source_table} "
-                                    f"WHERE {source_pk} IS NOT NULL AND {target_pk} IS NOT NULL "
-                                    "LIMIT :limit"
-                                ),
-                                {"limit": limit * 3},
-                            ).mappings().all()
-                        else:
-                            rows = conn.execute(
-                                text(
-                                    f"SELECT DISTINCT {source_table}.{source_pk} AS source_pk, "
-                                    f"{target_table}.{target_pk} AS target_pk{edge_property_select} "
-                                    f"FROM {source_table} JOIN {target_table} ON {join_condition} "
-                                    f"WHERE {source_table}.{source_pk} IS NOT NULL AND {target_table}.{target_pk} IS NOT NULL "
-                                    "LIMIT :limit"
-                                ),
-                                {"limit": limit * 3},
-                            ).mappings().all()
-                    except Exception:
-                        continue
-                    for row in rows:
-                        source_node = remember_node(self._schema_graph_node(tenant, source_artifact, source_table, row["source_pk"]))
-                        target_node = remember_node(self._schema_graph_node(tenant, target_artifact, target_table, row["target_pk"]))
-                        edge_id = f"{source_node['id']}->{target_node['id']}:{link['canonical_key']}"
-                        edge = {
-                            "id": edge_id,
-                            "tenant_id": tenant.tenant_id,
-                            "source": source_node["id"],
-                            "target": target_node["id"],
-                            "link_key": link["canonical_key"],
-                            "label": link["name"],
-                            "status": "approved",
-                            "projection_source": "SchemaGraphModelingAgent",
-                        }
-                        edge_properties = self._schema_graph_edge_properties_from_row(row, edge_property_columns)
-                        if edge_properties:
-                            edge["properties"] = edge_properties
-                        remember_edge(edge)
-                        if len(edges) >= limit * 3:
-                            break
-        except (SQLAlchemyError, OSError) as exc:
-            return self._schema_graph_source_unavailable_graph(
-                tenant,
-                object_type=object_type,
-                instance_id=instance_id,
-                limit=requested_limit,
-                reason=exc,
-            )
-        if object_type and instance_id and not center:
-            compact_type = re.sub(r"[^0-9A-Za-z]", "", str(object_type)).lower()
-            for artifact in objects.values():
-                if re.sub(r"[^0-9A-Za-z]", "", artifact["name"]).lower() == compact_type:
-                    table = next((item for item in artifact["payload"].get("mapped_table_names") or [] if item in source_tables), None)
-                    if table:
-                        center = remember_node(self._schema_graph_node(tenant, artifact, table, instance_id))
-                    break
-        return {
-            "approved": True,
-            "tenant": tenant.public_dict(),
-            "graph_database": tenant.graph_database,
-            "depth": 0,
-            "limit": limit,
-            "limits": {"requested_limit": requested_limit, "applied_limit": limit, "hard_limit": 300, "truncated": len(nodes) >= limit or len(edges) >= limit * 3},
-            "center": center,
-            "nodes": nodes[:limit],
-            "edges": edges[: limit * 3],
-            "scope": {
-                "tenant_id": tenant.tenant_id,
-                "view": "all",
-                "node_limit": limit,
-                "edge_limit": limit * 3,
-                "approved_only": True,
-                "projection_source": "SchemaGraphModelingAgent",
-            },
-        }
-
-    def _schema_graph_source_unavailable_graph(self, tenant, object_type=None, instance_id=None, limit=200, reason=None):
-        requested_limit = int(limit)
-        limit = max(1, min(requested_limit, 300))
-        return {
-            "approved": False,
-            "tenant": tenant.public_dict(),
-            "graph_database": tenant.graph_database,
-            "depth": 0,
-            "limit": limit,
-            "limits": {
-                "requested_limit": requested_limit,
-                "applied_limit": limit,
-                "hard_limit": 300,
-                "truncated": False,
-            },
-            "center": None,
-            "nodes": [],
-            "edges": [],
-            "scope": {
-                "tenant_id": tenant.tenant_id,
-                "view": "all",
-                "type": object_type or None,
-                "id": instance_id or None,
-                "node_limit": limit,
-                "edge_limit": limit * 3,
-                "approved_only": True,
-                "projection_source": "SchemaGraphModelingAgent",
-                "source_db_status": "unavailable",
-                "degraded": True,
-                "reason": "Source database unavailable; approved SchemaGraph projection exists, but instance graph rows cannot be loaded.",
-                "connection_error": str(reason)[:500] if reason else None,
-            },
-        }
+        return self._graph_repo_for(tenant).reasoning_link_config(tenant.tenant_id)
 
     def neighborhood(self, tenant, object_type, instance_id, depth=1, limit=200):
-        schema_graph = self._schema_graph_neighborhood(tenant, object_type, instance_id, depth=depth, limit=limit)
-        if schema_graph is not None:
+        graph = self._graph_repo_for(tenant).neighborhood(tenant.tenant_id, object_type, instance_id, depth=depth, limit=limit)
+        if graph is not None:
             return self._merge_ontology_concrete_objects_into_graph(
                 tenant,
-                schema_graph,
+                graph,
                 object_type=object_type,
                 instance_id=instance_id,
                 limit=limit,
@@ -2843,15 +2048,6 @@ class InstanceRepository:
         return None
 
     def full_graph(self, tenant, object_type=None, instance_id=None, limit=200):
-        schema_graph = self._schema_graph_full_graph(tenant, object_type=object_type, instance_id=instance_id, limit=limit)
-        if schema_graph is not None:
-            return self._merge_ontology_concrete_objects_into_graph(
-                tenant,
-                schema_graph,
-                object_type=object_type,
-                instance_id=instance_id,
-                limit=limit,
-            )
         ontology_nodes = self._ontology_concrete_object_nodes(tenant, include_draft=False)
         if not ontology_nodes:
             return None
@@ -3842,7 +3038,7 @@ class InstanceRepository:
             "auto_review_llm_verifier": True,
             "auto_review_model": "gemini-3.5-flash",
             "auto_reject_similarity_threshold": 0.92,
-            "auto_approve_low_duplicate_proposals": True,
+            "auto_approve_low_duplicate_proposals": False,
             "auto_approve_min_confidence": 0.8,
             "auto_approve_max_duplicate_score": 0.5,
             "auto_review_reviewer": "Continuous Enrichment Agent",
@@ -3901,109 +3097,6 @@ class InstanceRepository:
                 },
             )
         return session_key
-
-    def _continuous_llm_query_plans(self, tenant, item, objective, fallback_plan, config):
-        if (config or {}).get("search_query_planner") in {"deterministic", "fallback", "off", "disabled"}:
-            return None, "disabled"
-        api_key = _configured_api_key("GEMINI_API_KEY", "GOOGLE_API_KEY")
-        if not api_key:
-            return None, "missing_api_key"
-        try:
-            from google import genai
-        except Exception as exc:
-            return None, f"google_genai_unavailable: {_safe_error_message(exc)}"
-        fallback_plans = fallback_plan.get("plans") or []
-        payload = item.get("payload") if isinstance(item.get("payload"), dict) else {}
-        prompt = {
-            "task": "Generate broad web search queries for evidence discovery. Queries are for a search engine, not for an AI assistant.",
-            "rules": [
-                "Return strict JSON only: {\"plans\":[{\"query\":\"...\",\"intent\":\"...\",\"granularity\":\"...\",\"coarse_level\":0}]}",
-                "Use short, recall-oriented search queries, normally 3 to 8 words.",
-                "Prefer real-world entity names, aliases, places, products, organizations, events, and plain domain concepts.",
-                "Do not include instruction words such as find, recent, public, evidence, investigate, analyze, current, latest unless they are part of a proper name.",
-                "Do not include internal schema/control tokens such as proposed_node, proposed_edge, frontier, graph, schema, has_systemic_risk, depends_on, many_to_many, EvidenceEntity.",
-                "Translate schema relation IDs into plain-language concepts only when useful; otherwise omit them.",
-                "Start with important entities, then broaden for recall. Do not over-constrain every query.",
-                "No Boolean operators, no quotes, no site filters unless explicitly present in the frontier.",
-            ],
-            "objective": objective,
-            "tenant_id": tenant.tenant_id,
-            "frontier": {
-                "key": item.get("key"),
-                "name": item.get("name"),
-                "source_label": payload.get("source_label"),
-                "target_label": payload.get("target_label"),
-                "relation": payload.get("relation") or item.get("relation"),
-                "source_type": payload.get("source_type"),
-                "target_type": payload.get("target_type"),
-                "ontology_type": item.get("ontology_type") or payload.get("ontology_type"),
-                "metrics": payload.get("metrics") or [],
-            },
-            "fallback_plans": [
-                {
-                    "intent": plan.get("intent"),
-                    "granularity": plan.get("granularity"),
-                    "coarse_level": plan.get("coarse_level"),
-                    "query": plan.get("query"),
-                }
-                for plan in fallback_plans[:4]
-            ],
-        }
-        try:
-            client = genai.Client(api_key=api_key)
-            response = client.models.generate_content(
-                model=(config or {}).get("search_query_planner_model") or "gemini-3.5-flash",
-                contents=json.dumps(prompt, ensure_ascii=False),
-            )
-            raw_text = (getattr(response, "text", "") or "").strip()
-            if raw_text.startswith("```"):
-                raw_text = re.sub(r"^```(?:json)?\s*", "", raw_text)
-                raw_text = re.sub(r"\s*```$", "", raw_text)
-            parsed = json.loads(raw_text)
-        except Exception as exc:
-            return None, f"llm_error: {_safe_error_message(exc)}"
-        raw_plans = parsed.get("plans") if isinstance(parsed, dict) else None
-        if not isinstance(raw_plans, list):
-            return None, "invalid_llm_plan_shape"
-        forbidden = {
-            "find",
-            "public",
-            "evidence",
-            "proposed_node",
-            "proposed_edge",
-            "has_systemic_risk",
-            "depends_on",
-            "many_to_many",
-            "evidenceentity",
-        }
-        plans = []
-        seen_queries = set()
-        for index, raw_plan in enumerate(raw_plans):
-            if not isinstance(raw_plan, dict):
-                continue
-            query = re.sub(r"\s+", " ", str(raw_plan.get("query") or "")).strip()
-            lowered = query.lower()
-            if not query or query in seen_queries or any(term in lowered for term in forbidden):
-                continue
-            words = query.split()
-            if len(words) > 10:
-                query = " ".join(words[:10])
-            fallback = fallback_plans[min(index, len(fallback_plans) - 1)] if fallback_plans else {}
-            plans.append(
-                {
-                    **fallback,
-                    "query": query,
-                    "intent": raw_plan.get("intent") or fallback.get("intent") or "llm_recall_discovery",
-                    "granularity": raw_plan.get("granularity") or fallback.get("granularity") or f"L{index}_llm_recall",
-                    "coarse_level": int(raw_plan.get("coarse_level") if raw_plan.get("coarse_level") is not None else fallback.get("coarse_level") or index),
-                    "planner": "llm",
-                    "source_terms": raw_plan.get("source_terms") if isinstance(raw_plan.get("source_terms"), list) else fallback.get("source_terms") or [],
-                }
-            )
-            seen_queries.add(query)
-        if not plans:
-            return None, "empty_llm_plan_after_validation"
-        return {**fallback_plan, "query": plans[0]["query"], "plans": plans, "selected_plan": plans[0], "planner": "llm"}, "ok"
 
     def _continuous_research_mode(self, config):
         mode = str((config or {}).get("research_mode") or (config or {}).get("mode") or "").strip().lower()
@@ -4098,88 +3191,9 @@ class InstanceRepository:
                 break
         return items
 
-    def _continuous_research_query_plan(self, item, objective, config):
-        payload = item.get("payload") if isinstance(item.get("payload"), dict) else {}
-        topic = re.sub(r"\s+", " ", str(payload.get("topic") or item.get("name") or objective or "").strip())
-        lanes = payload.get("retrieval_lanes") if isinstance(payload.get("retrieval_lanes"), list) else self._continuous_retrieval_lanes(config)
-        windows = payload.get("recency_windows") if isinstance(payload.get("recency_windows"), list) else self._continuous_recency_windows(config)
-        max_queries_per_lane = max(1, min(int((config or {}).get("max_queries_per_lane") or 2), 5))
-        lane_templates = {
-            "breaking_news": [
-                ("latest_developments", "24h", "{topic} latest developments"),
-                ("recent_news", "7d", "{topic} news analysis"),
-            ],
-            "official_sources": [
-                ("official_assessment", "30d", "{topic} government report"),
-                ("official_statement", "7d", "{topic} official statement"),
-            ],
-            "academic": [
-                ("academic_mechanism", "historical", "{topic} academic paper risk analysis"),
-                ("literature_review", "historical", "{topic} journal article mechanism analysis"),
-            ],
-            "think_tank": [
-                ("expert_analysis", "30d", "{topic} think tank analysis"),
-                ("policy_brief", "historical", "{topic} policy brief strategic risk"),
-            ],
-            "industry": [
-                ("market_impact", "7d", "{topic} market impact analysis"),
-                ("industry_risk", "30d", "{topic} industry risk report"),
-            ],
-            "historical_cases": [
-                ("historical_case", "historical", "{topic} historical crisis analysis"),
-                ("comparative_history", "historical", "{topic} past disruption case study"),
-            ],
-        }
-        window_rank = {window: index for index, window in enumerate(windows)}
-        plans = []
-        seen = set()
-        for lane in lanes:
-            templates = lane_templates.get(str(lane), [])
-            for intent, window, template in templates[:max_queries_per_lane]:
-                query = re.sub(r"\s+", " ", template.format(topic=topic)).strip()
-                lowered = query.lower()
-                if not query or lowered in seen:
-                    continue
-                seen.add(lowered)
-                coarse_level = window_rank.get(window, len(plans))
-                plans.append(
-                    {
-                        "query": query,
-                        "intent": intent,
-                        "lane": lane,
-                        "recency_window": window,
-                        "granularity": f"research_{lane}_{window}",
-                        "coarse_level": coarse_level,
-                        "degree": 0,
-                        "radius": 1,
-                        "source_terms": [
-                            {"source": "research_topic", "term": topic},
-                            {"source": "retrieval_lane", "term": lane},
-                            {"source": "recency_window", "term": window},
-                        ],
-                    }
-                )
-        return {
-            "query": plans[0]["query"] if plans else topic,
-            "query_terms": {
-                "topic": [topic],
-                "lanes": lanes,
-                "recency_windows": windows,
-            },
-            "plans": plans,
-            "selected_plan": plans[0] if plans else None,
-            "planner": "deep_research_lane_planner",
-            "research_agenda": {
-                "topic": topic,
-                "lanes": lanes,
-                "recency_windows": windows,
-                "goal": "discover recent developments, expert historical analysis, mechanisms, contradictions, indicators, and graph expansion candidates",
-            },
-        }
-
     def _continuous_update_config(self, config, body):
         config = dict(config or {})
-        config.setdefault("auto_approve_low_duplicate_proposals", True)
+        config.setdefault("auto_approve_low_duplicate_proposals", False)
         config.setdefault("auto_approve_min_confidence", 0.8)
         config.setdefault("auto_approve_max_duplicate_score", 0.5)
         for key in ("research_topic", "execution_goal"):
@@ -5053,12 +4067,6 @@ class InstanceRepository:
                     matches.setdefault(node_id, set()).add(element_key)
         return {node_id: len(keys) for node_id, keys in matches.items()}
 
-    def _continuous_instance_enrichment_count(self, tenant, node_id, label, object_type):
-        return self._continuous_instance_enrichment_counts(
-            tenant,
-            [{"node_id": node_id, "label": label, "object_type": object_type}],
-        ).get(node_id, 0)
-
     def _continuous_graph_coverage_frontier(self, tenant, config=None, limit=50):
         items = []
         frontier_state = self._continuous_frontier_state(config or {})
@@ -5749,28 +4757,6 @@ class InstanceRepository:
         config["latest_events"] = merged[-50:]
         return config
 
-    def _continuous_persist_session_events(self, tenant, session_key, config, events):
-        if not events:
-            return config
-        self._continuous_append_events(config, events)
-        with self.metadata_engine_for(tenant).begin() as conn:
-            conn.execute(
-                text(
-                    """
-                    UPDATE aletheia_continuous_enrichment_sessions
-                    SET config_json = :config_json,
-                        updated_at = CURRENT_TIMESTAMP
-                    WHERE project_id = :tenant_id AND session_key = :session_key
-                    """
-                ),
-                {
-                    "tenant_id": tenant.tenant_id,
-                    "session_key": session_key,
-                    "config_json": _json_dump(config),
-                },
-            )
-        return config
-
     def _continuous_session_runtime_state(self, status, config, frontier, now_ts=None):
         config = config or {}
         frontier = frontier or []
@@ -5909,7 +4895,7 @@ class InstanceRepository:
         config.setdefault("auto_review_llm_verifier", True)
         config.setdefault("auto_review_model", "gemini-3.5-flash")
         config.setdefault("auto_reject_similarity_threshold", 0.92)
-        config.setdefault("auto_approve_low_duplicate_proposals", True)
+        config.setdefault("auto_approve_low_duplicate_proposals", False)
         config.setdefault("auto_approve_min_confidence", 0.8)
         config.setdefault("auto_approve_max_duplicate_score", 0.5)
         config.setdefault("auto_review_reviewer", "Continuous Enrichment Agent")
@@ -6588,10 +5574,7 @@ class InstanceRepository:
                 },
             }
             try:
-                if tenant.tenant_id == "creditcardfraud":
-                    autopilot_result = self.reasoning_repository.run_creditcardfraud_autopilot_playbook(tenant, autopilot_payload)
-                else:
-                    autopilot_result = self.reasoning_repository.create_autopilot_session(tenant, autopilot_payload)
+                autopilot_result = self.reasoning_repository.create_autopilot_session(tenant, autopilot_payload)
                 config["last_autopilot_session_key"] = (autopilot_result.get("session") or {}).get("session_key") or autopilot_payload["session_key"]
                 events.append(
                     {
@@ -7367,6 +6350,15 @@ class InstanceRepository:
                 "promoted_artifact": promoted_artifact,
                 "quality_gate": quality_gate,
             }
+            for audit_key in (
+                "review_actor",
+                "machine_approval",
+                "approval_policy",
+                "approval_policy_version",
+                "approval_thresholds",
+            ):
+                if audit_key in body:
+                    review_event[audit_key] = body[audit_key]
             payload.setdefault("review_events", []).append(review_event)
             payload["review_boundary"] = {
                 "writes_canonical": catalog_write,
@@ -7841,7 +6833,7 @@ class InstanceRepository:
         return 0.0
 
     def _should_auto_approve_low_duplicate_proposal(self, element, config):
-        if not (config or {}).get("auto_approve_low_duplicate_proposals", True):
+        if not (config or {}).get("auto_approve_low_duplicate_proposals", False):
             return False, "disabled", 0.0
         element_type = str(element.get("element_type") or "").lower()
         payload = element.get("payload") or {}
@@ -7975,7 +6967,7 @@ class InstanceRepository:
         return {"enabled": True, "reviewed": reviewed, "skipped": skipped}
 
     def _continuous_auto_approve_low_duplicate_proposals(self, tenant, proposed_graph, config):
-        if not (config or {}).get("auto_approve_low_duplicate_proposals", True):
+        if not (config or {}).get("auto_approve_low_duplicate_proposals", False):
             return {"enabled": False, "reviewed": [], "skipped": []}
         reviewed = []
         skipped = []
@@ -7999,6 +6991,8 @@ class InstanceRepository:
                         "reason": reason,
                         "confidence": round(confidence, 4),
                         "duplicate_score": round(duplicate_score, 4),
+                        "approval_policy": "auto_approve_low_duplicate_proposals",
+                        "review_actor": "machine",
                     }
                 )
                 continue
@@ -8011,7 +7005,19 @@ class InstanceRepository:
                     tenant,
                     element_key,
                     "approve",
-                    {"reviewer": reviewer, "reason": review_reason, "review_surface": "graph"},
+                    {
+                        "reviewer": reviewer,
+                        "reason": review_reason,
+                        "review_surface": "graph",
+                        "review_actor": "machine",
+                        "machine_approval": True,
+                        "approval_policy": "auto_approve_low_duplicate_proposals",
+                        "approval_policy_version": "v1",
+                        "approval_thresholds": {
+                            "min_confidence": min_confidence,
+                            "max_duplicate_score": max_duplicate_score,
+                        },
+                    },
                 )
             except Exception as exc:
                 skipped.append(
@@ -8020,6 +7026,8 @@ class InstanceRepository:
                         "reason": f"review_failed: {_safe_error_message(exc)}",
                         "confidence": round(confidence, 4),
                         "duplicate_score": round(duplicate_score, 4),
+                        "approval_policy": "auto_approve_low_duplicate_proposals",
+                        "review_actor": "machine",
                     }
                 )
                 continue
@@ -8030,6 +7038,8 @@ class InstanceRepository:
                         "reason": reason,
                         "confidence": round(confidence, 4),
                         "duplicate_score": round(duplicate_score, 4),
+                        "approval_policy": "auto_approve_low_duplicate_proposals",
+                        "review_actor": "machine",
                     }
                 )
         return {"enabled": True, "reviewed": reviewed, "skipped": skipped}
@@ -8130,9 +7140,6 @@ class InstanceRepository:
             },
         }
 
-    def _row(self, row):
-        return {key: _jsonable(value) for key, value in dict(row).items()}
-
 
 class ReasoningRepository:
     def __init__(self, tenant_registry, instance_repository, ensure_schema=False):
@@ -8140,7 +7147,6 @@ class ReasoningRepository:
         self.instance_repository = instance_repository
         self.ensure_schema = ensure_schema
         self.metadata_engines = {}
-        self.source_engines = {}
         self._autopilot_schema_ready = set()
         self._finding_experience_schema_ready = set()
 
@@ -8155,13 +7161,6 @@ class ReasoningRepository:
             if self.ensure_schema:
                 ensure_artifact_schema(engine)
             self.tenant_registry.ensure_metadata(engine)
-        return engine
-
-    def source_engine_for(self, tenant):
-        engine = self.source_engines.get(tenant.source_db_url)
-        if engine is None:
-            engine = create_engine(tenant.source_db_url)
-            self.source_engines[tenant.source_db_url] = engine
         return engine
 
     def ensure_finding_experience_schema(self, tenant):
@@ -8869,286 +7868,6 @@ class ReasoningRepository:
             "created_at": str(row["created_at"]) if row["created_at"] else None,
         }
 
-    def run_creditcardfraud_autopilot_playbook(self, tenant, payload):
-        if tenant.tenant_id != "creditcardfraud":
-            raise ValueError("creditcardfraud playbook requires tenant=creditcardfraud")
-        profile = self._creditcardfraud_profile(tenant)
-        objective = payload.get("objective") or "Discover high-value credit card fraud risk findings"
-        session_key = payload.get("session_key")
-        session_payload = {
-            "session_key": session_key,
-            "objective": objective,
-            "scope": {
-                "tenant": tenant.tenant_id,
-                "table": "credit_card_transactions_safe",
-                "approved_only": True,
-                "source_surface": "creditcardfraud_discovery_playbook",
-                "source_mode": profile.get("source_mode"),
-            },
-            "budget": payload.get("budget") or {
-                "max_hypotheses": 8,
-                "max_reasoning_tasks": 5,
-                "max_tool_calls": 20,
-                "max_runtime_seconds": 120,
-            },
-            "safety_profile": {
-                "approved_only": True,
-                "safe_views_only": True,
-                "allow_sensitive_fields": False,
-                "blocked_fields": ["card_verification_code_fields"],
-            },
-            "created_by": payload.get("created_by") or "Creditcardfraud Discovery Playbook",
-        }
-        if isinstance(payload.get("scope"), dict):
-            session_payload["scope"].update(payload["scope"])
-        created = self.create_autopilot_session(tenant, session_payload)
-        session_key = created["session"]["session_key"]
-
-        hypothesis_specs = [
-            {
-                "title": "Card-not-present transactions concentrate fraud risk",
-                "rationale": "Compare card-present and card-not-present fraud rates against the dataset baseline.",
-                "status": "completed",
-                "priority": 10,
-                "evidence_plan": [{"kind": "aggregate", "source_ref": "credit_card_transactions_safe", "metric": "fraud_rate_by_card_present"}],
-                "reasoning_task_keys": ["reasoning:creditcardfraud:dataset-risk-profile:v1"],
-            },
-            {
-                "title": "Verification mismatch transactions have elevated fraud rate",
-                "rationale": "Use the safe derived verification-match flag instead of raw verification values.",
-                "status": "completed",
-                "priority": 20,
-                "evidence_plan": [{"kind": "aggregate", "source_ref": "credit_card_transactions_safe", "metric": "fraud_rate_by_verification_match"}],
-                "reasoning_task_keys": ["reasoning:creditcardfraud:dataset-risk-profile:v1"],
-            },
-            {
-                "title": "Missing POS entry mode may identify a weak-control channel",
-                "rationale": "Missing POS entry mode showed the highest fraud-rate lift in the imported dataset profile.",
-                "status": "completed",
-                "priority": 30,
-                "evidence_plan": [{"kind": "aggregate", "source_ref": "credit_card_transactions_safe", "metric": "fraud_rate_missing_pos_entry"}],
-                "reasoning_task_keys": ["reasoning:creditcardfraud:dataset-risk-profile:v1"],
-            },
-            {
-                "title": "Merchant categories concentrate fraud exposure",
-                "rationale": "Rank merchant categories by fraud rate and volume to separate noisy rates from high-value findings.",
-                "status": "completed",
-                "priority": 40,
-                "evidence_plan": [{"kind": "aggregate", "source_ref": "credit_card_transactions_safe", "metric": "fraud_rate_by_merchant_category"}],
-                "reasoning_task_keys": ["reasoning:creditcardfraud:dataset-risk-profile:v1"],
-            },
-            {
-                "title": "Same account/merchant/amount/day duplicate clusters indicate multi-swipe risk",
-                "rationale": "Repeated same-day transaction clusters are useful triage candidates for duplicate authorization or multi-swipe review.",
-                "status": "completed",
-                "priority": 50,
-                "evidence_plan": [{"kind": "cluster", "source_ref": "credit_card_transactions_safe", "metric": "same_account_merchant_amount_day_clusters"}],
-                "reasoning_task_keys": ["reasoning:creditcardfraud:dataset-risk-profile:v1"],
-            },
-            {
-                "title": "Expiration-key mismatch does not clear the value threshold",
-                "rationale": "The imported profile did not show enough value lift to promote this into a candidate finding before stronger evidence exists.",
-                "status": "pruned",
-                "priority": 90,
-                "evidence_plan": [{"kind": "aggregate", "source_ref": "credit_card_transactions_safe", "metric": "expiration_key_in_match"}],
-                "pruned_reason": "Pruned because expected fraud-rate lift is below candidate threshold and no strong operational action follows from the field alone.",
-                "reasoning_task_keys": ["reasoning:creditcardfraud:dataset-risk-profile:v1"],
-            },
-        ]
-        hypotheses = {}
-        for spec in hypothesis_specs:
-            result = self.add_autopilot_hypothesis(tenant, session_key, spec)
-            hypotheses[spec["title"]] = result["hypothesis"]["hypothesis_key"]
-
-        candidate_specs = self._creditcardfraud_candidate_specs(profile, hypotheses)
-        for spec in candidate_specs:
-            self.add_autopilot_candidate_finding(tenant, session_key, spec)
-
-        return self.get_autopilot_session(tenant, session_key)
-
-    def _creditcardfraud_profile(self, tenant):
-        fallback = {
-            "source_mode": "fallback_reported_profile",
-            "total_transactions": 786363,
-            "fraud_transactions": 12417,
-            "fraud_rate": 0.01579,
-            "nonfraud_avg_amount": 135.57,
-            "fraud_avg_amount": 225.22,
-            "card_not_present_count": 433495,
-            "card_not_present_fraud_rate": 0.0207,
-            "verification_mismatch_count": 7015,
-            "verification_mismatch_fraud_rate": 0.0289,
-            "pos_missing_count": 4054,
-            "pos_missing_fraud_rate": 0.0664,
-            "duplicate_clusters": 12761,
-            "high_risk_categories": [
-                {"category": "airline", "fraud_rate": 0.0346},
-                {"category": "rideshare", "fraud_rate": 0.0249},
-                {"category": "online_retail", "fraud_rate": 0.0244},
-                {"category": "online_gifts", "fraud_rate": 0.0242},
-            ],
-            "examples": [
-                {"transaction_id": 571924, "risk_signal": "high amount online transaction with fraud label"},
-                {"transaction_id": 149886, "risk_signal": "missing POS entry mode and fraud label"},
-                {"transaction_id": 391987, "risk_signal": "verification mismatch and fraud label"},
-            ],
-        }
-        try:
-            with self.source_engine_for(tenant).connect() as conn:
-                base = conn.execute(text("""
-                    SELECT
-                      COUNT(*) AS total_transactions,
-                      SUM(CASE WHEN isFraud THEN 1 ELSE 0 END) AS fraud_transactions,
-                      AVG(CASE WHEN isFraud THEN transactionAmount ELSE NULL END) AS fraud_avg_amount,
-                      AVG(CASE WHEN NOT isFraud THEN transactionAmount ELSE NULL END) AS nonfraud_avg_amount
-                    FROM credit_card_transactions_safe
-                """)).mappings().first()
-                cnp = conn.execute(text("""
-                    SELECT COUNT(*) AS total, SUM(CASE WHEN isFraud THEN 1 ELSE 0 END) AS fraud
-                    FROM credit_card_transactions_safe
-                    WHERE cardPresent = false
-                """)).mappings().first()
-                mismatch = conn.execute(text("""
-                    SELECT COUNT(*) AS total, SUM(CASE WHEN isFraud THEN 1 ELSE 0 END) AS fraud
-                    FROM credit_card_transactions_safe
-                    WHERE cvvMatch = false
-                """)).mappings().first()
-                pos_missing = conn.execute(text("""
-                    SELECT COUNT(*) AS total, SUM(CASE WHEN isFraud THEN 1 ELSE 0 END) AS fraud
-                    FROM credit_card_transactions_safe
-                    WHERE posEntryMode IS NULL OR posEntryMode = ''
-                """)).mappings().first()
-                categories = conn.execute(text("""
-                    SELECT merchantCategoryCode AS category,
-                           COUNT(*) AS total,
-                           SUM(CASE WHEN isFraud THEN 1 ELSE 0 END) AS fraud
-                    FROM credit_card_transactions_safe
-                    GROUP BY merchantCategoryCode
-                    HAVING COUNT(*) >= 100
-                    ORDER BY (SUM(CASE WHEN isFraud THEN 1 ELSE 0 END) / COUNT(*)) DESC
-                    LIMIT 4
-                """)).mappings().all()
-                dup = conn.execute(text("""
-                    SELECT COUNT(*) AS clusters FROM (
-                      SELECT customerId, merchantName, transactionAmount, DATE(transactionDateTime) AS tx_day
-                      FROM credit_card_transactions_safe
-                      GROUP BY customerId, merchantName, transactionAmount, DATE(transactionDateTime)
-                      HAVING COUNT(*) > 1
-                    ) q
-                """)).mappings().first()
-            total = int(base["total_transactions"] or 0)
-            fraud = int(base["fraud_transactions"] or 0)
-            if total <= 0:
-                return fallback
-            return {
-                **fallback,
-                "source_mode": "live_safe_view",
-                "total_transactions": total,
-                "fraud_transactions": fraud,
-                "fraud_rate": fraud / total,
-                "fraud_avg_amount": float(base["fraud_avg_amount"] or fallback["fraud_avg_amount"]),
-                "nonfraud_avg_amount": float(base["nonfraud_avg_amount"] or fallback["nonfraud_avg_amount"]),
-                "card_not_present_count": int(cnp["total"] or 0),
-                "card_not_present_fraud_rate": (int(cnp["fraud"] or 0) / int(cnp["total"] or 1)),
-                "verification_mismatch_count": int(mismatch["total"] or 0),
-                "verification_mismatch_fraud_rate": (int(mismatch["fraud"] or 0) / int(mismatch["total"] or 1)),
-                "pos_missing_count": int(pos_missing["total"] or 0),
-                "pos_missing_fraud_rate": (int(pos_missing["fraud"] or 0) / int(pos_missing["total"] or 1)),
-                "duplicate_clusters": int(dup["clusters"] or 0),
-                "high_risk_categories": [
-                    {"category": row["category"], "fraud_rate": int(row["fraud"] or 0) / int(row["total"] or 1)}
-                    for row in categories
-                ] or fallback["high_risk_categories"],
-            }
-        except Exception:
-            return fallback
-
-    def _creditcardfraud_candidate_specs(self, profile, hypotheses):
-        baseline = profile["fraud_rate"]
-        categories = profile["high_risk_categories"]
-        examples = profile["examples"]
-        evidence_limit = "Draft candidate from Autopilot playbook; requires human review before formal finding approval."
-        return [
-            {
-                "hypothesis_key": hypotheses["Card-not-present transactions concentrate fraud risk"],
-                "title": "Card-not-present transactions carry elevated fraud risk",
-                "conclusion": f"Card-not-present transactions show a fraud rate of {profile['card_not_present_fraud_rate']:.2%} versus the dataset baseline of {baseline:.2%}, making this a high-value triage segment.",
-                "value_score": 0.84,
-                "confidence": 0.78,
-                "novelty_score": 0.58,
-                "impact_score": 0.82,
-                "evidence_chain": [
-                    {"kind": "aggregate", "source_ref": "credit_card_transactions_safe", "metric": "baseline_fraud_rate", "value": f"{baseline:.2%}"},
-                    {"kind": "aggregate", "source_ref": "credit_card_transactions_safe", "metric": "card_not_present_fraud_rate", "value": f"{profile['card_not_present_fraud_rate']:.2%}"},
-                    {"kind": "volume", "source_ref": "credit_card_transactions_safe", "metric": "card_not_present_count", "value": profile["card_not_present_count"]},
-                ],
-                "evidence_limits": [evidence_limit],
-                "suggested_action": {"next": "Break down by merchant category and transaction amount decile."},
-            },
-            {
-                "hypothesis_key": hypotheses["Verification mismatch transactions have elevated fraud rate"],
-                "title": "Verification mismatch is a compact fraud-risk signal",
-                "conclusion": f"Transactions where the derived verification-match flag is false show a fraud rate of {profile['verification_mismatch_fraud_rate']:.2%}, above the baseline of {baseline:.2%}.",
-                "value_score": 0.79,
-                "confidence": 0.73,
-                "novelty_score": 0.52,
-                "impact_score": 0.77,
-                "evidence_chain": [
-                    {"kind": "aggregate", "source_ref": "credit_card_transactions_safe", "metric": "verification_mismatch_count", "value": profile["verification_mismatch_count"]},
-                    {"kind": "aggregate", "source_ref": "credit_card_transactions_safe", "metric": "verification_mismatch_fraud_rate", "value": f"{profile['verification_mismatch_fraud_rate']:.2%}"},
-                    {"kind": "privacy_boundary", "source_ref": "credit_card_transactions_safe", "metric": "derived_match_flag_only", "value": "raw verification values excluded"},
-                ],
-                "evidence_limits": [evidence_limit, "Uses a derived match flag only; raw verification values are not surfaced."],
-                "suggested_action": {"next": "Prioritize mismatch transactions with high amount or card-not-present channel."},
-            },
-            {
-                "hypothesis_key": hypotheses["Missing POS entry mode may identify a weak-control channel"],
-                "title": "Missing POS entry mode should be reviewed as a weak-control pattern",
-                "conclusion": f"Transactions with missing POS entry mode show a fraud rate of {profile['pos_missing_fraud_rate']:.2%}, materially above baseline.",
-                "value_score": 0.88,
-                "confidence": 0.8,
-                "novelty_score": 0.66,
-                "impact_score": 0.84,
-                "evidence_chain": [
-                    {"kind": "aggregate", "source_ref": "credit_card_transactions_safe", "metric": "pos_missing_count", "value": profile["pos_missing_count"]},
-                    {"kind": "aggregate", "source_ref": "credit_card_transactions_safe", "metric": "pos_missing_fraud_rate", "value": f"{profile['pos_missing_fraud_rate']:.2%}"},
-                    {"kind": "example", "source_ref": "credit_card_transactions_safe", "metric": "high_risk_transaction_id", "value": examples[1]["transaction_id"]},
-                ],
-                "evidence_limits": [evidence_limit],
-                "suggested_action": {"next": "Review ingestion completeness and POS-mode normalization rules."},
-            },
-            {
-                "hypothesis_key": hypotheses["Merchant categories concentrate fraud exposure"],
-                "title": "Merchant category concentration reveals high-yield fraud review segments",
-                "conclusion": "The highest-risk merchant categories include " + ", ".join(f"{c['category']} ({c['fraud_rate']:.2%})" for c in categories) + ".",
-                "value_score": 0.81,
-                "confidence": 0.76,
-                "novelty_score": 0.61,
-                "impact_score": 0.8,
-                "evidence_chain": [
-                    {"kind": "aggregate", "source_ref": "credit_card_transactions_safe", "metric": "top_merchant_categories", "value": [{"category": c["category"], "fraud_rate": f"{c['fraud_rate']:.2%}"} for c in categories]},
-                    {"kind": "aggregate", "source_ref": "credit_card_transactions_safe", "metric": "baseline_fraud_rate", "value": f"{baseline:.2%}"},
-                ],
-                "evidence_limits": [evidence_limit, "Category ranking should be paired with volume and amount thresholds before operational use."],
-                "suggested_action": {"next": "Create category-specific review queues for high-rate and high-volume intersections."},
-            },
-            {
-                "hypothesis_key": hypotheses["Same account/merchant/amount/day duplicate clusters indicate multi-swipe risk"],
-                "title": "Same-day duplicate transaction clusters need multi-swipe review",
-                "conclusion": f"The dataset contains {profile['duplicate_clusters']:,} same customer / same merchant / same amount / same-day duplicate clusters, a useful review entry point for duplicate authorization and multi-swipe behavior.",
-                "value_score": 0.77,
-                "confidence": 0.7,
-                "novelty_score": 0.64,
-                "impact_score": 0.72,
-                "evidence_chain": [
-                    {"kind": "cluster", "source_ref": "credit_card_transactions_safe", "metric": "duplicate_clusters", "value": profile["duplicate_clusters"]},
-                    {"kind": "example", "source_ref": "credit_card_transactions_safe", "metric": "high_risk_transaction_id", "value": examples[0]["transaction_id"]},
-                ],
-                "evidence_limits": [evidence_limit, "Duplicate clusters include benign repeats; candidate requires case-level review."],
-                "suggested_action": {"next": "Separate reversals, merchant retries, and high-confidence multi-swipe clusters."},
-            },
-        ]
-
     def _autopilot_session_row(self, tenant, session_key):
         with self.metadata_engine_for(tenant).connect() as conn:
             return conn.execute(
@@ -9846,9 +8565,6 @@ class ReasoningRepository:
             )
         return {"closed_count": result.rowcount}
 
-    def ensure_default_task(self, tenant):
-        return None
-
     def run_task(self, tenant, task_key):
         return self.run_scoped_graph_task(tenant, task_key)
 
@@ -9891,8 +8607,14 @@ class ReasoningRepository:
         scope_depth = int(scope.get("depth") or 1)
         scope_limit = int(scope.get("node_limit") or 200)
         scope_edge_limit = int(scope.get("edge_limit") or scope_limit)
-        engine = ReasoningEngine(self.instance_repository)
-        graph_context = self._scoped_graph_prompt_context(tenant, center_node, scope_depth, scope_limit, scope_edge_limit)
+        graph_context = self._scoped_graph_prompt_context(
+            tenant,
+            center_node,
+            scope_depth,
+            scope_limit,
+            scope_edge_limit,
+            demo_mode=self._explicit_demo_mode(scope),
+        )
         yield {
             "event": "llm_request_body",
             "data": self._llm_request_trace_payload(
@@ -9911,6 +8633,33 @@ class ReasoningRepository:
                 ),
             ),
         }
+        if not self._approved_or_explicit_demo_graph_context(graph_context):
+            tool_calls[0]["status"] = "blocked"
+            tool_calls[0]["projection_source"] = graph_context.get("projection_source")
+            tool_calls[0]["demo_mode"] = graph_context.get("demo_mode", False)
+            tool_calls[0]["degraded_reason"] = graph_context.get("degraded_reason")
+            tool_calls[1]["status"] = "skipped"
+            output, eval_result = self._missing_projection_block_payload(tenant, graph_context, evidence_paths)
+            yield {
+                "event": "llm_response_body",
+                "data": self._llm_response_trace_payload(
+                    tenant,
+                    task,
+                    scope,
+                    response_body={
+                        "schema_version": "reasoning_response_v1",
+                        "status": "blocked",
+                        "structured_answer": None,
+                        "projection_source": output["projection_source"],
+                        "demo_mode": output["demo_mode"],
+                        "degraded_reason": output["degraded_reason"],
+                    },
+                ),
+            }
+            run = self._record_run(tenant, task, query_plan, tool_calls, evidence_paths, output, eval_result, "blocked", started)
+            yield {"event": "run_complete", "data": {"tenant": tenant.public_dict(), "task": task, "run": run, "findings": [], "approved": False}}
+            return
+        engine = ReasoningEngine(self.instance_repository)
         structured_answer = engine.analyze(tenant, center_node, task.get("question"), depth=scope_depth, limit=scope_limit)
         structured_response = (
             self._reasoning_response_v1(tenant, task, scope, structured_answer, evidence_paths, graph_context)
@@ -9976,9 +8725,21 @@ class ReasoningRepository:
             "finding_keys": [finding["canonical_key"]],
             "unsupported_claims": [],
             "draft_only": True,
+            "projection_source": graph_context.get("projection_source"),
+            "demo_mode": graph_context.get("demo_mode", False),
+            "degraded_reason": graph_context.get("degraded_reason"),
             **({"structured_answer": structured_answer, "structured_response": structured_response} if structured_answer else {}),
         }
-        eval_result = {"passed": True, "approved_only": True, "draft_only": True, "unsupported_claims": [], "evidence_path_count": len(evidence_paths), "tenant_id": tenant.tenant_id}
+        eval_result = {
+            "passed": True,
+            "approved_only": True,
+            "draft_only": True,
+            "unsupported_claims": [],
+            "evidence_path_count": len(evidence_paths),
+            "tenant_id": tenant.tenant_id,
+            "projection_source": graph_context.get("projection_source"),
+            "demo_mode": graph_context.get("demo_mode", False),
+        }
         if structured_response and structured_response.get("conclusion_evaluation"):
             eval_result["conclusion_evaluation"] = structured_response["conclusion_evaluation"]
         run = self._record_run(tenant, task, query_plan, tool_calls, evidence_paths, output, eval_result, "completed", started)
@@ -10664,13 +9425,6 @@ class ReasoningRepository:
     def _plain_reasoning_conclusion(self, question, label, detailed_conclusion, ranked_paths, second_hop_paths, graph_degree):
         return plain_reasoning_conclusion(question, label, detailed_conclusion, ranked_paths, second_hop_paths, graph_degree)
 
-    def _display_label_from_question(self, question, fallback):
-        return display_label_from_question(question, fallback)
-
-    def _paths_with_peer(self, second_hop_paths, peer_keys):
-        return paths_with_peer(second_hop_paths, peer_keys)
-
-
     def _formatted_scoped_reasoning_prompt_request(self, tenant, task, scope, evidence_paths, scope_depth, scope_limit, scope_edge_limit, graph_context=None):
         question = task.get("question") or ""
         center_node = scope.get("center_node")
@@ -10730,9 +9484,69 @@ class ReasoningRepository:
             },
         }
 
-    def _scoped_graph_prompt_context(self, tenant, center_node, depth, node_limit, edge_limit):
+    def _explicit_demo_mode(self, scope):
+        scope = scope or {}
+        return bool(scope.get("demo_mode") is True or scope.get("allow_demo_mode") is True or scope.get("allow_demo_fallback") is True)
+
+    def _reasoning_projection_sources(self, *contexts):
+        sources = []
+        for context in contexts:
+            scope = (context or {}).get("scope") or {}
+            for source in (scope.get("projection_source"), (context or {}).get("projection_source")):
+                if not source:
+                    continue
+                for part in str(source).split("+"):
+                    part = part.strip()
+                    if part and part not in sources:
+                        sources.append(part)
+        return "+".join(sources) if sources else "none"
+
+    def _approved_or_explicit_demo_graph_context(self, graph_context):
+        graph_context = graph_context or {}
+        return bool(graph_context.get("approved") or graph_context.get("demo_mode"))
+
+    def _missing_projection_block_payload(self, tenant, graph_context, evidence_paths):
+        graph_context = graph_context or {}
+        unsupported_claims = ["missing approved graph projection"]
+        output = {
+            "summary": "Scoped graph reasoning blocked because no approved graph projection is available.",
+            "unsupported_claims": unsupported_claims,
+            "draft_only": True,
+            "projection_source": graph_context.get("projection_source") or "none",
+            "demo_mode": bool(graph_context.get("demo_mode")),
+            "degraded_reason": graph_context.get("degraded_reason") or self._missing_projection_reason(),
+        }
+        eval_result = {
+            "passed": False,
+            "approved_only": True,
+            "draft_only": True,
+            "unsupported_claims": unsupported_claims,
+            "evidence_path_count": len(evidence_paths or []),
+            "tenant_id": tenant.tenant_id,
+            "projection_source": output["projection_source"],
+            "demo_mode": output["demo_mode"],
+            "degraded_reason": output["degraded_reason"],
+        }
+        return output, eval_result
+
+    def _missing_projection_reason(self):
+        return "No reviewed SchemaGraphModelingAgent projection. Import data and run schema-to-graph modeling first."
+
+    def _scoped_graph_prompt_context(self, tenant, center_node, depth, node_limit, edge_limit, demo_mode=False):
+        demo_mode = bool(demo_mode)
         if not center_node or ":" not in str(center_node):
-            return {"center_node": center_node, "nodes": [], "edges": [], "degree": {"center": 0}}
+            projection_source = "explicit_demo_mode" if demo_mode else "none"
+            return {
+                "center_node": center_node,
+                "nodes": [],
+                "edges": [],
+                "retrieval_mode": "explicit_demo_mode" if demo_mode else "degraded_no_approved_projection",
+                "degree": {"center": 0},
+                "approved": False,
+                "projection_source": projection_source,
+                "demo_mode": demo_mode,
+                "degraded_reason": None if demo_mode else self._missing_projection_reason(),
+            }
         object_type, instance_id = str(center_node).split(":", 1)
         node_limit = max(1, min(int(node_limit or 200), 300))
         edge_limit = max(1, min(int(edge_limit or node_limit), 300))
@@ -10747,6 +9561,10 @@ class ReasoningRepository:
             limit=fetch_limit,
         ) or {}
         graph = self.instance_repository.full_graph(tenant, object_type, instance_id, limit=fetch_limit) or {}
+        approved = bool(local_rag_context.get("approved") or graph.get("approved"))
+        projection_source = self._reasoning_projection_sources(local_rag_context, graph)
+        if demo_mode and not approved:
+            projection_source = "explicit_demo_mode"
         nodes = graph.get("nodes") or []
         edges = graph.get("edges") or []
         if local_rag_context.get("approved"):
@@ -10825,20 +9643,11 @@ class ReasoningRepository:
             node_type = (nodes_by_id.get(other) or {}).get("type") or "unknown"
             neighbor_type_counts[node_type] = neighbor_type_counts.get(node_type, 0) + 1
 
+        # Source-key profiling (SQL-join aggregation across tables sharing
+        # a source key) was retired along with the rest of reasoning_engine's
+        # SQL retrieval core -- no graph-native replacement exists yet, so
+        # this stays empty rather than calling a method that no longer exists.
         source_key_profile = None
-        try:
-            cfg_key = self.instance_repository._cfg_key(object_type)
-            cfg = self.instance_repository.reasoning_entity_config(tenant).get(cfg_key)
-            if cfg:
-                source_key_profile = ReasoningEngine(self.instance_repository)._source_key_profile(
-                    tenant,
-                    object_type,
-                    instance_id,
-                    cfg,
-                    depth=depth,
-                )
-        except Exception:
-            source_key_profile = None
 
         top_source_paths = (source_key_profile or {}).get("top_paths") or []
         source_backed_related_nodes = [
@@ -10907,9 +9716,22 @@ class ReasoningRepository:
                 "eval": local_rag_context.get("eval") or {},
             }
 
+        if retrieval_context:
+            retrieval_mode = "local_graph_context"
+        elif approved:
+            retrieval_mode = "approved_graph_scope"
+        elif demo_mode:
+            retrieval_mode = "explicit_demo_mode"
+        else:
+            retrieval_mode = "degraded_no_approved_projection"
+
         return {
             "center_node": center_node,
-            "retrieval_mode": "local_graph_context" if retrieval_context else "approved_graph_scope",
+            "retrieval_mode": retrieval_mode,
+            "approved": approved,
+            "projection_source": projection_source,
+            "demo_mode": demo_mode,
+            "degraded_reason": None if approved or demo_mode else self._missing_projection_reason(),
             "depth": depth,
             "node_limit": node_limit,
             "edge_limit": edge_limit,
@@ -10992,7 +9814,23 @@ class ReasoningRepository:
         scope_depth = int(scope.get("depth") or 1)
         scope_limit = int(scope.get("node_limit") or 200)
         scope_edge_limit = int(scope.get("edge_limit") or scope_limit)
-        graph_context = self._scoped_graph_prompt_context(tenant, center_node, scope_depth, scope_limit, scope_edge_limit)
+        graph_context = self._scoped_graph_prompt_context(
+            tenant,
+            center_node,
+            scope_depth,
+            scope_limit,
+            scope_edge_limit,
+            demo_mode=self._explicit_demo_mode(scope),
+        )
+        if not self._approved_or_explicit_demo_graph_context(graph_context):
+            tool_calls[0]["status"] = "blocked"
+            tool_calls[0]["projection_source"] = graph_context.get("projection_source")
+            tool_calls[0]["demo_mode"] = graph_context.get("demo_mode", False)
+            tool_calls[0]["degraded_reason"] = graph_context.get("degraded_reason")
+            tool_calls[1]["status"] = "skipped"
+            output, eval_result = self._missing_projection_block_payload(tenant, graph_context, evidence_paths)
+            run = self._record_run(tenant, task, query_plan, tool_calls, evidence_paths, output, eval_result, "blocked", started)
+            return {"tenant": tenant.public_dict(), "task": task, "run": run, "findings": [], "approved": False}
         engine = ReasoningEngine(self.instance_repository)
         structured_answer = engine.analyze(tenant, center_node, task.get("question"), depth=scope_depth, limit=scope_limit)
         structured_response = (
@@ -11044,6 +9882,9 @@ class ReasoningRepository:
             "finding_keys": [finding["canonical_key"]],
             "unsupported_claims": [],
             "draft_only": True,
+            "projection_source": graph_context.get("projection_source"),
+            "demo_mode": graph_context.get("demo_mode", False),
+            "degraded_reason": graph_context.get("degraded_reason"),
             **({"structured_answer": structured_answer, "structured_response": structured_response} if structured_answer else {}),
         }
         eval_result = {
@@ -11053,6 +9894,8 @@ class ReasoningRepository:
             "unsupported_claims": [],
             "evidence_path_count": len(evidence_paths),
             "tenant_id": tenant.tenant_id,
+            "projection_source": graph_context.get("projection_source"),
+            "demo_mode": graph_context.get("demo_mode", False),
         }
         if structured_response and structured_response.get("conclusion_evaluation"):
             eval_result["conclusion_evaluation"] = structured_response["conclusion_evaluation"]
@@ -11207,31 +10050,6 @@ class ReasoningRepository:
         finding["conclusion"] = conclusion
         finding["display_normalized"] = True
         return finding
-
-    def graph_query(self, tenant, object_type, instance_id):
-        return self.instance_repository.neighborhood(tenant, object_type, instance_id, depth=1, limit=200)
-
-    def instance_lookup(self, tenant, object_type, instance_id):
-        return self.instance_repository.detail(tenant, object_type, instance_id)
-
-    def edge_lookup(self, tenant, source, target):
-        return self.instance_repository.edge_detail(tenant, source, target)
-
-    def artifact_lookup(self, tenant, canonical_key):
-        with self.metadata_engine_for(tenant).connect() as conn:
-            row = conn.execute(
-                text(
-                    """
-                    SELECT id, project_id, canonical_key, artifact_type, name, description,
-                           payload_json, confidence, source_refs_json, status, version,
-                           source_agent, created_at, updated_at
-                    FROM aletheia_ontology_artifacts
-                    WHERE project_id = :tenant_id AND canonical_key = :canonical_key AND status = 'approved'
-                    """
-                ),
-                {"tenant_id": tenant.tenant_id, "canonical_key": canonical_key},
-            ).mappings().first()
-        return _artifact_to_dict(row) if row else None
 
     def list_findings(self, tenant, task_key):
         with self.metadata_engine_for(tenant).connect() as conn:
@@ -13315,18 +12133,6 @@ class AletheiaServerHandler(BaseHTTPRequestHandler):
             try:
                 body = self._read_json()
                 result = self.reasoning_repository.create_autopilot_session(tenant, body)
-            except ValueError as exc:
-                self._send_error(HTTPStatus.BAD_REQUEST, str(exc))
-                return
-            except Exception as exc:  # pragma: no cover - displayed to local operator
-                self._send_error(HTTPStatus.INTERNAL_SERVER_ERROR, str(exc))
-                return
-            self._send_json(result)
-            return
-        if parsed.path == "/api/reasoning/autopilot/playbooks/creditcardfraud/run":
-            try:
-                body = self._read_json()
-                result = self.reasoning_repository.run_creditcardfraud_autopilot_playbook(tenant, body)
             except ValueError as exc:
                 self._send_error(HTTPStatus.BAD_REQUEST, str(exc))
                 return

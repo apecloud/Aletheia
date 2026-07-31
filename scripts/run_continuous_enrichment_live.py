@@ -154,8 +154,8 @@ def poll_events(base, tenant, session_key, stop_event, seen, poll_seconds):
 def main():
     parser = argparse.ArgumentParser(description="Run continuous enrichment cycles and print live query trace.")
     parser.add_argument("--base-url", default="http://127.0.0.1:8772")
-    parser.add_argument("--tenant", default="maritime-risk")
-    parser.add_argument("--session-key", default="continuous:maritime-risk:us-iran-impact:mvp")
+    parser.add_argument("--tenant", default="hotpotqa-graph-v1")
+    parser.add_argument("--session-key", default="continuous:hotpotqa-graph-v1:mvp")
     parser.add_argument("--sleep-seconds", type=float, default=30)
     parser.add_argument("--poll-seconds", type=float, default=3)
     parser.add_argument("--max-cycles", type=int, default=0, help="0 means run forever")

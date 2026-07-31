@@ -1,0 +1,231 @@
+[
+  {
+    "qid": "WebQTrn-11",
+    "question": "what time zone am i in cleveland ohio",
+    "center_node": "WebQTrn-11:cleveland",
+    "additional_center_nodes": [],
+    "answers": [
+      "Eastern Time Zone"
+    ],
+    "triple_count": 5332
+  },
+  {
+    "qid": "WebQTrn-15",
+    "question": "what is nina dobrev nationality",
+    "center_node": "WebQTrn-15:nina_dobrev",
+    "additional_center_nodes": [],
+    "answers": [
+      "Bulgaria",
+      "Canada"
+    ],
+    "triple_count": 2086
+  },
+  {
+    "qid": "WebQTrn-47",
+    "question": "what county is heathrow airport in",
+    "center_node": "WebQTrn-47:london_heathrow_airport",
+    "additional_center_nodes": [],
+    "answers": [
+      "Hillingdon"
+    ],
+    "triple_count": 4914
+  },
+  {
+    "qid": "WebQTrn-73",
+    "question": "what form of government was practiced in sparta",
+    "center_node": "WebQTrn-73:sparta",
+    "additional_center_nodes": [],
+    "answers": [
+      "Monarchy",
+      "Aristocracy",
+      "Diarchy",
+      "Republic"
+    ],
+    "triple_count": 1933
+  },
+  {
+    "qid": "WebQTrn-104",
+    "question": "who was the president after jfk died",
+    "center_node": "WebQTrn-104:john_f_kennedy",
+    "additional_center_nodes": [],
+    "answers": [
+      "Lyndon B. Johnson"
+    ],
+    "triple_count": 5871
+  },
+  {
+    "qid": "WebQTrn-126",
+    "question": "where to visit near bangkok",
+    "center_node": "WebQTrn-126:bangkok",
+    "additional_center_nodes": [],
+    "answers": [
+      "Bangkok International Trade and Exhibition Centre",
+      "Dusit Zoo",
+      "Wat Arun",
+      "Magic Land",
+      "Wat Ratchanatdaram"
+    ],
+    "triple_count": 3942
+  },
+  {
+    "qid": "WebQTrn-143",
+    "question": "what did nick clegg study at university",
+    "center_node": "WebQTrn-143:nick_clegg",
+    "additional_center_nodes": [],
+    "answers": [
+      "Social anthropology",
+      "Political philosophy"
+    ],
+    "triple_count": 1113
+  },
+  {
+    "qid": "WebQTrn-152",
+    "question": "what is henry clay known for",
+    "center_node": "WebQTrn-152:henry_clay",
+    "additional_center_nodes": [],
+    "answers": [
+      "Lawyer",
+      "Politician",
+      "Statesman"
+    ],
+    "triple_count": 4489
+  },
+  {
+    "qid": "WebQTrn-164",
+    "question": "where was kennedy when he got shot",
+    "center_node": "WebQTrn-164:john_f_kennedy",
+    "additional_center_nodes": [],
+    "answers": [
+      "Dallas"
+    ],
+    "triple_count": 5871
+  },
+  {
+    "qid": "WebQTrn-196",
+    "question": "who did ben stiller play in megamind",
+    "center_node": "WebQTrn-196:ben_stiller",
+    "additional_center_nodes": [],
+    "answers": [
+      "Bernard"
+    ],
+    "triple_count": 7101
+  },
+  {
+    "qid": "WebQTrn-206",
+    "question": "who won golden boot",
+    "center_node": "WebQTrn-206:premier_league_golden_boot",
+    "additional_center_nodes": [],
+    "answers": [
+      "Robin van Persie",
+      "Cristiano Ronaldo"
+    ],
+    "triple_count": 68
+  },
+  {
+    "qid": "WebQTrn-218",
+    "question": "what are all the names of harry potter",
+    "center_node": "WebQTrn-218:harry_potter",
+    "additional_center_nodes": [],
+    "answers": [
+      "Harry Potter and the Chamber of Secrets",
+      "Harry Potter and the Philosopher's Stone",
+      "Harry Potter and the Deathly Hallows",
+      "Harry Potter and the Order of the Phoenix",
+      "Harry Potter and the Half-Blood Prince"
+    ],
+    "triple_count": 5156
+  },
+  {
+    "qid": "WebQTrn-249",
+    "question": "who is tia and tamera mowry parents",
+    "center_node": "WebQTrn-249:tia_mowry",
+    "additional_center_nodes": [],
+    "answers": [
+      "Darlene Mowry",
+      "Tim Mowry"
+    ],
+    "triple_count": 2193
+  },
+  {
+    "qid": "WebQTrn-258",
+    "question": "what are major exports of the usa",
+    "center_node": "WebQTrn-258:united_states_of_america",
+    "additional_center_nodes": [],
+    "answers": [
+      "Pharmaceutical Preparation",
+      "Automotive industry",
+      "Food Manufacturing",
+      "Industrial Organic Chemicals, NEC"
+    ],
+    "triple_count": 6540
+  },
+  {
+    "qid": "WebQTrn-267",
+    "question": "what other countries does canada trade with",
+    "center_node": "WebQTrn-267:canada",
+    "additional_center_nodes": [],
+    "answers": [
+      "Japan",
+      "United States of America",
+      "United Kingdom"
+    ],
+    "triple_count": 6836
+  },
+  {
+    "qid": "WebQTrn-279",
+    "question": "what language they speak in the philippines",
+    "center_node": "WebQTrn-279:philippines",
+    "additional_center_nodes": [],
+    "answers": [
+      "Filipino language",
+      "English Language"
+    ],
+    "triple_count": 4920
+  },
+  {
+    "qid": "WebQTrn-297",
+    "question": "who was real housewives brandi married to",
+    "center_node": "WebQTrn-297:brandi_glanville",
+    "additional_center_nodes": [],
+    "answers": [
+      "Eddie Cibrian"
+    ],
+    "triple_count": 1622
+  },
+  {
+    "qid": "WebQTrn-326",
+    "question": "what time zone is new york under",
+    "center_node": "WebQTrn-326:new_york",
+    "additional_center_nodes": [],
+    "answers": [
+      "UTC−05:00",
+      "Eastern Time Zone"
+    ],
+    "triple_count": 8209
+  },
+  {
+    "qid": "WebQTrn-349",
+    "question": "what kind of government did benito mussolini have",
+    "center_node": "WebQTrn-349:benito_mussolini",
+    "additional_center_nodes": [],
+    "answers": [
+      "Republican Fascist Party",
+      "National Fascist Party",
+      "Italian Socialist Party"
+    ],
+    "triple_count": 2872
+  },
+  {
+    "qid": "WebQTrn-351",
+    "question": "who is chelsea kane",
+    "center_node": "WebQTrn-351:chelsea_kane",
+    "additional_center_nodes": [],
+    "answers": [
+      "Voice Actor",
+      "Actor",
+      "Singer",
+      "Dancer"
+    ],
+    "triple_count": 1921
+  }
+]

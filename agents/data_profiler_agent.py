@@ -12,7 +12,7 @@ from typing import List
 # Industry Standard LLM Abstractions for Multi-Model Support
 from litellm import completion
 import instructor
-from ontology_artifacts import Base, ColumnProfile, ExtractedColumn, ExtractedTable
+from ontology_artifacts import Base, ColumnProfile, ExtractedTable
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger("DataProfilerAgent")

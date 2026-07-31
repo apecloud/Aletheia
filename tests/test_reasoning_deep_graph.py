@@ -1,9 +1,176 @@
 import unittest
+from unittest.mock import patch
 
 from server.aletheia_server import InstanceRepository, ReasoningRepository
 
 
+class FakeReasoningTenant:
+    tenant_id = "demo"
+
+    def public_dict(self):
+        return {"tenant_id": self.tenant_id}
+
+
+class EmptyGraphInstanceRepository:
+    def local_rag_context(self, *args, **kwargs):
+        return None
+
+    def full_graph(self, *args, **kwargs):
+        return None
+
+    def edge_detail(self, *args, **kwargs):
+        return None
+
+
+class ApprovedGraphInstanceRepository(EmptyGraphInstanceRepository):
+    def full_graph(self, *args, **kwargs):
+        return {
+            "approved": True,
+            "nodes": [
+                {"id": "Object:entity-a", "type": "Object", "label": "Entity A"},
+            ],
+            "edges": [],
+            "scope": {"projection_source": "SchemaGraphModelingAgent"},
+        }
+
+
+class EmptyReasoningEngine:
+    def __init__(self, *args, **kwargs):
+        pass
+
+    def analyze(self, *args, **kwargs):
+        return None
+
+
+class StructuredReasoningEngine:
+    def __init__(self, *args, **kwargs):
+        pass
+
+    def analyze(self, *args, **kwargs):
+        return {
+            "title": "Entity A Profile",
+            "profile_summary": "Entity A has approved graph context.",
+            "metrics": {"label": "Entity A"},
+        }
+
+
 class DeepGraphReasoningTest(unittest.TestCase):
+    def _repo_with_task(self, instance_repository, scope):
+        repo = object.__new__(ReasoningRepository)
+        repo.instance_repository = instance_repository
+        repo._get_task_row = lambda tenant, task_key: {
+            "id": 1,
+            "canonical_key": task_key,
+            "question": "What does the scoped graph show?",
+            "status": "active",
+            "scope": scope,
+        }
+        repo.update_task_status = lambda *args, **kwargs: None
+        captured = {}
+
+        def record_run(tenant, task, query_plan, tool_calls, evidence_paths, output, eval_result, status, started):
+            captured["run"] = {
+                "id": 10,
+                "status": status,
+                "query_plan": query_plan,
+                "tool_calls": tool_calls,
+                "evidence_paths": evidence_paths,
+                "output": output,
+                "eval_result": eval_result,
+            }
+            return captured["run"]
+
+        def record_finding(tenant, run, finding):
+            captured["finding"] = dict(finding, id=20)
+            return captured["finding"]
+
+        repo._record_run = record_run
+        repo._record_finding = record_finding
+        return repo, captured
+
+    def test_scoped_graph_task_blocks_without_approved_projection_or_demo_mode(self):
+        repo, captured = self._repo_with_task(
+            EmptyGraphInstanceRepository(),
+            {
+                "center_node": "Object:entity-a",
+                "evidence_paths": [{"kind": "graph_node", "node": "Object:entity-a"}],
+            },
+        )
+
+        with patch("server.aletheia_server.ReasoningEngine", side_effect=AssertionError("engine must not run")):
+            result = repo.run_scoped_graph_task(FakeReasoningTenant(), "task-no-projection")
+
+        self.assertFalse(result["approved"])
+        self.assertEqual(result["findings"], [])
+        self.assertNotIn("finding", captured)
+        self.assertEqual(captured["run"]["status"], "blocked")
+        self.assertEqual(captured["run"]["tool_calls"][0]["status"], "blocked")
+        self.assertEqual(captured["run"]["tool_calls"][1]["status"], "skipped")
+        self.assertEqual(captured["run"]["output"]["projection_source"], "none")
+        self.assertFalse(captured["run"]["output"]["demo_mode"])
+        self.assertIn("No reviewed SchemaGraphModelingAgent projection", captured["run"]["output"]["degraded_reason"])
+        self.assertIn("missing approved graph projection", captured["run"]["eval_result"]["unsupported_claims"])
+
+    def test_streaming_scoped_graph_task_blocks_without_approved_projection(self):
+        repo, captured = self._repo_with_task(
+            EmptyGraphInstanceRepository(),
+            {
+                "center_node": "Object:entity-a",
+                "evidence_paths": [{"kind": "graph_node", "node": "Object:entity-a"}],
+            },
+        )
+
+        with patch("server.aletheia_server.ReasoningEngine", side_effect=AssertionError("engine must not run")):
+            events = list(repo.run_scoped_graph_task_streaming(FakeReasoningTenant(), "task-stream-no-projection"))
+
+        response_events = [event for event in events if event["event"] == "llm_response_body"]
+        self.assertEqual(response_events[0]["data"]["response_body"]["status"], "blocked")
+        self.assertEqual(response_events[0]["data"]["response_body"]["projection_source"], "none")
+        self.assertFalse(response_events[0]["data"]["response_body"]["demo_mode"])
+        self.assertEqual(captured["run"]["status"], "blocked")
+        self.assertEqual(events[-1]["event"], "run_complete")
+        self.assertFalse(events[-1]["data"]["approved"])
+        self.assertEqual(events[-1]["data"]["findings"], [])
+
+    def test_scoped_graph_task_allows_static_fallback_only_in_explicit_demo_mode(self):
+        repo, captured = self._repo_with_task(
+            EmptyGraphInstanceRepository(),
+            {
+                "center_node": "Object:entity-a",
+                "demo_mode": True,
+                "evidence_paths": [{"kind": "graph_node", "node": "Object:entity-a"}],
+            },
+        )
+
+        with patch("server.aletheia_server.ReasoningEngine", EmptyReasoningEngine):
+            result = repo.run_scoped_graph_task(FakeReasoningTenant(), "task-demo")
+
+        self.assertTrue(result["approved"])
+        self.assertEqual(captured["run"]["status"], "completed")
+        self.assertEqual(captured["run"]["output"]["projection_source"], "explicit_demo_mode")
+        self.assertTrue(captured["run"]["output"]["demo_mode"])
+        self.assertIsNone(captured["run"]["output"]["degraded_reason"])
+        self.assertIn("finding", captured)
+
+    def test_scoped_graph_task_allows_approved_projection_without_demo_mode(self):
+        repo, captured = self._repo_with_task(
+            ApprovedGraphInstanceRepository(),
+            {
+                "center_node": "Object:entity-a",
+                "evidence_paths": [{"kind": "graph_node", "node": "Object:entity-a"}],
+            },
+        )
+
+        with patch("server.aletheia_server.ReasoningEngine", StructuredReasoningEngine):
+            result = repo.run_scoped_graph_task(FakeReasoningTenant(), "task-approved")
+
+        self.assertTrue(result["approved"])
+        self.assertEqual(captured["run"]["status"], "completed")
+        self.assertEqual(captured["run"]["output"]["projection_source"], "SchemaGraphModelingAgent")
+        self.assertFalse(captured["run"]["output"]["demo_mode"])
+        self.assertIsNone(captured["run"]["output"]["degraded_reason"])
+        self.assertIn("structured_response", captured["run"]["output"])
+
     def test_instance_repository_exposes_schema_reasoning_entity_adapters(self):
         self.assertTrue(callable(getattr(InstanceRepository, "_fetch_entity", None)))
         self.assertTrue(callable(getattr(InstanceRepository, "_entity_node", None)))

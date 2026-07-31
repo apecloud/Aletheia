@@ -1,0 +1,1263 @@
+[
+  {
+    "qid": "5a72b3335542994cef4bc3dc",
+    "question": "What party campaigned for the Irish Home Rule Movement?",
+    "center_node": "5a72b3335542994cef4bc3dc:home_rule_league",
+    "answer": "The Home Rule League",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 17,
+    "extraction_error": "",
+    "additional_center_nodes": []
+  },
+  {
+    "qid": "5a7647505542992d0ec06089",
+    "question": "How has played in more bands, Kim Wilson or Chino Moreno?",
+    "center_node": "5a7647505542992d0ec06089:chino_moreno",
+    "answer": "Chino Moreno",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 6,
+    "extraction_error": "",
+    "additional_center_nodes": [
+      "5a7647505542992d0ec06089:chino_moreno",
+      "5a7647505542992d0ec06089:kim_wilson"
+    ]
+  },
+  {
+    "qid": "5a72b8de5542994cef4bc3df",
+    "question": "Which runner-up from \"American Idol\" wrote country song \"Next Boyfriend\"?",
+    "center_node": "5a72b8de5542994cef4bc3df:lauren_alaina",
+    "answer": "Lauren Alaina",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 18,
+    "extraction_error": "",
+    "additional_center_nodes": []
+  },
+  {
+    "qid": "5a7651825542992d0ec060a3",
+    "question": "Which university has more schools, Ateneo de Davao University or University of Rochester?",
+    "center_node": "5a7651825542992d0ec060a3:ateneo_de_davao_university",
+    "answer": "Ateneo de Davao University",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 3,
+    "extraction_error": "",
+    "additional_center_nodes": [
+      "5a7651825542992d0ec060a3:ateneo_de_davao_university",
+      "5a7651825542992d0ec060a3:university_of_rochester"
+    ]
+  },
+  {
+    "qid": "5a72b9155542992359bc3187",
+    "question": "What service is an Amtrak flagship that includes BWI Rail Station as one of its Amtrak intercity services?",
+    "center_node": "5a72b9155542992359bc3187:acela_express",
+    "answer": "Acela Express",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 5,
+    "extraction_error": "",
+    "additional_center_nodes": []
+  },
+  {
+    "qid": "5a7652435542992d0ec060a5",
+    "question": "Who was the first Russian composer to make a lasting impression internationally, Alessandro Scarlatti or Pyotr Ilyich Tchaikovsky?",
+    "center_node": "5a7652435542992d0ec060a5:pyotr_ilyich_tchaikovsky",
+    "answer": "Pyotr Ilyich Tchaikovsky",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 3,
+    "extraction_error": "",
+    "additional_center_nodes": [
+      "5a7652435542992d0ec060a5:alessandro_scarlatti",
+      "5a7652435542992d0ec060a5:pyotr_ilyich_tchaikovsky",
+      "5a7652435542992d0ec060a5:tchaikovsky_film"
+    ]
+  },
+  {
+    "qid": "5a72ba165542992359bc318a",
+    "question": "Who runs the website surpassed by both Baidu Baike and Hudong.com?",
+    "center_node": "5a72ba165542992359bc318a:chinese_wikipedia",
+    "answer": "Wikimedia Foundation",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 7,
+    "extraction_error": "",
+    "additional_center_nodes": []
+  },
+  {
+    "qid": "5a7652785542992db9473760",
+    "question": "Which of the following is known for his work \"Good Bye Lenin!\" in 2003: Vladimir Danilevich or Wolfgang Becker?",
+    "center_node": "5a7652785542992db9473760:wolfgang_becker",
+    "answer": "Wolfgang Becker",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 9,
+    "extraction_error": "",
+    "additional_center_nodes": [
+      "5a7652785542992db9473760:good_bye_lenin",
+      "5a7652785542992db9473760:good_bye_lenin_soundtrack",
+      "5a7652785542992db9473760:vladimir_danilevich",
+      "5a7652785542992db9473760:wolfgang_becker"
+    ]
+  },
+  {
+    "qid": "5a72ba1a5542992359bc318b",
+    "question": "Which song did Eminem and Rihanna collaborate on after their other collaboration song in studio album \"Unapologetic?\"",
+    "center_node": "5a72ba1a5542992359bc318b:the_monster_song",
+    "answer": "The Monster",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 16,
+    "extraction_error": "",
+    "additional_center_nodes": []
+  },
+  {
+    "qid": "5a76538d5542992db9473764",
+    "question": "Which singer/songwriter is the Executive Vice President of A&R at Capitol Records: Nate Albert or Rod Stewart?",
+    "center_node": "5a76538d5542992db9473764:nate_albert",
+    "answer": "Nate Albert",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 12,
+    "extraction_error": "",
+    "additional_center_nodes": [
+      "5a76538d5542992db9473764:nate_albert",
+      "5a76538d5542992db9473764:rod_stewart"
+    ]
+  },
+  {
+    "qid": "5a72bb045542994cef4bc3e4",
+    "question": "The Nun is based on what film series based on the real life cases of Ed and Lorraine Warren?",
+    "center_node": "5a72bb045542994cef4bc3e4:the_nun_2018_film",
+    "answer": "The Conjuring",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 7,
+    "extraction_error": "",
+    "additional_center_nodes": []
+  },
+  {
+    "qid": "5a769b0d5542993569682c50",
+    "question": "Which documentary film was created first, The End of Suburbia or Super High Me?",
+    "center_node": "5a769b0d5542993569682c50:the_end_of_suburbia",
+    "answer": "The End of Suburbia",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 5,
+    "extraction_error": "",
+    "additional_center_nodes": [
+      "5a769b0d5542993569682c50:super_high",
+      "5a769b0d5542993569682c50:super_high_me",
+      "5a769b0d5542993569682c50:the_end_of_suburbia"
+    ]
+  },
+  {
+    "qid": "5a72c6565542992359bc31a7",
+    "question": "What is the stage name of the former pornographic actress born in 1981 that co-hosted the 26th AVN Awards?",
+    "center_node": "5a72c6565542992359bc31a7:belladonna_actress",
+    "answer": "Belladonna",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 7,
+    "extraction_error": "",
+    "additional_center_nodes": []
+  },
+  {
+    "qid": "5a76a0005542993569682c64",
+    "question": "Which American film director is an advisor for Disney, Rick Ray or John Lasseter?",
+    "center_node": "5a76a0005542993569682c64:john_lasseter",
+    "answer": "John Alan Lasseter",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 15,
+    "extraction_error": "",
+    "additional_center_nodes": [
+      "5a76a0005542993569682c64:john_lasseter",
+      "5a76a0005542993569682c64:rick_ray"
+    ]
+  },
+  {
+    "qid": "5a72c6f65542994cef4bc402",
+    "question": "Wheat salad is composed typically of what red fruit?",
+    "center_node": "5a72c6f65542994cef4bc402:wheat_salad",
+    "answer": "tomato",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 2,
+    "extraction_error": "",
+    "additional_center_nodes": []
+  },
+  {
+    "qid": "5a76f22055429972597f13fa",
+    "question": "What position in their bands did both Christopher Amott and Johnny Edwards have in common?",
+    "center_node": "5a76f22055429972597f13fa:christopher_amott",
+    "answer": "vocalist",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 13,
+    "extraction_error": "",
+    "additional_center_nodes": [
+      "5a76f22055429972597f13fa:christopher_amott",
+      "5a76f22055429972597f13fa:johnny_edwards_musician"
+    ]
+  },
+  {
+    "qid": "5a72d3525542991f9a20c5ab",
+    "question": "What was the founding year of the county where Weber's Store is located?",
+    "center_node": "5a72d3525542991f9a20c5ab:weber_s_store",
+    "answer": "1905",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 2,
+    "extraction_error": "",
+    "additional_center_nodes": []
+  },
+  {
+    "qid": "5a76fda05542994aec3b71b0",
+    "question": "Martin Flavin and Peter Benchley both did what occupation?",
+    "center_node": "5a76fda05542994aec3b71b0:peter_benchley",
+    "answer": "novelist",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 4,
+    "extraction_error": "",
+    "additional_center_nodes": [
+      "5a76fda05542994aec3b71b0:martin_flavin",
+      "5a76fda05542994aec3b71b0:martin_flavin_politician",
+      "5a76fda05542994aec3b71b0:peter_benchley"
+    ]
+  },
+  {
+    "qid": "5a72d7b35542991f9a20c5be",
+    "question": "What is the name of the pop artist that belongs on the Pledis Entertainment label and has 13 members?",
+    "center_node": "5a72d7b35542991f9a20c5be:seventeen_band",
+    "answer": "Seventeen",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 8,
+    "extraction_error": "",
+    "additional_center_nodes": []
+  },
+  {
+    "qid": "5a77121a5542994aec3b71db",
+    "question": "Which 1970's film was released first, Charley and the Angel or The Boatniks?",
+    "center_node": "5a77121a5542994aec3b71db:the_boatniks",
+    "answer": "The Boatniks is a 1970 American comedy film starring Robert Morse, Stefanie Powers, Don Ameche and Phil Silvers.",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 2,
+    "extraction_error": "",
+    "additional_center_nodes": [
+      "5a77121a5542994aec3b71db:charley_and_the_angel",
+      "5a77121a5542994aec3b71db:the_boatniks"
+    ]
+  },
+  {
+    "qid": "5a72dcb45542992359bc31af",
+    "question": "What company did Rex Maughan aquire?",
+    "center_node": "5a72dcb45542992359bc31af:rex_maughan",
+    "answer": "Aloe Vera of America",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 3,
+    "extraction_error": "",
+    "additional_center_nodes": []
+  },
+  {
+    "qid": "5a7723fa55429966f1a36ca0",
+    "question": "Which was published earlier, La Belle Assemblée or VIVmag?",
+    "center_node": "5a7723fa55429966f1a36ca0:la_belle_assembl_e",
+    "answer": "La Belle Assemblée",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 4,
+    "extraction_error": "",
+    "additional_center_nodes": [
+      "5a7723fa55429966f1a36ca0:la_belle_assembl_e",
+      "5a7723fa55429966f1a36ca0:la_belle_ship",
+      "5a7723fa55429966f1a36ca0:vivmag"
+    ]
+  },
+  {
+    "qid": "5a72df275542992359bc31b3",
+    "question": "What was Muammar Mohammed Abu Minyar Gaddafi's title during the Libyan Civil War?",
+    "center_node": "5a72df275542992359bc31b3:muammar_gaddafi",
+    "answer": "\"Brotherly Leader\" of the Great Socialist People's Libyan Arab Jamahiriya",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 21,
+    "extraction_error": "",
+    "additional_center_nodes": []
+  },
+  {
+    "qid": "5a772c925542993735360208",
+    "question": "Which was published first Polarity or The Farming Game?",
+    "center_node": "5a772c925542993735360208:the_farming_game",
+    "answer": "The Farming Game",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 3,
+    "extraction_error": "",
+    "additional_center_nodes": [
+      "5a772c925542993735360208:polarity_game",
+      "5a772c925542993735360208:the_farming_game"
+    ]
+  },
+  {
+    "qid": "5a72df8d5542992359bc31b4",
+    "question": "What East of Piccadilly star apperared in dozens of stage performances?",
+    "center_node": "5a72df8d5542992359bc31b4:sebastian_shaw_actor",
+    "answer": "Sebastian Lewis Shaw",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 3,
+    "extraction_error": "",
+    "additional_center_nodes": []
+  },
+  {
+    "qid": "5a77309d55429972597f1487",
+    "question": "Who was born first, José Echegaray y Eizaguirre or P. J. O'Rourke?",
+    "center_node": "5a77309d55429972597f1487:jos_echegaray",
+    "answer": "José Echegaray y Eizaguirre",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 3,
+    "extraction_error": "",
+    "additional_center_nodes": [
+      "5a77309d55429972597f1487:jos_echegaray",
+      "5a77309d55429972597f1487:p_j_o_rourke"
+    ]
+  },
+  {
+    "qid": "5a72e28f5542992359bc31ba",
+    "question": "Which technique did the director at Pzena Investment Management outline?",
+    "center_node": "5a72e28f5542992359bc31ba:joel_greenblatt",
+    "answer": "outlined by Joel Greenblatt",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 5,
+    "extraction_error": "",
+    "additional_center_nodes": []
+  },
+  {
+    "qid": "5a77321355429972597f1493",
+    "question": "Which documentary was created first, The Agronomist or American Scary?",
+    "center_node": "5a77321355429972597f1493:the_agronomist",
+    "answer": "The Agronomist",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 8,
+    "extraction_error": "",
+    "additional_center_nodes": [
+      "5a77321355429972597f1493:american_scary",
+      "5a77321355429972597f1493:the_agronomist"
+    ]
+  },
+  {
+    "qid": "5a72e4375542992359bc31bf",
+    "question": "Who is older, Lucy Gichuhi or Bob Day?",
+    "center_node": "5a72e4375542992359bc31bf:bob_day",
+    "answer": "Bob Day",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 2,
+    "extraction_error": "",
+    "additional_center_nodes": []
+  },
+  {
+    "qid": "5a7736d85542994aec3b722b",
+    "question": "Which film director is younger, Manoel de Oliveira or Alfonso Cuarón?",
+    "center_node": "5a7736d85542994aec3b722b:manoel_de_oliveira",
+    "answer": "Alfonso Cuarón",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 5,
+    "extraction_error": "",
+    "additional_center_nodes": [
+      "5a7736d85542994aec3b722b:alfonso_cuar_n",
+      "5a7736d85542994aec3b722b:manoel_de_oliveira"
+    ]
+  },
+  {
+    "qid": "5a72f0e25542991f9a20c5cf",
+    "question": "What television show was,based,on an 1908 novel by Lucy Maud Montgomery?   Anne.",
+    "center_node": "5a72f0e25542991f9a20c5cf:anne_tv_series",
+    "answer": "Anne",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 19,
+    "extraction_error": "",
+    "additional_center_nodes": []
+  },
+  {
+    "qid": "5a7739e255429972597f14ad",
+    "question": "Who is older, Gabe Saporta or John S. Hall?",
+    "center_node": "5a7739e255429972597f14ad:gabe_saporta",
+    "answer": "John S. Hall",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 2,
+    "extraction_error": "",
+    "additional_center_nodes": [
+      "5a7739e255429972597f14ad:gabe_saporta",
+      "5a7739e255429972597f14ad:john_s_hall"
+    ]
+  },
+  {
+    "qid": "5a72f1cf5542994cef4bc414",
+    "question": "Which English actor starred in the 1995 american romantic drama film The Scarlet Letter alongside Demi Moore and Robert Duvall?",
+    "center_node": "5a72f1cf5542994cef4bc414:the_scarlet_letter_1995_film",
+    "answer": "Gary Oldman",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 7,
+    "extraction_error": "",
+    "additional_center_nodes": []
+  },
+  {
+    "qid": "5a773ec45542994aec3b7245",
+    "question": "Who was born earlier, Simone Bolelli or Caroline Wozniacki?",
+    "center_node": "5a773ec45542994aec3b7245:simone_bolelli",
+    "answer": "Simone Bolelli",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 2,
+    "extraction_error": "",
+    "additional_center_nodes": [
+      "5a773ec45542994aec3b7245:caroline_wozniacki",
+      "5a773ec45542994aec3b7245:simone_bolelli"
+    ]
+  },
+  {
+    "qid": "5a72f3a85542992359bc31e5",
+    "question": "The large subunit and small subunit that use two types of RNA are major components that make up what?",
+    "center_node": "5a72f3a85542992359bc31e5:ribosome",
+    "answer": "Ribosomes",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 10,
+    "extraction_error": "",
+    "additional_center_nodes": []
+  },
+  {
+    "qid": "5a7744e45542993569682d37",
+    "question": "Who was born first, Juan Rulfo or John le Carré?",
+    "center_node": "5a7744e45542993569682d37:juan_rulfo",
+    "answer": "Juan Rulfo",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 11,
+    "extraction_error": "",
+    "additional_center_nodes": [
+      "5a7744e45542993569682d37:john_le_carr",
+      "5a7744e45542993569682d37:juan_rulfo"
+    ]
+  },
+  {
+    "qid": "5a72f45a5542992359bc31e6",
+    "question": "What is the name of the former MGM Grand Garden Special Events Center where the Mayweather-Ortiz fight took place?",
+    "center_node": "5a72f45a5542992359bc31e6:mgm_grand_garden_arena",
+    "answer": "MGM Grand Garden Arena",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 2,
+    "extraction_error": "",
+    "additional_center_nodes": []
+  },
+  {
+    "qid": "5a77452155429972597f14e1",
+    "question": "Which pizza chain has locations in more cities, Round Table Pizza or Marion's Piazza?",
+    "center_node": "5a77452155429972597f14e1:round_table_pizza",
+    "answer": "Round Table Pizza",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 5,
+    "extraction_error": "",
+    "additional_center_nodes": [
+      "5a77452155429972597f14e1:marion_s_piazza",
+      "5a77452155429972597f14e1:round_table",
+      "5a77452155429972597f14e1:round_table_pizza"
+    ]
+  },
+  {
+    "qid": "5a72f74a55429901807daf59",
+    "question": "Which American comedian born on March 21, 1962, appeared in the movie \"Sleepless in Seattle?\"",
+    "center_node": "5a72f74a55429901807daf59:rosie_o_donnell",
+    "answer": "Rosie O'Donnell",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 4,
+    "extraction_error": "",
+    "additional_center_nodes": []
+  },
+  {
+    "qid": "5a77474855429972597f14e4",
+    "question": "Who released their debut album first, Daisy Chainsaw or Generationals?",
+    "center_node": "5a77474855429972597f14e4:daisy_chainsaw",
+    "answer": "Daisy Chainsaw",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 4,
+    "extraction_error": "",
+    "additional_center_nodes": [
+      "5a77474855429972597f14e4:daisy_chainsaw",
+      "5a77474855429972597f14e4:generationals"
+    ]
+  },
+  {
+    "qid": "5a72f7df5542991f9a20c5d7",
+    "question": "Piers Bizony has written articles for which magazine based in Bristol, UK?",
+    "center_node": "5a72f7df5542991f9a20c5d7:piers_bizony",
+    "answer": "BBC Focus",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 19,
+    "extraction_error": "",
+    "additional_center_nodes": []
+  },
+  {
+    "qid": "5a774c0155429966f1a36ce2",
+    "question": "Which women's magazine was published first, Mirabella or Home Monthly?",
+    "center_node": "5a774c0155429966f1a36ce2:home_monthly",
+    "answer": "Home Monthly",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 7,
+    "extraction_error": "",
+    "additional_center_nodes": [
+      "5a774c0155429966f1a36ce2:home_monthly",
+      "5a774c0155429966f1a36ce2:mirabella"
+    ]
+  },
+  {
+    "qid": "5a72fc865542991f9a20c5e9",
+    "question": "When did the coach of the 1963 Oklahoma Sooners football team die ?",
+    "center_node": "5a72fc865542991f9a20c5e9:1963_oklahoma_sooners_football_team",
+    "answer": "February 9, 1994",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 2,
+    "extraction_error": "",
+    "additional_center_nodes": []
+  },
+  {
+    "qid": "5a7758895542994aec3b729c",
+    "question": "Which American rock band, Sugar Ray or Against the Current gained mainstream fame in the 1990's?",
+    "center_node": "5a7758895542994aec3b729c:sugar_ray",
+    "answer": "rock",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 6,
+    "extraction_error": "",
+    "additional_center_nodes": [
+      "5a7758895542994aec3b729c:against_the_current_band",
+      "5a7758895542994aec3b729c:sugar_ray"
+    ]
+  },
+  {
+    "qid": "5a73024f5542991f9a20c5fc",
+    "question": "what year was the cover artist of Multiverse: Exploring Poul Anderson's Worlds born ?",
+    "center_node": "5a73024f5542991f9a20c5fc:multiverse_exploring_poul_and_2fe8c0ace3",
+    "answer": "September 13, 1960",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 2,
+    "extraction_error": "",
+    "additional_center_nodes": []
+  },
+  {
+    "qid": "5a7759fc5542993569682d60",
+    "question": "Where are Teide National Park and Garajonay National Park located?",
+    "center_node": "5a7759fc5542993569682d60:teide_national_park",
+    "answer": "Canary Islands, Spain",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 4,
+    "extraction_error": "",
+    "additional_center_nodes": [
+      "5a7759fc5542993569682d60:garajonay_national_park",
+      "5a7759fc5542993569682d60:teide_national_park"
+    ]
+  },
+  {
+    "qid": "5a7302b75542991f9a20c5fd",
+    "question": "What supernatural horror film did Miles Doleac have a role in?",
+    "center_node": "5a7302b75542991f9a20c5fd:miles_doleac",
+    "answer": "Sleepy Hollow",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 12,
+    "extraction_error": "",
+    "additional_center_nodes": []
+  },
+  {
+    "qid": "5a77671255429966f1a36d21",
+    "question": "What aspect of the board game Diplomacy is not found in the board game Uncle Wiggily?",
+    "center_node": "5a77671255429966f1a36d21:diplomacy_game",
+    "answer": "negotiation phases",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 18,
+    "extraction_error": "",
+    "additional_center_nodes": [
+      "5a77671255429966f1a36d21:diplomacy_game",
+      "5a77671255429966f1a36d21:uncle_wiggily",
+      "5a77671255429966f1a36d21:uncle_wiggily_board_game"
+    ]
+  },
+  {
+    "qid": "5a7306a655429901807daf67",
+    "question": "Who is prime minister of this West African country that covers 36125km2?",
+    "center_node": "5a7306a655429901807daf67:guinea_bissau",
+    "answer": "Umaro Mokhtar Sissoco Embaló",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 4,
+    "extraction_error": "",
+    "additional_center_nodes": []
+  },
+  {
+    "qid": "5a77685e5542993569682d83",
+    "question": "Which came first, Battle of Antietam or Battle of Guam?",
+    "center_node": "5a77685e5542993569682d83:battle_of_antietam",
+    "answer": "Battle of Antietam",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 5,
+    "extraction_error": "",
+    "additional_center_nodes": [
+      "5a77685e5542993569682d83:battle_of_antietam",
+      "5a77685e5542993569682d83:battle_of_guam_1941",
+      "5a77685e5542993569682d83:battle_of_guam_1944"
+    ]
+  },
+  {
+    "qid": "5a73073d55429901807daf69",
+    "question": "Which Football Club is based in the capital of Lesotho?",
+    "center_node": "5a73073d55429901807daf69:maseru",
+    "answer": "Lerotholi Polytechnic Football Club",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 10,
+    "extraction_error": "",
+    "additional_center_nodes": []
+  },
+  {
+    "qid": "5a7769a35542993569682d8f",
+    "question": "Which documentary was release first, Baghdad ER or The Ten-Year Lunch?",
+    "center_node": "5a7769a35542993569682d8f:baghdad_er",
+    "answer": "The Ten-Year Lunch",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 4,
+    "extraction_error": "",
+    "additional_center_nodes": [
+      "5a7769a35542993569682d8f:baghdad_er",
+      "5a7769a35542993569682d8f:the_ten_year_lunch"
+    ]
+  },
+  {
+    "qid": "5a7309a15542992359bc320c",
+    "question": "Which writer of the song \"Money, Money, Money\" by pop group ABBA was born on 16 December 1946 ?",
+    "center_node": "5a7309a15542992359bc320c:benny_andersson",
+    "answer": "Benny Andersson",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 7,
+    "extraction_error": "",
+    "additional_center_nodes": []
+  },
+  {
+    "qid": "5a776bc855429966f1a36d3a",
+    "question": "What do the Rampur Greyhound and Borzoi have in common?",
+    "center_node": "5a776bc855429966f1a36d3a:rampur_greyhound",
+    "answer": "member of the sighthound family",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 4,
+    "extraction_error": "",
+    "additional_center_nodes": [
+      "5a776bc855429966f1a36d3a:borzoi",
+      "5a776bc855429966f1a36d3a:rampur_greyhound"
+    ]
+  },
+  {
+    "qid": "5a730abe5542994cef4bc42f",
+    "question": "What \"sport\" involving animals dates all the way back to the Tang Dynasty and continued to the beginning of the 19th century?",
+    "center_node": "5a730abe5542994cef4bc42f:cricket_fighting",
+    "answer": "Cricket fighting",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 8,
+    "extraction_error": "",
+    "additional_center_nodes": []
+  },
+  {
+    "qid": "5a776bd155429966f1a36d3b",
+    "question": "Who was born first, Maurice Ravel or William Walton?",
+    "center_node": "5a776bd155429966f1a36d3b:maurice_ravel",
+    "answer": "Maurice Ravel",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 2,
+    "extraction_error": "",
+    "additional_center_nodes": [
+      "5a776bd155429966f1a36d3b:maurice_ravel",
+      "5a776bd155429966f1a36d3b:william_walton"
+    ]
+  },
+  {
+    "qid": "5a7312675542994cef4bc43d",
+    "question": "Which one of Ricardo Rodríguez Saá's relatives would become governor from 1983 to 2001?",
+    "center_node": "5a7312675542994cef4bc43d:ricardo_rodr_guez_sa",
+    "answer": "Adolfo Rodríguez Saá",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 16,
+    "extraction_error": "",
+    "additional_center_nodes": []
+  },
+  {
+    "qid": "5a77720255429967ab10517f",
+    "question": "In what year did both Orson Scott Card's novel \"Ender's Game\" and Keri Hulme's \"The Bone People\" come out?",
+    "center_node": "5a77720255429967ab10517f:orson_scott_card",
+    "answer": "1985",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 35,
+    "extraction_error": "",
+    "additional_center_nodes": [
+      "5a77720255429967ab10517f:ender_s_game_short_story",
+      "5a77720255429967ab10517f:keri_hulme",
+      "5a77720255429967ab10517f:orson_scott_card",
+      "5a77720255429967ab10517f:the_bone_people"
+    ]
+  },
+  {
+    "qid": "5a7313865542994cef4bc442",
+    "question": "What type of bank organization is Pondicherry Gramin Bank that it operates in different States of India?",
+    "center_node": "5a7313865542994cef4bc442:pondicherry_gramin_bank",
+    "answer": "Regional Rural Bank",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 9,
+    "extraction_error": "",
+    "additional_center_nodes": []
+  },
+  {
+    "qid": "5a7774e155429967ab10518d",
+    "question": "What studio helped produce both Return to Never Land and McFarland, USA?",
+    "center_node": "5a7774e155429967ab10518d:return_to_never_land",
+    "answer": "Walt Disney Pictures",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 4,
+    "extraction_error": "",
+    "additional_center_nodes": [
+      "5a7774e155429967ab10518d:mcfarland_usa",
+      "5a7774e155429967ab10518d:return_to_never_land"
+    ]
+  },
+  {
+    "qid": "5a7319e755429901807daf86",
+    "question": "Which NCAA record does the quarterback of the Minnesota Vikings hold?",
+    "center_node": "5a7319e755429901807daf86:case_keenum",
+    "answer": "most total touchdowns in NCAA history",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 8,
+    "extraction_error": "",
+    "additional_center_nodes": []
+  },
+  {
+    "qid": "5a777ca855429949eeb29e6a",
+    "question": "What company produced both The Little Mermaid and The Strongest Man in the World?",
+    "center_node": "5a777ca855429949eeb29e6a:the_little_mermaid_1989_film",
+    "answer": "Walt Disney",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 5,
+    "extraction_error": "",
+    "additional_center_nodes": [
+      "5a777ca855429949eeb29e6a:the_little_mermaid_1989_film",
+      "5a777ca855429949eeb29e6a:the_strongest_man_in_the_world"
+    ]
+  },
+  {
+    "qid": "5a731a635542994cef4bc458",
+    "question": "What series has Smith worked on that is based on a novel by Margaret Atwood?",
+    "center_node": "5a731a635542994cef4bc458:scott_michael_smith",
+    "answer": "The Handmaid's Tale",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 7,
+    "extraction_error": "",
+    "additional_center_nodes": []
+  },
+  {
+    "qid": "5a7785af55429949eeb29ec2",
+    "question": "Who is older, James Kerwin or Paul Verhoeven?",
+    "center_node": "5a7785af55429949eeb29ec2:james_kerwin",
+    "answer": "Paul Verhoeven",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 2,
+    "extraction_error": "",
+    "additional_center_nodes": [
+      "5a7785af55429949eeb29ec2:james_kerwin",
+      "5a7785af55429949eeb29ec2:paul_verhoeven"
+    ]
+  },
+  {
+    "qid": "5a7320565542991f9a20c61d",
+    "question": "who is younger Keith Bostic or Jerry Glanville ?",
+    "center_node": "5a7320565542991f9a20c61d:keith_bostic_american_football",
+    "answer": "Keith Bostic",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 2,
+    "extraction_error": "",
+    "additional_center_nodes": []
+  },
+  {
+    "qid": "5a77863555429949eeb29ec6",
+    "question": "Who was born first Iain Pears or Richard Llewellyn ?",
+    "center_node": "5a77863555429949eeb29ec6:iain_pears",
+    "answer": "Richard Dafydd Vivian Llewellyn",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 8,
+    "extraction_error": "",
+    "additional_center_nodes": [
+      "5a77863555429949eeb29ec6:iain_pears",
+      "5a77863555429949eeb29ec6:richard_llewellyn"
+    ]
+  },
+  {
+    "qid": "5a7322165542994cef4bc470",
+    "question": "What memeber of the artistic gymanstic team known as the \"Final Five\" who won a team gold medal at the Rio games was born on May 25, 1994?",
+    "center_node": "5a7322165542994cef4bc470:aly_raisman",
+    "answer": "Aly Raisman",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 7,
+    "extraction_error": "",
+    "additional_center_nodes": []
+  },
+  {
+    "qid": "5a778a165542995d831811a9",
+    "question": "Who gained recognition earlier, Tim Roth or Polly Draper",
+    "center_node": "5a778a165542995d831811a9:tim_roth",
+    "answer": "Timothy Simon \"Tim\" Roth",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 5,
+    "extraction_error": "",
+    "additional_center_nodes": [
+      "5a778a165542995d831811a9:polly_draper",
+      "5a778a165542995d831811a9:tim_roth"
+    ]
+  },
+  {
+    "qid": "5a7324e055429901807daf8f",
+    "question": "What rapper on the song \"Wij zijn Ajax\" plays for the Turkish club Beşiktaş?",
+    "center_node": "5a7324e055429901807daf8f:ryan_babel",
+    "answer": "Ryan Babel",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 0,
+    "extraction_error": "hard timeout: no response after 45s (proxy/connect hang)",
+    "additional_center_nodes": []
+  },
+  {
+    "qid": "5a778b345542992a6e59decf",
+    "question": "Who was born first, Susan Oliver or W. S. Van Dyke?",
+    "center_node": "5a778b345542992a6e59decf:susan_oliver",
+    "answer": "Woodbridge Strong Van Dyke II",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 2,
+    "extraction_error": "",
+    "additional_center_nodes": [
+      "5a778b345542992a6e59decf:susan_oliver",
+      "5a778b345542992a6e59decf:w_s_van_dyke"
+    ]
+  },
+  {
+    "qid": "5a73250a5542991f9a20c643",
+    "question": "Where has Kerwin Swint's work appeared that draws 20.5 million unique visitors a month?",
+    "center_node": "5a73250a5542991f9a20c643:kerwin_swint",
+    "answer": "Mental Floss",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 2,
+    "extraction_error": "",
+    "additional_center_nodes": []
+  },
+  {
+    "qid": "5a7790ed5542992a6e59defb",
+    "question": "Name three common things that are used in playing Monopoly and King of Tokyo?",
+    "center_node": "5a7790ed5542992a6e59defb:king_of_tokyo",
+    "answer": "dice, cards, and boards",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 6,
+    "extraction_error": "",
+    "additional_center_nodes": [
+      "5a7790ed5542992a6e59defb:king_of_tokyo",
+      "5a7790ed5542992a6e59defb:monopoly_game"
+    ]
+  },
+  {
+    "qid": "5a73266d5542994cef4bc47d",
+    "question": "Who opened Gunnersby Park and signed the Munich Agreement?",
+    "center_node": "5a73266d5542994cef4bc47d:neville_chamberlain",
+    "answer": "Neville Chamberlain",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 5,
+    "extraction_error": "",
+    "additional_center_nodes": []
+  },
+  {
+    "qid": "5a77919d5542995d831811dd",
+    "question": "Who was born first, Marino Girolami or Daniel Myrick?",
+    "center_node": "5a77919d5542995d831811dd:marino_girolami",
+    "answer": "Marino Girolami",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 2,
+    "extraction_error": "",
+    "additional_center_nodes": [
+      "5a77919d5542995d831811dd:daniel_myrick",
+      "5a77919d5542995d831811dd:marino_girolami"
+    ]
+  },
+  {
+    "qid": "5a7326cb5542994cef4bc47f",
+    "question": "When the two Coldplay songs U.F.O and Princess of China were written, what factor did they have in common?",
+    "center_node": "5a7326cb5542994cef4bc47f:u_f_o_coldplay_song",
+    "answer": "was written by all four members of the band",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 6,
+    "extraction_error": "",
+    "additional_center_nodes": []
+  },
+  {
+    "qid": "5a7797a555429967ab105208",
+    "question": "Who is younger, Wayne Coyne or Toshiko Koshijima?",
+    "center_node": "5a7797a555429967ab105208:wayne_coyne",
+    "answer": "Toshiko Koshijima",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 2,
+    "extraction_error": "",
+    "additional_center_nodes": [
+      "5a7797a555429967ab105208:toshiko_koshijima",
+      "5a7797a555429967ab105208:wayne_coyne"
+    ]
+  },
+  {
+    "qid": "5a7326cd5542991f29ee2d11",
+    "question": "In the television series Green Hornet, which actor played the role of Kato?",
+    "center_node": "5a7326cd5542991f29ee2d11:the_green_hornet_tv_series",
+    "answer": "Bruce Lee",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 4,
+    "extraction_error": "",
+    "additional_center_nodes": []
+  },
+  {
+    "qid": "5a77a7565542995d83181249",
+    "question": "Between the two film makers Fabián Bielinsky and Murdock MacQuarrie, who was born earlier?",
+    "center_node": "5a77a7565542995d83181249:fabi_n_bielinsky",
+    "answer": "Murdock MacQuarrie",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 2,
+    "extraction_error": "",
+    "additional_center_nodes": [
+      "5a77a7565542995d83181249:fabi_n_bielinsky",
+      "5a77a7565542995d83181249:murdock_macquarrie"
+    ]
+  },
+  {
+    "qid": "5a7327265542994cef4bc480",
+    "question": "Which actor appeared in the films \"Just My Luck\" and \"Into the Woods\"?",
+    "center_node": "5a7327265542994cef4bc480:chris_pine",
+    "answer": "Christopher Whitelaw Pine",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 3,
+    "extraction_error": "",
+    "additional_center_nodes": []
+  },
+  {
+    "qid": "5a77a7695542997042120ac4",
+    "question": "Which documentary is the oldest, The Private Life of Plants or Marx Reloaded?",
+    "center_node": "5a77a7695542997042120ac4:the_private_life_of_plants",
+    "answer": "The Private Life of Plants",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 4,
+    "extraction_error": "",
+    "additional_center_nodes": [
+      "5a77a7695542997042120ac4:marx_reloaded",
+      "5a77a7695542997042120ac4:the_private_life_of_plants"
+    ]
+  },
+  {
+    "qid": "5a7329a15542991f9a20c65f",
+    "question": "What record officially started in 1519 in the same state that holds the city Augustus Chapman Allen used his inheritance to fund the founding of?",
+    "center_node": "5a7329a15542991f9a20c65f:history_of_texas",
+    "answer": "The recorded History of Texas",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 6,
+    "extraction_error": "",
+    "additional_center_nodes": []
+  },
+  {
+    "qid": "5a77a7db5542995d8318124d",
+    "question": "Which author was born first, Josephine Tey or Julia Peterkin?",
+    "center_node": "5a77a7db5542995d8318124d:josephine_tey",
+    "answer": "Julia Peterkin",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 32,
+    "extraction_error": "",
+    "additional_center_nodes": [
+      "5a77a7db5542995d8318124d:josephine_tey",
+      "5a77a7db5542995d8318124d:julia_peterkin"
+    ]
+  },
+  {
+    "qid": "5a732aa055429901807daf9f",
+    "question": "What year did the largest convention center in the U.S. state of Georgia open?",
+    "center_node": "5a732aa055429901807daf9f:georgia_world_congress_center",
+    "answer": "1976",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 5,
+    "extraction_error": "",
+    "additional_center_nodes": []
+  },
+  {
+    "qid": "5a77afcd5542997042120adf",
+    "question": "Who is older Carrie Akre or Shifty Shellshock?",
+    "center_node": "5a77afcd5542997042120adf:carrie_akre",
+    "answer": "Carrie Akre",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 2,
+    "extraction_error": "",
+    "additional_center_nodes": [
+      "5a77afcd5542997042120adf:carrie_akre",
+      "5a77afcd5542997042120adf:shifty_shellshock"
+    ]
+  },
+  {
+    "qid": "5a732aaa5542992359bc325a",
+    "question": "Which career path did African-American activist Bertha Gilkey pursue in St. Louis, Missouri?",
+    "center_node": "5a732aaa5542992359bc325a:bertha_gilkey",
+    "answer": "Property management",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 6,
+    "extraction_error": "",
+    "additional_center_nodes": []
+  },
+  {
+    "qid": "5a77b6325542997042120af7",
+    "question": "Who was born first, Bobcat Goldthwait or Maurice Elvey?",
+    "center_node": "5a77b6325542997042120af7:bobcat_goldthwait",
+    "answer": "Maurice Elvey",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 3,
+    "extraction_error": "",
+    "additional_center_nodes": [
+      "5a77b6325542997042120af7:bobcat_goldthwait",
+      "5a77b6325542997042120af7:maurice_elvey"
+    ]
+  },
+  {
+    "qid": "5a732ab25542991f29ee2d25",
+    "question": "In what school district is Governor John R. Rogers High School, named after John Rankin Rogers, located?",
+    "center_node": "5a732ab25542991f29ee2d25:governor_john_r_rogers_high_school",
+    "answer": "Puyallup School District of Washington",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 10,
+    "extraction_error": "",
+    "additional_center_nodes": []
+  },
+  {
+    "qid": "5a77bdcb5542997042120b0b",
+    "question": "Who was born first,  Morgan Llywelyn or Robert Jordan?",
+    "center_node": "5a77bdcb5542997042120b0b:morgan_llywelyn",
+    "answer": "Morgan Llywelyn",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 6,
+    "extraction_error": "",
+    "additional_center_nodes": [
+      "5a77bdcb5542997042120b0b:morgan_llywelyn",
+      "5a77bdcb5542997042120b0b:robert_jordan"
+    ]
+  },
+  {
+    "qid": "5a732ca45542992359bc325d",
+    "question": "Which conflict involving the Mende ethnic group lasted for eleven years?",
+    "center_node": "5a732ca45542992359bc325d:sierra_leone_civil_war",
+    "answer": "Sierra Leone Civil War",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 12,
+    "extraction_error": "",
+    "additional_center_nodes": []
+  },
+  {
+    "qid": "5a77c58b55429967ab105281",
+    "question": "Who is still alive today, Franklin Adreon or Ryan Gosling?",
+    "center_node": "5a77c58b55429967ab105281:ryan_gosling",
+    "answer": "Franklin \"Pete\" Adreon",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 4,
+    "extraction_error": "",
+    "additional_center_nodes": [
+      "5a77c58b55429967ab105281:franklin_adreon",
+      "5a77c58b55429967ab105281:ryan_gosling"
+    ]
+  },
+  {
+    "qid": "5a7331705542991f9a20c67a",
+    "question": "Who was the Goal keeper for Iraq in the 1996 AFC Asian Cup played in the United Arab Emirates?",
+    "center_node": "5a7331705542991f9a20c67a:emad_hashim",
+    "answer": "Emad Hashim",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 8,
+    "extraction_error": "",
+    "additional_center_nodes": []
+  },
+  {
+    "qid": "5a77c74155429967ab105291",
+    "question": "Which band formed in England, Of Montreal or Vib Gyor?",
+    "center_node": "5a77c74155429967ab105291:vib_gyor",
+    "answer": "Vib Gyor was a band that was formed in Leeds, England.",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 4,
+    "extraction_error": "",
+    "additional_center_nodes": [
+      "5a77c74155429967ab105291:of_montreal",
+      "5a77c74155429967ab105291:vib_gyor"
+    ]
+  },
+  {
+    "qid": "5a7331de5542994cef4bc4a8",
+    "question": "If the Charhki  Dadri crash was less dangerous than the Tenerife airport disaster, which occured firat?",
+    "center_node": "5a7331de5542994cef4bc4a8:charkhi_dadri_mid_air_collision",
+    "answer": "On March 27, 1977, two Boeing 747 passenger jets, KLM Flight 4805 and Pan Am Flight 1736, collided on the runway at Los Rodeos Airport (now Tenerife North Airport)",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 6,
+    "extraction_error": "",
+    "additional_center_nodes": []
+  },
+  {
+    "qid": "5a77ca3955429967ab1052a3",
+    "question": "Which board game is newer, Splendor or Power Grid?",
+    "center_node": "5a77ca3955429967ab1052a3:splendor_board_game",
+    "answer": "Splendor",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 2,
+    "extraction_error": "",
+    "additional_center_nodes": [
+      "5a77ca3955429967ab1052a3:power_grid",
+      "5a77ca3955429967ab1052a3:splendor_board_game"
+    ]
+  },
+  {
+    "qid": "5a73354f5542991f9a20c687",
+    "question": "Thomas Henry Moray Followed work down on nuclear batteries in 1912 by this English physicist?",
+    "center_node": "5a73354f5542991f9a20c687:thomas_henry_moray",
+    "answer": "Henry Moseley",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 7,
+    "extraction_error": "",
+    "additional_center_nodes": []
+  },
+  {
+    "qid": "5a77d12755429967ab1052b8",
+    "question": "Who was born first, Jaap Speyer or Bruce Conner?",
+    "center_node": "5a77d12755429967ab1052b8:jaap_speyer",
+    "answer": "Jaap Speyer",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 2,
+    "extraction_error": "",
+    "additional_center_nodes": [
+      "5a77d12755429967ab1052b8:bruce_conner",
+      "5a77d12755429967ab1052b8:jaap_speyer"
+    ]
+  },
+  {
+    "qid": "5a7335b55542992359bc3290",
+    "question": "who released the 2012 record of red?",
+    "center_node": "5a7335b55542992359bc3290:red_taylor_swift_album",
+    "answer": "Big Machine Records",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 9,
+    "extraction_error": "",
+    "additional_center_nodes": []
+  },
+  {
+    "qid": "5a77dbaf5542997042120b5b",
+    "question": "Mikael Åkerfeldt and Lee Ranaldo were this kind of instrumentalist in their respective bands.",
+    "center_node": "5a77dbaf5542997042120b5b:mikael_kerfeldt",
+    "answer": "Guitarists",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 7,
+    "extraction_error": "",
+    "additional_center_nodes": [
+      "5a77dbaf5542997042120b5b:lee_ranaldo",
+      "5a77dbaf5542997042120b5b:mikael_kerfeldt"
+    ]
+  },
+  {
+    "qid": "5a7336d05542992359bc3293",
+    "question": "Lady Elizabeth Delmé and Her Children (1779) is a portrait given to the National Gallery of Art in 1937, which is located in which state?",
+    "center_node": "5a7336d05542992359bc3293:lady_elizabeth_delm_and_her_children",
+    "answer": "Washington, D.C.",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 2,
+    "extraction_error": "",
+    "additional_center_nodes": []
+  },
+  {
+    "qid": "5a77f2af5542995d83181333",
+    "question": "Who was born first, Grigory Margulis or Leonid Levin?",
+    "center_node": "5a77f2af5542995d83181333:grigory_margulis",
+    "answer": "Gregori Aleksandrovich Margulis",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 2,
+    "extraction_error": "",
+    "additional_center_nodes": [
+      "5a77f2af5542995d83181333:grigory_margulis",
+      "5a77f2af5542995d83181333:leonid_levin"
+    ]
+  }
+]

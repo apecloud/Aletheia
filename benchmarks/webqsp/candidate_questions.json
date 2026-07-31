@@ -1,0 +1,8562 @@
+[
+  {
+    "idx": 1,
+    "id": "WebQTrn-11",
+    "question": "what time zone am i in cleveland ohio",
+    "topic": "Cleveland",
+    "answers": [
+      "Eastern Time Zone"
+    ],
+    "a_entities": [
+      "Eastern Time Zone"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "Cleveland",
+        "location.location.time_zones",
+        "Eastern Time Zone",
+        "Eastern Time Zone"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 5332
+  },
+  {
+    "idx": 2,
+    "id": "WebQTrn-15",
+    "question": "what is nina dobrev nationality",
+    "topic": "Nina Dobrev",
+    "answers": [
+      "Bulgaria",
+      "Canada"
+    ],
+    "a_entities": [
+      "Bulgaria",
+      "Canada"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "Nina Dobrev",
+        "people.person.nationality",
+        "Bulgaria",
+        "Bulgaria"
+      ],
+      [
+        "Nina Dobrev",
+        "people.person.ethnicity",
+        "Bulgarian Canadian",
+        "Bulgaria"
+      ],
+      [
+        "Nina Dobrev",
+        "people.person.languages",
+        "Bulgarian Language",
+        "Bulgaria"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 2086
+  },
+  {
+    "idx": 3,
+    "id": "WebQTrn-47",
+    "question": "what county is heathrow airport in",
+    "topic": "London Heathrow Airport",
+    "answers": [
+      "Hillingdon"
+    ],
+    "a_entities": [
+      "Hillingdon"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "London Heathrow Airport",
+        "aviation.airport.serves",
+        "London Borough of Hillingdon",
+        "Hillingdon"
+      ],
+      [
+        "London Heathrow Airport",
+        "location.location.containedby",
+        "Hillingdon",
+        "Hillingdon"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 4914
+  },
+  {
+    "idx": 4,
+    "id": "WebQTrn-73",
+    "question": "what form of government was practiced in sparta",
+    "topic": "Sparta",
+    "answers": [
+      "Monarchy",
+      "Aristocracy",
+      "Diarchy",
+      "Republic"
+    ],
+    "a_entities": [
+      "Monarchy",
+      "Aristocracy",
+      "Diarchy",
+      "Republic"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "Sparta",
+        "location.country.form_of_government",
+        "Aristocracy",
+        "Aristocracy"
+      ],
+      [
+        "Sparta",
+        "location.country.form_of_government",
+        "Diarchy",
+        "Diarchy"
+      ],
+      [
+        "Sparta",
+        "location.country.form_of_government",
+        "Republic",
+        "Republic"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 1933
+  },
+  {
+    "idx": 5,
+    "id": "WebQTrn-104",
+    "question": "who was the president after jfk died",
+    "topic": "John F. Kennedy",
+    "answers": [
+      "Lyndon B. Johnson"
+    ],
+    "a_entities": [
+      "Lyndon B. Johnson"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "John F. Kennedy",
+        "base.kwebbase.kwtopic.has_sentences",
+        "He chose his other rival, Lyndon B. Johnson, as his running mate, to boost his chances in the South.",
+        "Lyndon B. Johnson"
+      ],
+      [
+        "John F. Kennedy",
+        "government.us_president.vice_president",
+        "Lyndon B. Johnson",
+        "Lyndon B. Johnson"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 5871
+  },
+  {
+    "idx": 6,
+    "id": "WebQTrn-126",
+    "question": "where to visit near bangkok",
+    "topic": "Bangkok",
+    "answers": [
+      "Bangkok International Trade and Exhibition Centre",
+      "Dusit Zoo",
+      "Wat Arun",
+      "Magic Land",
+      "Wat Ratchanatdaram"
+    ],
+    "a_entities": [
+      "Bangkok International Trade and Exhibition Centre",
+      "Dusit Zoo",
+      "Wat Arun",
+      "Magic Land",
+      "Wat Ratchanatdaram"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "Bangkok",
+        "travel.travel_destination.tourist_attractions",
+        "Bangkok Aquarium",
+        "Bangkok Aquarium"
+      ],
+      [
+        "Bangkok",
+        "common.image.appears_in_topic_gallery",
+        "Bangkok",
+        "Bangkok International Trade and Exhibition Centre"
+      ],
+      [
+        "Bangkok",
+        "travel.travel_destination.tourist_attractions",
+        "Khaosan Road",
+        "Khaosan Road"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 3942
+  },
+  {
+    "idx": 7,
+    "id": "WebQTrn-143",
+    "question": "what did nick clegg study at university",
+    "topic": "Nick Clegg",
+    "answers": [
+      "Social anthropology",
+      "Political philosophy"
+    ],
+    "a_entities": [
+      "Social anthropology",
+      "Political philosophy"
+    ],
+    "hop_count": 2,
+    "direct_paths": [],
+    "two_hop_paths": [
+      [
+        "Nick Clegg",
+        "people.person.education",
+        "m.02wn4r4",
+        "REVERSE:education.field_of_study.students_majoring",
+        "Political philosophy",
+        "Political philosophy"
+      ],
+      [
+        "Nick Clegg",
+        "REVERSE:education.education.student",
+        "m.02wn4r4",
+        "REVERSE:education.field_of_study.students_majoring",
+        "Political philosophy",
+        "Political philosophy"
+      ],
+      [
+        "Nick Clegg",
+        "people.person.education",
+        "m.02wn4r4",
+        "education.education.major_field_of_study",
+        "Political philosophy",
+        "Political philosophy"
+      ]
+    ],
+    "graph_size": 1113
+  },
+  {
+    "idx": 8,
+    "id": "WebQTrn-152",
+    "question": "what is henry clay known for",
+    "topic": "Henry Clay",
+    "answers": [
+      "Lawyer",
+      "Politician",
+      "Statesman"
+    ],
+    "a_entities": [
+      "Lawyer",
+      "Politician",
+      "Statesman"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "Henry Clay",
+        "people.person.profession",
+        "Politician",
+        "Politician"
+      ],
+      [
+        "Henry Clay",
+        "people.person.profession",
+        "Lawyer",
+        "Lawyer"
+      ],
+      [
+        "Henry Clay",
+        "people.person.profession",
+        "Statesman",
+        "Statesman"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 4489
+  },
+  {
+    "idx": 9,
+    "id": "WebQTrn-164",
+    "question": "where was kennedy when he got shot",
+    "topic": "John F. Kennedy",
+    "answers": [
+      "Dallas"
+    ],
+    "a_entities": [
+      "Dallas"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "John F. Kennedy",
+        "people.deceased_person.place_of_death",
+        "Dallas",
+        "Dallas"
+      ],
+      [
+        "John F. Kennedy",
+        "base.kwebbase.kwtopic.has_sentences",
+        "On November 22, 1963, Kennedy was assassinated as he and his wife drove through Dallas, Texas.",
+        "Dallas"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 5871
+  },
+  {
+    "idx": 10,
+    "id": "WebQTrn-196",
+    "question": "who did ben stiller play in megamind",
+    "topic": "Ben Stiller",
+    "answers": [
+      "Bernard"
+    ],
+    "a_entities": [
+      "Bernard"
+    ],
+    "hop_count": 2,
+    "direct_paths": [],
+    "two_hop_paths": [
+      [
+        "Ben Stiller",
+        "film.actor.film",
+        "m.0fndj1l",
+        "REVERSE:film.film_character.portrayed_in_films",
+        "Bernard",
+        "Bernard"
+      ],
+      [
+        "Ben Stiller",
+        "REVERSE:film.performance.actor",
+        "m.0fndj1l",
+        "REVERSE:film.film_character.portrayed_in_films",
+        "Bernard",
+        "Bernard"
+      ],
+      [
+        "Ben Stiller",
+        "film.actor.film",
+        "m.0fndj1l",
+        "film.performance.character",
+        "Bernard",
+        "Bernard"
+      ]
+    ],
+    "graph_size": 7101
+  },
+  {
+    "idx": 11,
+    "id": "WebQTrn-206",
+    "question": "who won golden boot",
+    "topic": "Premier League Golden Boot",
+    "answers": [
+      "Robin van Persie",
+      "Cristiano Ronaldo"
+    ],
+    "a_entities": [
+      "Robin van Persie",
+      "Cristiano Ronaldo"
+    ],
+    "hop_count": 2,
+    "direct_paths": [],
+    "two_hop_paths": [
+      [
+        "Premier League Golden Boot",
+        "REVERSE:award.award_honor.award",
+        "m.0w3m61v",
+        "REVERSE:award.award_winner.awards_won",
+        "Cristiano Ronaldo",
+        "Cristiano Ronaldo"
+      ],
+      [
+        "Premier League Golden Boot",
+        "award.award_category.winners",
+        "m.0w3m61v",
+        "REVERSE:award.award_winner.awards_won",
+        "Cristiano Ronaldo",
+        "Cristiano Ronaldo"
+      ],
+      [
+        "Premier League Golden Boot",
+        "REVERSE:award.award_honor.award",
+        "m.0w3m61v",
+        "award.award_honor.award_winner",
+        "Cristiano Ronaldo",
+        "Cristiano Ronaldo"
+      ]
+    ],
+    "graph_size": 68
+  },
+  {
+    "idx": 12,
+    "id": "WebQTrn-218",
+    "question": "what are all the names of harry potter",
+    "topic": "Harry Potter",
+    "answers": [
+      "Harry Potter and the Chamber of Secrets",
+      "Harry Potter and the Philosopher's Stone",
+      "Harry Potter and the Deathly Hallows",
+      "Harry Potter and the Order of the Phoenix",
+      "Harry Potter and the Half-Blood Prince"
+    ],
+    "a_entities": [
+      "Harry Potter and the Chamber of Secrets",
+      "Harry Potter and the Philosopher's Stone",
+      "Harry Potter and the Deathly Hallows",
+      "Harry Potter and the Order of the Phoenix",
+      "Harry Potter and the Half-Blood Prince"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "Harry Potter",
+        "fictional_universe.fictional_universe.species",
+        "Phoenix",
+        "Harry Potter and the Order of the Phoenix"
+      ],
+      [
+        "Harry Potter",
+        "fictional_universe.fictional_universe.works_set_here",
+        "Harry Potter and the Half-Blood Prince",
+        "Harry Potter and the Half-Blood Prince"
+      ],
+      [
+        "Harry Potter",
+        "fictional_universe.fictional_universe.works_set_here",
+        "Harry Potter and the Goblet of Fire",
+        "Harry Potter and the Goblet of Fire"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 5156
+  },
+  {
+    "idx": 13,
+    "id": "WebQTrn-249",
+    "question": "who is tia and tamera mowry parents",
+    "topic": "Tia Mowry",
+    "answers": [
+      "Darlene Mowry",
+      "Tim Mowry"
+    ],
+    "a_entities": [
+      "Darlene Mowry",
+      "Tim Mowry"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "Tia Mowry",
+        "people.person.parents",
+        "Tim Mowry",
+        "Tim Mowry"
+      ],
+      [
+        "Tia Mowry",
+        "people.person.parents",
+        "Darlene Mowry",
+        "Darlene Mowry"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 2193
+  },
+  {
+    "idx": 15,
+    "id": "WebQTrn-258",
+    "question": "what are major exports of the usa",
+    "topic": "United States of America",
+    "answers": [
+      "Pharmaceutical Preparation",
+      "Automotive industry",
+      "Food Manufacturing",
+      "Industrial Organic Chemicals, NEC"
+    ],
+    "a_entities": [
+      "Pharmaceutical Preparation",
+      "Automotive industry",
+      "Food Manufacturing",
+      "Industrial Organic Chemicals, NEC"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "United States of America",
+        "location.country.internet_tld",
+        "us",
+        "Automotive industry"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 6540
+  },
+  {
+    "idx": 16,
+    "id": "WebQTrn-267",
+    "question": "what other countries does canada trade with",
+    "topic": "Canada",
+    "answers": [
+      "Japan",
+      "United States of America",
+      "United Kingdom"
+    ],
+    "a_entities": [
+      "Japan",
+      "United States of America",
+      "United Kingdom"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "Canada",
+        "location.country.internet_tld",
+        "ca",
+        "United States of America"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 6836
+  },
+  {
+    "idx": 17,
+    "id": "WebQTrn-279",
+    "question": "what language they speak in the philippines",
+    "topic": "Philippines",
+    "answers": [
+      "Filipino language",
+      "English Language"
+    ],
+    "a_entities": [
+      "Filipino language",
+      "English Language"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "Philippines",
+        "location.country.official_language",
+        "Filipino language",
+        "Filipino language"
+      ],
+      [
+        "Philippines",
+        "location.country.languages_spoken",
+        "Filipino language",
+        "Filipino language"
+      ],
+      [
+        "Philippines",
+        "location.country.official_language",
+        "English Language",
+        "English Language"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 4920
+  },
+  {
+    "idx": 18,
+    "id": "WebQTrn-297",
+    "question": "who was real housewives brandi married to",
+    "topic": "Brandi Glanville",
+    "answers": [
+      "Eddie Cibrian"
+    ],
+    "a_entities": [
+      "Eddie Cibrian"
+    ],
+    "hop_count": 2,
+    "direct_paths": [],
+    "two_hop_paths": [
+      [
+        "Brandi Glanville",
+        "people.person.children",
+        "Mason Edward Cibrian",
+        "REVERSE:people.person.children",
+        "Eddie Cibrian",
+        "Eddie Cibrian"
+      ],
+      [
+        "Brandi Glanville",
+        "REVERSE:people.person.parents",
+        "Mason Edward Cibrian",
+        "REVERSE:people.person.children",
+        "Eddie Cibrian",
+        "Eddie Cibrian"
+      ],
+      [
+        "Brandi Glanville",
+        "people.person.children",
+        "Mason Edward Cibrian",
+        "people.person.parents",
+        "Eddie Cibrian",
+        "Eddie Cibrian"
+      ]
+    ],
+    "graph_size": 1622
+  },
+  {
+    "idx": 19,
+    "id": "WebQTrn-326",
+    "question": "what time zone is new york under",
+    "topic": "New York",
+    "answers": [
+      "UTC\u221205:00",
+      "Eastern Time Zone"
+    ],
+    "a_entities": [
+      "UTC\u221205:00",
+      "Eastern Time Zone"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "New York",
+        "location.location.time_zones",
+        "Eastern Time Zone",
+        "Eastern Time Zone"
+      ],
+      [
+        "New York",
+        "location.location.time_zones",
+        "UTC\u221205:00",
+        "UTC\u221205:00"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 8209
+  },
+  {
+    "idx": 22,
+    "id": "WebQTrn-349",
+    "question": "what kind of government did benito mussolini have",
+    "topic": "Benito Mussolini",
+    "answers": [
+      "Republican Fascist Party",
+      "National Fascist Party",
+      "Italian Socialist Party"
+    ],
+    "a_entities": [
+      "Republican Fascist Party",
+      "National Fascist Party",
+      "Italian Socialist Party"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "Benito Mussolini",
+        "organization.organization_founder.organizations_founded",
+        "National Fascist Party",
+        "National Fascist Party"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 2872
+  },
+  {
+    "idx": 23,
+    "id": "WebQTrn-351",
+    "question": "who is chelsea kane",
+    "topic": "Chelsea Kane",
+    "answers": [
+      "Voice Actor",
+      "Actor",
+      "Singer",
+      "Dancer"
+    ],
+    "a_entities": [
+      "Voice Actor",
+      "Actor",
+      "Singer",
+      "Dancer"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "Chelsea Kane",
+        "people.person.profession",
+        "Singer",
+        "Singer"
+      ],
+      [
+        "Chelsea Kane",
+        "people.person.profession",
+        "Actor",
+        "Voice Actor"
+      ],
+      [
+        "Chelsea Kane",
+        "people.person.profession",
+        "Voice Actor",
+        "Voice Actor"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 1921
+  },
+  {
+    "idx": 24,
+    "id": "WebQTrn-353",
+    "question": "what did obama study in school",
+    "topic": "Barack Obama",
+    "answers": [
+      "Political Science"
+    ],
+    "a_entities": [
+      "Political Science"
+    ],
+    "hop_count": 2,
+    "direct_paths": [],
+    "two_hop_paths": [
+      [
+        "Barack Obama",
+        "REVERSE:book.written_work.author",
+        "The Audacity of Hope",
+        "book.written_work.subjects",
+        "Political Science",
+        "Political Science"
+      ],
+      [
+        "Barack Obama",
+        "REVERSE:book.book_edition.author_editor",
+        "The Audacity of Hope",
+        "book.written_work.subjects",
+        "Political Science",
+        "Political Science"
+      ],
+      [
+        "Barack Obama",
+        "REVERSE:book.book_edition.author_editor",
+        "The Audacity of Hope",
+        "book.written_work.subjects",
+        "Political Science",
+        "Political Science"
+      ]
+    ],
+    "graph_size": 7509
+  },
+  {
+    "idx": 25,
+    "id": "WebQTrn-358",
+    "question": "what movies has taylor lautner been in 2011",
+    "topic": "Taylor Lautner",
+    "answers": [
+      "Field of Dreams 2: Lockout",
+      "Abduction",
+      "The Ridiculous Six",
+      "Northern Lights",
+      "He's a Bully, Charlie Brown"
+    ],
+    "a_entities": [
+      "Field of Dreams 2: Lockout",
+      "Abduction",
+      "The Ridiculous Six",
+      "Northern Lights",
+      "He's a Bully, Charlie Brown"
+    ],
+    "hop_count": 2,
+    "direct_paths": [],
+    "two_hop_paths": [
+      [
+        "Taylor Lautner",
+        "REVERSE:film.performance.actor",
+        "m.04z4zmg",
+        "film.performance.film",
+        "Twilight",
+        "The Twilight Saga: Breaking Dawn - Part 1"
+      ],
+      [
+        "Taylor Lautner",
+        "film.actor.film",
+        "m.04z4zmg",
+        "film.performance.film",
+        "Twilight",
+        "The Twilight Saga: Breaking Dawn - Part 1"
+      ],
+      [
+        "Taylor Lautner",
+        "REVERSE:film.performance.actor",
+        "m.04z4zmg",
+        "REVERSE:film.film.starring",
+        "Twilight",
+        "The Twilight Saga: Breaking Dawn - Part 1"
+      ]
+    ],
+    "graph_size": 1664
+  },
+  {
+    "idx": 26,
+    "id": "WebQTrn-361",
+    "question": "what company did henry ford work for",
+    "topic": "Henry Ford",
+    "answers": [
+      "James F. Flower & Bros",
+      "Ford Motor Company",
+      "Detroit Dry Dock Co",
+      "Henry Ford Company",
+      "Edison Illuminating Company"
+    ],
+    "a_entities": [
+      "James F. Flower & Bros",
+      "Ford Motor Company",
+      "Detroit Dry Dock Co",
+      "Henry Ford Company",
+      "Edison Illuminating Company"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "Henry Ford",
+        "organization.organization_founder.organizations_founded",
+        "Ford Motor Company",
+        "Ford Motor Company"
+      ],
+      [
+        "Henry Ford",
+        "book.book_subject.works",
+        "Henry Ford",
+        "Henry Ford Company"
+      ],
+      [
+        "Henry Ford",
+        "common.image.appears_in_topic_gallery",
+        "Henry Ford",
+        "Henry Ford Company"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 2614
+  },
+  {
+    "idx": 27,
+    "id": "WebQTrn-376",
+    "question": "who speaks farsi",
+    "topic": "Persian Language",
+    "answers": [
+      "Tajikistan",
+      "Seljuk Empire",
+      "Canada",
+      "Oman",
+      "Uzbekistan"
+    ],
+    "a_entities": [
+      "Tajikistan",
+      "Seljuk Empire",
+      "Canada",
+      "Oman",
+      "Uzbekistan"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "Persian Language",
+        "language.human_language.countries_spoken_in",
+        "Oman",
+        "Oman"
+      ],
+      [
+        "Persian Language",
+        "language.human_language.countries_spoken_in",
+        "Iraq",
+        "Iraq"
+      ],
+      [
+        "Persian Language",
+        "language.human_language.countries_spoken_in",
+        "Iran",
+        "Iran"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 5527
+  },
+  {
+    "idx": 28,
+    "id": "WebQTrn-398",
+    "question": "what states does the missouri river touch",
+    "topic": "Missouri River",
+    "answers": [
+      "South Dakota",
+      "Montana",
+      "North Dakota",
+      "Kansas",
+      "Missouri"
+    ],
+    "a_entities": [
+      "South Dakota",
+      "Montana",
+      "North Dakota",
+      "Kansas",
+      "Missouri"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "Missouri River",
+        "geography.body_of_water.bridges",
+        "Illinois Central Missouri River Bridge",
+        "Missouri"
+      ],
+      [
+        "Missouri River",
+        "location.location.partially_containedby",
+        "Iowa",
+        "Iowa"
+      ],
+      [
+        "Missouri River",
+        "geography.body_of_water.bridges",
+        "Burt County Missouri River Bridge",
+        "Missouri"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 6221
+  },
+  {
+    "idx": 29,
+    "id": "WebQTrn-414",
+    "question": "what countries around the world speak french",
+    "topic": "French",
+    "answers": [
+      "Equatorial Guinea",
+      "South Vietnam",
+      "Congo",
+      "Cameroon",
+      "Qatar"
+    ],
+    "a_entities": [
+      "Equatorial Guinea",
+      "South Vietnam",
+      "Congo",
+      "Cameroon",
+      "Qatar"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "French",
+        "base.rosetta.local_name.locale",
+        "Rwanda",
+        "Rwanda"
+      ],
+      [
+        "French",
+        "base.rosetta.local_name.locale",
+        "Central African Republic",
+        "Central African Republic"
+      ],
+      [
+        "French",
+        "base.rosetta.local_name.locale",
+        "Madagascar",
+        "Madagascar"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 3789
+  },
+  {
+    "idx": 30,
+    "id": "WebQTrn-418",
+    "question": "where was john lennon standing when he was shot",
+    "topic": "John Lennon",
+    "answers": [
+      "New York City"
+    ],
+    "a_entities": [
+      "New York City"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "John Lennon",
+        "music.artist.album",
+        "Some Time in New York City",
+        "New York City"
+      ],
+      [
+        "John Lennon",
+        "music.producer.tracks_produced",
+        "New York City",
+        "New York City"
+      ],
+      [
+        "John Lennon",
+        "music.artist.album",
+        "Live in New York City",
+        "New York City"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 8137
+  },
+  {
+    "idx": 31,
+    "id": "WebQTrn-428",
+    "question": "who was judy garland married to",
+    "topic": "Judy Garland",
+    "answers": [
+      "Sidney Luft",
+      "Mickey Deans",
+      "Mark Herron",
+      "Vincente Minnelli",
+      "David Rose"
+    ],
+    "a_entities": [
+      "Sidney Luft",
+      "Mickey Deans",
+      "Mark Herron",
+      "Vincente Minnelli",
+      "David Rose"
+    ],
+    "hop_count": 2,
+    "direct_paths": [],
+    "two_hop_paths": [
+      [
+        "Judy Garland",
+        "freebase.valuenotation.is_reviewed",
+        "Country of nationality",
+        "REVERSE:freebase.valuenotation.is_reviewed",
+        "Sidney Luft",
+        "Sidney Luft"
+      ],
+      [
+        "Judy Garland",
+        "REVERSE:people.person.parents",
+        "Liza Minnelli",
+        "people.person.parents",
+        "Vincente Minnelli",
+        "Vincente Minnelli"
+      ],
+      [
+        "Judy Garland",
+        "people.person.children",
+        "Liza Minnelli",
+        "people.person.parents",
+        "Vincente Minnelli",
+        "Vincente Minnelli"
+      ]
+    ],
+    "graph_size": 4910
+  },
+  {
+    "idx": 32,
+    "id": "WebQTrn-429",
+    "question": "where is abraham lincoln hometown",
+    "topic": "Abraham Lincoln",
+    "answers": [
+      "Hodgenville"
+    ],
+    "a_entities": [
+      "Hodgenville"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "Abraham Lincoln",
+        "people.person.place_of_birth",
+        "Hodgenville",
+        "Hodgenville"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 5417
+  },
+  {
+    "idx": 33,
+    "id": "WebQTrn-430",
+    "question": "what disease did helen keller",
+    "topic": "Helen Keller",
+    "answers": [
+      "Hearing loss"
+    ],
+    "a_entities": [
+      "Hearing loss"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "Helen Keller",
+        "medicine.notable_person_with_medical_condition.condition",
+        "Hearing loss",
+        "Hearing loss"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 4555
+  },
+  {
+    "idx": 34,
+    "id": "WebQTrn-442",
+    "question": "who was the first leader of the afl",
+    "topic": "American Football League",
+    "answers": [
+      "Bud Adams",
+      "Lamar Hunt"
+    ],
+    "a_entities": [
+      "Bud Adams",
+      "Lamar Hunt"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "American Football League",
+        "organization.organization.founders",
+        "Lamar Hunt",
+        "Lamar Hunt"
+      ],
+      [
+        "American Football League",
+        "organization.organization.founders",
+        "Bud Adams",
+        "Bud Adams"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 769
+  },
+  {
+    "idx": 35,
+    "id": "WebQTrn-443",
+    "question": "who is the arizona cardinals football coach",
+    "topic": "Arizona Cardinals",
+    "answers": [
+      "Bruce Arians"
+    ],
+    "a_entities": [
+      "Bruce Arians"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "Arizona Cardinals",
+        "american_football.football_team.current_head_coach",
+        "Bruce Arians",
+        "Bruce Arians"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 4595
+  },
+  {
+    "idx": 36,
+    "id": "WebQTrn-457",
+    "question": "who did ayrton senna drive for",
+    "topic": "Ayrton Senna",
+    "answers": [
+      "McLaren",
+      "Williams F1",
+      "Team Lotus",
+      "Toleman"
+    ],
+    "a_entities": [
+      "McLaren",
+      "Williams F1",
+      "Team Lotus",
+      "Toleman"
+    ],
+    "hop_count": 2,
+    "direct_paths": [],
+    "two_hop_paths": [
+      [
+        "Ayrton Senna",
+        "base.formula1.formula_1_driver.team_member",
+        "m.04j9d3s",
+        "REVERSE:base.formula1.formula_1_team.driver",
+        "McLaren",
+        "McLaren"
+      ],
+      [
+        "Ayrton Senna",
+        "REVERSE:base.formula1.formula_1_team_member.driver",
+        "m.04j9d3s",
+        "REVERSE:base.formula1.formula_1_team.driver",
+        "McLaren",
+        "McLaren"
+      ],
+      [
+        "Ayrton Senna",
+        "base.formula1.formula_1_driver.team_member",
+        "m.04j9d3s",
+        "base.formula1.formula_1_team_member.team",
+        "McLaren",
+        "McLaren"
+      ]
+    ],
+    "graph_size": 2444
+  },
+  {
+    "idx": 37,
+    "id": "WebQTrn-459",
+    "question": "where is the best place to vacation in the dominican republic",
+    "topic": "Dominican Republic",
+    "answers": [
+      "Playa Fronton",
+      "National Palace",
+      "Columbus Lighthouse",
+      "Macao Beach",
+      "Damajaqua Cascades"
+    ],
+    "a_entities": [
+      "Playa Fronton",
+      "National Palace",
+      "Columbus Lighthouse",
+      "Macao Beach",
+      "Damajaqua Cascades"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "Dominican Republic",
+        "travel.travel_destination.tourist_attractions",
+        "Damajaqua Cascades",
+        "Damajaqua Cascades"
+      ],
+      [
+        "Dominican Republic",
+        "travel.travel_destination.tourist_attractions",
+        "Haitian Batey",
+        "Haitian Batey"
+      ],
+      [
+        "Dominican Republic",
+        "travel.travel_destination.tourist_attractions",
+        "Playa Fronton",
+        "Playa Fronton"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 5091
+  },
+  {
+    "idx": 38,
+    "id": "WebQTrn-483",
+    "question": "what type of music did richard wagner play",
+    "topic": "Richard Wagner",
+    "answers": [
+      "Opera",
+      "Classical music",
+      "Romantic music"
+    ],
+    "a_entities": [
+      "Opera",
+      "Classical music",
+      "Romantic music"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "Richard Wagner",
+        "music.artist.genre",
+        "Classical music",
+        "Classical music"
+      ],
+      [
+        "Richard Wagner",
+        "base.kwebbase.kwtopic.has_sentences",
+        "von Weber, a family friend and the artistic director of the German Opera in Dresden, was another strong childhood influence.",
+        "Opera"
+      ],
+      [
+        "Richard Wagner",
+        "music.artist.genre",
+        "Opera",
+        "Opera"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 6481
+  },
+  {
+    "idx": 39,
+    "id": "WebQTrn-497",
+    "question": "in what country is amsterdam",
+    "topic": "Amsterdam",
+    "answers": [
+      "Netherlands"
+    ],
+    "a_entities": [
+      "Netherlands"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "Amsterdam",
+        "location.administrative_division.country",
+        "Netherlands",
+        "Netherlands"
+      ],
+      [
+        "Amsterdam",
+        "base.biblioness.bibs_location.country",
+        "Netherlands",
+        "Netherlands"
+      ],
+      [
+        "Amsterdam",
+        "location.administrative_division.second_level_division_of",
+        "Netherlands",
+        "Netherlands"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 5356
+  },
+  {
+    "idx": 40,
+    "id": "WebQTrn-534",
+    "question": "who does michael vick play for",
+    "topic": "Michael Vick",
+    "answers": [
+      "New York Jets"
+    ],
+    "a_entities": [
+      "New York Jets"
+    ],
+    "hop_count": 2,
+    "direct_paths": [],
+    "two_hop_paths": [
+      [
+        "Michael Vick",
+        "sports.pro_athlete.teams",
+        "m.0_z82d0",
+        "sports.sports_team_roster.team",
+        "New York Jets",
+        "New York Jets"
+      ],
+      [
+        "Michael Vick",
+        "REVERSE:sports.sports_team_roster.player",
+        "m.0_z82d0",
+        "sports.sports_team_roster.team",
+        "New York Jets",
+        "New York Jets"
+      ],
+      [
+        "Michael Vick",
+        "base.schemastaging.athlete_extra.salary",
+        "m.0101fgg3",
+        "base.schemastaging.athlete_salary.team",
+        "New York Jets",
+        "New York Jets"
+      ]
+    ],
+    "graph_size": 1347
+  },
+  {
+    "idx": 41,
+    "id": "WebQTrn-536",
+    "question": "what is anderson silva trained in",
+    "topic": "Anderson Silva",
+    "answers": [
+      "Mixed Martial Artist",
+      "Actor"
+    ],
+    "a_entities": [
+      "Mixed Martial Artist",
+      "Actor"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "Anderson Silva",
+        "people.person.profession",
+        "Actor",
+        "Actor"
+      ],
+      [
+        "Anderson Silva",
+        "common.topic.notable_types",
+        "Martial Artist",
+        "Mixed Martial Artist"
+      ],
+      [
+        "Anderson Silva",
+        "people.person.profession",
+        "Mixed Martial Artist",
+        "Mixed Martial Artist"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 892
+  },
+  {
+    "idx": 42,
+    "id": "WebQTrn-557",
+    "question": "who played dorothy in the wizard of oz movie",
+    "topic": "Dorothy Gale",
+    "answers": [
+      "Judy Garland"
+    ],
+    "a_entities": [
+      "Judy Garland"
+    ],
+    "hop_count": 2,
+    "direct_paths": [],
+    "two_hop_paths": [
+      [
+        "Dorothy Gale",
+        "REVERSE:theater.play.characters",
+        "The Wizard of Oz",
+        "music.album.featured_artists",
+        "Judy Garland",
+        "Judy Garland"
+      ],
+      [
+        "Dorothy Gale",
+        "theater.theater_character.plays_appears_in",
+        "The Wizard of Oz",
+        "music.album.featured_artists",
+        "Judy Garland",
+        "Judy Garland"
+      ],
+      [
+        "Dorothy Gale",
+        "book.book_character.appears_in_book",
+        "The Wizard of Oz",
+        "music.album.featured_artists",
+        "Judy Garland",
+        "Judy Garland"
+      ]
+    ],
+    "graph_size": 7763
+  },
+  {
+    "idx": 43,
+    "id": "WebQTrn-566",
+    "question": "what style of art does andy warhol do",
+    "topic": "Andy Warhol",
+    "answers": [
+      "Modern art",
+      "Pop art"
+    ],
+    "a_entities": [
+      "Modern art",
+      "Pop art"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "Andy Warhol",
+        "book.author.works_written",
+        "a",
+        "Modern art"
+      ],
+      [
+        "Andy Warhol",
+        "visual_art.visual_artist.associated_periods_or_movements",
+        "Modern art",
+        "Modern art"
+      ],
+      [
+        "Andy Warhol",
+        "visual_art.visual_artist.associated_periods_or_movements",
+        "Pop art",
+        "Pop art"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 6594
+  },
+  {
+    "idx": 44,
+    "id": "WebQTrn-579",
+    "question": "who played luke skywalker in star wars episode 4",
+    "topic": "Luke Skywalker",
+    "answers": [
+      "Mark Hamill"
+    ],
+    "a_entities": [
+      "Mark Hamill"
+    ],
+    "hop_count": 2,
+    "direct_paths": [],
+    "two_hop_paths": [
+      [
+        "Luke Skywalker",
+        "film.film_character.portrayed_in_films",
+        "m.010fs6tg",
+        "REVERSE:film.actor.film",
+        "Mark Hamill",
+        "Mark Hamill"
+      ],
+      [
+        "Luke Skywalker",
+        "REVERSE:film.performance.character",
+        "m.010fs6tg",
+        "REVERSE:film.actor.film",
+        "Mark Hamill",
+        "Mark Hamill"
+      ],
+      [
+        "Luke Skywalker",
+        "film.film_character.portrayed_in_films",
+        "m.010fs6tg",
+        "film.performance.actor",
+        "Mark Hamill",
+        "Mark Hamill"
+      ]
+    ],
+    "graph_size": 3370
+  },
+  {
+    "idx": 45,
+    "id": "WebQTrn-608",
+    "question": "what is shakira 's nationality",
+    "topic": "Shakira",
+    "answers": [
+      "Colombia"
+    ],
+    "a_entities": [
+      "Colombia"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "Shakira",
+        "people.person.ethnicity",
+        "Colombians",
+        "Colombia"
+      ],
+      [
+        "Shakira",
+        "music.artist.origin",
+        "Colombia",
+        "Colombia"
+      ],
+      [
+        "Shakira",
+        "people.person.nationality",
+        "Colombia",
+        "Colombia"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 7581
+  },
+  {
+    "idx": 46,
+    "id": "WebQTrn-611",
+    "question": "what position did george washington serve in the constitutional convention",
+    "topic": "George Washington",
+    "answers": [
+      "Delegate to the Continental Congress"
+    ],
+    "a_entities": [
+      "Delegate to the Continental Congress"
+    ],
+    "hop_count": 2,
+    "direct_paths": [],
+    "two_hop_paths": [
+      [
+        "George Washington",
+        "government.politician.government_positions_held",
+        "m.09ryjt0",
+        "government.government_position_held.office_position_or_title",
+        "Delegate to the Continental Congress",
+        "Delegate to the Continental Congress"
+      ],
+      [
+        "George Washington",
+        "REVERSE:government.government_position_held.office_holder",
+        "m.09ryjt0",
+        "government.government_position_held.office_position_or_title",
+        "Delegate to the Continental Congress",
+        "Delegate to the Continental Congress"
+      ],
+      [
+        "George Washington",
+        "government.politician.government_positions_held",
+        "m.09ryjt0",
+        "REVERSE:government.government_office_or_title.office_holders",
+        "Delegate to the Continental Congress",
+        "Delegate to the Continental Congress"
+      ]
+    ],
+    "graph_size": 5422
+  },
+  {
+    "idx": 47,
+    "id": "WebQTrn-639",
+    "question": "where do audi come from",
+    "topic": "Audi",
+    "answers": [
+      "Ingolstadt"
+    ],
+    "a_entities": [
+      "Ingolstadt"
+    ],
+    "hop_count": 2,
+    "direct_paths": [],
+    "two_hop_paths": [
+      [
+        "Audi",
+        "organization.organization.headquarters",
+        "m.02t7b7x",
+        "location.mailing_address.citytown",
+        "Ingolstadt",
+        "Ingolstadt"
+      ]
+    ],
+    "graph_size": 2066
+  },
+  {
+    "idx": 48,
+    "id": "WebQTrn-700",
+    "question": "who played juni in spy kids 4",
+    "topic": "Spy Kids: All the Time in the World",
+    "answers": [
+      "Daryl Sabara"
+    ],
+    "a_entities": [
+      "Daryl Sabara"
+    ],
+    "hop_count": 2,
+    "direct_paths": [],
+    "two_hop_paths": [
+      [
+        "Spy Kids: All the Time in the World",
+        "film.film.country",
+        "United States of America",
+        "REVERSE:people.person.nationality",
+        "Daryl Sabara",
+        "Daryl Sabara"
+      ],
+      [
+        "Spy Kids: All the Time in the World",
+        "film.film.starring",
+        "m.0g51m5_",
+        "film.performance.actor",
+        "Daryl Sabara",
+        "Daryl Sabara"
+      ],
+      [
+        "Spy Kids: All the Time in the World",
+        "REVERSE:film.performance.film",
+        "m.0g51m5_",
+        "film.performance.actor",
+        "Daryl Sabara",
+        "Daryl Sabara"
+      ]
+    ],
+    "graph_size": 4457
+  },
+  {
+    "idx": 49,
+    "id": "WebQTrn-701",
+    "question": "what year did the new york mets start",
+    "topic": "New York Mets",
+    "answers": [
+      "1962"
+    ],
+    "a_entities": [
+      "1962"
+    ],
+    "hop_count": 2,
+    "direct_paths": [],
+    "two_hop_paths": [
+      [
+        "New York Mets",
+        "baseball.baseball_team.team_stats",
+        "m.05n69vq",
+        "baseball.baseball_team_stats.season",
+        "1962 Major League Baseball Season",
+        "1962"
+      ],
+      [
+        "New York Mets",
+        "REVERSE:baseball.baseball_team_stats.team",
+        "m.05n69vq",
+        "baseball.baseball_team_stats.season",
+        "1962 Major League Baseball Season",
+        "1962"
+      ]
+    ],
+    "graph_size": 1843
+  },
+  {
+    "idx": 50,
+    "id": "WebQTrn-722",
+    "question": "what is the current government system in france",
+    "topic": "France",
+    "answers": [
+      "Semi-presidential system",
+      "Unitary state",
+      "Constitutional republic"
+    ],
+    "a_entities": [
+      "Semi-presidential system",
+      "Unitary state",
+      "Constitutional republic"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "France",
+        "location.country.internet_tld",
+        "re",
+        "Semi-presidential system"
+      ],
+      [
+        "France",
+        "location.country.form_of_government",
+        "Semi-presidential system",
+        "Semi-presidential system"
+      ],
+      [
+        "France",
+        "location.country.form_of_government",
+        "Constitutional republic",
+        "Constitutional republic"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 6744
+  },
+  {
+    "idx": 51,
+    "id": "WebQTrn-724",
+    "question": "what is calabria italy",
+    "topic": "Calabria",
+    "answers": [
+      "Italian region"
+    ],
+    "a_entities": [
+      "Italian region"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "Calabria",
+        "base.aareas.schema.administrative_area.administrative_area_type",
+        "Italian region",
+        "Italian region"
+      ],
+      [
+        "Calabria",
+        "common.topic.notable_types",
+        "Italian region",
+        "Italian region"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 2211
+  },
+  {
+    "idx": 52,
+    "id": "WebQTrn-733",
+    "question": "who did heinrich himmler marry",
+    "topic": "Heinrich Himmler",
+    "answers": [
+      "Margarete Boden"
+    ],
+    "a_entities": [
+      "Margarete Boden"
+    ],
+    "hop_count": 2,
+    "direct_paths": [],
+    "two_hop_paths": [
+      [
+        "Heinrich Himmler",
+        "freebase.valuenotation.is_reviewed",
+        "Place of birth",
+        "REVERSE:freebase.valuenotation.has_value",
+        "Margarete Boden",
+        "Margarete Boden"
+      ],
+      [
+        "Heinrich Himmler",
+        "REVERSE:people.marriage.spouse",
+        "m.0k1wrn5",
+        "people.marriage.spouse",
+        "Margarete Boden",
+        "Margarete Boden"
+      ],
+      [
+        "Heinrich Himmler",
+        "people.person.spouse_s",
+        "m.0k1wrn5",
+        "people.marriage.spouse",
+        "Margarete Boden",
+        "Margarete Boden"
+      ]
+    ],
+    "graph_size": 2714
+  },
+  {
+    "idx": 53,
+    "id": "WebQTrn-741",
+    "question": "who was carrie underwood in soul surfer",
+    "topic": "Carrie Underwood",
+    "answers": [
+      "Sarah Hill"
+    ],
+    "a_entities": [
+      "Sarah Hill"
+    ],
+    "hop_count": 2,
+    "direct_paths": [],
+    "two_hop_paths": [
+      [
+        "Carrie Underwood",
+        "film.actor.film",
+        "m.0gbz1tr",
+        "REVERSE:film.film_character.portrayed_in_films",
+        "Sarah Hill",
+        "Sarah Hill"
+      ],
+      [
+        "Carrie Underwood",
+        "REVERSE:film.performance.actor",
+        "m.0gbz1tr",
+        "REVERSE:film.film_character.portrayed_in_films",
+        "Sarah Hill",
+        "Sarah Hill"
+      ],
+      [
+        "Carrie Underwood",
+        "film.actor.film",
+        "m.0gbz1tr",
+        "film.performance.character",
+        "Sarah Hill",
+        "Sarah Hill"
+      ]
+    ],
+    "graph_size": 8474
+  },
+  {
+    "idx": 54,
+    "id": "WebQTrn-747",
+    "question": "what is venus named for",
+    "topic": "Venus",
+    "answers": [
+      "Venus"
+    ],
+    "a_entities": [
+      "Venus"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "Venus",
+        "visual_art.art_subject.artwork_on_the_subject",
+        "The Birth of Venus",
+        "Venus"
+      ],
+      [
+        "Venus",
+        "visual_art.art_subject.artwork_on_the_subject",
+        "Venus de Milo",
+        "Venus"
+      ],
+      [
+        "Venus",
+        "base.skosbase.vocabulary_equivalent_topic.equivalent_concept",
+        "Venus (Planet)",
+        "Venus"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 1625
+  },
+  {
+    "idx": 55,
+    "id": "WebQTrn-788",
+    "question": "what clubs has peter crouch played for",
+    "topic": "Peter Crouch",
+    "answers": [
+      "Aston Villa F.C.",
+      "Queens Park Rangers F.C. in European football",
+      "Tottenham Hotspur F.C.",
+      "Portsmouth F.C.",
+      "Stoke City F.C."
+    ],
+    "a_entities": [
+      "Aston Villa F.C.",
+      "Queens Park Rangers F.C. in European football",
+      "Tottenham Hotspur F.C.",
+      "Portsmouth F.C.",
+      "Stoke City F.C."
+    ],
+    "hop_count": 2,
+    "direct_paths": [],
+    "two_hop_paths": [
+      [
+        "Peter Crouch",
+        "sports.pro_athlete.teams",
+        "m.06zyb08",
+        "sports.sports_team_roster.team",
+        "Tottenham Hotspur F.C.",
+        "Tottenham Hotspur F.C."
+      ],
+      [
+        "Peter Crouch",
+        "REVERSE:sports.sports_team_roster.player",
+        "m.06zyb08",
+        "sports.sports_team_roster.team",
+        "Tottenham Hotspur F.C.",
+        "Tottenham Hotspur F.C."
+      ],
+      [
+        "Peter Crouch",
+        "REVERSE:sports.sports_team_roster.player",
+        "m.0bg6_lv",
+        "sports.sports_team_roster.team",
+        "Southampton F.C.",
+        "Southampton F.C."
+      ]
+    ],
+    "graph_size": 915
+  },
+  {
+    "idx": 56,
+    "id": "WebQTrn-793",
+    "question": "who did michael jordan marry",
+    "topic": "Michael Jordan",
+    "answers": [
+      "Yvette Prieto",
+      "Juanita Vanoy"
+    ],
+    "a_entities": [
+      "Yvette Prieto",
+      "Juanita Vanoy"
+    ],
+    "hop_count": 2,
+    "direct_paths": [],
+    "two_hop_paths": [
+      [
+        "Michael Jordan",
+        "people.person.children",
+        "Victoria Jordan",
+        "people.person.parents",
+        "Yvette Prieto",
+        "Yvette Prieto"
+      ],
+      [
+        "Michael Jordan",
+        "REVERSE:people.person.parents",
+        "Victoria Jordan",
+        "people.person.parents",
+        "Yvette Prieto",
+        "Yvette Prieto"
+      ],
+      [
+        "Michael Jordan",
+        "people.person.children",
+        "Victoria Jordan",
+        "REVERSE:people.person.children",
+        "Yvette Prieto",
+        "Yvette Prieto"
+      ]
+    ],
+    "graph_size": 2227
+  },
+  {
+    "idx": 57,
+    "id": "WebQTrn-810",
+    "question": "what date did the san francisco giants win the world series",
+    "topic": "San Francisco Giants",
+    "answers": [
+      "2014 World Series"
+    ],
+    "a_entities": [
+      "2014 World Series"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "San Francisco Giants",
+        "sports.sports_team.championships",
+        "2014 World Series",
+        "2014 World Series"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 2366
+  },
+  {
+    "idx": 58,
+    "id": "WebQTrn-844",
+    "question": "what 3 states border the pacific ocean",
+    "topic": "Pacific Ocean",
+    "answers": [
+      "Oregon",
+      "California",
+      "Washington"
+    ],
+    "a_entities": [
+      "Oregon",
+      "California",
+      "Washington"
+    ],
+    "hop_count": 2,
+    "direct_paths": [],
+    "two_hop_paths": [
+      [
+        "Pacific Ocean",
+        "location.location.adjoin_s",
+        "m.03hchfb",
+        "REVERSE:location.location.adjoin_s",
+        "California",
+        "California"
+      ],
+      [
+        "Pacific Ocean",
+        "REVERSE:location.adjoining_relationship.adjoins",
+        "m.03hchfb",
+        "REVERSE:location.location.adjoin_s",
+        "California",
+        "California"
+      ],
+      [
+        "Pacific Ocean",
+        "location.location.adjoin_s",
+        "m.03hchfb",
+        "location.adjoining_relationship.adjoins",
+        "California",
+        "California"
+      ]
+    ],
+    "graph_size": 7327
+  },
+  {
+    "idx": 59,
+    "id": "WebQTrn-846",
+    "question": "where was avril lavigne born",
+    "topic": "Avril Lavigne",
+    "answers": [
+      "Belleville"
+    ],
+    "a_entities": [
+      "Belleville"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "Avril Lavigne",
+        "people.person.place_of_birth",
+        "Belleville",
+        "Belleville"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 9496
+  },
+  {
+    "idx": 60,
+    "id": "WebQTrn-858",
+    "question": "which countries does south africa export to",
+    "topic": "South Africa",
+    "answers": [
+      "Angola",
+      "Tanzania"
+    ],
+    "a_entities": [
+      "Angola",
+      "Tanzania"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "South Africa",
+        "location.country.internet_tld",
+        "za",
+        "Tanzania"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 4766
+  },
+  {
+    "idx": 61,
+    "id": "WebQTrn-868",
+    "question": "what a city in montana",
+    "topic": "Montana",
+    "answers": [
+      "Three Forks",
+      "Cohagen, Montana",
+      "St. Ignatius",
+      "Windham",
+      "Kevin"
+    ],
+    "a_entities": [
+      "Three Forks",
+      "Cohagen, Montana",
+      "St. Ignatius",
+      "Windham",
+      "Kevin"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "Montana",
+        "book.book_subject.works",
+        "Homestead",
+        "Homestead, Montana"
+      ],
+      [
+        "Montana",
+        "book.book_subject.works",
+        "Springwater",
+        "Springwater Colony"
+      ],
+      [
+        "Montana",
+        "location.us_state.capital",
+        "Helena",
+        "East Helena"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 6102
+  },
+  {
+    "idx": 62,
+    "id": "WebQTrn-889",
+    "question": "who play luke skywalker",
+    "topic": "Luke Skywalker",
+    "answers": [
+      "Bob Bergen",
+      "Mark Hamill"
+    ],
+    "a_entities": [
+      "Bob Bergen",
+      "Mark Hamill"
+    ],
+    "hop_count": 2,
+    "direct_paths": [],
+    "two_hop_paths": [
+      [
+        "Luke Skywalker",
+        "REVERSE:film.performance.character",
+        "m.010wvbml",
+        "film.performance.actor",
+        "Bob Bergen",
+        "Bob Bergen"
+      ],
+      [
+        "Luke Skywalker",
+        "film.film_character.portrayed_in_films",
+        "m.010wvbml",
+        "film.performance.actor",
+        "Bob Bergen",
+        "Bob Bergen"
+      ],
+      [
+        "Luke Skywalker",
+        "REVERSE:film.performance.character",
+        "m.010wvbml",
+        "REVERSE:film.actor.film",
+        "Bob Bergen",
+        "Bob Bergen"
+      ]
+    ],
+    "graph_size": 3370
+  },
+  {
+    "idx": 63,
+    "id": "WebQTrn-891",
+    "question": "where did john howard live",
+    "topic": "John Howard",
+    "answers": [
+      "Sydney"
+    ],
+    "a_entities": [
+      "Sydney"
+    ],
+    "hop_count": 2,
+    "direct_paths": [],
+    "two_hop_paths": [
+      [
+        "John Howard",
+        "people.person.education",
+        "m.03lk8v8",
+        "education.education.institution",
+        "University of Sydney",
+        "Sydney"
+      ],
+      [
+        "John Howard",
+        "REVERSE:education.education.student",
+        "m.03lk8v8",
+        "education.education.institution",
+        "University of Sydney",
+        "Sydney"
+      ],
+      [
+        "John Howard",
+        "REVERSE:people.place_lived.person",
+        "m.03pk4lw",
+        "people.place_lived.location",
+        "Sydney",
+        "Sydney"
+      ]
+    ],
+    "graph_size": 928
+  },
+  {
+    "idx": 64,
+    "id": "WebQTrn-901",
+    "question": "who was judy collins married to",
+    "topic": "Judy Collins",
+    "answers": [
+      "Louis Nelson",
+      "Peter Taylor"
+    ],
+    "a_entities": [
+      "Louis Nelson",
+      "Peter Taylor"
+    ],
+    "hop_count": 2,
+    "direct_paths": [],
+    "two_hop_paths": [
+      [
+        "Judy Collins",
+        "people.person.spouse_s",
+        "m.0l_w55m",
+        "people.marriage.spouse",
+        "Peter Taylor",
+        "Peter Taylor"
+      ],
+      [
+        "Judy Collins",
+        "REVERSE:people.marriage.spouse",
+        "m.0l_w55m",
+        "people.marriage.spouse",
+        "Peter Taylor",
+        "Peter Taylor"
+      ],
+      [
+        "Judy Collins",
+        "people.person.spouse_s",
+        "m.0l_w55m",
+        "REVERSE:people.person.spouse_s",
+        "Peter Taylor",
+        "Peter Taylor"
+      ]
+    ],
+    "graph_size": 3426
+  },
+  {
+    "idx": 66,
+    "id": "WebQTrn-931",
+    "question": "where did emily murphy go to school",
+    "topic": "Emily Murphy",
+    "answers": [
+      "Bishop Strachan School"
+    ],
+    "a_entities": [
+      "Bishop Strachan School"
+    ],
+    "hop_count": 2,
+    "direct_paths": [],
+    "two_hop_paths": [
+      [
+        "Emily Murphy",
+        "REVERSE:education.education.student",
+        "m.0n10kr4",
+        "education.education.institution",
+        "Bishop Strachan School",
+        "Bishop Strachan School"
+      ],
+      [
+        "Emily Murphy",
+        "people.person.education",
+        "m.0n10kr4",
+        "education.education.institution",
+        "Bishop Strachan School",
+        "Bishop Strachan School"
+      ],
+      [
+        "Emily Murphy",
+        "REVERSE:education.education.student",
+        "m.0n10kr4",
+        "REVERSE:education.educational_institution.students_graduates",
+        "Bishop Strachan School",
+        "Bishop Strachan School"
+      ]
+    ],
+    "graph_size": 1519
+  },
+  {
+    "idx": 67,
+    "id": "WebQTrn-938",
+    "question": "what else did eli whitney invent",
+    "topic": "Eli Whitney",
+    "answers": [
+      "Milling",
+      "Interchangeable parts",
+      "Cotton gin"
+    ],
+    "a_entities": [
+      "Milling",
+      "Interchangeable parts",
+      "Cotton gin"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "Eli Whitney",
+        "law.inventor.inventions",
+        "Interchangeable parts",
+        "Interchangeable parts"
+      ],
+      [
+        "Eli Whitney",
+        "base.argumentmaps.innovator.original_ideas",
+        "Cotton gin",
+        "Cotton gin"
+      ],
+      [
+        "Eli Whitney",
+        "law.inventor.inventions",
+        "Cotton gin",
+        "Cotton gin"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 1928
+  },
+  {
+    "idx": 68,
+    "id": "WebQTrn-942",
+    "question": "where to travel around sydney",
+    "topic": "Sydney",
+    "answers": [
+      "Sydney Markets",
+      "Kamay Botany Bay National Park",
+      "Australian National Maritime Museum",
+      "City2Surf",
+      "Oatley Park, New South Wales"
+    ],
+    "a_entities": [
+      "Sydney Markets",
+      "Kamay Botany Bay National Park",
+      "Australian National Maritime Museum",
+      "City2Surf",
+      "Oatley Park, New South Wales"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "Sydney",
+        "travel.travel_destination.tourist_attractions",
+        "Oatley Park, New South Wales",
+        "Oatley Park, New South Wales"
+      ],
+      [
+        "Sydney",
+        "travel.travel_destination.tourist_attractions",
+        "Luna Park Sydney",
+        "Luna Park Sydney"
+      ],
+      [
+        "Sydney",
+        "travel.travel_destination.tourist_attractions",
+        "Wild Life Sydney",
+        "Wild Life Sydney"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 5531
+  },
+  {
+    "idx": 69,
+    "id": "WebQTrn-947",
+    "question": "where is the head office of hsbc bank",
+    "topic": "HSBC",
+    "answers": [
+      "8 Canada Square",
+      "London"
+    ],
+    "a_entities": [
+      "8 Canada Square",
+      "London"
+    ],
+    "hop_count": 2,
+    "direct_paths": [],
+    "two_hop_paths": [
+      [
+        "HSBC",
+        "exhibitions.exhibition_sponsor.exhibitions_sponsored",
+        "m.0jqt_29",
+        "exhibitions.exhibition_run.venue",
+        "Science Museum, London",
+        "London"
+      ],
+      [
+        "HSBC",
+        "REVERSE:exhibitions.exhibition_run.sponsor",
+        "m.0jqt_29",
+        "exhibitions.exhibition_run.venue",
+        "Science Museum, London",
+        "London"
+      ],
+      [
+        "HSBC",
+        "exhibitions.exhibition_sponsor.exhibitions_sponsored",
+        "m.0jqt_29",
+        "REVERSE:exhibitions.exhibition_venue.exhibitions_at_this_venue",
+        "Science Museum, London",
+        "London"
+      ]
+    ],
+    "graph_size": 1129
+  },
+  {
+    "idx": 70,
+    "id": "WebQTrn-956",
+    "question": "what year did florida marlins win the world series",
+    "topic": "Miami Marlins",
+    "answers": [
+      "2003 World Series"
+    ],
+    "a_entities": [
+      "2003 World Series"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "Miami Marlins",
+        "sports.sports_team.championships",
+        "2003 World Series",
+        "2003 World Series"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 2652
+  },
+  {
+    "idx": 71,
+    "id": "WebQTrn-957",
+    "question": "what movie did marlee matlin won an academy award for",
+    "topic": "Marlee Matlin",
+    "answers": [
+      "Children of a Lesser God"
+    ],
+    "a_entities": [
+      "Children of a Lesser God"
+    ],
+    "hop_count": 2,
+    "direct_paths": [],
+    "two_hop_paths": [
+      [
+        "Marlee Matlin",
+        "freebase.valuenotation.is_reviewed",
+        "Parents",
+        "REVERSE:type.property.master_property",
+        "Children",
+        "Children of a Lesser God"
+      ],
+      [
+        "Marlee Matlin",
+        "freebase.valuenotation.is_reviewed",
+        "Parents",
+        "owl#inverseOf",
+        "Children",
+        "Children of a Lesser God"
+      ],
+      [
+        "Marlee Matlin",
+        "freebase.valuenotation.is_reviewed",
+        "Parents",
+        "type.property.reverse_property",
+        "Children",
+        "Children of a Lesser God"
+      ]
+    ],
+    "graph_size": 2399
+  },
+  {
+    "idx": 72,
+    "id": "WebQTrn-969",
+    "question": "who is the head coach of the tennessee titans",
+    "topic": "Tennessee Titans",
+    "answers": [
+      "Ken Whisenhunt"
+    ],
+    "a_entities": [
+      "Ken Whisenhunt"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "Tennessee Titans",
+        "american_football.football_team.current_head_coach",
+        "Ken Whisenhunt",
+        "Ken Whisenhunt"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 4367
+  },
+  {
+    "idx": 73,
+    "id": "WebQTrn-1019",
+    "question": "where is the mozambique located",
+    "topic": "Mozambique",
+    "answers": [
+      "Africa",
+      "Southern Sun Hotel Group"
+    ],
+    "a_entities": [
+      "Africa",
+      "Southern Sun Hotel Group"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "Mozambique",
+        "location.location.events",
+        "East African Campaign",
+        "Africa"
+      ],
+      [
+        "Mozambique",
+        "location.location.containedby",
+        "Southern Sun Hotel Group",
+        "Southern Sun Hotel Group"
+      ],
+      [
+        "Mozambique",
+        "location.location.time_zones",
+        "Central Africa Time Zone",
+        "Africa"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 4154
+  },
+  {
+    "idx": 74,
+    "id": "WebQTrn-1023",
+    "question": "what is the money of argentina called",
+    "topic": "Argentina",
+    "answers": [
+      "Argentine peso"
+    ],
+    "a_entities": [
+      "Argentine peso"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "Argentina",
+        "location.country.currency_formerly_used",
+        "Argentine peso argentino",
+        "Argentine peso"
+      ],
+      [
+        "Argentina",
+        "location.country.currency_used",
+        "Argentine peso",
+        "Argentine peso"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 5498
+  },
+  {
+    "idx": 75,
+    "id": "WebQTrn-1025",
+    "question": "what did bella abzug do",
+    "topic": "Bella Abzug",
+    "answers": [
+      "Lawyer",
+      "Actor",
+      "Politician",
+      "Social activist"
+    ],
+    "a_entities": [
+      "Lawyer",
+      "Actor",
+      "Politician",
+      "Social activist"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "Bella Abzug",
+        "people.person.profession",
+        "Actor",
+        "Actor"
+      ],
+      [
+        "Bella Abzug",
+        "people.person.profession",
+        "Lawyer",
+        "Lawyer"
+      ],
+      [
+        "Bella Abzug",
+        "people.person.profession",
+        "Politician",
+        "Politician"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 3777
+  },
+  {
+    "idx": 76,
+    "id": "WebQTrn-1026",
+    "question": "what sights to see in madrid",
+    "topic": "Madrid",
+    "answers": [
+      "Madrid Arena",
+      "Festimad",
+      "Parque Warner Madrid",
+      "Plaza de Cibeles",
+      "Puerta del Sol"
+    ],
+    "a_entities": [
+      "Madrid Arena",
+      "Festimad",
+      "Parque Warner Madrid",
+      "Plaza de Cibeles",
+      "Puerta del Sol"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "Madrid",
+        "travel.travel_destination.tourist_attractions",
+        "Plaza de Cibeles",
+        "Plaza de Cibeles"
+      ],
+      [
+        "Madrid",
+        "travel.travel_destination.tourist_attractions",
+        "El Escorial",
+        "El Escorial"
+      ],
+      [
+        "Madrid",
+        "travel.travel_destination.tourist_attractions",
+        "Thyssen-Bornemisza Museum",
+        "Thyssen-Bornemisza Museum"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 4598
+  },
+  {
+    "idx": 77,
+    "id": "WebQTrn-1041",
+    "question": "what money is used in the maldives",
+    "topic": "Maldives",
+    "answers": [
+      "Maldivian rufiyaa"
+    ],
+    "a_entities": [
+      "Maldivian rufiyaa"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "Maldives",
+        "location.country.currency_used",
+        "Maldivian rufiyaa",
+        "Maldivian rufiyaa"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 3627
+  },
+  {
+    "idx": 78,
+    "id": "WebQTrn-1053",
+    "question": "what was liam neeson 's character in star wars",
+    "topic": "Liam Neeson",
+    "answers": [
+      "Qui-Gon Jinn"
+    ],
+    "a_entities": [
+      "Qui-Gon Jinn"
+    ],
+    "hop_count": 2,
+    "direct_paths": [],
+    "two_hop_paths": [
+      [
+        "Liam Neeson",
+        "tv.tv_actor.starring_roles",
+        "m.0gxs8fn",
+        "tv.regular_tv_appearance.character",
+        "Qui-Gon Jinn",
+        "Qui-Gon Jinn"
+      ],
+      [
+        "Liam Neeson",
+        "REVERSE:tv.regular_tv_appearance.actor",
+        "m.0gxs8fn",
+        "tv.regular_tv_appearance.character",
+        "Qui-Gon Jinn",
+        "Qui-Gon Jinn"
+      ],
+      [
+        "Liam Neeson",
+        "tv.tv_actor.starring_roles",
+        "m.0gxs8fn",
+        "REVERSE:tv.tv_character.appeared_in_tv_program",
+        "Qui-Gon Jinn",
+        "Qui-Gon Jinn"
+      ]
+    ],
+    "graph_size": 2778
+  },
+  {
+    "idx": 79,
+    "id": "WebQTrn-1054",
+    "question": "who plays the voice of lois griffin",
+    "topic": "Lois Griffin",
+    "answers": [
+      "Alex Borstein"
+    ],
+    "a_entities": [
+      "Alex Borstein"
+    ],
+    "hop_count": 2,
+    "direct_paths": [],
+    "two_hop_paths": [
+      [
+        "Lois Griffin",
+        "tv.tv_character.appeared_in_tv_program",
+        "m.02ntr0s",
+        "REVERSE:tv.tv_actor.starring_roles",
+        "Alex Borstein",
+        "Alex Borstein"
+      ],
+      [
+        "Lois Griffin",
+        "REVERSE:tv.regular_tv_appearance.character",
+        "m.02ntr0s",
+        "REVERSE:tv.tv_actor.starring_roles",
+        "Alex Borstein",
+        "Alex Borstein"
+      ],
+      [
+        "Lois Griffin",
+        "tv.tv_character.appeared_in_tv_program",
+        "m.02ntr0s",
+        "tv.regular_tv_appearance.actor",
+        "Alex Borstein",
+        "Alex Borstein"
+      ]
+    ],
+    "graph_size": 2584
+  },
+  {
+    "idx": 80,
+    "id": "WebQTrn-1067",
+    "question": "who are senators from new jersey",
+    "topic": "New Jersey",
+    "answers": [
+      "Bob Menendez",
+      "Cory Booker"
+    ],
+    "a_entities": [
+      "Bob Menendez",
+      "Cory Booker"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "New Jersey",
+        "common.topic.notable_types",
+        "Book",
+        "Cory Booker"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 7128
+  },
+  {
+    "idx": 81,
+    "id": "WebQTrn-1069",
+    "question": "what language do denmark",
+    "topic": "Denmark",
+    "answers": [
+      "Danish Language",
+      "German Language",
+      "Faroese",
+      "Greenlandic language"
+    ],
+    "a_entities": [
+      "Danish Language",
+      "German Language",
+      "Faroese",
+      "Greenlandic language"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "Denmark",
+        "location.country.languages_spoken",
+        "Faroese",
+        "Faroese"
+      ],
+      [
+        "Denmark",
+        "location.country.languages_spoken",
+        "German Language",
+        "German Language"
+      ],
+      [
+        "Denmark",
+        "location.country.administrative_divisions",
+        "Greenland",
+        "Greenlandic language"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 6487
+  },
+  {
+    "idx": 82,
+    "id": "WebQTrn-1084",
+    "question": "what timezone is texas san antonio in",
+    "topic": "San Antonio",
+    "answers": [
+      "Central Time Zone"
+    ],
+    "a_entities": [
+      "Central Time Zone"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "San Antonio",
+        "location.location.time_zones",
+        "Central Time Zone",
+        "Central Time Zone"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 4659
+  },
+  {
+    "idx": 83,
+    "id": "WebQTrn-1091",
+    "question": "when did the raiders win the superbowl",
+    "topic": "Oakland Raiders",
+    "answers": [
+      "2003 AFC Championship Game",
+      "1967 American Football League Championship Game",
+      "Super Bowl XVIII",
+      "Super Bowl XI",
+      "Super Bowl XV"
+    ],
+    "a_entities": [
+      "2003 AFC Championship Game",
+      "1967 American Football League Championship Game",
+      "Super Bowl XVIII",
+      "Super Bowl XI",
+      "Super Bowl XV"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "Oakland Raiders",
+        "sports.sports_team.championships",
+        "Super Bowl XI",
+        "Super Bowl XI"
+      ],
+      [
+        "Oakland Raiders",
+        "sports.sports_team.championships",
+        "2003 AFC Championship Game",
+        "2003 AFC Championship Game"
+      ],
+      [
+        "Oakland Raiders",
+        "sports.sports_team.championships",
+        "1967 American Football League Championship Game",
+        "1967 American Football League Championship Game"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 4087
+  },
+  {
+    "idx": 84,
+    "id": "WebQTrn-1109",
+    "question": "what is the currency used in tunisia",
+    "topic": "Tunisia",
+    "answers": [
+      "Tunisian dinar"
+    ],
+    "a_entities": [
+      "Tunisian dinar"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "Tunisia",
+        "location.country.administrative_divisions",
+        "Tunis",
+        "Tunisian dinar"
+      ],
+      [
+        "Tunisia",
+        "location.country.capital",
+        "Tunis",
+        "Tunisian dinar"
+      ],
+      [
+        "Tunisia",
+        "location.country.currency_used",
+        "Tunisian dinar",
+        "Tunisian dinar"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 4509
+  },
+  {
+    "idx": 85,
+    "id": "WebQTrn-1110",
+    "question": "what language group does polish belong to",
+    "topic": "Polish Language",
+    "answers": [
+      "Lechitic languages"
+    ],
+    "a_entities": [
+      "Lechitic languages"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "Polish Language",
+        "language.human_language.language_family",
+        "Lechitic languages",
+        "Lechitic languages"
+      ],
+      [
+        "Polish Language",
+        "base.rosetta.languoid.parent",
+        "Lechitic languages",
+        "Lechitic languages"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 2299
+  },
+  {
+    "idx": 86,
+    "id": "WebQTrn-1111",
+    "question": "what is the name of the new orleans saints football stadium",
+    "topic": "New Orleans Saints",
+    "answers": [
+      "Mercedes-Benz Superdome"
+    ],
+    "a_entities": [
+      "Mercedes-Benz Superdome"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "New Orleans Saints",
+        "sports.sports_team.arena_stadium",
+        "Mercedes-Benz Superdome",
+        "Mercedes-Benz Superdome"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 4449
+  },
+  {
+    "idx": 87,
+    "id": "WebQTrn-1144",
+    "question": "what team does drogba play for 2013",
+    "topic": "Didier Drogba",
+    "answers": [
+      "Galatasaray S.K.",
+      "Shanghai Greenland Shenhua F.C.",
+      "Ivory Coast national football team"
+    ],
+    "a_entities": [
+      "Galatasaray S.K.",
+      "Shanghai Greenland Shenhua F.C.",
+      "Ivory Coast national football team"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "Didier Drogba",
+        "people.person.nationality",
+        "Ivory Coast",
+        "Ivory Coast national football team"
+      ],
+      [
+        "Didier Drogba",
+        "people.person.place_of_birth",
+        "Ivory Coast",
+        "Ivory Coast national football team"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 831
+  },
+  {
+    "idx": 88,
+    "id": "WebQTrn-1148",
+    "question": "what is the northeast of the united states",
+    "topic": "Northeastern United States",
+    "answers": [
+      "New Hampshire",
+      "Mason",
+      "New England",
+      "Milford",
+      "Maine"
+    ],
+    "a_entities": [
+      "New Hampshire",
+      "Mason",
+      "New England",
+      "Milford",
+      "Maine"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "Northeastern United States",
+        "location.location.contains",
+        "New England",
+        "New England"
+      ],
+      [
+        "Northeastern United States",
+        "location.location.contains",
+        "Merrimack",
+        "Merrimack"
+      ],
+      [
+        "Northeastern United States",
+        "location.location.contains",
+        "Waltham",
+        "Waltham"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 4416
+  },
+  {
+    "idx": 89,
+    "id": "WebQTrn-1150",
+    "question": "what currency does brazil use",
+    "topic": "Brazil",
+    "answers": [
+      "Brazilian real"
+    ],
+    "a_entities": [
+      "Brazilian real"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "Brazil",
+        "book.book_subject.works",
+        "Brazil",
+        "Brazilian real"
+      ],
+      [
+        "Brazil",
+        "location.country.currency_used",
+        "Brazilian real",
+        "Brazilian real"
+      ],
+      [
+        "Brazil",
+        "book.written_work.subjects",
+        "Brazil",
+        "Brazilian real"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 4415
+  },
+  {
+    "idx": 90,
+    "id": "WebQTrn-1170",
+    "question": "what state did woodrow wilson represent",
+    "topic": "Woodrow Wilson",
+    "answers": [
+      "New Jersey"
+    ],
+    "a_entities": [
+      "New Jersey"
+    ],
+    "hop_count": 2,
+    "direct_paths": [],
+    "two_hop_paths": [
+      [
+        "Woodrow Wilson",
+        "book.written_work.subjects",
+        "United States of America",
+        "location.country.first_level_divisions",
+        "New Jersey",
+        "New Jersey"
+      ],
+      [
+        "Woodrow Wilson",
+        "book.written_work.subjects",
+        "United States of America",
+        "location.country.first_level_divisions",
+        "New Jersey",
+        "New Jersey"
+      ],
+      [
+        "Woodrow Wilson",
+        "people.person.nationality",
+        "United States of America",
+        "location.country.first_level_divisions",
+        "New Jersey",
+        "New Jersey"
+      ]
+    ],
+    "graph_size": 3826
+  },
+  {
+    "idx": 91,
+    "id": "WebQTrn-1183",
+    "question": "where did galileo go to school",
+    "topic": "Galileo Galilei",
+    "answers": [
+      "University of Pisa"
+    ],
+    "a_entities": [
+      "University of Pisa"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "Galileo Galilei",
+        "base.kwebbase.kwtopic.has_sentences",
+        "From 1585 to 1589 Galileo gave lessons in mathematics in Florence and Siena, and in 1586 he published an essay (describing his invention of a hydrostatic balance) which made him known throughout Italy, and won him the support of a wealthy patron, the Marchese del Monte, for whom he wrote a treatise on the centre of gravity in solids (1588) and who got him the job of lecturer in mathematics at the University of Pisa.",
+        "University of Pisa"
+      ],
+      [
+        "Galileo Galilei",
+        "people.person.place_of_birth",
+        "Pisa",
+        "University of Pisa"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 5333
+  },
+  {
+    "idx": 92,
+    "id": "WebQTrn-1201",
+    "question": "what state was hillary clinton a senator for",
+    "topic": "Hillary Rodham Clinton",
+    "answers": [
+      "New York"
+    ],
+    "a_entities": [
+      "New York"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "Hillary Rodham Clinton",
+        "common.image.appears_in_topic_gallery",
+        "United States Senate election in New York, 2000",
+        "New York"
+      ],
+      [
+        "Hillary Rodham Clinton",
+        "common.image.appears_in_topic_gallery",
+        "United States Senate election in New York, 2006",
+        "New York"
+      ],
+      [
+        "Hillary Rodham Clinton",
+        "common.image.appears_in_topic_gallery",
+        "New York United States Senate Election, 2012",
+        "New York"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 3674
+  },
+  {
+    "idx": 93,
+    "id": "WebQTrn-1215",
+    "question": "what language is mainly spoken in england",
+    "topic": "England",
+    "answers": [
+      "Old English"
+    ],
+    "a_entities": [
+      "Old English"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "England",
+        "location.country.languages_spoken",
+        "Old English",
+        "Old English"
+      ],
+      [
+        "England",
+        "biology.breed_origin.breeds_originating_here",
+        "Old English Sheepdog",
+        "Old English"
+      ],
+      [
+        "England",
+        "biology.breed_origin.breeds_originating_here",
+        "Old English Terrier",
+        "Old English"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 9094
+  },
+  {
+    "idx": 94,
+    "id": "WebQTrn-1221",
+    "question": "what is the braves mascot",
+    "topic": "Atlanta Braves",
+    "answers": [
+      "Homer",
+      "Chief Noc-A-Homa",
+      "Rally"
+    ],
+    "a_entities": [
+      "Homer",
+      "Chief Noc-A-Homa",
+      "Rally"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "Atlanta Braves",
+        "sports.sports_team.team_mascot",
+        "Homer",
+        "Homer"
+      ],
+      [
+        "Atlanta Braves",
+        "sports.sports_team.team_mascot",
+        "Chief Noc-A-Homa",
+        "Chief Noc-A-Homa"
+      ],
+      [
+        "Atlanta Braves",
+        "sports.sports_team.team_mascot",
+        "Rally",
+        "Rally"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 1857
+  },
+  {
+    "idx": 95,
+    "id": "WebQTrn-1232",
+    "question": "where was the roman empire centered",
+    "topic": "Roman Empire",
+    "answers": [
+      "Ravenna",
+      "Constantinople",
+      "Rome"
+    ],
+    "a_entities": [
+      "Ravenna",
+      "Constantinople",
+      "Rome"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "Roman Empire",
+        "location.location.people_born_here",
+        "Alexius of Rome",
+        "Rome"
+      ],
+      [
+        "Roman Empire",
+        "location.country.capital",
+        "Constantinople",
+        "Constantinople"
+      ],
+      [
+        "Roman Empire",
+        "location.location.people_born_here",
+        "Demophilus of Constantinople",
+        "Constantinople"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 2920
+  },
+  {
+    "idx": 96,
+    "id": "WebQTrn-1239",
+    "question": "who became president when jfk was killed",
+    "topic": "John F. Kennedy",
+    "answers": [
+      "Lyndon B. Johnson"
+    ],
+    "a_entities": [
+      "Lyndon B. Johnson"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "John F. Kennedy",
+        "base.kwebbase.kwtopic.has_sentences",
+        "He chose his other rival, Lyndon B. Johnson, as his running mate, to boost his chances in the South.",
+        "Lyndon B. Johnson"
+      ],
+      [
+        "John F. Kennedy",
+        "government.us_president.vice_president",
+        "Lyndon B. Johnson",
+        "Lyndon B. Johnson"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 5871
+  },
+  {
+    "idx": 97,
+    "id": "WebQTrn-1254",
+    "question": "where was the gallipoli campaign waged",
+    "topic": "Gallipoli Campaign",
+    "answers": [
+      "Gallipoli"
+    ],
+    "a_entities": [
+      "Gallipoli"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "Gallipoli Campaign",
+        "time.event.locations",
+        "Gallipoli",
+        "Gallipoli"
+      ],
+      [
+        "Gallipoli Campaign",
+        "common.topic.image",
+        "The Battle of Gallipoli, February\u2013April 1915",
+        "Gallipoli"
+      ],
+      [
+        "Gallipoli Campaign",
+        "film.film_subject.films",
+        "Gallipoli",
+        "Gallipoli"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 6541
+  },
+  {
+    "idx": 98,
+    "id": "WebQTrn-1257",
+    "question": "what did king george vi die of",
+    "topic": "George VI",
+    "answers": [
+      "Lung cancer"
+    ],
+    "a_entities": [
+      "Lung cancer"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "George VI",
+        "people.deceased_person.cause_of_death",
+        "Lung cancer",
+        "Lung cancer"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 5291
+  },
+  {
+    "idx": 99,
+    "id": "WebQTrn-1259",
+    "question": "where did brad paisley graduate from college",
+    "topic": "Brad Paisley",
+    "answers": [
+      "Belmont University"
+    ],
+    "a_entities": [
+      "Belmont University"
+    ],
+    "hop_count": 2,
+    "direct_paths": [],
+    "two_hop_paths": [
+      [
+        "Brad Paisley",
+        "people.person.nationality",
+        "United States of America",
+        "REVERSE:location.location.containedby",
+        "Belmont University",
+        "Belmont University"
+      ],
+      [
+        "Brad Paisley",
+        "REVERSE:education.education.student",
+        "m.0h3d7qj",
+        "education.education.institution",
+        "Belmont University",
+        "Belmont University"
+      ],
+      [
+        "Brad Paisley",
+        "people.person.education",
+        "m.0h3d7qj",
+        "education.education.institution",
+        "Belmont University",
+        "Belmont University"
+      ]
+    ],
+    "graph_size": 8218
+  },
+  {
+    "idx": 100,
+    "id": "WebQTrn-1271",
+    "question": "what type of music is tchaikovsky",
+    "topic": "Pyotr Ilyich Tchaikovsky",
+    "answers": [
+      "Ballet",
+      "Art song",
+      "Opera",
+      "Classical music"
+    ],
+    "a_entities": [
+      "Ballet",
+      "Art song",
+      "Opera",
+      "Classical music"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "Pyotr Ilyich Tchaikovsky",
+        "broadcast.artist.content",
+        "1.FM Otto's Opera House",
+        "Opera"
+      ],
+      [
+        "Pyotr Ilyich Tchaikovsky",
+        "music.artist.genre",
+        "Ballet",
+        "Ballet"
+      ],
+      [
+        "Pyotr Ilyich Tchaikovsky",
+        "book.author.works_written",
+        "Favourite Ballet Classics I",
+        "Ballet"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 6018
+  },
+  {
+    "idx": 101,
+    "id": "WebQTrn-1277",
+    "question": "what language do you speak in iran",
+    "topic": "Iran",
+    "answers": [
+      "Pashto language",
+      "Luri language",
+      "Azerbaijani language",
+      "Arabic Language",
+      "Assyrian Neo-Aramaic Language"
+    ],
+    "a_entities": [
+      "Pashto language",
+      "Luri language",
+      "Azerbaijani language",
+      "Arabic Language",
+      "Assyrian Neo-Aramaic Language"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "Iran",
+        "location.country.languages_spoken",
+        "Armenian Language",
+        "Armenian Language"
+      ],
+      [
+        "Iran",
+        "location.country.languages_spoken",
+        "Persian Language",
+        "Persian Language"
+      ],
+      [
+        "Iran",
+        "location.country.languages_spoken",
+        "Afshar language",
+        "Afshar language"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 4088
+  },
+  {
+    "idx": 102,
+    "id": "WebQTrn-1307",
+    "question": "who is prime minister of japan 2011",
+    "topic": "Japan",
+    "answers": [
+      "Yoshihiko Noda",
+      "Naoto Kan"
+    ],
+    "a_entities": [
+      "Yoshihiko Noda",
+      "Naoto Kan"
+    ],
+    "hop_count": 2,
+    "direct_paths": [],
+    "two_hop_paths": [
+      [
+        "Japan",
+        "government.governmental_jurisdiction.governing_officials",
+        "m.0nf_g2w",
+        "government.government_position_held.office_holder",
+        "Yoshihiko Noda",
+        "Yoshihiko Noda"
+      ],
+      [
+        "Japan",
+        "REVERSE:government.government_position_held.jurisdiction_of_office",
+        "m.0nf_g2w",
+        "government.government_position_held.office_holder",
+        "Yoshihiko Noda",
+        "Yoshihiko Noda"
+      ],
+      [
+        "Japan",
+        "government.governmental_jurisdiction.governing_officials",
+        "m.0nf_g2w",
+        "REVERSE:government.politician.government_positions_held",
+        "Yoshihiko Noda",
+        "Yoshihiko Noda"
+      ]
+    ],
+    "graph_size": 5819
+  },
+  {
+    "idx": 103,
+    "id": "WebQTrn-1321",
+    "question": "what city is the university of maryland university college in",
+    "topic": "University of Maryland University College",
+    "answers": [
+      "Adelphi",
+      "United States of America",
+      "Maryland"
+    ],
+    "a_entities": [
+      "Adelphi",
+      "United States of America",
+      "Maryland"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "University of Maryland University College",
+        "base.schemastaging.educational_institution_extra.libraries",
+        "University of Maryland University College Library",
+        "Maryland"
+      ],
+      [
+        "University of Maryland University College",
+        "location.location.containedby",
+        "United States of America",
+        "United States of America"
+      ],
+      [
+        "University of Maryland University College",
+        "location.location.containedby",
+        "Maryland",
+        "Maryland"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 423
+  },
+  {
+    "idx": 104,
+    "id": "WebQTrn-1340",
+    "question": "what all does google have",
+    "topic": "Google",
+    "answers": [
+      "Google AdWords",
+      "Google Apps for Work",
+      "Google Maps API for Business",
+      "Google Earth Enterprise",
+      "Google Chrome"
+    ],
+    "a_entities": [
+      "Google AdWords",
+      "Google Apps for Work",
+      "Google Maps API for Business",
+      "Google Earth Enterprise",
+      "Google Chrome"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "Google",
+        "common.topic.subject_of",
+        "Google Apps for Work",
+        "Google Apps for Work"
+      ],
+      [
+        "Google",
+        "education.educational_institution.students_graduates",
+        "AdWords",
+        "Google AdWords"
+      ],
+      [
+        "Google",
+        "internet.website_owner.websites_owned",
+        "Google Maps",
+        "Google Maps API for Business"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 5543
+  },
+  {
+    "idx": 105,
+    "id": "WebQTrn-1372",
+    "question": "what is the zip code for trenton ga",
+    "topic": "Trenton",
+    "answers": [
+      "08607",
+      "08650",
+      "08611",
+      "08691",
+      "08628"
+    ],
+    "a_entities": [
+      "08607",
+      "08650",
+      "08611",
+      "08691",
+      "08628"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "Trenton",
+        "location.citytown.postal_codes",
+        "08604",
+        "08604"
+      ],
+      [
+        "Trenton",
+        "location.citytown.postal_codes",
+        "08605",
+        "08605"
+      ],
+      [
+        "Trenton",
+        "location.citytown.postal_codes",
+        "08647",
+        "08647"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 3446
+  },
+  {
+    "idx": 106,
+    "id": "WebQTrn-1407",
+    "question": "what happened at fukushima daiichi nuclear plant",
+    "topic": "Fukushima Daiichi Nuclear Power Plant",
+    "answers": [
+      "Disaster-affected structure"
+    ],
+    "a_entities": [
+      "Disaster-affected structure"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "Fukushima Daiichi Nuclear Power Plant",
+        "common.topic.notable_types",
+        "Disaster-affected structure",
+        "Disaster-affected structure"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 509
+  },
+  {
+    "idx": 107,
+    "id": "WebQTrn-1424",
+    "question": "where is oceania on a map",
+    "topic": "Oceania",
+    "answers": [
+      "Pacific Ocean",
+      "DVD Region 4"
+    ],
+    "a_entities": [
+      "Pacific Ocean",
+      "DVD Region 4"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "Oceania",
+        "location.location.containedby",
+        "Pacific Ocean",
+        "Pacific Ocean"
+      ],
+      [
+        "Oceania",
+        "location.location.containedby",
+        "DVD Region 4",
+        "DVD Region 4"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 6363
+  },
+  {
+    "idx": 108,
+    "id": "WebQTrn-1428",
+    "question": "when was the last time the ny giants played in the superbowl",
+    "topic": "New York Giants",
+    "answers": [
+      "Super Bowl XLVI"
+    ],
+    "a_entities": [
+      "Super Bowl XLVI"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "New York Giants",
+        "sports.sports_team.championships",
+        "Super Bowl XLVI",
+        "Super Bowl XLVI"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 4338
+  },
+  {
+    "idx": 109,
+    "id": "WebQTrn-1430",
+    "question": "who was the president of pakistan in 1980",
+    "topic": "Pakistan",
+    "answers": [
+      "Muhammad Zia-ul-Haq"
+    ],
+    "a_entities": [
+      "Muhammad Zia-ul-Haq"
+    ],
+    "hop_count": 2,
+    "direct_paths": [],
+    "two_hop_paths": [
+      [
+        "Pakistan",
+        "REVERSE:government.government_position_held.jurisdiction_of_office",
+        "m.0k_k7jc",
+        "REVERSE:government.politician.government_positions_held",
+        "Muhammad Zia-ul-Haq",
+        "Muhammad Zia-ul-Haq"
+      ],
+      [
+        "Pakistan",
+        "government.governmental_jurisdiction.governing_officials",
+        "m.0k_k7jc",
+        "REVERSE:government.politician.government_positions_held",
+        "Muhammad Zia-ul-Haq",
+        "Muhammad Zia-ul-Haq"
+      ],
+      [
+        "Pakistan",
+        "REVERSE:government.government_position_held.jurisdiction_of_office",
+        "m.0k_k7jc",
+        "government.government_position_held.office_holder",
+        "Muhammad Zia-ul-Haq",
+        "Muhammad Zia-ul-Haq"
+      ]
+    ],
+    "graph_size": 5011
+  },
+  {
+    "idx": 110,
+    "id": "WebQTrn-1433",
+    "question": "what does the adriatic sea border",
+    "topic": "Adriatic Sea",
+    "answers": [
+      "Albania"
+    ],
+    "a_entities": [
+      "Albania"
+    ],
+    "hop_count": 2,
+    "direct_paths": [],
+    "two_hop_paths": [
+      [
+        "Adriatic Sea",
+        "location.location.adjoin_s",
+        "m.04dsr50",
+        "REVERSE:location.location.adjoin_s",
+        "Albania",
+        "Albania"
+      ],
+      [
+        "Adriatic Sea",
+        "REVERSE:location.adjoining_relationship.adjoins",
+        "m.04dsr50",
+        "REVERSE:location.location.adjoin_s",
+        "Albania",
+        "Albania"
+      ],
+      [
+        "Adriatic Sea",
+        "location.location.adjoin_s",
+        "m.04dsr50",
+        "location.adjoining_relationship.adjoins",
+        "Albania",
+        "Albania"
+      ]
+    ],
+    "graph_size": 1916
+  },
+  {
+    "idx": 111,
+    "id": "WebQTrn-1449",
+    "question": "what to do when traveling to london",
+    "topic": "London",
+    "answers": [
+      "Whetstone, London",
+      "London Zoo",
+      "National Maritime Museum",
+      "London Palladium",
+      "Apsley House"
+    ],
+    "a_entities": [
+      "Whetstone, London",
+      "London Zoo",
+      "National Maritime Museum",
+      "London Palladium",
+      "Apsley House"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "London",
+        "travel.travel_destination.tourist_attractions",
+        "Smithfield, London",
+        "Smithfield, London"
+      ],
+      [
+        "London",
+        "travel.travel_destination.tourist_attractions",
+        "The Clink",
+        "The Clink"
+      ],
+      [
+        "London",
+        "visual_art.art_subject.artwork_on_the_subject",
+        "London",
+        "Whetstone, London"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 7721
+  },
+  {
+    "idx": 113,
+    "id": "WebQTrn-1474",
+    "question": "what countries do they speak italian",
+    "topic": "Italian Language",
+    "answers": [
+      "Gozo",
+      "Italy",
+      "San Marino",
+      "Mexico",
+      "Argentina"
+    ],
+    "a_entities": [
+      "Gozo",
+      "Italy",
+      "San Marino",
+      "Mexico",
+      "Argentina"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "Italian Language",
+        "language.human_language.main_country",
+        "Italy",
+        "Italy"
+      ],
+      [
+        "Italian Language",
+        "language.human_language.countries_spoken_in",
+        "Italy",
+        "Italy"
+      ],
+      [
+        "Italian Language",
+        "language.human_language.countries_spoken_in",
+        "Slovenia",
+        "Slovenia"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 2946
+  },
+  {
+    "idx": 114,
+    "id": "WebQTrn-1485",
+    "question": "what was francisco vasquez de coronado known for",
+    "topic": "Francisco V\u00e1zquez de Coronado",
+    "answers": [
+      "Conquistador"
+    ],
+    "a_entities": [
+      "Conquistador"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "Francisco V\u00e1zquez de Coronado",
+        "people.person.profession",
+        "Conquistador",
+        "Conquistador"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 2099
+  },
+  {
+    "idx": 115,
+    "id": "WebQTrn-1515",
+    "question": "where was lance armstrong born and in what year",
+    "topic": "Lance Armstrong",
+    "answers": [
+      "Plano"
+    ],
+    "a_entities": [
+      "Plano"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "Lance Armstrong",
+        "people.person.place_of_birth",
+        "Plano",
+        "Plano"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 2398
+  },
+  {
+    "idx": 116,
+    "id": "WebQTrn-1525",
+    "question": "where did phil mickelson go to college",
+    "topic": "Phil Mickelson",
+    "answers": [
+      "Arizona State University"
+    ],
+    "a_entities": [
+      "Arizona State University"
+    ],
+    "hop_count": 2,
+    "direct_paths": [],
+    "two_hop_paths": [
+      [
+        "Phil Mickelson",
+        "people.person.nationality",
+        "United States of America",
+        "REVERSE:base.aareas.schema.administrative_area.administrative_parent",
+        "Arizona",
+        "Arizona State University"
+      ],
+      [
+        "Phil Mickelson",
+        "people.person.nationality",
+        "United States of America",
+        "REVERSE:location.location.containedby",
+        "Arizona",
+        "Arizona State University"
+      ],
+      [
+        "Phil Mickelson",
+        "people.person.nationality",
+        "United States of America",
+        "location.country.administrative_divisions",
+        "Arizona",
+        "Arizona State University"
+      ]
+    ],
+    "graph_size": 1310
+  },
+  {
+    "idx": 117,
+    "id": "WebQTrn-1537",
+    "question": "what other languages does switzerland speak",
+    "topic": "Switzerland",
+    "answers": [
+      "French",
+      "Romansh language",
+      "Italian Language",
+      "German Language"
+    ],
+    "a_entities": [
+      "French",
+      "Romansh language",
+      "Italian Language",
+      "German Language"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "Switzerland",
+        "location.country.languages_spoken",
+        "French",
+        "French"
+      ],
+      [
+        "Switzerland",
+        "location.country.languages_spoken",
+        "Italian Language",
+        "Italian Language"
+      ],
+      [
+        "Switzerland",
+        "location.country.official_language",
+        "German Language",
+        "German Language"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 6346
+  },
+  {
+    "idx": 118,
+    "id": "WebQTrn-1574",
+    "question": "what timezone is toronto gmt",
+    "topic": "Toronto",
+    "answers": [
+      "Eastern Time Zone"
+    ],
+    "a_entities": [
+      "Eastern Time Zone"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "Toronto",
+        "location.location.time_zones",
+        "Eastern Time Zone",
+        "Eastern Time Zone"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 5741
+  },
+  {
+    "idx": 119,
+    "id": "WebQTrn-1597",
+    "question": "what characters does seth macfarlane voice",
+    "topic": "Seth MacFarlane",
+    "answers": [
+      "Giodano Bruno",
+      "Tom Tucker",
+      "Brian Griffin",
+      "Dr. Elmer Hartman",
+      "God"
+    ],
+    "a_entities": [
+      "Giodano Bruno",
+      "Tom Tucker",
+      "Brian Griffin",
+      "Dr. Elmer Hartman",
+      "God"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "Seth MacFarlane",
+        "fictional_universe.fictional_character_creator.fictional_characters_created",
+        "Peter Griffin",
+        "Peter Griffin"
+      ],
+      [
+        "Seth MacFarlane",
+        "fictional_universe.fictional_character_creator.fictional_characters_created",
+        "Stewie Griffin",
+        "Stewie Griffin"
+      ],
+      [
+        "Seth MacFarlane",
+        "fictional_universe.fictional_character_creator.fictional_characters_created",
+        "Roger: American Dad!",
+        "Roger: American Dad!"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 6491
+  },
+  {
+    "idx": 120,
+    "id": "WebQTrn-1599",
+    "question": "what has ian somerhalder played in",
+    "topic": "Ian Somerhalder",
+    "answers": [
+      "Pulse",
+      "Time Framed",
+      "The Tournament",
+      "Changing Hearts",
+      "Lost City Raiders"
+    ],
+    "a_entities": [
+      "Pulse",
+      "Time Framed",
+      "The Tournament",
+      "Changing Hearts",
+      "Lost City Raiders"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "Ian Somerhalder",
+        "film.producer.film",
+        "Time Framed",
+        "Time Framed"
+      ],
+      [
+        "Ian Somerhalder",
+        "film.producer.film",
+        "Recess",
+        "Recess"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 1798
+  },
+  {
+    "idx": 121,
+    "id": "WebQTrn-1603",
+    "question": "what form of government exists in china",
+    "topic": "China",
+    "answers": [
+      "Single-party state",
+      "Communist state",
+      "Socialist state"
+    ],
+    "a_entities": [
+      "Single-party state",
+      "Communist state",
+      "Socialist state"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "China",
+        "location.country.form_of_government",
+        "Single-party state",
+        "Single-party state"
+      ],
+      [
+        "China",
+        "location.country.form_of_government",
+        "Socialist state",
+        "Socialist state"
+      ],
+      [
+        "China",
+        "location.country.form_of_government",
+        "Communist state",
+        "Communist state"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 6293
+  },
+  {
+    "idx": 122,
+    "id": "WebQTrn-1618",
+    "question": "what type of music does ella fitzgerald sing",
+    "topic": "Ella Fitzgerald",
+    "answers": [
+      "Swing music",
+      "Vocal jazz",
+      "Ballad",
+      "Bebop",
+      "Traditional pop music"
+    ],
+    "a_entities": [
+      "Swing music",
+      "Vocal jazz",
+      "Ballad",
+      "Bebop",
+      "Traditional pop music"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "Ella Fitzgerald",
+        "music.lyricist.lyrics_written",
+        "Joe Williams\u2019 Blues",
+        "Blues"
+      ],
+      [
+        "Ella Fitzgerald",
+        "music.featured_artist.recordings",
+        "I'll Chase the Blues Away",
+        "Blues"
+      ],
+      [
+        "Ella Fitzgerald",
+        "broadcast.artist.content",
+        "SoulfulClassicJazz.com Radio",
+        "Jazz"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 5245
+  },
+  {
+    "idx": 123,
+    "id": "WebQTrn-1629",
+    "question": "who the voice of jack skellington",
+    "topic": "Jack Skellington",
+    "answers": [
+      "Danny Elfman",
+      "Chris Sarandon"
+    ],
+    "a_entities": [
+      "Danny Elfman",
+      "Chris Sarandon"
+    ],
+    "hop_count": 2,
+    "direct_paths": [],
+    "two_hop_paths": [
+      [
+        "Jack Skellington",
+        "fictional_universe.fictional_character.occupation",
+        "Singer",
+        "REVERSE:people.person.profession",
+        "Danny Elfman",
+        "Danny Elfman"
+      ],
+      [
+        "Jack Skellington",
+        "film.film_character.portrayed_in_films",
+        "m.098cnxr",
+        "REVERSE:film.actor.film",
+        "Chris Sarandon",
+        "Chris Sarandon"
+      ],
+      [
+        "Jack Skellington",
+        "REVERSE:film.performance.character",
+        "m.098cnxr",
+        "REVERSE:film.actor.film",
+        "Chris Sarandon",
+        "Chris Sarandon"
+      ]
+    ],
+    "graph_size": 1092
+  },
+  {
+    "idx": 124,
+    "id": "WebQTrn-1653",
+    "question": "who played andy in toy story 3",
+    "topic": "Toy Story 3",
+    "answers": [
+      "John Morris",
+      "Charlie Bright"
+    ],
+    "a_entities": [
+      "John Morris",
+      "Charlie Bright"
+    ],
+    "hop_count": 2,
+    "direct_paths": [],
+    "two_hop_paths": [
+      [
+        "Toy Story 3",
+        "film.film.starring",
+        "m.0y62s8v",
+        "REVERSE:film.actor.film",
+        "Charlie Bright",
+        "Charlie Bright"
+      ],
+      [
+        "Toy Story 3",
+        "REVERSE:film.performance.film",
+        "m.0y62s8v",
+        "REVERSE:film.actor.film",
+        "Charlie Bright",
+        "Charlie Bright"
+      ],
+      [
+        "Toy Story 3",
+        "film.film.starring",
+        "m.0y62s8v",
+        "film.performance.actor",
+        "Charlie Bright",
+        "Charlie Bright"
+      ]
+    ],
+    "graph_size": 5053
+  },
+  {
+    "idx": 125,
+    "id": "WebQTrn-1662",
+    "question": "what years did jackie robinson play baseball",
+    "topic": "Jackie Robinson",
+    "answers": [
+      "1955 Major League Baseball season",
+      "1951 Major League Baseball season",
+      "1947 Major League Baseball season",
+      "1954 Major League Baseball season",
+      "1952 Major League Baseball season"
+    ],
+    "a_entities": [
+      "1955 Major League Baseball season",
+      "1951 Major League Baseball season",
+      "1947 Major League Baseball season",
+      "1954 Major League Baseball season",
+      "1952 Major League Baseball season"
+    ],
+    "hop_count": 2,
+    "direct_paths": [],
+    "two_hop_paths": [
+      [
+        "Jackie Robinson",
+        "baseball.baseball_player.batting_stats",
+        "m.06sbp_k",
+        "baseball.batting_statistics.season",
+        "1955 Major League Baseball season",
+        "1955 Major League Baseball season"
+      ],
+      [
+        "Jackie Robinson",
+        "REVERSE:baseball.batting_statistics.player",
+        "m.06sbp_k",
+        "baseball.batting_statistics.season",
+        "1955 Major League Baseball season",
+        "1955 Major League Baseball season"
+      ],
+      [
+        "Jackie Robinson",
+        "baseball.baseball_player.batting_stats",
+        "m.06sbpwy",
+        "baseball.batting_statistics.season",
+        "1950 Major League Baseball season",
+        "1950 Major League Baseball season"
+      ]
+    ],
+    "graph_size": 2309
+  },
+  {
+    "idx": 126,
+    "id": "WebQTrn-1679",
+    "question": "where is washington d.c. at",
+    "topic": "Washington, D.C.",
+    "answers": [
+      "Mid-Atlantic states",
+      "South Atlantic States"
+    ],
+    "a_entities": [
+      "Mid-Atlantic states",
+      "South Atlantic States"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "Washington, D.C.",
+        "location.location.containedby",
+        "Mid-Atlantic states",
+        "Mid-Atlantic states"
+      ],
+      [
+        "Washington, D.C.",
+        "location.location.containedby",
+        "South Atlantic States",
+        "South Atlantic States"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 6856
+  },
+  {
+    "idx": 127,
+    "id": "WebQTrn-1682",
+    "question": "when did aldi originate",
+    "topic": "ALDI",
+    "answers": [
+      "Essen"
+    ],
+    "a_entities": [
+      "Essen"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "ALDI",
+        "organization.organization.place_founded",
+        "Essen",
+        "Essen"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 919
+  },
+  {
+    "idx": 128,
+    "id": "WebQTrn-1706",
+    "question": "who controls panama",
+    "topic": "Panama",
+    "answers": [
+      "Juan Carlos Varela"
+    ],
+    "a_entities": [
+      "Juan Carlos Varela"
+    ],
+    "hop_count": 2,
+    "direct_paths": [],
+    "two_hop_paths": [
+      [
+        "Panama",
+        "government.governmental_jurisdiction.governing_officials",
+        "m.010g6vfx",
+        "government.government_position_held.office_holder",
+        "Juan Carlos Varela",
+        "Juan Carlos Varela"
+      ],
+      [
+        "Panama",
+        "REVERSE:government.government_position_held.jurisdiction_of_office",
+        "m.010g6vfx",
+        "government.government_position_held.office_holder",
+        "Juan Carlos Varela",
+        "Juan Carlos Varela"
+      ],
+      [
+        "Panama",
+        "government.governmental_jurisdiction.governing_officials",
+        "m.010g6vfx",
+        "REVERSE:government.politician.government_positions_held",
+        "Juan Carlos Varela",
+        "Juan Carlos Varela"
+      ]
+    ],
+    "graph_size": 3995
+  },
+  {
+    "idx": 129,
+    "id": "WebQTrn-1711",
+    "question": "what movies did chris farley do",
+    "topic": "Chris Farley",
+    "answers": [
+      "Beverly Hills Ninja",
+      "Black Sheep",
+      "Wayne's World 2",
+      "Wayne's World",
+      "Almost Heroes"
+    ],
+    "a_entities": [
+      "Beverly Hills Ninja",
+      "Black Sheep",
+      "Wayne's World 2",
+      "Wayne's World",
+      "Almost Heroes"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "Chris Farley",
+        "people.person.place_of_birth",
+        "Madison",
+        "Billy Madison"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 4190
+  },
+  {
+    "idx": 130,
+    "id": "WebQTrn-1728",
+    "question": "what kind of money do you use in costa rica",
+    "topic": "Costa Rica",
+    "answers": [
+      "Costa Rican col\u00f3n"
+    ],
+    "a_entities": [
+      "Costa Rican col\u00f3n"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "Costa Rica",
+        "location.country.currency_used",
+        "Costa Rican col\u00f3n",
+        "Costa Rican col\u00f3n"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 3866
+  },
+  {
+    "idx": 131,
+    "id": "WebQTrn-1741",
+    "question": "who played carlton banks",
+    "topic": "Carlton Banks",
+    "answers": [
+      "Alfonso Ribeiro"
+    ],
+    "a_entities": [
+      "Alfonso Ribeiro"
+    ],
+    "hop_count": 2,
+    "direct_paths": [],
+    "two_hop_paths": [
+      [
+        "Carlton Banks",
+        "fictional_universe.fictional_character.gender",
+        "Male",
+        "REVERSE:people.person.gender",
+        "Alfonso Ribeiro",
+        "Alfonso Ribeiro"
+      ],
+      [
+        "Carlton Banks",
+        "tv.tv_character.appeared_in_tv_program",
+        "m.02slfzb",
+        "REVERSE:tv.tv_actor.starring_roles",
+        "Alfonso Ribeiro",
+        "Alfonso Ribeiro"
+      ],
+      [
+        "Carlton Banks",
+        "REVERSE:tv.regular_tv_appearance.character",
+        "m.02slfzb",
+        "REVERSE:tv.tv_actor.starring_roles",
+        "Alfonso Ribeiro",
+        "Alfonso Ribeiro"
+      ]
+    ],
+    "graph_size": 241
+  },
+  {
+    "idx": 132,
+    "id": "WebQTrn-1754",
+    "question": "what influenced andy warhol 's work",
+    "topic": "Andy Warhol",
+    "answers": [
+      "John Cage",
+      "Jasper Johns",
+      "Jack Smith",
+      "Marcel Duchamp",
+      "Jean-Michel Basquiat"
+    ],
+    "a_entities": [
+      "John Cage",
+      "Jasper Johns",
+      "Jack Smith",
+      "Marcel Duchamp",
+      "Jean-Michel Basquiat"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "Andy Warhol",
+        "influence.influence_node.influenced_by",
+        "Truman Capote",
+        "Truman Capote"
+      ],
+      [
+        "Andy Warhol",
+        "influence.influence_node.influenced_by",
+        "Tom of Finland",
+        "Tom of Finland"
+      ],
+      [
+        "Andy Warhol",
+        "music.artist.track",
+        "Andy and Man Ray Prepare for a Portrait, 11-30-1973",
+        "Man Ray"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 6594
+  },
+  {
+    "idx": 133,
+    "id": "WebQTrn-1756",
+    "question": "who is angelina jolie husband name",
+    "topic": "Angelina Jolie",
+    "answers": [
+      "Brad Pitt"
+    ],
+    "a_entities": [
+      "Brad Pitt"
+    ],
+    "hop_count": 2,
+    "direct_paths": [],
+    "two_hop_paths": [
+      [
+        "Angelina Jolie",
+        "REVERSE:base.popstra.infidelity.victim",
+        "m.064bh_m",
+        "REVERSE:base.popstra.celebrity.infidelity_perpetrator",
+        "Brad Pitt",
+        "Brad Pitt"
+      ],
+      [
+        "Angelina Jolie",
+        "base.popstra.celebrity.infidelity_victim",
+        "m.064bh_m",
+        "REVERSE:base.popstra.celebrity.infidelity_perpetrator",
+        "Brad Pitt",
+        "Brad Pitt"
+      ],
+      [
+        "Angelina Jolie",
+        "REVERSE:base.popstra.infidelity.victim",
+        "m.064bh_m",
+        "base.popstra.infidelity.perpetrator",
+        "Brad Pitt",
+        "Brad Pitt"
+      ]
+    ],
+    "graph_size": 4891
+  },
+  {
+    "idx": 134,
+    "id": "WebQTrn-1758",
+    "question": "what is the present form of government in iran",
+    "topic": "Iran",
+    "answers": [
+      "Parliamentary system",
+      "Theocracy",
+      "Presidential system",
+      "Unitary state",
+      "Islamic republic"
+    ],
+    "a_entities": [
+      "Parliamentary system",
+      "Theocracy",
+      "Presidential system",
+      "Unitary state",
+      "Islamic republic"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "Iran",
+        "location.country.form_of_government",
+        "Theocracy",
+        "Theocracy"
+      ],
+      [
+        "Iran",
+        "location.country.form_of_government",
+        "Unitary state",
+        "Unitary state"
+      ],
+      [
+        "Iran",
+        "location.country.form_of_government",
+        "Islamic republic",
+        "Islamic republic"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 4088
+  },
+  {
+    "idx": 135,
+    "id": "WebQTrn-1770",
+    "question": "what is beyonce 's daughters name",
+    "topic": "Beyonc\u00e9 Knowles",
+    "answers": [
+      "Blue Ivy"
+    ],
+    "a_entities": [
+      "Blue Ivy"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "Beyonc\u00e9 Knowles",
+        "people.person.children",
+        "Blue Ivy",
+        "Blue Ivy"
+      ],
+      [
+        "Beyonc\u00e9 Knowles",
+        "music.composer.compositions",
+        "Blue",
+        "Blue Ivy"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 9495
+  },
+  {
+    "idx": 136,
+    "id": "WebQTrn-1771",
+    "question": "when did the colts last win the superbowl",
+    "topic": "Indianapolis Colts",
+    "answers": [
+      "Super Bowl XLI"
+    ],
+    "a_entities": [
+      "Super Bowl XLI"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "Indianapolis Colts",
+        "sports.sports_team.championships",
+        "Super Bowl XLI",
+        "Super Bowl XLI"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 4577
+  },
+  {
+    "idx": 137,
+    "id": "WebQTrn-1772",
+    "question": "what college did michael jordan play basketball for",
+    "topic": "Michael Jordan",
+    "answers": [
+      "University of North Carolina at Chapel Hill"
+    ],
+    "a_entities": [
+      "University of North Carolina at Chapel Hill"
+    ],
+    "hop_count": 2,
+    "direct_paths": [],
+    "two_hop_paths": [
+      [
+        "Michael Jordan",
+        "REVERSE:sports.sports_league_draft_pick.player",
+        "m.02h7cgv",
+        "sports.sports_league_draft_pick.school",
+        "University of North Carolina at Chapel Hill",
+        "University of North Carolina at Chapel Hill"
+      ],
+      [
+        "Michael Jordan",
+        "sports.drafted_athlete.drafted",
+        "m.02h7cgv",
+        "sports.sports_league_draft_pick.school",
+        "University of North Carolina at Chapel Hill",
+        "University of North Carolina at Chapel Hill"
+      ],
+      [
+        "Michael Jordan",
+        "REVERSE:education.education.student",
+        "m.04g36q3",
+        "education.education.institution",
+        "University of North Carolina at Chapel Hill",
+        "University of North Carolina at Chapel Hill"
+      ]
+    ],
+    "graph_size": 2227
+  },
+  {
+    "idx": 138,
+    "id": "WebQTrn-1774",
+    "question": "what countries are located in the netherlands",
+    "topic": "Netherlands",
+    "answers": [
+      "Limburg",
+      "Flevoland",
+      "Friesland",
+      "Utrecht",
+      "North Brabant"
+    ],
+    "a_entities": [
+      "Limburg",
+      "Flevoland",
+      "Friesland",
+      "Utrecht",
+      "North Brabant"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "Netherlands",
+        "location.country.first_level_divisions",
+        "Overijssel",
+        "Overijssel"
+      ],
+      [
+        "Netherlands",
+        "location.country.administrative_divisions",
+        "Drenthe",
+        "Drenthe"
+      ],
+      [
+        "Netherlands",
+        "location.country.administrative_divisions",
+        "Overijssel",
+        "Overijssel"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 7068
+  },
+  {
+    "idx": 139,
+    "id": "WebQTrn-1791",
+    "question": "who is golfer dustin johnson dating",
+    "topic": "Dustin Johnson",
+    "answers": [
+      "Paulina Gretzky"
+    ],
+    "a_entities": [
+      "Paulina Gretzky"
+    ],
+    "hop_count": 2,
+    "direct_paths": [],
+    "two_hop_paths": [
+      [
+        "Dustin Johnson",
+        "REVERSE:celebrities.romantic_relationship.celebrity",
+        "m.0wpd79b",
+        "REVERSE:celebrities.celebrity.sexual_relationships",
+        "Paulina Gretzky",
+        "Paulina Gretzky"
+      ],
+      [
+        "Dustin Johnson",
+        "celebrities.celebrity.sexual_relationships",
+        "m.0wpd79b",
+        "REVERSE:celebrities.celebrity.sexual_relationships",
+        "Paulina Gretzky",
+        "Paulina Gretzky"
+      ],
+      [
+        "Dustin Johnson",
+        "REVERSE:celebrities.romantic_relationship.celebrity",
+        "m.0wpd79b",
+        "celebrities.romantic_relationship.celebrity",
+        "Paulina Gretzky",
+        "Paulina Gretzky"
+      ]
+    ],
+    "graph_size": 1247
+  },
+  {
+    "idx": 140,
+    "id": "WebQTrn-1799",
+    "question": "who played danielle rousseau on lost",
+    "topic": "Lost",
+    "answers": [
+      "Danielle Rousseau"
+    ],
+    "a_entities": [
+      "Danielle Rousseau"
+    ],
+    "hop_count": 2,
+    "direct_paths": [],
+    "two_hop_paths": [
+      [
+        "Lost",
+        "tv.tv_program.regular_cast",
+        "m.0kj8gs2",
+        "tv.regular_tv_appearance.character",
+        "Danielle Rousseau",
+        "Danielle Rousseau"
+      ],
+      [
+        "Lost",
+        "REVERSE:tv.regular_tv_appearance.series",
+        "m.0kj8gs2",
+        "tv.regular_tv_appearance.character",
+        "Danielle Rousseau",
+        "Danielle Rousseau"
+      ],
+      [
+        "Lost",
+        "tv.tv_program.regular_cast",
+        "m.0kj8gs2",
+        "REVERSE:tv.tv_character.appeared_in_tv_program",
+        "Danielle Rousseau",
+        "Danielle Rousseau"
+      ]
+    ],
+    "graph_size": 4219
+  },
+  {
+    "idx": 141,
+    "id": "WebQTrn-1816",
+    "question": "what part does seth macfarlane play in family guy",
+    "topic": "Family Guy",
+    "answers": [
+      "Glenn Quagmire",
+      "Kevin Swanson",
+      "Jasper",
+      "Mickey McFinnegan",
+      "Peter Griffin"
+    ],
+    "a_entities": [
+      "Glenn Quagmire",
+      "Kevin Swanson",
+      "Jasper",
+      "Mickey McFinnegan",
+      "Peter Griffin"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "Family Guy",
+        "media_common.adapted_work.adaptations",
+        "Family Guy Presents: Stewie Griffin: The Untold Story",
+        "Stewie Griffin"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 3780
+  },
+  {
+    "idx": 142,
+    "id": "WebQTrn-1818",
+    "question": "what did ben hall do",
+    "topic": "Ben Hall",
+    "answers": [
+      "Bushranger"
+    ],
+    "a_entities": [
+      "Bushranger"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "Ben Hall",
+        "people.person.profession",
+        "Bushranger",
+        "Bushranger"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 3693
+  },
+  {
+    "idx": 143,
+    "id": "WebQTrn-1824",
+    "question": "who played cruella deville in 102 dalmatians",
+    "topic": "Cruella de Vil",
+    "answers": [
+      "Glenn Close"
+    ],
+    "a_entities": [
+      "Glenn Close"
+    ],
+    "hop_count": 2,
+    "direct_paths": [],
+    "two_hop_paths": [
+      [
+        "Cruella de Vil",
+        "tv.tv_character.appeared_in_tv_program",
+        "m.0whr8dg",
+        "REVERSE:tv.tv_actor.starring_roles",
+        "Glenn Close",
+        "Glenn Close"
+      ],
+      [
+        "Cruella de Vil",
+        "REVERSE:tv.regular_tv_appearance.character",
+        "m.0whr8dg",
+        "REVERSE:tv.tv_actor.starring_roles",
+        "Glenn Close",
+        "Glenn Close"
+      ],
+      [
+        "Cruella de Vil",
+        "tv.tv_character.appeared_in_tv_program",
+        "m.0whr8dg",
+        "tv.regular_tv_appearance.actor",
+        "Glenn Close",
+        "Glenn Close"
+      ]
+    ],
+    "graph_size": 5219
+  },
+  {
+    "idx": 144,
+    "id": "WebQTrn-1830",
+    "question": "what ethnicity are people from iran",
+    "topic": "Iranian peoples",
+    "answers": [
+      "Irani",
+      "Tajiks",
+      "Pashtun",
+      "Baloch people",
+      "Hazaras"
+    ],
+    "a_entities": [
+      "Irani",
+      "Tajiks",
+      "Pashtun",
+      "Baloch people",
+      "Hazaras"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "Iranian peoples",
+        "people.ethnicity.includes_groups",
+        "Hazaras",
+        "Hazaras"
+      ],
+      [
+        "Iranian peoples",
+        "people.ethnicity.included_in_group",
+        "Indo-Iranians",
+        "Irani"
+      ],
+      [
+        "Iranian peoples",
+        "people.ethnicity.includes_groups",
+        "Tajiks",
+        "Tajiks"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 5000
+  },
+  {
+    "idx": 145,
+    "id": "WebQTrn-1843",
+    "question": "who is the publisher of the wall street journal",
+    "topic": "The Wall Street Journal",
+    "answers": [
+      "News Corporation",
+      "Dow Jones & Company"
+    ],
+    "a_entities": [
+      "News Corporation",
+      "Dow Jones & Company"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "The Wall Street Journal",
+        "book.newspaper.owner",
+        "Dow Jones & Company",
+        "Dow Jones & Company"
+      ],
+      [
+        "The Wall Street Journal",
+        "book.newspaper.owner",
+        "News Corporation",
+        "News Corporation"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 5378
+  },
+  {
+    "idx": 146,
+    "id": "WebQTrn-1846",
+    "question": "what form of government does afghanistan have",
+    "topic": "Afghanistan",
+    "answers": [
+      "Islamic republic"
+    ],
+    "a_entities": [
+      "Islamic republic"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "Afghanistan",
+        "location.country.form_of_government",
+        "Islamic republic",
+        "Islamic republic"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 5229
+  },
+  {
+    "idx": 147,
+    "id": "WebQTrn-1873",
+    "question": "what happened to nagasaki",
+    "topic": "Nagasaki",
+    "answers": [
+      "Shinee World 2014",
+      "Miss International 1986",
+      "Atomic bombings of Hiroshima and Nagasaki"
+    ],
+    "a_entities": [
+      "Shinee World 2014",
+      "Miss International 1986",
+      "Atomic bombings of Hiroshima and Nagasaki"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "Nagasaki",
+        "location.location.events",
+        "Atomic bombings of Hiroshima and Nagasaki",
+        "Atomic bombings of Hiroshima and Nagasaki"
+      ],
+      [
+        "Nagasaki",
+        "location.location.events",
+        "Miss International 1986",
+        "Miss International 1986"
+      ],
+      [
+        "Nagasaki",
+        "location.location.events",
+        "Shinee World 2014",
+        "Shinee World 2014"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 899
+  },
+  {
+    "idx": 148,
+    "id": "WebQTrn-1875",
+    "question": "what movies did james franco play in",
+    "topic": "James Franco",
+    "answers": [
+      "The Car Kid",
+      "1973",
+      "Rebel",
+      "Oz the Great and Powerful",
+      "Homefront"
+    ],
+    "a_entities": [
+      "The Car Kid",
+      "1973",
+      "Rebel",
+      "Oz the Great and Powerful",
+      "Homefront"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "James Franco",
+        "film.film_story_contributor.film_story_credits",
+        "Palo Alto",
+        "Palo Alto"
+      ],
+      [
+        "James Franco",
+        "film.writer.film",
+        "Child of God",
+        "Child of God"
+      ],
+      [
+        "James Franco",
+        "film.writer.film",
+        "Fool's Gold",
+        "Fool's Gold"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 6201
+  },
+  {
+    "idx": 149,
+    "id": "WebQTrn-1897",
+    "question": "what club team does ronaldinho play for",
+    "topic": "Ronaldinho",
+    "answers": [
+      "Brazil national football team",
+      "Quer\u00e9taro F.C."
+    ],
+    "a_entities": [
+      "Brazil national football team",
+      "Quer\u00e9taro F.C."
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "Ronaldinho",
+        "people.person.nationality",
+        "Brazil",
+        "Brazil national football team"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 1435
+  },
+  {
+    "idx": 150,
+    "id": "WebQTrn-1913",
+    "question": "where does luke skywalker live in star wars",
+    "topic": "Luke Skywalker",
+    "answers": [
+      "Tatooine"
+    ],
+    "a_entities": [
+      "Tatooine"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "Luke Skywalker",
+        "fictional_universe.fictional_character.places_lived",
+        "Tatooine",
+        "Tatooine"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 3370
+  },
+  {
+    "idx": 151,
+    "id": "WebQTrn-1931",
+    "question": "what films has morgan freeman narrated",
+    "topic": "Morgan Freeman",
+    "answers": [
+      "High Crimes",
+      "Batman Begins",
+      "Hard Rain",
+      "Along Came a Spider",
+      "Clinton and Nadine"
+    ],
+    "a_entities": [
+      "High Crimes",
+      "Batman Begins",
+      "Hard Rain",
+      "Along Came a Spider",
+      "Clinton and Nadine"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "Morgan Freeman",
+        "film.producer.film",
+        "The Maiden Heist",
+        "The Maiden Heist"
+      ],
+      [
+        "Morgan Freeman",
+        "film.producer.films_executive_produced",
+        "Under Suspicion",
+        "Under Suspicion"
+      ],
+      [
+        "Morgan Freeman",
+        "film.producer.films_executive_produced",
+        "Levity",
+        "Levity"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 3903
+  },
+  {
+    "idx": 152,
+    "id": "WebQTrn-1935",
+    "question": "where was tommy emmanuel born",
+    "topic": "Tommy Emmanuel",
+    "answers": [
+      "Muswellbrook"
+    ],
+    "a_entities": [
+      "Muswellbrook"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "Tommy Emmanuel",
+        "people.person.place_of_birth",
+        "Muswellbrook",
+        "Muswellbrook"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 2871
+  },
+  {
+    "idx": 153,
+    "id": "WebQTrn-1936",
+    "question": "what techniques did frida kahlo use in her paintings",
+    "topic": "Frida Kahlo",
+    "answers": [
+      "Modern art",
+      "Magic realism",
+      "Surrealism"
+    ],
+    "a_entities": [
+      "Modern art",
+      "Magic realism",
+      "Surrealism"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "Frida Kahlo",
+        "visual_art.visual_artist.associated_periods_or_movements",
+        "Modern art",
+        "Modern art"
+      ],
+      [
+        "Frida Kahlo",
+        "visual_art.visual_artist.associated_periods_or_movements",
+        "Magic realism",
+        "Magic realism"
+      ],
+      [
+        "Frida Kahlo",
+        "visual_art.visual_artist.associated_periods_or_movements",
+        "Surrealism",
+        "Surrealism"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 3967
+  },
+  {
+    "idx": 154,
+    "id": "WebQTrn-1946",
+    "question": "what countries include western europe",
+    "topic": "Western Europe",
+    "answers": [
+      "France",
+      "Belgium",
+      "Germany",
+      "Switzerland",
+      "Spain"
+    ],
+    "a_entities": [
+      "France",
+      "Belgium",
+      "Germany",
+      "Switzerland",
+      "Spain"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "Western Europe",
+        "location.location.contains",
+        "France",
+        "France"
+      ],
+      [
+        "Western Europe",
+        "location.location.contains",
+        "Kingdom of France",
+        "France"
+      ],
+      [
+        "Western Europe",
+        "location.location.partially_contains",
+        "France",
+        "France"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 7568
+  },
+  {
+    "idx": 155,
+    "id": "WebQTrn-1962",
+    "question": "who played carl fredricksen in up",
+    "topic": "Up",
+    "answers": [
+      "Jeremy Leary",
+      "Ed Asner"
+    ],
+    "a_entities": [
+      "Jeremy Leary",
+      "Ed Asner"
+    ],
+    "hop_count": 2,
+    "direct_paths": [],
+    "two_hop_paths": [
+      [
+        "Up",
+        "base.reviews.reviewed_topic.reviews",
+        "Review of Up at blog.nola.com",
+        "base.reviews.review.mentions",
+        "Ed Asner",
+        "Ed Asner"
+      ],
+      [
+        "Up",
+        "REVERSE:base.reviews.review.reviewed_topic",
+        "Review of Up at blog.nola.com",
+        "base.reviews.review.mentions",
+        "Ed Asner",
+        "Ed Asner"
+      ],
+      [
+        "Up",
+        "base.reviews.reviewed_topic.reviews",
+        "Review of Up at www.csmonitor.com",
+        "base.reviews.review.mentions",
+        "Ed Asner",
+        "Ed Asner"
+      ]
+    ],
+    "graph_size": 5452
+  },
+  {
+    "idx": 156,
+    "id": "WebQTrn-1976",
+    "question": "what did robert koch do",
+    "topic": "Robert Koch",
+    "answers": [
+      "Physician"
+    ],
+    "a_entities": [
+      "Physician"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "Robert Koch",
+        "people.person.profession",
+        "Physician",
+        "Physician"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 1944
+  },
+  {
+    "idx": 157,
+    "id": "WebQTrn-1981",
+    "question": "who is lleyton hewitt",
+    "topic": "Lleyton Hewitt",
+    "answers": [
+      "Tennis player"
+    ],
+    "a_entities": [
+      "Tennis player"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "Lleyton Hewitt",
+        "people.person.profession",
+        "Tennis player",
+        "Tennis player"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 988
+  },
+  {
+    "idx": 158,
+    "id": "WebQTrn-1990",
+    "question": "what is st mary mascot",
+    "topic": "Saint Mary's College of California",
+    "answers": [
+      "Saint Mary's College of California Gael"
+    ],
+    "a_entities": [
+      "Saint Mary's College of California Gael"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "Saint Mary's College of California",
+        "education.educational_institution_campus.educational_institution",
+        "Saint Mary's College of California",
+        "Saint Mary's College of California Gael"
+      ],
+      [
+        "Saint Mary's College of California",
+        "location.location.containedby",
+        "California",
+        "Saint Mary's College of California Gael"
+      ],
+      [
+        "Saint Mary's College of California",
+        "education.educational_institution.mascot",
+        "Saint Mary's College of California Gael",
+        "Saint Mary's College of California Gael"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 841
+  },
+  {
+    "idx": 160,
+    "id": "WebQTrn-2014",
+    "question": "what county is stockton ca located in",
+    "topic": "Stockton",
+    "answers": [
+      "San Joaquin County"
+    ],
+    "a_entities": [
+      "San Joaquin County"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "Stockton",
+        "location.hud_county_place.county",
+        "San Joaquin County",
+        "San Joaquin County"
+      ],
+      [
+        "Stockton",
+        "location.location.containedby",
+        "San Joaquin County",
+        "San Joaquin County"
+      ],
+      [
+        "Stockton",
+        "location.location.contains",
+        "San Joaquin County Fairgrounds",
+        "San Joaquin County"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 1784
+  },
+  {
+    "idx": 161,
+    "id": "WebQTrn-2018",
+    "question": "what form of government does czech republic have",
+    "topic": "Czech Republic",
+    "answers": [
+      "Parliamentary republic"
+    ],
+    "a_entities": [
+      "Parliamentary republic"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "Czech Republic",
+        "location.country.form_of_government",
+        "Parliamentary republic",
+        "Parliamentary republic"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 7240
+  },
+  {
+    "idx": 162,
+    "id": "WebQTrn-2034",
+    "question": "what language do iraqi people speak",
+    "topic": "Iraq",
+    "answers": [
+      "South Azeri language",
+      "Assyrian Neo-Aramaic Language",
+      "Syriac language",
+      "Armenian Language",
+      "Kurdish languages"
+    ],
+    "a_entities": [
+      "South Azeri language",
+      "Assyrian Neo-Aramaic Language",
+      "Syriac language",
+      "Armenian Language",
+      "Kurdish languages"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "Iraq",
+        "location.country.languages_spoken",
+        "Turkmen Language",
+        "Turkmen Language"
+      ],
+      [
+        "Iraq",
+        "location.country.languages_spoken",
+        "Arabic Language",
+        "Arabic Language"
+      ],
+      [
+        "Iraq",
+        "location.country.languages_spoken",
+        "Assyrian Neo-Aramaic Language",
+        "Assyrian Neo-Aramaic Language"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 5171
+  },
+  {
+    "idx": 164,
+    "id": "WebQTrn-2056",
+    "question": "what was the name of martin luther king jr parents",
+    "topic": "Martin Luther King, Jr.",
+    "answers": [
+      "Alberta Williams King",
+      "Martin Luther King, Sr."
+    ],
+    "a_entities": [
+      "Alberta Williams King",
+      "Martin Luther King, Sr."
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "Martin Luther King, Jr.",
+        "people.person.parents",
+        "Martin Luther King, Sr.",
+        "Martin Luther King, Sr."
+      ],
+      [
+        "Martin Luther King, Jr.",
+        "symbols.namesake.named_after",
+        "Martin Luther King, Sr.",
+        "Martin Luther King, Sr."
+      ],
+      [
+        "Martin Luther King, Jr.",
+        "people.person.parents",
+        "Alberta Williams King",
+        "Alberta Williams King"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 6642
+  },
+  {
+    "idx": 165,
+    "id": "WebQTrn-2057",
+    "question": "what money does guatemala use",
+    "topic": "Guatemala",
+    "answers": [
+      "Guatemalan quetzal"
+    ],
+    "a_entities": [
+      "Guatemalan quetzal"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "Guatemala",
+        "location.country.currency_used",
+        "Guatemalan quetzal",
+        "Guatemalan quetzal"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 4275
+  },
+  {
+    "idx": 167,
+    "id": "WebQTrn-2080",
+    "question": "what art movement was vincent van gogh apart of",
+    "topic": "Vincent van Gogh",
+    "answers": [
+      "Post-Impressionism"
+    ],
+    "a_entities": [
+      "Post-Impressionism"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "Vincent van Gogh",
+        "visual_art.visual_artist.associated_periods_or_movements",
+        "Post-Impressionism",
+        "Post-Impressionism"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 6171
+  },
+  {
+    "idx": 168,
+    "id": "WebQTrn-2097",
+    "question": "what party was winston churchill in politics",
+    "topic": "Winston Churchill",
+    "answers": [
+      "Liberal Party",
+      "Conservative Party"
+    ],
+    "a_entities": [
+      "Liberal Party",
+      "Conservative Party"
+    ],
+    "hop_count": 2,
+    "direct_paths": [],
+    "two_hop_paths": [
+      [
+        "Winston Churchill",
+        "REVERSE:government.political_party_tenure.politician",
+        "m.03ld_6t",
+        "government.political_party_tenure.party",
+        "Liberal Party",
+        "Liberal Party"
+      ],
+      [
+        "Winston Churchill",
+        "government.politician.party",
+        "m.03ld_6t",
+        "government.political_party_tenure.party",
+        "Liberal Party",
+        "Liberal Party"
+      ],
+      [
+        "Winston Churchill",
+        "people.person.nationality",
+        "United Kingdom",
+        "REVERSE:government.political_party.country",
+        "Liberal Party",
+        "Liberal Party"
+      ]
+    ],
+    "graph_size": 5020
+  },
+  {
+    "idx": 169,
+    "id": "WebQTrn-2117",
+    "question": "what types of government does china have",
+    "topic": "China",
+    "answers": [
+      "Single-party state",
+      "Communist state",
+      "Socialist state"
+    ],
+    "a_entities": [
+      "Single-party state",
+      "Communist state",
+      "Socialist state"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "China",
+        "location.country.form_of_government",
+        "Single-party state",
+        "Single-party state"
+      ],
+      [
+        "China",
+        "location.country.form_of_government",
+        "Socialist state",
+        "Socialist state"
+      ],
+      [
+        "China",
+        "location.country.form_of_government",
+        "Communist state",
+        "Communist state"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 6293
+  },
+  {
+    "idx": 170,
+    "id": "WebQTrn-2172",
+    "question": "what school does bart simpson go to",
+    "topic": "Bart Simpson",
+    "answers": [
+      "Springfield Elementary School",
+      "Springfield High School"
+    ],
+    "a_entities": [
+      "Springfield Elementary School",
+      "Springfield High School"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "Bart Simpson",
+        "fictional_universe.fictional_character.education",
+        "Springfield Elementary School",
+        "Springfield Elementary School"
+      ],
+      [
+        "Bart Simpson",
+        "fictional_universe.fictional_character.education",
+        "Springfield High School",
+        "Springfield High School"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 3744
+  },
+  {
+    "idx": 171,
+    "id": "WebQTrn-2182",
+    "question": "what college did ron jaworski go to",
+    "topic": "Ron Jaworski",
+    "answers": [
+      "Youngstown State University"
+    ],
+    "a_entities": [
+      "Youngstown State University"
+    ],
+    "hop_count": 2,
+    "direct_paths": [],
+    "two_hop_paths": [
+      [
+        "Ron Jaworski",
+        "people.person.education",
+        "m.02kykk7",
+        "education.education.institution",
+        "Youngstown State University",
+        "Youngstown State University"
+      ],
+      [
+        "Ron Jaworski",
+        "REVERSE:education.education.student",
+        "m.02kykk7",
+        "education.education.institution",
+        "Youngstown State University",
+        "Youngstown State University"
+      ],
+      [
+        "Ron Jaworski",
+        "people.person.education",
+        "m.02kykk7",
+        "REVERSE:education.educational_institution.students_graduates",
+        "Youngstown State University",
+        "Youngstown State University"
+      ]
+    ],
+    "graph_size": 1434
+  },
+  {
+    "idx": 173,
+    "id": "WebQTrn-2190",
+    "question": "where does sam shepard live",
+    "topic": "Sam Shepard",
+    "answers": [
+      "Manhattan",
+      "Guam",
+      "South Dakota",
+      "Fort Sheridan",
+      "South Pasadena"
+    ],
+    "a_entities": [
+      "Manhattan",
+      "Guam",
+      "South Dakota",
+      "Fort Sheridan",
+      "South Pasadena"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "Sam Shepard",
+        "people.person.place_of_birth",
+        "Fort Sheridan",
+        "Fort Sheridan"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 5358
+  },
+  {
+    "idx": 174,
+    "id": "WebQTrn-2203",
+    "question": "where is port charlotte florida located",
+    "topic": "Port Charlotte",
+    "answers": [
+      "United States of America",
+      "Charlotte County",
+      "Florida"
+    ],
+    "a_entities": [
+      "United States of America",
+      "Charlotte County",
+      "Florida"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "Port Charlotte",
+        "location.location.containedby",
+        "United States of America",
+        "United States of America"
+      ],
+      [
+        "Port Charlotte",
+        "location.location.containedby",
+        "Florida",
+        "Florida"
+      ],
+      [
+        "Port Charlotte",
+        "location.location.containedby",
+        "Charlotte County",
+        "Charlotte County"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 3090
+  },
+  {
+    "idx": 175,
+    "id": "WebQTrn-2206",
+    "question": "who helped form the american federation of labor",
+    "topic": "American Federation of Labor",
+    "answers": [
+      "Samuel Gompers"
+    ],
+    "a_entities": [
+      "Samuel Gompers"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "American Federation of Labor",
+        "organization.organization.founders",
+        "Samuel Gompers",
+        "Samuel Gompers"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 4639
+  },
+  {
+    "idx": 176,
+    "id": "WebQTrn-2215",
+    "question": "where was brad paisley born and raised",
+    "topic": "Brad Paisley",
+    "answers": [
+      "Glen Dale"
+    ],
+    "a_entities": [
+      "Glen Dale"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "Brad Paisley",
+        "people.person.place_of_birth",
+        "Glen Dale",
+        "Glen Dale"
+      ],
+      [
+        "Brad Paisley",
+        "music.artist.origin",
+        "Glen Dale",
+        "Glen Dale"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 8218
+  },
+  {
+    "idx": 177,
+    "id": "WebQTrn-2226",
+    "question": "what are all songs by taylor swift",
+    "topic": "Taylor Swift",
+    "answers": [
+      "Enchanted",
+      "Clean",
+      "Mine (live 2011)",
+      "State of Grace (acoustic version)",
+      "Ours (Live)"
+    ],
+    "a_entities": [
+      "Enchanted",
+      "Clean",
+      "Mine (live 2011)",
+      "State of Grace (acoustic version)",
+      "Ours (Live)"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "Taylor Swift",
+        "music.composer.compositions",
+        "Sad Beautiful Tragic",
+        "Sad Beautiful Tragic"
+      ],
+      [
+        "Taylor Swift",
+        "music.artist.album",
+        "Safe & Sound",
+        "Safe & Sound"
+      ],
+      [
+        "Taylor Swift",
+        "music.composer.compositions",
+        "Long Live",
+        "Long Live"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 8048
+  },
+  {
+    "idx": 178,
+    "id": "WebQTrn-2228",
+    "question": "who was francis drake married to",
+    "topic": "Francis Drake",
+    "answers": [
+      "Elizabeth Sydenham",
+      "Mary Newman"
+    ],
+    "a_entities": [
+      "Elizabeth Sydenham",
+      "Mary Newman"
+    ],
+    "hop_count": 2,
+    "direct_paths": [],
+    "two_hop_paths": [
+      [
+        "Francis Drake",
+        "REVERSE:people.marriage.spouse",
+        "m.0k1nmz1",
+        "REVERSE:people.person.spouse_s",
+        "Mary Newman",
+        "Mary Newman"
+      ],
+      [
+        "Francis Drake",
+        "people.person.spouse_s",
+        "m.0k1nmz1",
+        "REVERSE:people.person.spouse_s",
+        "Mary Newman",
+        "Mary Newman"
+      ],
+      [
+        "Francis Drake",
+        "REVERSE:people.marriage.spouse",
+        "m.0k1nmz1",
+        "people.marriage.spouse",
+        "Mary Newman",
+        "Mary Newman"
+      ]
+    ],
+    "graph_size": 1912
+  },
+  {
+    "idx": 179,
+    "id": "WebQTrn-2245",
+    "question": "who invented facebook wikipedia",
+    "topic": "Facebook, Inc.",
+    "answers": [
+      "Andrew McCollum",
+      "Mark Zuckerberg",
+      "Eduardo Saverin",
+      "Dustin Moskovitz",
+      "Chris Hughes"
+    ],
+    "a_entities": [
+      "Andrew McCollum",
+      "Mark Zuckerberg",
+      "Eduardo Saverin",
+      "Dustin Moskovitz",
+      "Chris Hughes"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "Facebook, Inc.",
+        "organization.organization.founders",
+        "Mark Zuckerberg",
+        "Mark Zuckerberg"
+      ],
+      [
+        "Facebook, Inc.",
+        "organization.organization.founders",
+        "Chris Hughes",
+        "Chris Hughes"
+      ],
+      [
+        "Facebook, Inc.",
+        "organization.organization.founders",
+        "Dustin Moskovitz",
+        "Dustin Moskovitz"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 2209
+  },
+  {
+    "idx": 180,
+    "id": "WebQTrn-2263",
+    "question": "what did sammy davis jr die of",
+    "topic": "Sammy Davis, Jr.",
+    "answers": [
+      "Laryngeal cancer",
+      "Complication"
+    ],
+    "a_entities": [
+      "Laryngeal cancer",
+      "Complication"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "Sammy Davis, Jr.",
+        "people.deceased_person.cause_of_death",
+        "Complication",
+        "Complication"
+      ],
+      [
+        "Sammy Davis, Jr.",
+        "people.deceased_person.cause_of_death",
+        "Laryngeal cancer",
+        "Laryngeal cancer"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 3719
+  },
+  {
+    "idx": 181,
+    "id": "WebQTrn-2267",
+    "question": "what year did dwayne wade came to the nba",
+    "topic": "Dwyane Wade",
+    "answers": [
+      "2003 NBA draft"
+    ],
+    "a_entities": [
+      "2003 NBA draft"
+    ],
+    "hop_count": 2,
+    "direct_paths": [],
+    "two_hop_paths": [
+      [
+        "Dwyane Wade",
+        "sports.drafted_athlete.drafted",
+        "m.02h7nlr",
+        "sports.sports_league_draft_pick.draft",
+        "2003 NBA draft",
+        "2003 NBA draft"
+      ],
+      [
+        "Dwyane Wade",
+        "REVERSE:sports.sports_league_draft_pick.player",
+        "m.02h7nlr",
+        "sports.sports_league_draft_pick.draft",
+        "2003 NBA draft",
+        "2003 NBA draft"
+      ],
+      [
+        "Dwyane Wade",
+        "sports.drafted_athlete.drafted",
+        "m.02h7nlr",
+        "REVERSE:sports.sports_league_draft.picks",
+        "2003 NBA draft",
+        "2003 NBA draft"
+      ]
+    ],
+    "graph_size": 1282
+  },
+  {
+    "idx": 182,
+    "id": "WebQTrn-2298",
+    "question": "what do michelle obama do for a living",
+    "topic": "Michelle Obama",
+    "answers": [
+      "Lawyer",
+      "Writer"
+    ],
+    "a_entities": [
+      "Lawyer",
+      "Writer"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "Michelle Obama",
+        "people.person.profession",
+        "Writer",
+        "Writer"
+      ],
+      [
+        "Michelle Obama",
+        "people.person.profession",
+        "Lawyer",
+        "Lawyer"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 2367
+  },
+  {
+    "idx": 184,
+    "id": "WebQTrn-2311",
+    "question": "what killed sammy davis jr",
+    "topic": "Sammy Davis, Jr.",
+    "answers": [
+      "Laryngeal cancer",
+      "Complication"
+    ],
+    "a_entities": [
+      "Laryngeal cancer",
+      "Complication"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "Sammy Davis, Jr.",
+        "people.deceased_person.cause_of_death",
+        "Complication",
+        "Complication"
+      ],
+      [
+        "Sammy Davis, Jr.",
+        "people.deceased_person.cause_of_death",
+        "Laryngeal cancer",
+        "Laryngeal cancer"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 3719
+  },
+  {
+    "idx": 185,
+    "id": "WebQTrn-2328",
+    "question": "who won the presidential race in venezuela",
+    "topic": "Venezuela",
+    "answers": [
+      "Rafael Caldera",
+      "Luis Herrera Campins",
+      "Nicol\u00e1s Maduro",
+      "Carlos Andr\u00e9s P\u00e9rez",
+      "Hugo Ch\u00e1vez"
+    ],
+    "a_entities": [
+      "Rafael Caldera",
+      "Luis Herrera Campins",
+      "Nicol\u00e1s Maduro",
+      "Carlos Andr\u00e9s P\u00e9rez",
+      "Hugo Ch\u00e1vez"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "Venezuela",
+        "location.country.internet_tld",
+        "ve",
+        "Hugo Ch\u00e1vez"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 4995
+  },
+  {
+    "idx": 186,
+    "id": "WebQTrn-2340",
+    "question": "what was eli whitney job",
+    "topic": "Eli Whitney",
+    "answers": [
+      "Teacher",
+      "Inventor",
+      "Engineer"
+    ],
+    "a_entities": [
+      "Teacher",
+      "Inventor",
+      "Engineer"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "Eli Whitney",
+        "people.person.profession",
+        "Teacher",
+        "Teacher"
+      ],
+      [
+        "Eli Whitney",
+        "people.person.profession",
+        "Engineer",
+        "Engineer"
+      ],
+      [
+        "Eli Whitney",
+        "common.topic.notable_types",
+        "Inventor",
+        "Inventor"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 1928
+  },
+  {
+    "idx": 187,
+    "id": "WebQTrn-2343",
+    "question": "who did hermione granger marry",
+    "topic": "Hermione Granger",
+    "answers": [
+      "Ronald Weasley"
+    ],
+    "a_entities": [
+      "Ronald Weasley"
+    ],
+    "hop_count": 2,
+    "direct_paths": [],
+    "two_hop_paths": [
+      [
+        "Hermione Granger",
+        "book.book_character.appears_in_book",
+        "Harry Potter and the Philosopher's Stone",
+        "REVERSE:book.book_character.appears_in_book",
+        "Ronald Weasley",
+        "Ronald Weasley"
+      ],
+      [
+        "Hermione Granger",
+        "REVERSE:book.book.characters",
+        "Harry Potter and the Prisoner of Azkaban",
+        "book.book.characters",
+        "Ronald Weasley",
+        "Ronald Weasley"
+      ],
+      [
+        "Hermione Granger",
+        "book.book_character.appears_in_book",
+        "Harry Potter and the Prisoner of Azkaban",
+        "book.book.characters",
+        "Ronald Weasley",
+        "Ronald Weasley"
+      ]
+    ],
+    "graph_size": 4157
+  },
+  {
+    "idx": 188,
+    "id": "WebQTrn-2358",
+    "question": "where did newt gingrich attend college",
+    "topic": "Newt Gingrich",
+    "answers": [
+      "Tulane University",
+      "Emory University"
+    ],
+    "a_entities": [
+      "Tulane University",
+      "Emory University"
+    ],
+    "hop_count": 2,
+    "direct_paths": [],
+    "two_hop_paths": [
+      [
+        "Newt Gingrich",
+        "REVERSE:education.education.student",
+        "m.03l6zr9",
+        "education.education.institution",
+        "Emory University",
+        "Emory University"
+      ],
+      [
+        "Newt Gingrich",
+        "people.person.education",
+        "m.03l6zr9",
+        "education.education.institution",
+        "Emory University",
+        "Emory University"
+      ],
+      [
+        "Newt Gingrich",
+        "REVERSE:education.education.student",
+        "m.02wp72t",
+        "education.education.institution",
+        "Tulane University",
+        "Tulane University"
+      ]
+    ],
+    "graph_size": 3326
+  },
+  {
+    "idx": 189,
+    "id": "WebQTrn-2370",
+    "question": "who is playing bilbo in the hobbit movie",
+    "topic": "Old Bilbo",
+    "answers": [
+      "Mikhail Danilov"
+    ],
+    "a_entities": [
+      "Mikhail Danilov"
+    ],
+    "hop_count": 2,
+    "direct_paths": [],
+    "two_hop_paths": [
+      [
+        "Old Bilbo",
+        "REVERSE:film.performance.character",
+        "m.0112mlwm",
+        "REVERSE:film.actor.film",
+        "Mikhail Danilov",
+        "Mikhail Danilov"
+      ],
+      [
+        "Old Bilbo",
+        "film.film_character.portrayed_in_films",
+        "m.0112mlwm",
+        "REVERSE:film.actor.film",
+        "Mikhail Danilov",
+        "Mikhail Danilov"
+      ],
+      [
+        "Old Bilbo",
+        "REVERSE:film.performance.character",
+        "m.0112mlwm",
+        "film.performance.actor",
+        "Mikhail Danilov",
+        "Mikhail Danilov"
+      ]
+    ],
+    "graph_size": 4194
+  },
+  {
+    "idx": 190,
+    "id": "WebQTrn-2378",
+    "question": "who does jodelle ferland play in eclipse",
+    "topic": "Eclipse",
+    "answers": [
+      "Bree Tanner"
+    ],
+    "a_entities": [
+      "Bree Tanner"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "Eclipse",
+        "book.book.characters",
+        "Bree Tanner",
+        "Bree Tanner"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 6625
+  },
+  {
+    "idx": 191,
+    "id": "WebQTrn-2388",
+    "question": "what films have taylor lautner starred in",
+    "topic": "Taylor Lautner",
+    "answers": [
+      "Field of Dreams 2: Lockout",
+      "The Twilight Saga: Breaking Dawn - Part 1",
+      "Grown Ups 2",
+      "The Twilight Saga: Breaking Dawn - Part 2",
+      "Abduction"
+    ],
+    "a_entities": [
+      "Field of Dreams 2: Lockout",
+      "The Twilight Saga: Breaking Dawn - Part 1",
+      "Grown Ups 2",
+      "The Twilight Saga: Breaking Dawn - Part 2",
+      "Abduction"
+    ],
+    "hop_count": 2,
+    "direct_paths": [],
+    "two_hop_paths": [
+      [
+        "Taylor Lautner",
+        "REVERSE:film.performance.actor",
+        "m.04z4zmg",
+        "film.performance.film",
+        "Twilight",
+        "The Twilight Saga: Breaking Dawn - Part 1"
+      ],
+      [
+        "Taylor Lautner",
+        "film.actor.film",
+        "m.04z4zmg",
+        "film.performance.film",
+        "Twilight",
+        "The Twilight Saga: Breaking Dawn - Part 1"
+      ],
+      [
+        "Taylor Lautner",
+        "REVERSE:film.performance.actor",
+        "m.04z4zmg",
+        "REVERSE:film.film.starring",
+        "Twilight",
+        "The Twilight Saga: Breaking Dawn - Part 1"
+      ]
+    ],
+    "graph_size": 1664
+  },
+  {
+    "idx": 192,
+    "id": "WebQTrn-2392",
+    "question": "what airport does southwest fly to in denver",
+    "topic": "Denver",
+    "answers": [
+      "Denver International Airport"
+    ],
+    "a_entities": [
+      "Denver International Airport"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "Denver",
+        "location.us_county.county_seat",
+        "Denver",
+        "Denver International Airport"
+      ],
+      [
+        "Denver",
+        "location.hud_county_place.place",
+        "Denver",
+        "Denver International Airport"
+      ],
+      [
+        "Denver",
+        "location.hud_county_place.county",
+        "Denver",
+        "Denver International Airport"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 3905
+  },
+  {
+    "idx": 193,
+    "id": "WebQTrn-2395",
+    "question": "where kurdish people from",
+    "topic": "Kurds",
+    "answers": [
+      "Asia"
+    ],
+    "a_entities": [
+      "Asia"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "Kurds",
+        "people.ethnicity.geographic_distribution",
+        "Asia",
+        "Asia"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 3251
+  },
+  {
+    "idx": 194,
+    "id": "WebQTrn-2403",
+    "question": "what is the buddhist holy book",
+    "topic": "Buddhism",
+    "answers": [
+      "Gang\u014dji Garan Engi",
+      "Longchen Nyingthig",
+      "Chinese Buddhist canon",
+      "N\u012blaka\u1e47\u1e6dha Dh\u0101ra\u1e47\u012b",
+      "Mah\u0101vastu"
+    ],
+    "a_entities": [
+      "Gang\u014dji Garan Engi",
+      "Longchen Nyingthig",
+      "Chinese Buddhist canon",
+      "N\u012blaka\u1e47\u1e6dha Dh\u0101ra\u1e47\u012b",
+      "Mah\u0101vastu"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "Buddhism",
+        "religion.religion.texts",
+        "Amitabha Sutra",
+        "Amitabha Sutra"
+      ],
+      [
+        "Buddhism",
+        "religion.religion.texts",
+        "Chinese Buddhist canon",
+        "Chinese Buddhist canon"
+      ],
+      [
+        "Buddhism",
+        "religion.religion.texts",
+        "P\u0101li Canon",
+        "P\u0101li Canon"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 4396
+  },
+  {
+    "idx": 195,
+    "id": "WebQTrn-2424",
+    "question": "what college did kris humphries play for",
+    "topic": "Kris Humphries",
+    "answers": [
+      "University of Minnesota"
+    ],
+    "a_entities": [
+      "University of Minnesota"
+    ],
+    "hop_count": 2,
+    "direct_paths": [],
+    "two_hop_paths": [
+      [
+        "Kris Humphries",
+        "REVERSE:people.place_lived.person",
+        "m.03phb05",
+        "people.place_lived.location",
+        "Minnesota",
+        "University of Minnesota"
+      ],
+      [
+        "Kris Humphries",
+        "people.person.places_lived",
+        "m.03phb05",
+        "people.place_lived.location",
+        "Minnesota",
+        "University of Minnesota"
+      ],
+      [
+        "Kris Humphries",
+        "REVERSE:education.education.student",
+        "m.040qdx8",
+        "education.education.institution",
+        "University of Minnesota",
+        "University of Minnesota"
+      ]
+    ],
+    "graph_size": 2623
+  },
+  {
+    "idx": 196,
+    "id": "WebQTrn-2429",
+    "question": "what type of government does japan currently have",
+    "topic": "Japan",
+    "answers": [
+      "Parliamentary system",
+      "Unitary state",
+      "Constitutional monarchy"
+    ],
+    "a_entities": [
+      "Parliamentary system",
+      "Unitary state",
+      "Constitutional monarchy"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "Japan",
+        "location.country.form_of_government",
+        "Constitutional monarchy",
+        "Constitutional monarchy"
+      ],
+      [
+        "Japan",
+        "location.country.form_of_government",
+        "Parliamentary system",
+        "Parliamentary system"
+      ],
+      [
+        "Japan",
+        "location.country.form_of_government",
+        "Unitary state",
+        "Unitary state"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 5819
+  },
+  {
+    "idx": 197,
+    "id": "WebQTrn-2454",
+    "question": "what airlines fly into ontario international airport",
+    "topic": "Ontario International Airport",
+    "answers": [
+      "UPS Airlines",
+      "Great Lakes Airlines",
+      "Ameriflight",
+      "West Air"
+    ],
+    "a_entities": [
+      "UPS Airlines",
+      "Great Lakes Airlines",
+      "Ameriflight",
+      "West Air"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "Ontario International Airport",
+        "aviation.airport.hub_for",
+        "Great Lakes Airlines",
+        "Great Lakes Airlines"
+      ],
+      [
+        "Ontario International Airport",
+        "aviation.airport.hub_for",
+        "UPS Airlines",
+        "UPS Airlines"
+      ],
+      [
+        "Ontario International Airport",
+        "aviation.airport.hub_for",
+        "Ameriflight",
+        "Ameriflight"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 1163
+  },
+  {
+    "idx": 198,
+    "id": "WebQTrn-2465",
+    "question": "what do you speak in singapore",
+    "topic": "Singapore",
+    "answers": [
+      "Chinese language",
+      "Standard Chinese",
+      "English Language",
+      "Tamil Language",
+      "Malay Language"
+    ],
+    "a_entities": [
+      "Chinese language",
+      "Standard Chinese",
+      "English Language",
+      "Tamil Language",
+      "Malay Language"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "Singapore",
+        "location.country.languages_spoken",
+        "Chinese language",
+        "Chinese language"
+      ],
+      [
+        "Singapore",
+        "location.country.official_language",
+        "English Language",
+        "English Language"
+      ],
+      [
+        "Singapore",
+        "location.country.languages_spoken",
+        "Tamil Language",
+        "Tamil Language"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 4234
+  },
+  {
+    "idx": 199,
+    "id": "WebQTrn-2478",
+    "question": "what is the syracuse university mascot",
+    "topic": "Syracuse University",
+    "answers": [
+      "Syracuse University Otto the Orange"
+    ],
+    "a_entities": [
+      "Syracuse University Otto the Orange"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "Syracuse University",
+        "education.educational_institution.campuses",
+        "Syracuse University",
+        "Syracuse University Otto the Orange"
+      ],
+      [
+        "Syracuse University",
+        "location.location.containedby",
+        "Syracuse",
+        "Syracuse University Otto the Orange"
+      ],
+      [
+        "Syracuse University",
+        "education.educational_institution_campus.educational_institution",
+        "Syracuse University",
+        "Syracuse University Otto the Orange"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 1335
+  },
+  {
+    "idx": 200,
+    "id": "WebQTrn-2482",
+    "question": "what government did japan have",
+    "topic": "Japan",
+    "answers": [
+      "Parliamentary system",
+      "Unitary state",
+      "Constitutional monarchy"
+    ],
+    "a_entities": [
+      "Parliamentary system",
+      "Unitary state",
+      "Constitutional monarchy"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "Japan",
+        "location.country.form_of_government",
+        "Constitutional monarchy",
+        "Constitutional monarchy"
+      ],
+      [
+        "Japan",
+        "location.country.form_of_government",
+        "Parliamentary system",
+        "Parliamentary system"
+      ],
+      [
+        "Japan",
+        "location.country.form_of_government",
+        "Unitary state",
+        "Unitary state"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 5819
+  },
+  {
+    "idx": 201,
+    "id": "WebQTrn-2485",
+    "question": "what countries does china border",
+    "topic": "China",
+    "answers": [
+      "Vietnam",
+      "Japan",
+      "Laos",
+      "Russia",
+      "Mongolia"
+    ],
+    "a_entities": [
+      "Vietnam",
+      "Japan",
+      "Laos",
+      "Russia",
+      "Mongolia"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "China",
+        "location.country.administrative_divisions",
+        "Taiwan Province, People's Republic of China",
+        "Taiwan"
+      ],
+      [
+        "China",
+        "location.country.languages_spoken",
+        "Mongolian language",
+        "Mongolia"
+      ],
+      [
+        "China",
+        "biology.breed_origin.breeds_originating_here",
+        "Japanese Chin",
+        "Japan"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 6293
+  },
+  {
+    "idx": 202,
+    "id": "WebQTrn-2487",
+    "question": "what drug did mitch hedberg overdose on",
+    "topic": "Mitch Hedberg",
+    "answers": [
+      "Heroin overdose"
+    ],
+    "a_entities": [
+      "Heroin overdose"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "Mitch Hedberg",
+        "people.deceased_person.cause_of_death",
+        "Heroin overdose",
+        "Heroin overdose"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 5160
+  },
+  {
+    "idx": 203,
+    "id": "WebQTrn-2491",
+    "question": "what language do you speak in austria",
+    "topic": "Austria",
+    "answers": [
+      "Bosnian language",
+      "Slovene language",
+      "Croatian language",
+      "Hungarian language",
+      "Serbian language"
+    ],
+    "a_entities": [
+      "Bosnian language",
+      "Slovene language",
+      "Croatian language",
+      "Hungarian language",
+      "Serbian language"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "Austria",
+        "location.country.official_language",
+        "German Language",
+        "German Language"
+      ],
+      [
+        "Austria",
+        "location.country.languages_spoken",
+        "Serbian language",
+        "Serbian language"
+      ],
+      [
+        "Austria",
+        "freebase.domain_profile.equivalent_topic",
+        "Austria",
+        "Austrian German"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 6892
+  },
+  {
+    "idx": 204,
+    "id": "WebQTrn-2499",
+    "question": "who did plaxico burress sign with 2012",
+    "topic": "Plaxico Burress",
+    "answers": [
+      "Pittsburgh Steelers"
+    ],
+    "a_entities": [
+      "Pittsburgh Steelers"
+    ],
+    "hop_count": 2,
+    "direct_paths": [],
+    "two_hop_paths": [
+      [
+        "Plaxico Burress",
+        "REVERSE:sports.sports_team_roster.player",
+        "m.0ndqs6y",
+        "sports.sports_team_roster.team",
+        "Pittsburgh Steelers",
+        "Pittsburgh Steelers"
+      ],
+      [
+        "Plaxico Burress",
+        "sports.pro_athlete.teams",
+        "m.0ndqs6y",
+        "sports.sports_team_roster.team",
+        "Pittsburgh Steelers",
+        "Pittsburgh Steelers"
+      ],
+      [
+        "Plaxico Burress",
+        "REVERSE:sports.sports_league_draft_pick.player",
+        "m.0wc9shj",
+        "REVERSE:sports.professional_sports_team.draft_picks",
+        "Pittsburgh Steelers",
+        "Pittsburgh Steelers"
+      ]
+    ],
+    "graph_size": 1751
+  },
+  {
+    "idx": 205,
+    "id": "WebQTrn-2505",
+    "question": "what is vanderbilt university mascot",
+    "topic": "Vanderbilt University",
+    "answers": [
+      "Vanderbilt University Mr. Commodore"
+    ],
+    "a_entities": [
+      "Vanderbilt University Mr. Commodore"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "Vanderbilt University",
+        "education.educational_institution.mascot",
+        "Vanderbilt University Mr. Commodore",
+        "Vanderbilt University Mr. Commodore"
+      ],
+      [
+        "Vanderbilt University",
+        "education.educational_institution.campuses",
+        "Vanderbilt University",
+        "Vanderbilt University Mr. Commodore"
+      ],
+      [
+        "Vanderbilt University",
+        "education.educational_institution_campus.educational_institution",
+        "Vanderbilt University",
+        "Vanderbilt University Mr. Commodore"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 1674
+  },
+  {
+    "idx": 206,
+    "id": "WebQTrn-2510",
+    "question": "what country did truman lead",
+    "topic": "Harry S. Truman",
+    "answers": [
+      "United States of America"
+    ],
+    "a_entities": [
+      "United States of America"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "Harry S. Truman",
+        "people.person.nationality",
+        "United States of America",
+        "United States of America"
+      ],
+      [
+        "Harry S. Truman",
+        "book.written_work.subjects",
+        "United States of America",
+        "United States of America"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 4272
+  },
+  {
+    "idx": 207,
+    "id": "WebQTrn-2539",
+    "question": "what team did albert pujols play for",
+    "topic": "Albert Pujols",
+    "answers": [
+      "Scottsdale Scorpions",
+      "St. Louis Cardinals",
+      "Los Angeles Angels of Anaheim"
+    ],
+    "a_entities": [
+      "Scottsdale Scorpions",
+      "St. Louis Cardinals",
+      "Los Angeles Angels of Anaheim"
+    ],
+    "hop_count": 2,
+    "direct_paths": [],
+    "two_hop_paths": [
+      [
+        "Albert Pujols",
+        "baseball.baseball_player.batting_stats",
+        "m.06s6mb3",
+        "baseball.batting_statistics.team",
+        "St. Louis Cardinals",
+        "St. Louis Cardinals"
+      ],
+      [
+        "Albert Pujols",
+        "REVERSE:baseball.batting_statistics.player",
+        "m.06s6mb3",
+        "baseball.batting_statistics.team",
+        "St. Louis Cardinals",
+        "St. Louis Cardinals"
+      ],
+      [
+        "Albert Pujols",
+        "REVERSE:baseball.batting_statistics.player",
+        "m.06s6m3w",
+        "baseball.batting_statistics.team",
+        "St. Louis Cardinals",
+        "St. Louis Cardinals"
+      ]
+    ],
+    "graph_size": 1021
+  },
+  {
+    "idx": 208,
+    "id": "WebQTrn-2555",
+    "question": "what do do in new york",
+    "topic": "New York City",
+    "answers": [
+      "Museum of Sex",
+      "Museum of Mathematics",
+      "Frick Collection",
+      "Theodore Roosevelt Birthplace National Historic Site",
+      "Morgan Library & Museum"
+    ],
+    "a_entities": [
+      "Museum of Sex",
+      "Museum of Mathematics",
+      "Frick Collection",
+      "Theodore Roosevelt Birthplace National Historic Site",
+      "Morgan Library & Museum"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "New York City",
+        "travel.travel_destination.tourist_attractions",
+        "Crocheron Park",
+        "Crocheron Park"
+      ],
+      [
+        "New York City",
+        "base.biblioness.bibs_topic.subsumes",
+        "New York City",
+        "New York City Half Marathon"
+      ],
+      [
+        "New York City",
+        "travel.travel_destination.tourist_attractions",
+        "UAE Healthy Kidney 10K",
+        "UAE Healthy Kidney 10K"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 5748
+  },
+  {
+    "idx": 209,
+    "id": "WebQTrn-2588",
+    "question": "where do navajo indians live",
+    "topic": "Navajo people",
+    "answers": [
+      "New Mexico",
+      "Arizona",
+      "California",
+      "Utah",
+      "Southwestern United States"
+    ],
+    "a_entities": [
+      "New Mexico",
+      "Arizona",
+      "California",
+      "Utah",
+      "Southwestern United States"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "Navajo people",
+        "people.ethnicity.geographic_distribution",
+        "Southwestern United States",
+        "Southwestern United States"
+      ],
+      [
+        "Navajo people",
+        "people.ethnicity.geographic_distribution",
+        "Arizona",
+        "Arizona"
+      ],
+      [
+        "Navajo people",
+        "people.ethnicity.geographic_distribution",
+        "Utah",
+        "Utah"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 6551
+  },
+  {
+    "idx": 210,
+    "id": "WebQTrn-2603",
+    "question": "what do hungarian people speak",
+    "topic": "Hungary",
+    "answers": [
+      "Hungarian language"
+    ],
+    "a_entities": [
+      "Hungarian language"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "Hungary",
+        "location.country.official_language",
+        "Hungarian language",
+        "Hungarian language"
+      ],
+      [
+        "Hungary",
+        "location.country.languages_spoken",
+        "Hungarian language",
+        "Hungarian language"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 6241
+  },
+  {
+    "idx": 211,
+    "id": "WebQTrn-2609",
+    "question": "who speaks stewie on family guy",
+    "topic": "Family Guy",
+    "answers": [
+      "Seth MacFarlane"
+    ],
+    "a_entities": [
+      "Seth MacFarlane"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "Family Guy",
+        "tv.tv_program.program_creator",
+        "Seth MacFarlane",
+        "Seth MacFarlane"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 3780
+  },
+  {
+    "idx": 212,
+    "id": "WebQTrn-2631",
+    "question": "what countries are the mediterranean",
+    "topic": "Mediterranean Sea",
+    "answers": [
+      "France",
+      "Monaco",
+      "Spain",
+      "Turkey"
+    ],
+    "a_entities": [
+      "France",
+      "Monaco",
+      "Spain",
+      "Turkey"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "Mediterranean Sea",
+        "location.location.partially_contains",
+        "France",
+        "France"
+      ],
+      [
+        "Mediterranean Sea",
+        "location.location.partially_contains",
+        "Spain",
+        "Spain"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 6344
+  },
+  {
+    "idx": 213,
+    "id": "WebQTrn-2639",
+    "question": "what is time zone in new orleans",
+    "topic": "New Orleans",
+    "answers": [
+      "Central Time Zone"
+    ],
+    "a_entities": [
+      "Central Time Zone"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "New Orleans",
+        "location.location.time_zones",
+        "Central Time Zone",
+        "Central Time Zone"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 5234
+  },
+  {
+    "idx": 214,
+    "id": "WebQTrn-2651",
+    "question": "what do they speak iceland",
+    "topic": "Iceland",
+    "answers": [
+      "Icelandic Language"
+    ],
+    "a_entities": [
+      "Icelandic Language"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "Iceland",
+        "book.book.editions",
+        "Iceland",
+        "Icelandic Language"
+      ],
+      [
+        "Iceland",
+        "location.country.languages_spoken",
+        "Icelandic Language",
+        "Icelandic Language"
+      ],
+      [
+        "Iceland",
+        "book.book.editions",
+        "Iceland",
+        "Icelandic Language"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 5990
+  },
+  {
+    "idx": 215,
+    "id": "WebQTrn-2655",
+    "question": "when did joe mcelderry won x factor",
+    "topic": "Joseph McElderry",
+    "answers": [
+      "The X Factor (UK) - Season 6"
+    ],
+    "a_entities": [
+      "The X Factor (UK) - Season 6"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "Joseph McElderry",
+        "award.competitor.competitions_won",
+        "The X Factor (UK) - Season 6",
+        "The X Factor (UK) - Season 6"
+      ],
+      [
+        "Joseph McElderry",
+        "award.competitor.competitions",
+        "The X Factor (UK) - Season 6",
+        "The X Factor (UK) - Season 6"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 2717
+  },
+  {
+    "idx": 216,
+    "id": "WebQTrn-2660",
+    "question": "what does a american rottweiler look like",
+    "topic": "Rottweiler",
+    "answers": [
+      "Black",
+      "Tan",
+      "Mahogany"
+    ],
+    "a_entities": [
+      "Black",
+      "Tan",
+      "Mahogany"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "Rottweiler",
+        "biology.animal_breed.coloring",
+        "Tan",
+        "Tan"
+      ],
+      [
+        "Rottweiler",
+        "base.petbreeds.dog_breed.color",
+        "Black",
+        "Black"
+      ],
+      [
+        "Rottweiler",
+        "base.petbreeds.dog_breed.color",
+        "Mahogany",
+        "Mahogany"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 3453
+  },
+  {
+    "idx": 217,
+    "id": "WebQTrn-2685",
+    "question": "who inspired antonio vivaldi",
+    "topic": "Antonio Vivaldi",
+    "answers": [
+      "Johann Sebastian Bach"
+    ],
+    "a_entities": [
+      "Johann Sebastian Bach"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "Antonio Vivaldi",
+        "influence.influence_node.influenced",
+        "Johann Sebastian Bach",
+        "Johann Sebastian Bach"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 5977
+  },
+  {
+    "idx": 218,
+    "id": "WebQTrn-2693",
+    "question": "what state was ronald reagan governor of",
+    "topic": "Ronald Reagan",
+    "answers": [
+      "California"
+    ],
+    "a_entities": [
+      "California"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "Ronald Reagan",
+        "organization.organization_founder.organizations_founded",
+        "California Air Resources Board",
+        "California"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 5175
+  },
+  {
+    "idx": 219,
+    "id": "WebQTrn-2726",
+    "question": "who owns the new england patriots football team",
+    "topic": "New England Patriots",
+    "answers": [
+      "Robert Kraft"
+    ],
+    "a_entities": [
+      "Robert Kraft"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "New England Patriots",
+        "sports.professional_sports_team.owner_s",
+        "Robert Kraft",
+        "Robert Kraft"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 4674
+  },
+  {
+    "idx": 220,
+    "id": "WebQTrn-2730",
+    "question": "what has lucy hale played in",
+    "topic": "Lucy Hale",
+    "answers": [
+      "The Sisterhood of the Traveling Pants 2",
+      "Killer in the Family",
+      "A Cinderella Story: Once Upon a Song",
+      "Sorority Wars",
+      "Fear Island"
+    ],
+    "a_entities": [
+      "The Sisterhood of the Traveling Pants 2",
+      "Killer in the Family",
+      "A Cinderella Story: Once Upon a Song",
+      "Sorority Wars",
+      "Fear Island"
+    ],
+    "hop_count": 2,
+    "direct_paths": [],
+    "two_hop_paths": [
+      [
+        "Lucy Hale",
+        "people.person.nationality",
+        "United States of America",
+        "REVERSE:film.film.country",
+        "The Sisterhood of the Traveling Pants 2",
+        "The Sisterhood of the Traveling Pants 2"
+      ],
+      [
+        "Lucy Hale",
+        "people.person.nationality",
+        "United States of America",
+        "REVERSE:film.film.country",
+        "A Cinderella Story: Once Upon a Song",
+        "A Cinderella Story: Once Upon a Song"
+      ],
+      [
+        "Lucy Hale",
+        "people.person.nationality",
+        "United States of America",
+        "REVERSE:film.film.country",
+        "Scream 4",
+        "Scream 4"
+      ]
+    ],
+    "graph_size": 1613
+  },
+  {
+    "idx": 221,
+    "id": "WebQTrn-2734",
+    "question": "what language do argentina use",
+    "topic": "Argentina",
+    "answers": [
+      "Yiddish Language",
+      "Spanish Language",
+      "Quechuan languages",
+      "Italian Language",
+      "Guaran\u00ed language"
+    ],
+    "a_entities": [
+      "Yiddish Language",
+      "Spanish Language",
+      "Quechuan languages",
+      "Italian Language",
+      "Guaran\u00ed language"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "Argentina",
+        "location.country.languages_spoken",
+        "Italian Language",
+        "Italian Language"
+      ],
+      [
+        "Argentina",
+        "location.country.languages_spoken",
+        "Quechuan languages",
+        "Quechuan languages"
+      ],
+      [
+        "Argentina",
+        "location.country.official_language",
+        "Spanish Language",
+        "Spanish Language"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 5498
+  },
+  {
+    "idx": 222,
+    "id": "WebQTrn-2754",
+    "question": "who played as barney",
+    "topic": "Barney & Friends",
+    "answers": [
+      "David Joyner",
+      "Dean Wendt",
+      "Bob West",
+      "Carey Stinson"
+    ],
+    "a_entities": [
+      "David Joyner",
+      "Dean Wendt",
+      "Bob West",
+      "Carey Stinson"
+    ],
+    "hop_count": 2,
+    "direct_paths": [],
+    "two_hop_paths": [
+      [
+        "Barney & Friends",
+        "tv.tv_program.regular_cast",
+        "m.0j_84y7",
+        "REVERSE:tv.tv_actor.starring_roles",
+        "Carey Stinson",
+        "Carey Stinson"
+      ],
+      [
+        "Barney & Friends",
+        "REVERSE:tv.regular_tv_appearance.series",
+        "m.0j_84y7",
+        "REVERSE:tv.tv_actor.starring_roles",
+        "Carey Stinson",
+        "Carey Stinson"
+      ],
+      [
+        "Barney & Friends",
+        "tv.tv_program.regular_cast",
+        "m.0j_84y7",
+        "tv.regular_tv_appearance.actor",
+        "Carey Stinson",
+        "Carey Stinson"
+      ]
+    ],
+    "graph_size": 1827
+  },
+  {
+    "idx": 223,
+    "id": "WebQTrn-2767",
+    "question": "what language does greece use",
+    "topic": "Greece",
+    "answers": [
+      "Albanian language",
+      "Greek Language"
+    ],
+    "a_entities": [
+      "Albanian language",
+      "Greek Language"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "Greece",
+        "location.country.languages_spoken",
+        "Greek Language",
+        "Greek Language"
+      ],
+      [
+        "Greece",
+        "location.country.languages_spoken",
+        "Albanian language",
+        "Albanian language"
+      ],
+      [
+        "Greece",
+        "location.country.official_language",
+        "Greek Language",
+        "Greek Language"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 6869
+  },
+  {
+    "idx": 224,
+    "id": "WebQTrn-2777",
+    "question": "where the queen of denmark lives",
+    "topic": "Margrethe II of Denmark",
+    "answers": [
+      "Copenhagen"
+    ],
+    "a_entities": [
+      "Copenhagen"
+    ],
+    "hop_count": 2,
+    "direct_paths": [],
+    "two_hop_paths": [
+      [
+        "Margrethe II of Denmark",
+        "REVERSE:location.location.people_born_here",
+        "Amalienborg",
+        "REVERSE:location.location.contains",
+        "Copenhagen",
+        "Copenhagen"
+      ],
+      [
+        "Margrethe II of Denmark",
+        "people.person.place_of_birth",
+        "Amalienborg",
+        "REVERSE:location.location.contains",
+        "Copenhagen",
+        "Copenhagen"
+      ],
+      [
+        "Margrethe II of Denmark",
+        "REVERSE:location.location.people_born_here",
+        "Amalienborg",
+        "location.location.containedby",
+        "Copenhagen",
+        "Copenhagen"
+      ]
+    ],
+    "graph_size": 1749
+  },
+  {
+    "idx": 225,
+    "id": "WebQTrn-2786",
+    "question": "where does the appalachian trail run through",
+    "topic": "Appalachian National Scenic Trail",
+    "answers": [
+      "Eastern United States",
+      "International Appalachian Trail",
+      "Appalachian Mountains"
+    ],
+    "a_entities": [
+      "Eastern United States",
+      "International Appalachian Trail",
+      "Appalachian Mountains"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "Appalachian National Scenic Trail",
+        "location.location.containedby",
+        "Appalachian Mountains",
+        "Appalachian Mountains"
+      ],
+      [
+        "Appalachian National Scenic Trail",
+        "location.location.containedby",
+        "International Appalachian Trail",
+        "International Appalachian Trail"
+      ],
+      [
+        "Appalachian National Scenic Trail",
+        "location.location.containedby",
+        "Eastern United States",
+        "Eastern United States"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 6268
+  },
+  {
+    "idx": 226,
+    "id": "WebQTrn-2822",
+    "question": "what was the political system in libya",
+    "topic": "Libya",
+    "answers": [
+      "Parliamentary republic",
+      "Provisional government"
+    ],
+    "a_entities": [
+      "Parliamentary republic",
+      "Provisional government"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "Libya",
+        "location.country.form_of_government",
+        "Provisional government",
+        "Provisional government"
+      ],
+      [
+        "Libya",
+        "location.country.form_of_government",
+        "Parliamentary republic",
+        "Parliamentary republic"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 4755
+  },
+  {
+    "idx": 227,
+    "id": "WebQTrn-2828",
+    "question": "where does sally pearson live",
+    "topic": "Sally Pearson",
+    "answers": [
+      "Gold Coast"
+    ],
+    "a_entities": [
+      "Gold Coast"
+    ],
+    "hop_count": 2,
+    "direct_paths": [],
+    "two_hop_paths": [
+      [
+        "Sally Pearson",
+        "REVERSE:people.place_lived.person",
+        "m.0kd9tb9",
+        "people.place_lived.location",
+        "Gold Coast",
+        "Gold Coast"
+      ],
+      [
+        "Sally Pearson",
+        "people.person.places_lived",
+        "m.0kd9tb9",
+        "people.place_lived.location",
+        "Gold Coast",
+        "Gold Coast"
+      ],
+      [
+        "Sally Pearson",
+        "people.person.nationality",
+        "Australia",
+        "REVERSE:location.location.containedby",
+        "Gold Coast",
+        "Gold Coast"
+      ]
+    ],
+    "graph_size": 836
+  },
+  {
+    "idx": 228,
+    "id": "WebQTrn-2830",
+    "question": "where is madeira",
+    "topic": "Madeira",
+    "answers": [
+      "Azores Canaries Madeira",
+      "Portugal",
+      "Atlantic Ocean",
+      "Madeira Islands archipelago"
+    ],
+    "a_entities": [
+      "Azores Canaries Madeira",
+      "Portugal",
+      "Atlantic Ocean",
+      "Madeira Islands archipelago"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "Madeira",
+        "location.administrative_division.first_level_division_of",
+        "Portugal",
+        "Portugal"
+      ],
+      [
+        "Madeira",
+        "location.location.contains",
+        "Madeira Island",
+        "Madeira Islands archipelago"
+      ],
+      [
+        "Madeira",
+        "location.location.containedby",
+        "Azores Canaries Madeira",
+        "Azores Canaries Madeira"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 4479
+  },
+  {
+    "idx": 229,
+    "id": "WebQTrn-2835",
+    "question": "what things did thomas edison invent",
+    "topic": "Thomas Edison",
+    "answers": [
+      "Carbon microphone",
+      "Incandescent light bulb",
+      "Electric Power Distribution",
+      "Quadruplex telegraph",
+      "Mimeograph"
+    ],
+    "a_entities": [
+      "Carbon microphone",
+      "Incandescent light bulb",
+      "Electric Power Distribution",
+      "Quadruplex telegraph",
+      "Mimeograph"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "Thomas Edison",
+        "law.inventor.inventions",
+        "Carbon microphone",
+        "Carbon microphone"
+      ],
+      [
+        "Thomas Edison",
+        "law.inventor.inventions",
+        "Electric Power Distribution",
+        "Electric Power Distribution"
+      ],
+      [
+        "Thomas Edison",
+        "law.inventor.inventions",
+        "Incandescent light bulb",
+        "Incandescent light bulb"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 4886
+  },
+  {
+    "idx": 230,
+    "id": "WebQTrn-2850",
+    "question": "on what continent is canada found",
+    "topic": "Canada",
+    "answers": [
+      "Americas",
+      "North America"
+    ],
+    "a_entities": [
+      "Americas",
+      "North America"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "Canada",
+        "base.locations.countries.continent",
+        "North America",
+        "North America"
+      ],
+      [
+        "Canada",
+        "location.location.containedby",
+        "North America",
+        "North America"
+      ],
+      [
+        "Canada",
+        "location.location.containedby",
+        "Americas",
+        "Americas"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 6836
+  },
+  {
+    "idx": 231,
+    "id": "WebQTrn-2860",
+    "question": "what is the dominant language of jamaica",
+    "topic": "Jamaica",
+    "answers": [
+      "Jamaican English"
+    ],
+    "a_entities": [
+      "Jamaican English"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "Jamaica",
+        "location.country.official_language",
+        "Jamaican English",
+        "Jamaican English"
+      ],
+      [
+        "Jamaica",
+        "location.country.languages_spoken",
+        "Jamaican English",
+        "Jamaican English"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 5444
+  },
+  {
+    "idx": 232,
+    "id": "WebQTrn-2891",
+    "question": "what art movement was pablo picasso part of",
+    "topic": "Pablo Picasso",
+    "answers": [
+      "Picasso's African Period",
+      "Modern art",
+      "Picasso's Rose Period",
+      "Analytic cubism",
+      "Synthetic cubism"
+    ],
+    "a_entities": [
+      "Picasso's African Period",
+      "Modern art",
+      "Picasso's Rose Period",
+      "Analytic cubism",
+      "Synthetic cubism"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "Pablo Picasso",
+        "symbols.name_source.namesakes",
+        "Picasso",
+        "Picasso's African Period"
+      ],
+      [
+        "Pablo Picasso",
+        "book.author.works_written",
+        "Picasso",
+        "Picasso's African Period"
+      ],
+      [
+        "Pablo Picasso",
+        "visual_art.visual_artist.associated_periods_or_movements",
+        "Analytic cubism",
+        "Analytic cubism"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 7083
+  },
+  {
+    "idx": 233,
+    "id": "WebQTrn-2903",
+    "question": "what country columbus was born",
+    "topic": "Christopher Columbus",
+    "answers": [
+      "Italy"
+    ],
+    "a_entities": [
+      "Italy"
+    ],
+    "hop_count": 2,
+    "direct_paths": [],
+    "two_hop_paths": [
+      [
+        "Christopher Columbus",
+        "REVERSE:symbols.namesake.named_after",
+        "Columbus Day",
+        "base.schemastaging.holiday_extra.observance_rule",
+        "Columbus Day observance rule (Italy, 2004 - now)",
+        "Italy"
+      ],
+      [
+        "Christopher Columbus",
+        "symbols.name_source.namesakes",
+        "Columbus Day",
+        "base.schemastaging.holiday_extra.observance_rule",
+        "Columbus Day observance rule (Italy, 2004 - now)",
+        "Italy"
+      ],
+      [
+        "Christopher Columbus",
+        "book.book_subject.works",
+        "A History of the Life and Voyages of Christopher Columbus",
+        "book.written_work.subjects",
+        "Italy",
+        "Italy"
+      ]
+    ],
+    "graph_size": 4394
+  },
+  {
+    "idx": 234,
+    "id": "WebQTrn-2914",
+    "question": "how much indiana jones movies are there",
+    "topic": "Indiana Jones",
+    "answers": [
+      "Indiana Jones and the Raiders of the Lost Ark",
+      "Indiana Jones and the Temple of Doom",
+      "Indiana Jones and the Kingdom of the Crystal Skull",
+      "Indiana Jones and the Last Crusade"
+    ],
+    "a_entities": [
+      "Indiana Jones and the Raiders of the Lost Ark",
+      "Indiana Jones and the Temple of Doom",
+      "Indiana Jones and the Kingdom of the Crystal Skull",
+      "Indiana Jones and the Last Crusade"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "Indiana Jones",
+        "fictional_universe.fictional_setting.works_set_here",
+        "Indiana Jones",
+        "Indiana Jones and the Raiders of the Lost Ark"
+      ],
+      [
+        "Indiana Jones",
+        "fictional_universe.fictional_character.appears_in_these_fictional_universes",
+        "Indiana Jones",
+        "Indiana Jones and the Raiders of the Lost Ark"
+      ],
+      [
+        "Indiana Jones",
+        "fictional_universe.fictional_universe.works_set_here",
+        "Indiana Jones and the Temple of Doom",
+        "Indiana Jones and the Temple of Doom"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 2816
+  },
+  {
+    "idx": 235,
+    "id": "WebQTrn-2915",
+    "question": "what does george soros own",
+    "topic": "George Soros",
+    "answers": [
+      "International Crisis Group",
+      "Open Society Archives",
+      "Soros Fund Management",
+      "Stefan Batory Foundation",
+      "J Street"
+    ],
+    "a_entities": [
+      "International Crisis Group",
+      "Open Society Archives",
+      "Soros Fund Management",
+      "Stefan Batory Foundation",
+      "J Street"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "George Soros",
+        "organization.organization_founder.organizations_founded",
+        "Soros Foundation",
+        "Soros Foundation"
+      ],
+      [
+        "George Soros",
+        "organization.organization_founder.organizations_founded",
+        "Alliance for Open Society International",
+        "Alliance for Open Society International"
+      ],
+      [
+        "George Soros",
+        "symbols.name_source.namesakes",
+        "Soros Fund Management",
+        "Soros Fund Management"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 3427
+  },
+  {
+    "idx": 236,
+    "id": "WebQTrn-2921",
+    "question": "who started the federal reserve board",
+    "topic": "Federal Reserve System",
+    "answers": [
+      "Woodrow Wilson",
+      "Franklin D. Roosevelt",
+      "Paul Warburg",
+      "Carter Glass"
+    ],
+    "a_entities": [
+      "Woodrow Wilson",
+      "Franklin D. Roosevelt",
+      "Paul Warburg",
+      "Carter Glass"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "Federal Reserve System",
+        "organization.organization.founders",
+        "Franklin D. Roosevelt",
+        "Franklin D. Roosevelt"
+      ],
+      [
+        "Federal Reserve System",
+        "organization.organization.founders",
+        "Woodrow Wilson",
+        "Woodrow Wilson"
+      ],
+      [
+        "Federal Reserve System",
+        "organization.organization.founders",
+        "Paul Warburg",
+        "Paul Warburg"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 2835
+  },
+  {
+    "idx": 237,
+    "id": "WebQTrn-2922",
+    "question": "where did marco rubio go to college",
+    "topic": "Marco Rubio",
+    "answers": [
+      "Santa Fe College",
+      "University of Florida",
+      "University of Miami",
+      "Tarkio College",
+      "University of Miami School of Law"
+    ],
+    "a_entities": [
+      "Santa Fe College",
+      "University of Florida",
+      "University of Miami",
+      "Tarkio College",
+      "University of Miami School of Law"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "Marco Rubio",
+        "people.person.place_of_birth",
+        "Miami",
+        "University of Miami"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 3289
+  },
+  {
+    "idx": 238,
+    "id": "WebQTrn-2949",
+    "question": "when did romney first run for president",
+    "topic": "Mitt Romney",
+    "answers": [
+      "Mitt Romney presidential campaign, 2008"
+    ],
+    "a_entities": [
+      "Mitt Romney presidential campaign, 2008"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "Mitt Romney",
+        "common.topic.image",
+        "Mitt Romney",
+        "Mitt Romney presidential campaign, 2008"
+      ],
+      [
+        "Mitt Romney",
+        "government.politician.election_campaigns",
+        "Mitt Romney presidential campaign, 2008",
+        "Mitt Romney presidential campaign, 2008"
+      ],
+      [
+        "Mitt Romney",
+        "common.topic.image",
+        "Mitt Romney",
+        "Mitt Romney presidential campaign, 2008"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 1951
+  },
+  {
+    "idx": 239,
+    "id": "WebQTrn-2965",
+    "question": "what is the main language spoken in switzerland",
+    "topic": "Switzerland",
+    "answers": [
+      "French",
+      "Romansh language",
+      "Italian Language",
+      "German Language"
+    ],
+    "a_entities": [
+      "French",
+      "Romansh language",
+      "Italian Language",
+      "German Language"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "Switzerland",
+        "location.country.languages_spoken",
+        "French",
+        "French"
+      ],
+      [
+        "Switzerland",
+        "location.country.languages_spoken",
+        "Italian Language",
+        "Italian Language"
+      ],
+      [
+        "Switzerland",
+        "location.country.official_language",
+        "German Language",
+        "German Language"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 6346
+  },
+  {
+    "idx": 240,
+    "id": "WebQTrn-2975",
+    "question": "what movies does johnny depp play in",
+    "topic": "Johnny Depp",
+    "answers": [
+      "Pirates of the Caribbean: The Curse of the Black Pearl",
+      "Happily Ever After",
+      "Platoon",
+      "Public Enemies",
+      "Divine Rapture"
+    ],
+    "a_entities": [
+      "Pirates of the Caribbean: The Curse of the Black Pearl",
+      "Happily Ever After",
+      "Platoon",
+      "Public Enemies",
+      "Divine Rapture"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "Johnny Depp",
+        "film.writer.film",
+        "The Brave",
+        "The Brave"
+      ],
+      [
+        "Johnny Depp",
+        "film.producer.film",
+        "Shantaram",
+        "Shantaram"
+      ],
+      [
+        "Johnny Depp",
+        "film.producer.film",
+        "Mortdecai",
+        "Mortdecai"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 5138
+  },
+  {
+    "idx": 241,
+    "id": "WebQTrn-2991",
+    "question": "where did nick clegg go to prep school",
+    "topic": "Nick Clegg",
+    "answers": [
+      "Caldicott School"
+    ],
+    "a_entities": [
+      "Caldicott School"
+    ],
+    "hop_count": 2,
+    "direct_paths": [],
+    "two_hop_paths": [
+      [
+        "Nick Clegg",
+        "people.person.education",
+        "m.0bwt91_",
+        "REVERSE:education.educational_institution.students_graduates",
+        "Caldicott School",
+        "Caldicott School"
+      ],
+      [
+        "Nick Clegg",
+        "REVERSE:education.education.student",
+        "m.0bwt91_",
+        "REVERSE:education.educational_institution.students_graduates",
+        "Caldicott School",
+        "Caldicott School"
+      ],
+      [
+        "Nick Clegg",
+        "people.person.education",
+        "m.0bwt91_",
+        "education.education.institution",
+        "Caldicott School",
+        "Caldicott School"
+      ]
+    ],
+    "graph_size": 1113
+  },
+  {
+    "idx": 242,
+    "id": "WebQTrn-2993",
+    "question": "what currency should i take to mauritius",
+    "topic": "Mauritius",
+    "answers": [
+      "Mauritian rupee"
+    ],
+    "a_entities": [
+      "Mauritian rupee"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "Mauritius",
+        "location.country.currency_used",
+        "Mauritian rupee",
+        "Mauritian rupee"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 3450
+  },
+  {
+    "idx": 243,
+    "id": "WebQTrn-2998",
+    "question": "who is ellen albertini dow",
+    "topic": "Ellen Dow",
+    "answers": [
+      "Choreographer",
+      "Actor",
+      "Teacher"
+    ],
+    "a_entities": [
+      "Choreographer",
+      "Actor",
+      "Teacher"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "Ellen Dow",
+        "common.topic.notable_types",
+        "TV Actor",
+        "Actor"
+      ],
+      [
+        "Ellen Dow",
+        "people.person.profession",
+        "Actor",
+        "Actor"
+      ],
+      [
+        "Ellen Dow",
+        "people.person.profession",
+        "Choreographer",
+        "Choreographer"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 1784
+  },
+  {
+    "idx": 244,
+    "id": "WebQTrn-3034",
+    "question": "where did dr martin luther king get his doctorate",
+    "topic": "Martin Luther King, Jr.",
+    "answers": [
+      "Boston University"
+    ],
+    "a_entities": [
+      "Boston University"
+    ],
+    "hop_count": 2,
+    "direct_paths": [],
+    "two_hop_paths": [
+      [
+        "Martin Luther King, Jr.",
+        "REVERSE:education.education.student",
+        "m.02wp75f",
+        "education.education.institution",
+        "Boston University",
+        "Boston University"
+      ],
+      [
+        "Martin Luther King, Jr.",
+        "people.person.education",
+        "m.02wp75f",
+        "education.education.institution",
+        "Boston University",
+        "Boston University"
+      ]
+    ],
+    "graph_size": 6642
+  },
+  {
+    "idx": 245,
+    "id": "WebQTrn-3036",
+    "question": "who was the president of indian national congress",
+    "topic": "Indian National Congress",
+    "answers": [
+      "Sonia Gandhi"
+    ],
+    "a_entities": [
+      "Sonia Gandhi"
+    ],
+    "hop_count": 2,
+    "direct_paths": [],
+    "two_hop_paths": [
+      [
+        "Indian National Congress",
+        "REVERSE:organization.leadership.organization",
+        "m.0z1pk4q",
+        "organization.leadership.person",
+        "Sonia Gandhi",
+        "Sonia Gandhi"
+      ],
+      [
+        "Indian National Congress",
+        "organization.organization.leadership",
+        "m.0z1pk4q",
+        "organization.leadership.person",
+        "Sonia Gandhi",
+        "Sonia Gandhi"
+      ],
+      [
+        "Indian National Congress",
+        "REVERSE:organization.leadership.organization",
+        "m.0z1pk4q",
+        "REVERSE:business.board_member.leader_of",
+        "Sonia Gandhi",
+        "Sonia Gandhi"
+      ]
+    ],
+    "graph_size": 763
+  },
+  {
+    "idx": 246,
+    "id": "WebQTrn-3037",
+    "question": "where do most of the people in egypt live",
+    "topic": "Egypt",
+    "answers": [
+      "Greater Cairo"
+    ],
+    "a_entities": [
+      "Greater Cairo"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "Egypt",
+        "location.country.capital",
+        "Cairo",
+        "Greater Cairo"
+      ],
+      [
+        "Egypt",
+        "location.country.administrative_divisions",
+        "Cairo",
+        "Greater Cairo"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 4590
+  },
+  {
+    "idx": 248,
+    "id": "WebQTrn-3087",
+    "question": "what does united church of christ believe",
+    "topic": "United Church of Christ",
+    "answers": [
+      "Christianity"
+    ],
+    "a_entities": [
+      "Christianity"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "United Church of Christ",
+        "religion.religion.is_part_of",
+        "Christianity",
+        "Christianity"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 1000
+  },
+  {
+    "idx": 249,
+    "id": "WebQTrn-3093",
+    "question": "where is the capital city of assyrians",
+    "topic": "Assyria",
+    "answers": [
+      "Assur",
+      "Nineveh"
+    ],
+    "a_entities": [
+      "Assur",
+      "Nineveh"
+    ],
+    "hop_count": 1,
+    "direct_paths": [
+      [
+        "Assyria",
+        "location.country.capital",
+        "Assur",
+        "Assur"
+      ],
+      [
+        "Assyria",
+        "location.country.capital",
+        "Nineveh",
+        "Nineveh"
+      ]
+    ],
+    "two_hop_paths": [],
+    "graph_size": 1395
+  }
+]

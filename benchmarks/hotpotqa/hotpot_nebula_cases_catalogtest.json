@@ -1,0 +1,130 @@
+[
+  {
+    "qid": "5a70eee85542994082a3e3f0",
+    "question": "Which group of people in West Africa with significant populations in Ghana, Ivory Coast, Liberia and Sierra Leone use the Ida?",
+    "center_node": "5a70eee85542994082a3e3f0:yoruba_people",
+    "additional_center_nodes": [
+      "5a70eee85542994082a3e3f0:ida_sword"
+    ],
+    "answer": "The Yoruba",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 3,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a70f0e75542994082a3e408",
+    "question": "Which of these universities, Northwestern University or Johns Hopkins University, have a campus outside of the United States territories?",
+    "center_node": "5a70f0e75542994082a3e408:northwestern_university",
+    "additional_center_nodes": [
+      "5a70f0e75542994082a3e408:johns_hopkins_university"
+    ],
+    "answer": "with other campuses located in Chicago and Doha, Qatar",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 7,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a70f0a75542994082a3e403",
+    "question": "Which dialect spoken in the province of Scania calls Spettekaka, \"spiddekaga\"?",
+    "center_node": "5a70f0a75542994082a3e403:scanian_dialect",
+    "additional_center_nodes": [
+      "5a70f0a75542994082a3e403:spettekaka"
+    ],
+    "answer": "Scanian dialects",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 3,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a70f11a5542994082a3e40b",
+    "question": "Which dog breed, the Schapendoes or the Bull Terrier, has its origins in a greater number of other dog breeds?",
+    "center_node": "5a70f11a5542994082a3e40b:bull_terrier_miniature",
+    "additional_center_nodes": [
+      "5a70f11a5542994082a3e40b:schapendoes"
+    ],
+    "answer": "Bull Terrier",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 5,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a70f1685542994082a3e40f",
+    "question": "Which piece did Ludwig van Beethoven publish in 1801 that was dedicated to Count Moritz von Fries?",
+    "center_node": "5a70f1685542994082a3e40f:violin_sonata_no_4_beethoven",
+    "additional_center_nodes": [],
+    "answer": "Symphony No. 7",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 11,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a70f4695542994082a3e435",
+    "question": "Which canal was built between 1836 and 1847, Washington City Canal or Whitewater Canal?",
+    "center_node": "5a70f4695542994082a3e435:whitewater_canal",
+    "additional_center_nodes": [
+      "5a70f4695542994082a3e435:washington_city_canal"
+    ],
+    "answer": "The Whitewater Canal",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 17,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a70f39c5542994082a3e429",
+    "question": "What is the name of the independent candidate in Maine's 2010 gubernatorial race who finished ahead of Libby Mitchell?",
+    "center_node": "5a70f39c5542994082a3e429:eliot_cutler",
+    "additional_center_nodes": [
+      "5a70f39c5542994082a3e429:libby_mitchell"
+    ],
+    "answer": "Eliot Cutler",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 11,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a70f9335542994082a3e46a",
+    "question": "Which magazine is published more in a year, Essence or Alt for Damerne?",
+    "center_node": "5a70f9335542994082a3e46a:essence_magazine",
+    "additional_center_nodes": [
+      "5a70f9335542994082a3e46a:alt_for_damerne"
+    ],
+    "answer": "ALT for Damerne",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 2,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a70f4c45542994082a3e437",
+    "question": "Which Italian-American composer and librettist wrote the English language opera, Maria Golovin?",
+    "center_node": "5a70f4c45542994082a3e437:gian_carlo_menotti",
+    "additional_center_nodes": [
+      "5a70f4c45542994082a3e437:maria_golovin"
+    ],
+    "answer": "Gian Carlo Menotti",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 7,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a7100435542994082a3e4a3",
+    "question": "Are Finding Kraftland and Shikashika both frozen drinks?",
+    "center_node": "5a7100435542994082a3e4a3:finding_kraftland",
+    "additional_center_nodes": [
+      "5a7100435542994082a3e4a3:shikashika"
+    ],
+    "answer": "Shikashika is a shaved ice drink",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 4,
+    "extraction_error": ""
+  }
+]

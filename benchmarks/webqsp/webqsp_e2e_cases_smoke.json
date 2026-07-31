@@ -1,0 +1,435 @@
+[
+  {
+    "qid": "WebQTrn-11",
+    "question": "what time zone am i in cleveland ohio",
+    "center_node": "location:Cleveland",
+    "topic_type": "location",
+    "topic_entity": "Cleveland",
+    "hop_count": 1,
+    "gold_link_keys": [
+      "location:n:m:location_location_time_zones"
+    ],
+    "answer_entities": [
+      "Eastern Time Zone"
+    ],
+    "answers": [
+      "Eastern Time Zone"
+    ]
+  },
+  {
+    "qid": "WebQTrn-15",
+    "question": "what is nina dobrev nationality",
+    "center_node": "person:Nina Dobrev",
+    "topic_type": "person",
+    "topic_entity": "Nina Dobrev",
+    "hop_count": 1,
+    "gold_link_keys": [
+      "person:n:m:people_person_ethnicity",
+      "person:n:m:people_person_nationality",
+      "person:n:m:people_person_languages"
+    ],
+    "answer_entities": [
+      "Bulgaria",
+      "Canada"
+    ],
+    "answers": [
+      "Bulgaria",
+      "Canada"
+    ]
+  },
+  {
+    "qid": "WebQTrn-47",
+    "question": "what county is heathrow airport in",
+    "center_node": "aviation:London Heathrow Airport",
+    "topic_type": "aviation",
+    "topic_entity": "London Heathrow Airport",
+    "hop_count": 1,
+    "gold_link_keys": [
+      "aviation:n:m:location_location_containedby",
+      "location:n:m:location_location_containedby",
+      "aviation:n:m:aviation_airport_serves",
+      "architecture:n:m:location_location_containedby"
+    ],
+    "answer_entities": [
+      "Hillingdon"
+    ],
+    "answers": [
+      "Hillingdon"
+    ]
+  },
+  {
+    "qid": "WebQTrn-73",
+    "question": "what form of government was practiced in sparta",
+    "center_node": "location:Sparta",
+    "topic_type": "location",
+    "topic_entity": "Sparta",
+    "hop_count": 1,
+    "gold_link_keys": [
+      "location:n:m:location_country_form_of_government"
+    ],
+    "answer_entities": [
+      "Monarchy",
+      "Aristocracy",
+      "Diarchy",
+      "Republic"
+    ],
+    "answers": [
+      "Monarchy",
+      "Aristocracy",
+      "Diarchy",
+      "Republic"
+    ]
+  },
+  {
+    "qid": "WebQTrn-104",
+    "question": "who was the president after jfk died",
+    "center_node": "person:John F. Kennedy",
+    "topic_type": "person",
+    "topic_entity": "John F. Kennedy",
+    "hop_count": 1,
+    "gold_link_keys": [
+      "person:n:m:government_us_president_vice_president",
+      "person:n:m:base_kwebbase_kwtopic_has_sentences"
+    ],
+    "answer_entities": [
+      "Lyndon B. Johnson"
+    ],
+    "answers": [
+      "Lyndon B. Johnson"
+    ]
+  },
+  {
+    "qid": "WebQTrn-126",
+    "question": "where to visit near bangkok",
+    "center_node": "location:Bangkok",
+    "topic_type": "location",
+    "topic_entity": "Bangkok",
+    "hop_count": 1,
+    "gold_link_keys": [
+      "entity:n:m:common_image_appears_in_topic_gallery",
+      "location:n:m:common_image_appears_in_topic_gallery",
+      "location:n:m:travel_travel_destination_tourist_attractions",
+      "location:n:m:common_topic_image"
+    ],
+    "answer_entities": [
+      "Bangkok International Trade and Exhibition Centre",
+      "Dusit Zoo",
+      "Wat Arun",
+      "Magic Land",
+      "Wat Ratchanatdaram"
+    ],
+    "answers": [
+      "Bangkok International Trade and Exhibition Centre",
+      "Dusit Zoo",
+      "Wat Arun",
+      "Magic Land",
+      "Wat Ratchanatdaram"
+    ]
+  },
+  {
+    "qid": "WebQTrn-143",
+    "question": "what did nick clegg study at university",
+    "center_node": "person:Nick Clegg",
+    "topic_type": "person",
+    "topic_entity": "Nick Clegg",
+    "hop_count": 2,
+    "gold_link_keys": [
+      "person:n:m:people_person_education",
+      "education:n:m:education_education_student"
+    ],
+    "answer_entities": [
+      "Social anthropology",
+      "Political philosophy"
+    ],
+    "answers": [
+      "Social anthropology",
+      "Political philosophy"
+    ]
+  },
+  {
+    "qid": "WebQTrn-152",
+    "question": "what is henry clay known for",
+    "center_node": "person:Henry Clay",
+    "topic_type": "person",
+    "topic_entity": "Henry Clay",
+    "hop_count": 1,
+    "gold_link_keys": [
+      "person:n:m:book_author_works_written",
+      "person:n:m:people_person_profession"
+    ],
+    "answer_entities": [
+      "Lawyer",
+      "Politician",
+      "Statesman"
+    ],
+    "answers": [
+      "Lawyer",
+      "Politician",
+      "Statesman"
+    ]
+  },
+  {
+    "qid": "WebQTrn-164",
+    "question": "where was kennedy when he got shot",
+    "center_node": "person:John F. Kennedy",
+    "topic_type": "person",
+    "topic_entity": "John F. Kennedy",
+    "hop_count": 1,
+    "gold_link_keys": [
+      "person:n:m:base_kwebbase_kwtopic_has_sentences",
+      "person:n:m:people_deceased_person_place_of_death"
+    ],
+    "answer_entities": [
+      "Dallas"
+    ],
+    "answers": [
+      "Dallas"
+    ]
+  },
+  {
+    "qid": "WebQTrn-196",
+    "question": "who did ben stiller play in megamind",
+    "center_node": "tv:Ben Stiller",
+    "topic_type": "tv",
+    "topic_entity": "Ben Stiller",
+    "hop_count": 2,
+    "gold_link_keys": [
+      "film:n:m:film_performance_actor",
+      "film:n:m:film_performance_character",
+      "tv:n:m:film_actor_film",
+      "tv:n:m:film_film_character_portrayed_in_films"
+    ],
+    "answer_entities": [
+      "Bernard"
+    ],
+    "answers": [
+      "Bernard"
+    ]
+  },
+  {
+    "qid": "WebQTrn-206",
+    "question": "who won golden boot",
+    "center_node": "award:Premier League Golden Boot",
+    "topic_type": "award",
+    "topic_entity": "Premier League Golden Boot",
+    "hop_count": 2,
+    "gold_link_keys": [
+      "award:n:m:award_award_category_winners",
+      "award:n:m:award_award_honor_award_winner",
+      "award:n:m:award_award_honor_award",
+      "award:n:m:award_award_winner_awards_won"
+    ],
+    "answer_entities": [
+      "Robin van Persie",
+      "Cristiano Ronaldo"
+    ],
+    "answers": [
+      "Robin van Persie",
+      "Cristiano Ronaldo"
+    ]
+  },
+  {
+    "qid": "WebQTrn-218",
+    "question": "what are all the names of harry potter",
+    "center_node": "fictional:Harry Potter",
+    "topic_type": "fictional",
+    "topic_entity": "Harry Potter",
+    "hop_count": 1,
+    "gold_link_keys": [
+      "fictional:n:m:fictional_universe_fictional_universe_fictional_objects",
+      "fictional:n:m:fictional_universe_fictional_universe_organizations",
+      "fictional:n:m:book_book_character_appears_in_book",
+      "fictional:n:m:fictional_universe_fictional_universe_works_set_here",
+      "fictional:n:m:fictional_universe_fictional_universe_species",
+      "fictional:n:m:fictional_universe_fictional_character_appears_in_these_fictional_universes",
+      "fictional:n:m:fictional_universe_fictional_universe_locations",
+      "book:n:m:fictional_universe_fictional_character_appears_in_these_fictional_universes",
+      "fictional:n:m:fictional_universe_fictional_character_organizations",
+      "fictional:n:m:fictional_universe_fictional_character_has_possessed"
+    ],
+    "answer_entities": [
+      "Harry Potter and the Chamber of Secrets",
+      "Harry Potter and the Philosopher's Stone",
+      "Harry Potter and the Deathly Hallows",
+      "Harry Potter and the Order of the Phoenix",
+      "Harry Potter and the Half-Blood Prince"
+    ],
+    "answers": [
+      "Harry Potter and the Chamber of Secrets",
+      "Harry Potter and the Philosopher's Stone",
+      "Harry Potter and the Deathly Hallows",
+      "Harry Potter and the Order of the Phoenix",
+      "Harry Potter and the Half-Blood Prince"
+    ]
+  },
+  {
+    "qid": "WebQTrn-249",
+    "question": "who is tia and tamera mowry parents",
+    "center_node": "person:Tia Mowry",
+    "topic_type": "person",
+    "topic_entity": "Tia Mowry",
+    "hop_count": 1,
+    "gold_link_keys": [
+      "person:n:m:people_person_parents"
+    ],
+    "answer_entities": [
+      "Darlene Mowry",
+      "Tim Mowry"
+    ],
+    "answers": [
+      "Darlene Mowry",
+      "Tim Mowry"
+    ]
+  },
+  {
+    "qid": "WebQTrn-258",
+    "question": "what are major exports of the usa",
+    "center_node": "location:United States of America",
+    "topic_type": "location",
+    "topic_entity": "United States of America",
+    "hop_count": 1,
+    "gold_link_keys": [
+      "location:n:m:location_country_internet_tld",
+      "location:n:m:fictional_universe_fictional_setting_fictional_characters_born_here"
+    ],
+    "answer_entities": [
+      "Pharmaceutical Preparation",
+      "Automotive industry",
+      "Food Manufacturing",
+      "Industrial Organic Chemicals, NEC"
+    ],
+    "answers": [
+      "Pharmaceutical Preparation",
+      "Automotive industry",
+      "Food Manufacturing",
+      "Industrial Organic Chemicals, NEC"
+    ]
+  },
+  {
+    "qid": "WebQTrn-267",
+    "question": "what other countries does canada trade with",
+    "center_node": "location:Canada",
+    "topic_type": "location",
+    "topic_entity": "Canada",
+    "hop_count": 1,
+    "gold_link_keys": [
+      "location:n:m:location_country_internet_tld"
+    ],
+    "answer_entities": [
+      "Japan",
+      "United States of America",
+      "United Kingdom"
+    ],
+    "answers": [
+      "Japan",
+      "United States of America",
+      "United Kingdom"
+    ]
+  },
+  {
+    "qid": "WebQTrn-279",
+    "question": "what language they speak in the philippines",
+    "center_node": "location:Philippines",
+    "topic_type": "location",
+    "topic_entity": "Philippines",
+    "hop_count": 1,
+    "gold_link_keys": [
+      "location:n:m:location_country_languages_spoken",
+      "location:n:m:location_country_official_language"
+    ],
+    "answer_entities": [
+      "Filipino language",
+      "English Language"
+    ],
+    "answers": [
+      "Filipino language",
+      "English Language"
+    ]
+  },
+  {
+    "qid": "WebQTrn-297",
+    "question": "who was real housewives brandi married to",
+    "center_node": "person:Brandi Glanville",
+    "topic_type": "person",
+    "topic_entity": "Brandi Glanville",
+    "hop_count": 2,
+    "gold_link_keys": [
+      "person:n:m:people_person_spouse_s",
+      "person:n:m:people_person_children",
+      "person:n:m:people_marriage_spouse",
+      "person:n:m:people_person_parents"
+    ],
+    "answer_entities": [
+      "Eddie Cibrian"
+    ],
+    "answers": [
+      "Eddie Cibrian"
+    ]
+  },
+  {
+    "qid": "WebQTrn-326",
+    "question": "what time zone is new york under",
+    "center_node": "location:New York",
+    "topic_type": "location",
+    "topic_entity": "New York",
+    "hop_count": 1,
+    "gold_link_keys": [
+      "travel:n:m:location_location_time_zones",
+      "location:n:m:location_location_time_zones",
+      "organization:n:m:location_location_time_zones",
+      "meteorology:n:m:location_location_time_zones"
+    ],
+    "answer_entities": [
+      "UTC−05:00",
+      "Eastern Time Zone"
+    ],
+    "answers": [
+      "UTC−05:00",
+      "Eastern Time Zone"
+    ]
+  },
+  {
+    "qid": "WebQTrn-349",
+    "question": "what kind of government did benito mussolini have",
+    "center_node": "person:Benito Mussolini",
+    "topic_type": "person",
+    "topic_entity": "Benito Mussolini",
+    "hop_count": 1,
+    "gold_link_keys": [
+      "person:n:m:organization_organization_founder_organizations_founded"
+    ],
+    "answer_entities": [
+      "Republican Fascist Party",
+      "National Fascist Party",
+      "Italian Socialist Party"
+    ],
+    "answers": [
+      "Republican Fascist Party",
+      "National Fascist Party",
+      "Italian Socialist Party"
+    ]
+  },
+  {
+    "qid": "WebQTrn-351",
+    "question": "who is chelsea kane",
+    "center_node": "person:Chelsea Kane",
+    "topic_type": "person",
+    "topic_entity": "Chelsea Kane",
+    "hop_count": 1,
+    "gold_link_keys": [
+      "person:n:m:people_person_profession"
+    ],
+    "answer_entities": [
+      "Voice Actor",
+      "Actor",
+      "Singer",
+      "Dancer"
+    ],
+    "answers": [
+      "Voice Actor",
+      "Actor",
+      "Singer",
+      "Dancer"
+    ]
+  }
+]
