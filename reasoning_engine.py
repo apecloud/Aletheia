@@ -18,7 +18,6 @@ Usage:
     result = engine.analyze(tenant, "Employee:1", "Is Nancy a top performer?")
 """
 
-import json
 import os
 import re
 from collections import deque
@@ -34,43 +33,9 @@ def _jsonable(value):
 
 
 class ReasoningEngine:
-    LEXICAL_RECALL_STOPWORDS = {
-        "a",
-        "an",
-        "and",
-        "are",
-        "did",
-        "do",
-        "does",
-        "for",
-        "he",
-        "her",
-        "his",
-        "in",
-        "is",
-        "it",
-        "of",
-        "on",
-        "she",
-        "the",
-        "this",
-        "to",
-        "was",
-        "were",
-        "what",
-        "when",
-        "where",
-        "which",
-        "who",
-        "whom",
-        "whose",
-    }
-
-    def __init__(self, instance_repository, llm_planner=None, lexical_hint_config=None):
+    def __init__(self, instance_repository, llm_planner=None):
         self.repo = instance_repository
         self._llm_planner = llm_planner
-        self._lexical_hint_config_override = lexical_hint_config
-        self._lexical_hint_config_cache = None
 
     def _entity_config(self, tenant):
         if hasattr(self.repo, "reasoning_entity_config"):
@@ -81,53 +46,6 @@ class ReasoningEngine:
         if hasattr(self.repo, "reasoning_link_config"):
             return self.repo.reasoning_link_config(tenant)
         return getattr(self.repo, "LINK_CONFIG")
-
-    def _default_lexical_hint_config_path(self) -> str:
-        return os.path.join(
-            os.path.dirname(__file__),
-            "config",
-            "reasoning_lexical_hints.webqsp_freebase.json",
-        )
-
-    def _load_lexical_hint_config_file(self, path: str) -> dict:
-        try:
-            with open(path) as f:
-                payload = json.load(f)
-        except (OSError, json.JSONDecodeError):
-            return {}
-        return payload if isinstance(payload, dict) else {}
-
-    def _lexical_hint_config(self, tenant: str | None = None) -> dict:
-        """Return reviewable lexical hint configuration.
-
-        Binding order is explicit: constructor override, repository hook,
-        environment path, then the checked-in WebQSP/Freebase defaults. A repo
-        can bind hints to a tenant or ontology by implementing
-        reasoning_lexical_hint_config(tenant).
-        """
-        if self._lexical_hint_config_override is not None:
-            return self._lexical_hint_config_override
-
-        if hasattr(self.repo, "reasoning_lexical_hint_config"):
-            try:
-                payload = self.repo.reasoning_lexical_hint_config(tenant)
-            except TypeError:
-                payload = self.repo.reasoning_lexical_hint_config()
-            if isinstance(payload, dict):
-                return payload
-
-        path = os.environ.get("ALETHEIA_REASONING_LEXICAL_HINTS_PATH", "").strip()
-        if path.lower() in {"0", "false", "off", "none", "disabled"}:
-            return {}
-        if not path:
-            path = self._default_lexical_hint_config_path()
-
-        cache_key = path
-        if self._lexical_hint_config_cache and self._lexical_hint_config_cache[0] == cache_key:
-            return self._lexical_hint_config_cache[1]
-        payload = self._load_lexical_hint_config_file(path)
-        self._lexical_hint_config_cache = (cache_key, payload)
-        return payload
 
     # ------------------------------------------------------------------
     # Step 2: Artifact descriptions
@@ -291,95 +209,6 @@ class ReasoningEngine:
         )
         return ranked + remaining
 
-    @staticmethod
-    def _hint_tokens(values) -> set[str]:
-        if not isinstance(values, list):
-            return set()
-        return {str(value).lower() for value in values if str(value).strip()}
-
-    def _lexical_hint_matches_question(self, rule: dict, question_terms: set[str]) -> bool:
-        when_any = self._hint_tokens(rule.get("when_any"))
-        if when_any and not (when_any & question_terms):
-            return False
-        when_all = self._hint_tokens(rule.get("when_all"))
-        if when_all and not when_all.issubset(question_terms):
-            return False
-        unless_any = self._hint_tokens(rule.get("unless_any"))
-        if unless_any and (unless_any & question_terms):
-            return False
-        return True
-
-    def _lexical_hint_matches_text(self, rule: dict, link_key: str, relation_text: str) -> bool:
-        key_text = link_key.lower()
-        full_text = relation_text.lower()
-        key_any = self._hint_tokens(rule.get("link_contains_any"))
-        if key_any and not any(token in key_text for token in key_any):
-            return False
-        key_all = self._hint_tokens(rule.get("link_contains_all"))
-        if key_all and not all(token in key_text for token in key_all):
-            return False
-        relation_any = self._hint_tokens(rule.get("relation_contains_any"))
-        if relation_any and not any(token in full_text for token in relation_any):
-            return False
-        relation_all = self._hint_tokens(rule.get("relation_contains_all"))
-        if relation_all and not all(token in full_text for token in relation_all):
-                return False
-        return True
-
-    def _lexical_hint_matches_link_context(
-        self,
-        rule: dict,
-        object_type: str = "",
-        link_metadata: dict | None = None,
-    ) -> bool:
-        if not link_metadata:
-            has_context = False
-            from_type = ""
-            to_type = ""
-        else:
-            has_context = True
-            from_type = str(link_metadata.get("from", "")).lower()
-            to_type = str(link_metadata.get("to", "")).lower()
-        topic_type = (object_type or "").lower()
-
-        if "from_is_topic" in rule:
-            if not has_context or not topic_type or (from_type == topic_type) is not bool(rule["from_is_topic"]):
-                return False
-        if "to_is_topic" in rule:
-            if not has_context or not topic_type or (to_type == topic_type) is not bool(rule["to_is_topic"]):
-                return False
-        if "unless_from_is_topic" in rule and bool(rule["unless_from_is_topic"]):
-            if has_context and topic_type and from_type == topic_type:
-                return False
-        if "unless_to_is_topic" in rule and bool(rule["unless_to_is_topic"]):
-            if has_context and topic_type and to_type == topic_type:
-                return False
-
-        from_any = self._hint_tokens(rule.get("from_any"))
-        if from_any and from_type not in from_any:
-            return False
-        to_any = self._hint_tokens(rule.get("to_any"))
-        if to_any and to_type not in to_any:
-            return False
-        object_any = self._hint_tokens(rule.get("object_type_any"))
-        if object_any and topic_type not in object_any:
-            return False
-        return True
-
-    def _question_relation_terms(self, question: str, lexical_hint_config: dict | None = None) -> list[str]:
-        terms = [
-            term for term in re.findall(r"[a-z0-9]+", (question or "").lower())
-            if term not in self.LEXICAL_RECALL_STOPWORDS
-        ]
-        expanded = list(terms)
-        term_set = set(terms)
-        for rule in (lexical_hint_config or {}).get("term_expansions", []):
-            if not isinstance(rule, dict):
-                continue
-            if self._lexical_hint_matches_question(rule, term_set):
-                expanded.extend(str(term).lower() for term in rule.get("add", []) if str(term).strip())
-        return expanded
-
     def _link_config_by_key(self, link_config: list[dict] | None) -> dict[str, dict]:
         return {lc["link"]: lc for lc in (link_config or []) if lc.get("link")}
 
@@ -415,25 +244,6 @@ class ReasoningEngine:
             return 1
         return 2
 
-    def _topic_direction_rank(
-        self,
-        link_key: str,
-        object_type: str,
-        link_by_key: dict[str, dict],
-    ) -> int:
-        """Prefer center-to-answer links over reverse aliases when scores tie."""
-        if not object_type:
-            return 0
-        lc = link_by_key.get(link_key)
-        if not lc:
-            return 2
-        obj = object_type.lower()
-        if lc.get("from", "").lower() == obj:
-            return 0
-        if lc.get("to", "").lower() == obj:
-            return 1
-        return 2
-
     def _rerank_topic_compatible_link_keys(
         self,
         ranked: list[str],
@@ -457,117 +267,24 @@ class ReasoningEngine:
             key=lambda key: self._topic_compatibility_rank(key, object_type, link_by_key),
         )
 
-    def _configured_relation_bonus(
-        self,
-        question: str,
-        link_key: str,
-        relation_text: str,
-        lexical_hint_config: dict | None = None,
-        object_type: str = "",
-        link_metadata: dict | None = None,
-    ) -> int:
-        q_terms = set(re.findall(r"[a-z0-9]+", (question or "").lower()))
-        bonus = 0
-        for rule in (lexical_hint_config or {}).get("relation_bonuses", []):
-            if not isinstance(rule, dict):
-                continue
-            if not self._lexical_hint_matches_question(rule, q_terms):
-                continue
-            if not self._lexical_hint_matches_text(rule, link_key, relation_text):
-                continue
-            if not self._lexical_hint_matches_link_context(rule, object_type, link_metadata):
-                continue
-            try:
-                bonus += int(rule.get("bonus", 0))
-            except (TypeError, ValueError):
-                continue
-        return bonus
-
-    def _lexical_recall_link_keys(
-        self,
-        question: str,
-        link_config: list[dict] | None,
-        descriptions: dict[str, str] | None,
-        limit: int,
-        object_type: str = "",
-        lexical_hint_config: dict | None = None,
-    ) -> list[str]:
-        """Bounded lexical recall guard for relations the LLM ranked too low."""
-        if limit <= 0 or not link_config:
-            return []
-
-        question_terms = self._question_relation_terms(question, lexical_hint_config)
-        if not question_terms:
-            return []
-
-        descriptions = descriptions or {}
-        link_by_key = self._link_config_by_key(link_config)
-        scored = []
-        for lc in link_config:
-            link_key = lc["link"]
-            if object_type and not self._topic_compatible_link_key(link_key, object_type, link_by_key):
-                continue
-            relation_text = " ".join([
-                link_key,
-                descriptions.get(link_key, ""),
-                lc.get("from", ""),
-                lc.get("to", ""),
-            ]).lower()
-            relation_terms = re.findall(r"[a-z0-9]+", relation_text)
-            if not relation_terms:
-                continue
-            score = sum(relation_terms.count(term) for term in question_terms)
-            score += self._configured_relation_bonus(
-                question,
-                link_key,
-                relation_text,
-                lexical_hint_config,
-                object_type=object_type,
-                link_metadata=lc,
-            )
-            if score > 0:
-                scored.append((
-                    score,
-                    self._topic_direction_rank(link_key, object_type, link_by_key),
-                    link_key,
-                ))
-
-        scored.sort(key=lambda item: (-item[0], item[1], item[2]))
-        selected = []
-        seen = set()
-        for _, _, key in scored:
-            if key in seen:
-                continue
-            selected.append(key)
-            seen.add(key)
-            if len(selected) >= limit:
-                break
-        return selected
-
     def _llm_convergence_trace(
         self,
         llm_mapping: PlannerMapping,
-        question: str = "",
-        link_config: list[dict] | None = None,
-        descriptions: dict[str, str] | None = None,
         object_type: str = "",
-        lexical_hint_config: dict | None = None,
+        link_config: list[dict] | None = None,
     ) -> dict:
         """Return convergence output plus diagnostic trace without changing policy."""
         ranked = self._rank_llm_link_keys(llm_mapping)
         ranked = self._rerank_topic_compatible_link_keys(ranked, object_type, link_config)
         min_confidence = self._env_float("ALETHEIA_LLM_PLANNER_MIN_CONFIDENCE", 0.0)
         top_k = self._env_int("ALETHEIA_LLM_PLANNER_TOP_K", 10)
-        lexical_recall_k = self._env_int("ALETHEIA_LLM_PLANNER_LEXICAL_RECALL_K", 2)
         trace = {
             "llm_ranked_link_keys": list(ranked),
             "min_confidence": min_confidence,
             "top_k": top_k,
-            "lexical_recall_k": lexical_recall_k,
             "confidence_filtered_link_keys": [],
             "top_k_link_keys": [],
             "truncated_link_keys": [],
-            "lexical_recall_keys": [],
             "selected_after_convergence_keys": [],
             "selection_sources": {},
         }
@@ -588,26 +305,8 @@ class ReasoningEngine:
         trace["top_k_link_keys"] = list(ranked)
 
         converged = set(ranked)
-        lexical_keys = self._lexical_recall_link_keys(
-            question,
-            link_config,
-            descriptions,
-            lexical_recall_k,
-            object_type=object_type,
-            lexical_hint_config=lexical_hint_config,
-        )
-        trace["lexical_recall_keys"] = list(lexical_keys)
-        converged.update(lexical_keys)
         trace["selected_after_convergence_keys"] = sorted(converged)
-        selection_sources = {}
-        for key in converged:
-            sources = []
-            if key in ranked:
-                sources.append("llm_top_k")
-            if key in lexical_keys:
-                sources.append("lexical_recall")
-            selection_sources[key] = sources
-        trace["selection_sources"] = selection_sources
+        trace["selection_sources"] = {key: ["llm_top_k"] for key in converged}
         return trace
 
     # ------------------------------------------------------------------
@@ -625,7 +324,6 @@ class ReasoningEngine:
         llm_ranked_link_keys: list[str] = field(default_factory=list)
         llm_confidence_scores: dict[str, float] = field(default_factory=dict)
         llm_convergence_applied: bool = False
-        lexical_recall_keys: list[str] = field(default_factory=list)
         selected_after_convergence_keys: list[str] = field(default_factory=list)
         llm_confidence_filtered_link_keys: list[str] = field(default_factory=list)
         llm_truncated_link_keys: list[str] = field(default_factory=list)
@@ -754,7 +452,6 @@ class ReasoningEngine:
         entity_config,
         link_config,
         descriptions,
-        lexical_hint_config=None,
         candidate_labels=None,
     ):
         """Map a reasoning question to type-constrained retrieval paths.
@@ -771,7 +468,6 @@ class ReasoningEngine:
             admissible_chains=[],
             is_full_aggregation=True,
         )
-        lexical_hint_config = self._lexical_hint_config() if lexical_hint_config is None else lexical_hint_config
         if not question or not question.strip():
             return plan
 
@@ -915,14 +611,10 @@ class ReasoningEngine:
         if convergence_enabled:
             convergence_trace = self._llm_convergence_trace(
                 llm_mapping,
-                question=question,
-                link_config=link_config,
-                descriptions=descriptions,
                 object_type=object_type,
-                lexical_hint_config=lexical_hint_config,
+                link_config=link_config,
             )
             converged_llm_keys = set(convergence_trace["selected_after_convergence_keys"])
-            plan.lexical_recall_keys = list(convergence_trace["lexical_recall_keys"])
             plan.selected_after_convergence_keys = list(convergence_trace["selected_after_convergence_keys"])
             plan.llm_confidence_filtered_link_keys = list(convergence_trace["confidence_filtered_link_keys"])
             plan.llm_truncated_link_keys = list(convergence_trace["truncated_link_keys"])
@@ -934,7 +626,6 @@ class ReasoningEngine:
             plan.planner_convergence_config = {
                 "min_confidence": convergence_trace["min_confidence"],
                 "top_k": convergence_trace["top_k"],
-                "lexical_recall_k": convergence_trace["lexical_recall_k"],
             }
             if converged_llm_keys and include_keyword_union:
                 matched_link_keys = keyword_link_keys | converged_llm_keys
@@ -1238,7 +929,6 @@ class ReasoningEngine:
             entity_config,
             link_config,
             descriptions_for_plan,
-            lexical_hint_config=self._lexical_hint_config(tenant),
         )
 
         # Deduplicated against the primary and each other -- extraction

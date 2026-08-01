@@ -1,12 +1,14 @@
 import os
 import argparse
-import logging
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.orm import sessionmaker
 from ontology_artifacts import Base, ExtractedColumn, ExtractedTable
+try:
+    from legacy_agent_common import configure_logging
+except ModuleNotFoundError:
+    from agents.legacy_agent_common import configure_logging
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-logger = logging.getLogger("MetadataScraperAgent")
+logger = configure_logging("MetadataScraperAgent")
 
 class MetadataScraperAgent:
     def __init__(self, source_db_url: str, target_db_url: str):

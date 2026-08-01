@@ -14,9 +14,6 @@ from unittest.mock import patch
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-ROOT = Path(__file__).resolve().parents[1]
-sys.path.append(str(ROOT / "agents"))
-
 import agents.iterative_graph_enrichment_agent as iterative_graph_enrichment_agent  # noqa: E402
 from agents.iterative_graph_enrichment_agent import (  # noqa: E402
     GRAPH_EXTRACTION_PROMPT_VERSION,

@@ -14,17 +14,10 @@ Run: python -m unittest tests.test_graph_instance_repository
 
 from __future__ import annotations
 
-import sys
 import unittest
-from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT))
-sys.path.insert(0, str(ROOT / "agents"))
-sys.path.insert(0, str(ROOT / "scripts"))
-
-from graph_instance_repository import GraphInstanceRepository  # noqa: E402
-from relation_catalog import RelationCatalog  # noqa: E402
+from graph_instance_repository import GraphInstanceRepository
+from relation_catalog import RelationCatalog
 
 
 class GovernanceConfigTest(unittest.TestCase):

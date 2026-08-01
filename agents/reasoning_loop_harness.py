@@ -15,6 +15,15 @@ from typing import Any
 
 from sqlalchemy import create_engine, text
 
+try:
+    from loop_harness_common import deep_merge as _deep_merge
+    from loop_harness_common import json_load as _shared_json_load
+    from loop_harness_common import ratio as _shared_ratio
+except ModuleNotFoundError:
+    from agents.loop_harness_common import deep_merge as _deep_merge
+    from agents.loop_harness_common import json_load as _shared_json_load
+    from agents.loop_harness_common import ratio as _shared_ratio
+
 
 DEFAULT_REASONING_LOOP_CONFIG: dict[str, Any] = {
     "loop_id": "reasoning-process-loop-v1",
@@ -62,15 +71,6 @@ def load_reasoning_loop_config(path: str | Path | None) -> dict[str, Any]:
     with open(path, "r", encoding="utf-8") as fh:
         loaded = json.load(fh)
     return _deep_merge(config, loaded if isinstance(loaded, dict) else {})
-
-
-def _deep_merge(base: dict[str, Any], overlay: dict[str, Any]) -> dict[str, Any]:
-    for key, value in overlay.items():
-        if isinstance(value, dict) and isinstance(base.get(key), dict):
-            base[key] = _deep_merge(dict(base[key]), value)
-        else:
-            base[key] = value
-    return base
 
 
 def evaluate_reasoning_loop(
@@ -604,13 +604,8 @@ def _status_counts(items: list[dict[str, Any]]) -> dict[str, int]:
 
 
 def _ratio(numerator: int | float, denominator: int | float) -> float:
-    if not denominator:
-        return 1.0
-    return round(float(numerator) / float(denominator), 4)
+    return _shared_ratio(numerator, denominator, zero_denominator_default=1.0)
 
 
 def _json_load(value: Any, default: Any) -> Any:
-    try:
-        return json.loads(value) if value else default
-    except Exception:
-        return default
+    return _shared_json_load(value, default)

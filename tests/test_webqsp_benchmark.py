@@ -302,7 +302,6 @@ class WebQSPBenchmarkRunner:
             "llm_link_keys": [],
             "llm_ranked_link_keys": [],
             "llm_confidence_scores": {},
-            "lexical_recall_keys": [],
             "selected_after_convergence_keys": [],
             "llm_confidence_filtered_link_keys": [],
             "llm_truncated_link_keys": [],
@@ -323,7 +322,6 @@ class WebQSPBenchmarkRunner:
             "llm_link_keys": sorted(plan.llm_link_keys),
             "llm_ranked_link_keys": list(plan.llm_ranked_link_keys),
             "llm_confidence_scores": dict(plan.llm_confidence_scores),
-            "lexical_recall_keys": list(plan.lexical_recall_keys),
             "selected_after_convergence_keys": list(plan.selected_after_convergence_keys),
             "llm_confidence_filtered_link_keys": list(plan.llm_confidence_filtered_link_keys),
             "llm_truncated_link_keys": list(plan.llm_truncated_link_keys),
@@ -341,7 +339,6 @@ class WebQSPBenchmarkRunner:
         reasons = {}
         keyword_keys = set(payload.get("keyword_link_keys") or [])
         llm_ranked = list(payload.get("llm_ranked_link_keys") or [])
-        lexical_keys = set(payload.get("lexical_recall_keys") or [])
         top_k_keys = set(payload.get("llm_top_k_link_keys") or [])
         source_map = payload.get("planner_selection_sources") or {}
         confidence_scores = payload.get("llm_confidence_scores") or {}
@@ -356,7 +353,6 @@ class WebQSPBenchmarkRunner:
                 "llm_rank": llm_ranked.index(key) + 1 if key in llm_ranked else None,
                 "confidence": confidence_scores.get(key),
                 "in_llm_top_k": key in top_k_keys,
-                "added_by_lexical_recall": key in lexical_keys,
                 "added_by_keyword": key in keyword_keys,
             }
         return reasons
@@ -373,7 +369,6 @@ class WebQSPBenchmarkRunner:
         confidence_filtered = set(payload.get("llm_confidence_filtered_link_keys") or [])
         selected_after_convergence = set(payload.get("selected_after_convergence_keys") or [])
         keyword = set(payload.get("keyword_link_keys") or [])
-        lexical = set(payload.get("lexical_recall_keys") or [])
         diagnostics = {}
         for key in sorted(gold_keys):
             if key in selected:
@@ -395,7 +390,6 @@ class WebQSPBenchmarkRunner:
                 "in_llm_truncated": key in truncated,
                 "filtered_by_confidence": key in confidence_filtered,
                 "in_keyword_link_keys": key in keyword,
-                "in_lexical_recall_keys": key in lexical,
             }
         return diagnostics
 
@@ -511,7 +505,6 @@ class WebQSPBenchmarkRunner:
             "llm_link_keys": set(payload["llm_link_keys"]),
             "llm_ranked_link_keys": list(payload["llm_ranked_link_keys"]),
             "llm_confidence_scores": dict(payload["llm_confidence_scores"]),
-            "lexical_recall_keys": list(payload["lexical_recall_keys"]),
             "selected_after_convergence_keys": list(payload["selected_after_convergence_keys"]),
             "llm_confidence_filtered_link_keys": list(payload["llm_confidence_filtered_link_keys"]),
             "llm_truncated_link_keys": list(payload["llm_truncated_link_keys"]),
@@ -765,7 +758,7 @@ class BenchmarkRunnerInfrastructureTest(unittest.TestCase):
                     llm_top_k_link_keys=[top],
                     llm_truncated_link_keys=[gold],
                     planner_selection_sources={top: ["llm_top_k"]},
-                    planner_convergence_config={"top_k": 1, "min_confidence": 0.0, "lexical_recall_k": 0},
+                    planner_convergence_config={"top_k": 1, "min_confidence": 0.0},
                     llm_convergence_applied=True,
                     is_full_aggregation=False,
                 )
@@ -778,34 +771,6 @@ class BenchmarkRunnerInfrastructureTest(unittest.TestCase):
         self.assertEqual(result["top_k_truncation_evidence"]["gold_truncated_link_keys"], [gold])
         self.assertEqual(result["gold_link_diagnostics"][gold]["status"], "truncated_by_top_k")
         self.assertEqual(result["gold_link_diagnostics"][gold]["llm_rank"], 2)
-
-    def test_planner_trace_persists_lexical_recall_key_evidence(self):
-        lexical = "person:n:m:people_person_profession"
-        q = self._question_with_links([lexical], gold=[lexical])
-
-        class LexicalEngine:
-            def _plan_question_paths(self, *args):
-                return ReasoningEngine.QuestionPathPlan(
-                    selected_link_keys={lexical},
-                    selected_target_types={"profession"},
-                    llm_link_keys=set(),
-                    llm_ranked_link_keys=[],
-                    lexical_recall_keys=[lexical],
-                    selected_after_convergence_keys=[lexical],
-                    planner_selection_sources={lexical: ["lexical_recall"]},
-                    planner_convergence_config={"top_k": 10, "min_confidence": 0.0, "lexical_recall_k": 2},
-                    llm_convergence_applied=True,
-                    is_full_aggregation=False,
-                )
-
-        runner = WebQSPBenchmarkRunner(LexicalEngine(), cache_path=None, emit_progress=False)
-        result = runner.run([q])[0]
-
-        self.assertTrue(result["hit1"])
-        self.assertEqual(result["lexical_recall_keys"], [lexical])
-        self.assertEqual(result["selection_reason_by_key"][lexical]["sources"], ["lexical_recall"])
-        self.assertTrue(result["selection_reason_by_key"][lexical]["added_by_lexical_recall"])
-        self.assertEqual(result["gold_link_diagnostics"][lexical]["status"], "selected")
 
     def test_runner_limit_and_report_include_runtime_controls(self):
         class StaticEngine:

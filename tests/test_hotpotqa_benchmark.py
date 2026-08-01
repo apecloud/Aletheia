@@ -14,7 +14,6 @@ from __future__ import annotations
 import json
 import os
 import statistics
-import sys
 import tempfile
 import time
 import unittest
@@ -23,12 +22,10 @@ from hashlib import sha256
 from pathlib import Path
 from typing import Any
 
-ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT))
-sys.path.insert(0, str(ROOT / "scripts"))
+from hotpotqa_frozen_sample import DEFAULT_SAMPLE_PATH, load_hotpotqa_cases
+from hotpotqa_sample_eval import evaluate_em, evaluate_f1
 
-from hotpotqa_frozen_sample import DEFAULT_SAMPLE_PATH, load_hotpotqa_cases  # noqa: E402
-from hotpotqa_sample_eval import evaluate_em, evaluate_f1  # noqa: E402
+ROOT = Path(__file__).resolve().parents[1]
 
 
 # ---------------------------------------------------------------------------

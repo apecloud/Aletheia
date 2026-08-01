@@ -10,6 +10,7 @@ fi
 
 PROJECT_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 cd "$PROJECT_ROOT"
+source "$PROJECT_ROOT/scripts/lib/model_defaults.sh"
 
 # Ensure docs directory exists
 mkdir -p "$PROJECT_ROOT/docs"
@@ -20,9 +21,9 @@ echo "================================================="
 
 # Detect model based on env vars
 if [ -n "$GEMINI_API_KEY" ]; then
-    MODEL="gemini/gemini-3.1-pro-preview"
+    MODEL="$ALETHEIA_GEMINI_MODEL"
 elif [ -n "$OPENAI_API_KEY" ]; then
-    MODEL="gpt-4o"
+    MODEL="$ALETHEIA_OPENAI_MODEL"
 else
     echo "⚠️ Error: No API Key found. Please export GEMINI_API_KEY or OPENAI_API_KEY."
     exit 1

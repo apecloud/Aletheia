@@ -13,16 +13,11 @@ Run: python -m unittest tests.test_relation_catalog
 from __future__ import annotations
 
 import json
-import sys
 import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT))
-sys.path.insert(0, str(ROOT / "scripts"))
-
-from relation_catalog import RelationCatalog  # noqa: E402
+from relation_catalog import RelationCatalog
 
 
 def _match_response(canonical_match: str) -> MagicMock:
@@ -176,7 +171,6 @@ class LivePostgresSmokeTest(unittest.TestCase):
         except ImportError:
             self.skipTest("sqlalchemy not installed")
 
-        sys.path.insert(0, str(ROOT / "agents"))
         from tenant_registry import default_metadata_db_url
 
         db_url = default_metadata_db_url()

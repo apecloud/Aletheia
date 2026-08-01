@@ -1,7 +1,6 @@
 import os
 import json
 import argparse
-import logging
 import pandas as pd
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -13,9 +12,12 @@ from typing import List
 from litellm import completion
 import instructor
 from ontology_artifacts import Base, ColumnProfile, ExtractedTable
+try:
+    from legacy_agent_common import configure_logging
+except ModuleNotFoundError:
+    from agents.legacy_agent_common import configure_logging
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-logger = logging.getLogger("DataProfilerAgent")
+logger = configure_logging("DataProfilerAgent")
 
 # --- LLM Structured Output Models (Pydantic) ---
 class ColumnSemantic(BaseModel):

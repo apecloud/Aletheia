@@ -1,5 +1,4 @@
 import argparse
-import logging
 import os
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
@@ -8,9 +7,12 @@ from pydantic import BaseModel, Field
 from litellm import completion
 import instructor
 from ontology_artifacts import BusinessAction, delete_artifacts_by_type, ensure_artifact_schema, sync_action_artifact
+try:
+    from legacy_agent_common import configure_logging, resolve_model_name
+except ModuleNotFoundError:
+    from agents.legacy_agent_common import configure_logging, resolve_model_name
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-logger = logging.getLogger("ActionSynthesizerAgent")
+logger = configure_logging("ActionSynthesizerAgent")
 
 class ActionAnalysis(BaseModel):
     action_name: str = Field(description="A clean, business-friendly name for this action")
@@ -24,13 +26,9 @@ class ActionSynthesizerAgent:
         self.source_engine = create_engine(source_db_url)
         self.target_engine = create_engine(target_db_url)
         self.TargetSession = sessionmaker(bind=self.target_engine)
-        
-        # Override with gemini-3.1-pro-preview if litellm doesn't resolve automatically
-        if "gemini" in model_name.lower():
-            self.model_name = "gemini/gemini-3.1-pro-preview"
-        else:
-            self.model_name = model_name
-            
+
+        self.model_name = resolve_model_name(model_name)
+
         logger.info(f"Initialized Action Synthesizer with model: {self.model_name}")
 
     def setup_target_db(self):

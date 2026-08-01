@@ -44,6 +44,36 @@ def normalize_answer(text: str) -> str:
     return white_space_fix(remove_articles(remove_punc(lower(text or ""))))
 
 
+def fallback_answer_matches(gold: str, candidate: str) -> bool:
+    """Degraded-mode substring match, used only when the LLM judge itself is
+    unavailable (network/parse failure) -- NOT part of official EM/F1, whose
+    normalize_answer semantics above stay untouched for comparability with
+    published numbers.
+
+    Tries an exact-normalized substring check first (either direction), then
+    retries with a single trailing "s" stripped/added on each side, so a
+    plural gold ("writers") still matches a singular/compound candidate label
+    ("Author/Writer") instead of only failing because the LLM judge couldn't
+    be reached to apply its own looser entity-variant matching.
+    """
+    norm_gold = normalize_answer(gold)
+    norm_candidate = normalize_answer(candidate)
+    if not norm_gold or not norm_candidate:
+        return False
+    if norm_gold in norm_candidate or norm_candidate in norm_gold:
+        return True
+
+    def _toggle_trailing_s(text: str) -> str:
+        return text[:-1] if text.endswith("s") and len(text) > 1 else text + "s"
+
+    alt_gold = _toggle_trailing_s(norm_gold)
+    alt_candidate = _toggle_trailing_s(norm_candidate)
+    return (
+        alt_gold in norm_candidate or norm_candidate in alt_gold
+        or norm_gold in alt_candidate or alt_candidate in norm_gold
+    )
+
+
 def evaluate_em(prediction: str, gold: str) -> bool:
     """Exact match over normalized answer strings."""
     return normalize_answer(prediction) == normalize_answer(gold)

@@ -1,9 +1,4 @@
-import sys
 import unittest
-from pathlib import Path
-
-ROOT = Path(__file__).resolve().parents[1]
-sys.path.append(str(ROOT / "agents"))
 
 from agents.web_enrichment_agent import SearchResult, _is_public_web_url
 from iterative_graph_enrichment_agent import GPTResearcherSearchProvider, _is_accepted_research_result_url

@@ -1,9 +1,25 @@
 import json
 import os
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 from sqlalchemy import create_engine, text
+
+
+def default_graph_ip() -> str:
+    return os.environ.get("ALETHEIA_GRAPH_IP", "127.0.0.1")
+
+
+def default_graph_port() -> int:
+    return int(os.environ.get("ALETHEIA_GRAPH_PORT", "9669"))
+
+
+def default_graph_user() -> str:
+    return os.environ.get("ALETHEIA_GRAPH_USER", "root")
+
+
+def default_graph_password() -> str:
+    return os.environ.get("ALETHEIA_GRAPH_PASSWORD", "nebula")
 
 
 def default_metadata_db_url() -> str:
@@ -42,10 +58,10 @@ class TenantConfig:
     graph_tag_name: str = "HotpotEntity"
     graph_edge_type: str = "RELATION"
     graph_object_type: str = "entity"
-    graph_ip: str = "127.0.0.1"
-    graph_port: int = 9669
-    graph_user: str = "root"
-    graph_password: str = "nebula"
+    graph_ip: str = field(default_factory=default_graph_ip)
+    graph_port: int = field(default_factory=default_graph_port)
+    graph_user: str = field(default_factory=default_graph_user)
+    graph_password: str = field(default_factory=default_graph_password)
     relation_catalog_scope: str = ""
 
     def public_dict(self) -> dict:
@@ -84,10 +100,10 @@ class TenantRegistry:
                     graph_tag_name=item.get("graph_tag_name", "HotpotEntity"),
                     graph_edge_type=item.get("graph_edge_type", "RELATION"),
                     graph_object_type=item.get("graph_object_type", "entity"),
-                    graph_ip=item.get("graph_ip", "127.0.0.1"),
-                    graph_port=item.get("graph_port", 9669),
-                    graph_user=item.get("graph_user", "root"),
-                    graph_password=item.get("graph_password", "nebula"),
+                    graph_ip=item.get("graph_ip") or default_graph_ip(),
+                    graph_port=item.get("graph_port") or default_graph_port(),
+                    graph_user=item.get("graph_user") or default_graph_user(),
+                    graph_password=item.get("graph_password") or default_graph_password(),
                     relation_catalog_scope=item.get("relation_catalog_scope") or item["tenant_id"],
                 )
                 for item in config.get("tenants", [])

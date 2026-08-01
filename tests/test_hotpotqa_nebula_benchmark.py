@@ -12,17 +12,10 @@ Run: python -m unittest tests.test_hotpotqa_nebula_benchmark
 
 from __future__ import annotations
 
-import sys
 import unittest
-from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT))
-sys.path.insert(0, str(ROOT / "agents"))
-sys.path.insert(0, str(ROOT / "scripts"))
-
-from hotpotqa_kg_extraction import LocalGraph, Triple  # noqa: E402
-from hotpotqa_entity_ids import entity_id  # noqa: E402
+from hotpotqa_kg_extraction import LocalGraph, Triple
+from hotpotqa_entity_ids import entity_id
 from import_hotpotqa_nebula_tenant import materialize_hotpotqa_questions  # noqa: E402
 from run_hotpotqa_nebula_e2e_benchmark import gather_facts, graph_hit  # noqa: E402
 

@@ -3,10 +3,12 @@ import requests
 import pandas as pd
 from sqlalchemy import create_engine
 import argparse
-import logging
+try:
+    from legacy_agent_common import configure_logging
+except ModuleNotFoundError:
+    from agents.legacy_agent_common import configure_logging
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-logger = logging.getLogger("GenericDataScraperAgent")
+logger = configure_logging("GenericDataScraperAgent")
 
 class GenericDataScraper:
     def __init__(self, db_url: str):

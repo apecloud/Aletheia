@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import statistics
 import sys
 import time
@@ -165,6 +166,11 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    # Opt-in by design (see reasoning_engine.py._get_llm_planner) so tests
+    # never make network calls -- default it on for this real benchmark run
+    # so relation planning and multi-center answers aren't silently
+    # keyword-only just because nobody exported the flag.
+    os.environ.setdefault("ALETHEIA_LLM_PLANNER_ENABLED", "1")
     args = build_parser().parse_args(argv)
     report = run_benchmark(
         tenant_id=args.tenant,

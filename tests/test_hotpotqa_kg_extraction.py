@@ -13,16 +13,10 @@ Run: python -m unittest tests.test_hotpotqa_kg_extraction
 from __future__ import annotations
 
 import json
-import sys
 import unittest
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT))
-sys.path.insert(0, str(ROOT / "scripts"))
-
-from hotpotqa_kg_extraction import HotpotQARelationExtractor  # noqa: E402
+from hotpotqa_kg_extraction import HotpotQARelationExtractor
 
 
 def _response(payload: dict) -> MagicMock:

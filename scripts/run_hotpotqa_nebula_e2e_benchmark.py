@@ -28,7 +28,7 @@ sys.path.append(str(ROOT / "scripts"))
 
 from nebula3.common.ttypes import Value  # noqa: E402
 from graph_db_client import NebulaGraphClient  # noqa: E402
-from hotpotqa_sample_eval import normalize_answer  # noqa: E402
+from hotpotqa_sample_eval import fallback_answer_matches  # noqa: E402
 from hotpotqa_graph_judge import GraphHitJudge  # noqa: E402
 from import_hotpotqa_nebula_tenant import DEFAULT_CASES, DEFAULT_SPACE, EDGE_TYPE, TAG_NAME  # noqa: E402
 from reasoning_engine import ReasoningEngine  # noqa: E402
@@ -197,15 +197,12 @@ def graph_hit(neighbors: list[dict[str, str]], gold_answer: str) -> bool:
     *other* person's name, not the relation word "brother"; only the
     relation label itself contains the answer).
     """
-    gold = normalize_answer(gold_answer)
-    if not gold:
+    if not gold_answer:
         return False
     for neighbor in neighbors:
         for field in ("label", "rel"):
-            value = normalize_answer(neighbor.get(field, ""))
-            if not value:
-                continue
-            if gold in value or value in gold:
+            value = neighbor.get(field, "")
+            if value and fallback_answer_matches(gold_answer, value):
                 return True
     return False
 

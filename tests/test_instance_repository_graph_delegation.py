@@ -12,17 +12,10 @@ Run: python -m unittest tests.test_instance_repository_graph_delegation
 
 from __future__ import annotations
 
-import sys
 import unittest
-from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT))
-sys.path.insert(0, str(ROOT / "agents"))
-sys.path.insert(0, str(ROOT / "scripts"))
-
-from tenant_registry import TenantConfig, TenantRegistry  # noqa: E402
-from server.aletheia_server import InstanceRepository  # noqa: E402
+from tenant_registry import TenantConfig, TenantRegistry
+from server.aletheia_server import InstanceRepository
 
 
 def _graph_tenant(space: str) -> TenantConfig:

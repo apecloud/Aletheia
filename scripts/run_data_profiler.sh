@@ -11,6 +11,7 @@ fi
 
 PROJECT_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 cd "$PROJECT_ROOT"
+source "$PROJECT_ROOT/scripts/lib/model_defaults.sh"
 
 echo "================================================="
 echo "Starting Aletheia Knowledge Extraction Group..."
@@ -26,7 +27,6 @@ echo "================================================="
 
 # --- Example 2: Google Gemini ---
 # export GEMINI_API_KEY="AIza..."
-MODEL="gemini/gemini-3.1-pro-preview"
 
 # --- Example 3: Anthropic ---
 # export ANTHROPIC_API_KEY="sk-ant-..."
@@ -38,9 +38,9 @@ MODEL="gemini/gemini-3.1-pro-preview"
 
 # Currently set to use OpenAI as default, change as needed:
 if [ -n "$OPENAI_API_KEY" ]; then
-    MODEL="gpt-4o"
+    MODEL="$ALETHEIA_OPENAI_MODEL"
 elif [ -n "$GEMINI_API_KEY" ]; then
-    MODEL="gemini/gemini-3.1-pro-preview"
+    MODEL="$ALETHEIA_GEMINI_MODEL"
 else
     echo "⚠️ Error: No API Key found. Please export OPENAI_API_KEY or GEMINI_API_KEY."
     exit 1

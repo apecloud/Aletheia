@@ -1,13 +1,15 @@
 import os
 import argparse
-import logging
 import pandas as pd
 from sqlalchemy import create_engine
 from datasets import load_dataset
 from huggingface_hub import login
+try:
+    from legacy_agent_common import configure_logging
+except ModuleNotFoundError:
+    from agents.legacy_agent_common import configure_logging
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-logger = logging.getLogger("HFDatasetScraper")
+logger = configure_logging("HFDatasetScraper")
 
 class HFDatasetScraper:
     def __init__(self, db_url: str):

@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import statistics
 import sys
 import time
@@ -94,13 +95,12 @@ def analyze_hit(result: dict[str, Any] | None, question: str, golds: list[str], 
     if not result:
         return False, False
     facts = _judge_facts_from_analyze_result(result)
-    from hotpotqa_sample_eval import normalize_answer
+    from hotpotqa_sample_eval import fallback_answer_matches
 
     for gold in golds:
         judgement = judge.judge(question, gold, facts)
         if judgement.used_fallback:
-            norm_gold = normalize_answer(gold)
-            if norm_gold and any(norm_gold in normalize_answer(f["label"]) or normalize_answer(f["label"]) in norm_gold for f in facts if f.get("label")):
+            if any(fallback_answer_matches(gold, f["label"]) for f in facts if f.get("label")):
                 return True, True
             continue
         if judgement.hit:
@@ -231,6 +231,11 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    # Opt-in by design (see reasoning_engine.py._get_llm_planner) so tests
+    # never make network calls -- default it on for this real benchmark run
+    # so relation planning and multi-center answers aren't silently
+    # keyword-only just because nobody exported the flag.
+    os.environ.setdefault("ALETHEIA_LLM_PLANNER_ENABLED", "1")
     args = build_parser().parse_args(argv)
     report = run_benchmark(
         tenant_id=args.tenant,

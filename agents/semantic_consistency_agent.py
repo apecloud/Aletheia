@@ -1,15 +1,17 @@
 import os
 import argparse
-import logging
 from sqlalchemy import create_engine, text
 from pydantic import BaseModel, Field
 from typing import List
 
 from litellm import completion
 import instructor
+try:
+    from legacy_agent_common import configure_logging, resolve_model_name
+except ModuleNotFoundError:
+    from agents.legacy_agent_common import configure_logging, resolve_model_name
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-logger = logging.getLogger("SemanticConsistencyAgent")
+logger = configure_logging("SemanticConsistencyAgent")
 
 class ConsistencyIssue(BaseModel):
     issue_type: str = Field(description="Type of issue: e.g., 'Orphaned Object', 'Invalid Link', 'Unsafe Action', 'Contradiction'")
@@ -24,13 +26,9 @@ class ConsistencyReport(BaseModel):
 class SemanticConsistencyAgent:
     def __init__(self, target_db_url: str, model_name: str):
         self.target_engine = create_engine(target_db_url)
-        
-        # 强制优先使用 gemini-3.1-pro-preview
-        if "gemini" in model_name.lower():
-            self.model_name = "gemini/gemini-3.1-pro-preview"
-        else:
-            self.model_name = model_name
-            
+
+        self.model_name = resolve_model_name(model_name)
+
         logger.info(f"Initialized Semantic Consistency Agent with model: {self.model_name}")
 
     def run(self):

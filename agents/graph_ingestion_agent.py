@@ -1,6 +1,5 @@
 import os
 import argparse
-import logging
 import time
 from sqlalchemy import create_engine, text
 from pydantic import BaseModel, Field
@@ -11,9 +10,12 @@ import instructor
 from graph_db_client import NebulaGraphClient
 from ontology_artifacts import ensure_artifact_schema
 from tenant_registry import TenantRegistry
+try:
+    from legacy_agent_common import configure_logging, resolve_model_name
+except ModuleNotFoundError:
+    from agents.legacy_agent_common import configure_logging, resolve_model_name
 
-logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-logger = logging.getLogger("GraphIngestionAgent")
+logger = configure_logging("GraphIngestionAgent")
 
 class NodeExtractionQuery(BaseModel):
     sql_query: str = Field(description="SQL query to extract the business object. Must return an 'id' column uniquely identifying the node.")
@@ -51,12 +53,9 @@ class GraphIngestionAgent:
             space=graph_space
         )
         self.graph_client.connect()
-        
-        if "gemini" in model_name.lower():
-            self.model_name = "gemini/gemini-3.1-pro-preview"
-        else:
-            self.model_name = model_name
-            
+
+        self.model_name = resolve_model_name(model_name)
+
         logger.info(
             "Initialized Graph Ingestion Agent with model=%s tenant=%s graph_database=%s",
             self.model_name,

@@ -1,10 +1,4 @@
 import unittest
-import sys
-from pathlib import Path
-
-# Add scripts dir to path
-ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "scripts"))
 
 from generate_relation_descriptions import (
     generate_relation_description,

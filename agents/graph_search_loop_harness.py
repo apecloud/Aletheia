@@ -14,6 +14,15 @@ from typing import Any
 
 from sqlalchemy import text
 
+try:
+    from loop_harness_common import deep_merge as _deep_merge
+    from loop_harness_common import json_load as _shared_json_load
+    from loop_harness_common import ratio as _shared_ratio
+except ModuleNotFoundError:
+    from agents.loop_harness_common import deep_merge as _deep_merge
+    from agents.loop_harness_common import json_load as _shared_json_load
+    from agents.loop_harness_common import ratio as _shared_ratio
+
 
 DEFAULT_GRAPH_SEARCH_LOOP_CONFIG: dict[str, Any] = {
     "loop_id": "graph-search-loop-v1",
@@ -50,15 +59,6 @@ def load_graph_search_loop_config(path: str | Path | None) -> dict[str, Any]:
     with open(path, "r", encoding="utf-8") as fh:
         loaded = json.load(fh)
     return _deep_merge(config, loaded if isinstance(loaded, dict) else {})
-
-
-def _deep_merge(base: dict[str, Any], overlay: dict[str, Any]) -> dict[str, Any]:
-    for key, value in overlay.items():
-        if isinstance(value, dict) and isinstance(base.get(key), dict):
-            base[key] = _deep_merge(dict(base[key]), value)
-        else:
-            base[key] = value
-    return base
 
 
 def evaluate_graph_search_loop(
@@ -256,10 +256,7 @@ def _semantic_counts_by_node(repo, tenant, nodes: list[dict[str, Any]], *, limit
 
 
 def _json_load(value: Any, default: Any) -> Any:
-    try:
-        return json.loads(value) if value else default
-    except Exception:
-        return default
+    return _shared_json_load(value, default)
 
 
 def _default_query_samples(nodes: list[dict[str, Any]]) -> list[str]:
@@ -435,9 +432,7 @@ def _node_ref(node: dict[str, Any], context: dict[str, Any] | None = None) -> di
 
 
 def _ratio(numerator: int, denominator: int) -> float:
-    if denominator <= 0:
-        return 0.0
-    return round(float(numerator) / float(denominator), 4)
+    return _shared_ratio(numerator, denominator, zero_denominator_default=0.0)
 
 
 def _verdict(metrics: dict[str, Any], config: dict[str, Any]) -> dict[str, Any]:

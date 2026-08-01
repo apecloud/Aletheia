@@ -24,6 +24,15 @@ except ModuleNotFoundError:
     from agents.ontology_quality import concrete_object_quality as _concrete_object_quality
     from agents.ontology_quality import normalize_label as _normalize_label
 
+try:
+    from loop_harness_common import deep_merge as _deep_merge
+    from loop_harness_common import json_load as _shared_json_load
+    from loop_harness_common import ratio as _shared_ratio
+except ModuleNotFoundError:
+    from agents.loop_harness_common import deep_merge as _deep_merge
+    from agents.loop_harness_common import json_load as _shared_json_load
+    from agents.loop_harness_common import ratio as _shared_ratio
+
 
 DEFAULT_LOOP_CONFIG: dict[str, Any] = {
     "loop_id": "ontology-enrichment-loop-v1",
@@ -95,15 +104,6 @@ def load_loop_config(path: str | Path | None) -> dict[str, Any]:
     with open(path, "r", encoding="utf-8") as fh:
         loaded = json.load(fh)
     return _deep_merge(config, loaded if isinstance(loaded, dict) else {})
-
-
-def _deep_merge(base: dict[str, Any], overlay: dict[str, Any]) -> dict[str, Any]:
-    for key, value in overlay.items():
-        if isinstance(value, dict) and isinstance(base.get(key), dict):
-            base[key] = _deep_merge(dict(base[key]), value)
-        else:
-            base[key] = value
-    return base
 
 
 def evaluate_enrichment_loop(
@@ -1404,14 +1404,7 @@ def _latency_reasons(latency: dict[str, Any], targets: dict[str, Any]) -> list[s
 
 
 def _json_load(value: Any, default: Any) -> Any:
-    if value in (None, ""):
-        return default
-    if isinstance(value, (dict, list)):
-        return value
-    try:
-        return json.loads(value)
-    except Exception:
-        return default
+    return _shared_json_load(value, default, passthrough_containers=True)
 
 
 def _parse_ts(value: Any) -> datetime | None:
@@ -1605,6 +1598,4 @@ def _first_text(*values: Any) -> str:
 
 
 def _ratio(numerator: int, denominator: int) -> float:
-    if denominator <= 0:
-        return 1.0
-    return round(float(numerator) / float(denominator), 4)
+    return _shared_ratio(numerator, denominator, zero_denominator_default=1.0)

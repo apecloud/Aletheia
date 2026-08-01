@@ -1,5 +1,4 @@
 import argparse
-import logging
 import os
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
@@ -8,9 +7,12 @@ from typing import List
 
 from litellm import completion
 import instructor
+try:
+    from legacy_agent_common import configure_logging, resolve_model_name
+except ModuleNotFoundError:
+    from agents.legacy_agent_common import configure_logging, resolve_model_name
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-logger = logging.getLogger("BusinessContextAgent")
+logger = configure_logging("BusinessContextAgent")
 
 class TableAlignment(BaseModel):
     table_name: str = Field(description="The technical name of the table")
@@ -24,13 +26,9 @@ class BusinessContextAgent:
     def __init__(self, target_db_url: str, model_name: str, docs_dir: str):
         self.target_engine = create_engine(target_db_url)
         self.docs_dir = docs_dir
-        
-        # 强制优先使用 gemini-3.1-pro-preview
-        if "gemini" in model_name.lower():
-            self.model_name = "gemini/gemini-3.1-pro-preview"
-        else:
-            self.model_name = model_name
-            
+
+        self.model_name = resolve_model_name(model_name)
+
         logger.info(f"Initialized Business Context Agent with model: {self.model_name}")
 
     def read_documentation(self) -> str:

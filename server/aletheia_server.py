@@ -9,6 +9,7 @@ import shutil
 import ssl
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 from difflib import SequenceMatcher
@@ -59,6 +60,9 @@ SOURCE_DB_URL = os.environ.get(
 )
 STATIC_ROOT = ROOT / "web" / "app"
 CONTINUOUS_RUNNING_STALE_SECONDS = int(os.environ.get("ALETHEIA_CONTINUOUS_RUNNING_STALE_SECONDS", "900"))
+AGENT_GATEWAY_TMP_DIR = Path(os.environ.get("ALETHEIA_AGENT_GATEWAY_TMPDIR", tempfile.gettempdir()))
+AGENT_GATEWAY_TMP_DIR.mkdir(parents=True, exist_ok=True)
+DEFAULT_LLM_MODEL = os.environ.get("ALETHEIA_DEFAULT_LLM_MODEL", "gemini-3.5-flash")
 
 
 class LocalThreadingHTTPServer(ThreadingHTTPServer):
@@ -872,25 +876,47 @@ def _ontology_source_schema(artifact, table_fields=None):
     return {"kind": "unmapped", "source_refs": artifact.get("source_refs", [])}
 
 
-class ReviewRepository:
+class _TenantScopedEngineCache:
+    """Shared tenant()/metadata_engine_for() behavior for the 4 repository
+    classes below. Caches one SQLAlchemy engine per metadata_db_url, guarded
+    by a lock since the server runs under ThreadingHTTPServer (each request
+    is a new thread) and an unlocked read-check-then-write on the cache dict
+    is a real race.
+
+    _register_tenant_on_engine_create controls whether creating an engine
+    also calls tenant_registry.ensure_metadata() (a Postgres-flavored
+    CREATE TABLE/upsert against aletheia_tenants). InstanceRepository sets
+    this False: its tests construct it directly against sqlite metadata_db_url
+    fixtures, and ensure_metadata's DDL (NOW() default) isn't SQLite-portable."""
+
+    _register_tenant_on_engine_create = True
+
     def __init__(self, tenant_registry, ensure_schema=False):
         self.tenant_registry = tenant_registry
         self.ensure_schema = ensure_schema
-        self.engines = {}
+        self._metadata_engines = {}
+        self._metadata_engines_lock = threading.Lock()
 
     def tenant(self, tenant_id=None):
         return self.tenant_registry.get(tenant_id)
 
-    def engine_for(self, tenant):
-        engine = self.engines.get(tenant.metadata_db_url)
-        if engine is None:
-            engine = create_engine(tenant.metadata_db_url)
-            self.engines[tenant.metadata_db_url] = engine
-            if self.ensure_schema:
-                ensure_artifact_schema(engine)
-            self.tenant_registry.ensure_metadata(engine)
+    def metadata_engine_for(self, tenant):
+        engine = self._metadata_engines.get(tenant.metadata_db_url)
+        if engine is not None:
+            return engine
+        with self._metadata_engines_lock:
+            engine = self._metadata_engines.get(tenant.metadata_db_url)
+            if engine is None:
+                engine = create_engine(tenant.metadata_db_url)
+                if self.ensure_schema:
+                    ensure_artifact_schema(engine)
+                if self._register_tenant_on_engine_create:
+                    self.tenant_registry.ensure_metadata(engine)
+                self._metadata_engines[tenant.metadata_db_url] = engine
         return engine
 
+
+class ReviewRepository(_TenantScopedEngineCache):
     def list_artifacts(self, tenant, filters):
         conditions = ["project_id = :tenant_id"]
         params = {"tenant_id": tenant.tenant_id}
@@ -911,7 +937,7 @@ class ReviewRepository:
             )
             params["search"] = f"%{search}%"
         where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
-        with self.engine_for(tenant).connect() as conn:
+        with self.metadata_engine_for(tenant).connect() as conn:
             rows = conn.execute(
                 text(
                     f"""
@@ -961,7 +987,7 @@ class ReviewRepository:
             params["target_artifact_key"] = target_artifact_key
         where = " AND ".join(conditions)
         try:
-            with self.engine_for(tenant).connect() as conn:
+            with self.metadata_engine_for(tenant).connect() as conn:
                 rows = conn.execute(
                     text(
                         f"""
@@ -1011,7 +1037,7 @@ class ReviewRepository:
         }
 
     def get_artifact(self, tenant, canonical_key):
-        with self.engine_for(tenant).connect() as conn:
+        with self.metadata_engine_for(tenant).connect() as conn:
             artifact = conn.execute(
                 text(
                     """
@@ -1128,7 +1154,7 @@ class ReviewRepository:
     def review_status(self, tenant, canonical_key, status, reviewer, reason):
         if status != "approved":
             _require_reason(status, reason or "")
-        with self.engine_for(tenant).begin() as conn:
+        with self.metadata_engine_for(tenant).begin() as conn:
             artifact = self._fetch_for_update(conn, tenant, canonical_key)
             before_status = artifact["status"]
             before_version = artifact["version"]
@@ -1161,7 +1187,7 @@ class ReviewRepository:
 
     def comment(self, tenant, canonical_key, reviewer, reason):
         _require_reason("comment", reason or "")
-        with self.engine_for(tenant).begin() as conn:
+        with self.metadata_engine_for(tenant).begin() as conn:
             artifact = self._fetch_for_update(conn, tenant, canonical_key)
             self._record_review_event(
                 conn,
@@ -1179,7 +1205,7 @@ class ReviewRepository:
         return self.get_artifact(tenant, canonical_key)
 
     def edit(self, tenant, canonical_key, reviewer, reason, name=None, description=None, payload=None):
-        with self.engine_for(tenant).begin() as conn:
+        with self.metadata_engine_for(tenant).begin() as conn:
             artifact = self._fetch_for_update(conn, tenant, canonical_key)
             current_payload = _load_json(artifact["payload_json"], {})
             next_payload = current_payload if payload is None else payload
@@ -1284,19 +1310,17 @@ class ReviewRepository:
         )
 
 
-class InstanceRepository:
+class InstanceRepository(_TenantScopedEngineCache):
+    _register_tenant_on_engine_create = False
+
     def __init__(self, tenant_registry, ensure_schema=False):
-        self.tenant_registry = tenant_registry
-        self.ensure_schema = ensure_schema
-        self.metadata_engines = {}
+        super().__init__(tenant_registry, ensure_schema)
         self.reasoning_repository = None
         self._continuous_scheduler_lock = threading.Lock()
         self._continuous_scheduler_thread = None
         self._continuous_scheduler_stop = None
         self._graph_repos = {}
-
-    def tenant(self, tenant_id=None):
-        return self.tenant_registry.get(tenant_id)
+        self._graph_repos_lock = threading.Lock()
 
     def _graph_repo_for(self, tenant):
         """Lazily construct/cache a GraphInstanceRepository for a
@@ -1310,29 +1334,24 @@ class InstanceRepository:
             return cached
         from graph_instance_repository import GraphInstanceRepository
 
-        repo = GraphInstanceRepository(
-            space=tenant.graph_database,
-            tag_name=tenant.graph_tag_name,
-            edge_type=tenant.graph_edge_type,
-            object_type=tenant.graph_object_type,
-            nebula_ip=tenant.graph_ip,
-            nebula_port=tenant.graph_port,
-            nebula_user=tenant.graph_user,
-            nebula_password=tenant.graph_password,
-            relation_catalog_db_url=tenant.metadata_db_url,
-            relation_catalog_scope=tenant.relation_catalog_scope or tenant.tenant_id,
-        )
-        self._graph_repos[tenant.tenant_id] = repo
+        with self._graph_repos_lock:
+            cached = self._graph_repos.get(tenant.tenant_id)
+            if cached is not None:
+                return cached
+            repo = GraphInstanceRepository(
+                space=tenant.graph_database,
+                tag_name=tenant.graph_tag_name,
+                edge_type=tenant.graph_edge_type,
+                object_type=tenant.graph_object_type,
+                nebula_ip=tenant.graph_ip,
+                nebula_port=tenant.graph_port,
+                nebula_user=tenant.graph_user,
+                nebula_password=tenant.graph_password,
+                relation_catalog_db_url=tenant.metadata_db_url,
+                relation_catalog_scope=tenant.relation_catalog_scope or tenant.tenant_id,
+            )
+            self._graph_repos[tenant.tenant_id] = repo
         return repo
-
-    def metadata_engine_for(self, tenant):
-        engine = self.metadata_engines.get(tenant.metadata_db_url)
-        if engine is None:
-            engine = create_engine(tenant.metadata_db_url)
-            self.metadata_engines[tenant.metadata_db_url] = engine
-            if self.ensure_schema:
-                ensure_artifact_schema(engine)
-        return engine
 
     def types(self, tenant, include_draft=False):
         ontology_types = self._ontology_concrete_object_types(tenant, include_draft=include_draft)
@@ -3025,9 +3044,9 @@ class InstanceRepository:
             "max_frontier": 4,
             "max_results_per_query": 4,
             "search_query_planner": "llm_with_fallback",
-            "search_query_planner_model": "gemini-3.5-flash",
+            "search_query_planner_model": DEFAULT_LLM_MODEL,
             "frontier_selector": "llm_with_fallback",
-            "frontier_selector_model": "gemini-3.5-flash",
+            "frontier_selector_model": DEFAULT_LLM_MODEL,
             "frontier_selector_shortlist": 20,
             "frontier_max_per_cluster": 2,
             "instance_coverage_min_edges": 0,
@@ -3036,7 +3055,7 @@ class InstanceRepository:
             "node_similarity_dedup_threshold": 0.6,
             "auto_review_similar_proposals": False,
             "auto_review_llm_verifier": True,
-            "auto_review_model": "gemini-3.5-flash",
+            "auto_review_model": DEFAULT_LLM_MODEL,
             "auto_reject_similarity_threshold": 0.92,
             "auto_approve_low_duplicate_proposals": False,
             "auto_approve_min_confidence": 0.8,
@@ -4500,7 +4519,7 @@ class InstanceRepository:
         try:
             client = genai.Client(api_key=api_key)
             response = client.models.generate_content(
-                model=(config or {}).get("frontier_selector_model") or "gemini-3.5-flash",
+                model=(config or {}).get("frontier_selector_model") or DEFAULT_LLM_MODEL,
                 contents=json.dumps(prompt, ensure_ascii=False),
             )
             raw_text = (getattr(response, "text", "") or "").strip()
@@ -4893,7 +4912,7 @@ class InstanceRepository:
         config.setdefault("node_similarity_dedup_threshold", 0.6)
         config.setdefault("auto_review_similar_proposals", False)
         config.setdefault("auto_review_llm_verifier", True)
-        config.setdefault("auto_review_model", "gemini-3.5-flash")
+        config.setdefault("auto_review_model", DEFAULT_LLM_MODEL)
         config.setdefault("auto_reject_similarity_threshold", 0.92)
         config.setdefault("auto_approve_low_duplicate_proposals", False)
         config.setdefault("auto_approve_min_confidence", 0.8)
@@ -6913,7 +6932,7 @@ class InstanceRepository:
         try:
             client = genai.Client(api_key=api_key)
             response = client.models.generate_content(
-                model=(config or {}).get("auto_review_model") or "gemini-3.5-flash",
+                model=(config or {}).get("auto_review_model") or DEFAULT_LLM_MODEL,
                 contents=json.dumps(prompt, ensure_ascii=False),
             )
             raw_text = (getattr(response, "text", "") or "").strip()
@@ -7141,27 +7160,12 @@ class InstanceRepository:
         }
 
 
-class ReasoningRepository:
+class ReasoningRepository(_TenantScopedEngineCache):
     def __init__(self, tenant_registry, instance_repository, ensure_schema=False):
-        self.tenant_registry = tenant_registry
+        super().__init__(tenant_registry, ensure_schema)
         self.instance_repository = instance_repository
-        self.ensure_schema = ensure_schema
-        self.metadata_engines = {}
         self._autopilot_schema_ready = set()
         self._finding_experience_schema_ready = set()
-
-    def tenant(self, tenant_id=None):
-        return self.tenant_registry.get(tenant_id)
-
-    def metadata_engine_for(self, tenant):
-        engine = self.metadata_engines.get(tenant.metadata_db_url)
-        if engine is None:
-            engine = create_engine(tenant.metadata_db_url)
-            self.metadata_engines[tenant.metadata_db_url] = engine
-            if self.ensure_schema:
-                ensure_artifact_schema(engine)
-            self.tenant_registry.ensure_metadata(engine)
-        return engine
 
     def ensure_finding_experience_schema(self, tenant):
         key = tenant.metadata_db_url
@@ -10759,7 +10763,7 @@ class ReasoningRepository:
         }
 
 
-class AgentGatewayRepository:
+class AgentGatewayRepository(_TenantScopedEngineCache):
     BLOCKED_TOOLS = {
         "approve",
         "approve_finding",
@@ -10787,24 +10791,6 @@ class AgentGatewayRepository:
         {"runtime_id": "openclaw_cli_default", "runtime_type": "openclaw_cli", "binary_ref": "openclaw", "command_template_id": "version_probe_only", "enabled": True},
         {"runtime_id": "hermes_cli_default", "runtime_type": "hermes_cli", "binary_ref": "hermes", "command_template_id": "version_probe_only", "enabled": True},
     ]
-
-    def __init__(self, tenant_registry, ensure_schema=False):
-        self.tenant_registry = tenant_registry
-        self.ensure_schema = ensure_schema
-        self.metadata_engines = {}
-
-    def tenant(self, tenant_id=None):
-        return self.tenant_registry.get(tenant_id)
-
-    def metadata_engine_for(self, tenant):
-        engine = self.metadata_engines.get(tenant.metadata_db_url)
-        if engine is None:
-            engine = create_engine(tenant.metadata_db_url)
-            self.metadata_engines[tenant.metadata_db_url] = engine
-            if self.ensure_schema:
-                ensure_artifact_schema(engine)
-            self.tenant_registry.ensure_metadata(engine)
-        return engine
 
     def ensure_defaults(self, tenant):
         with self.metadata_engine_for(tenant).begin() as conn:
@@ -11098,7 +11084,7 @@ print(json.dumps({
             }
             return _json_dump(output), "", 0
         safe_prompt = self._safe_demo_prompt(runtime, tenant, task_type, prompt)
-        last_message_path = Path("/tmp") / f"aletheia-{runtime['runtime_id']}-{int(time.time() * 1000)}.txt"
+        last_message_path = AGENT_GATEWAY_TMP_DIR / f"aletheia-{runtime['runtime_id']}-{int(time.time() * 1000)}.txt"
         command = self._runtime_command(runtime, binary, safe_prompt, last_message_path)
         started = time.monotonic()
         try:
@@ -12656,6 +12642,11 @@ def main():
     parser.add_argument("--tls-key", help="Path to TLS private key PEM file")
     args = parser.parse_args()
 
+    # Reasoning's LLM planner (relation selection + multi-center answer
+    # derivation, see reasoning_engine.py) is opt-in by env var so tests never
+    # make network calls -- for the actual server process, default it on so
+    # it isn't silently off just because nobody remembered to export it.
+    os.environ.setdefault("ALETHEIA_LLM_PLANNER_ENABLED", "1")
     os.environ["ALETHEIA_PG_URL"] = args.db_url
     os.environ["ALETHEIA_MYSQL_URL"] = args.source_db_url
     registry = TenantRegistry.load(args.tenants_file)

@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 import time
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
@@ -50,7 +51,9 @@ graph traversal (each a "label" -- an entity or attribute value -- and the "rela
 Rules:
 1. Answer hit=true if ANY retrieved label identifies the SAME real-world entity/value as the gold \
 answer -- even if the wording differs (a shorter/longer name, a middle name present in one but not \
-the other, an abbreviation, a title prefix like "Captain", reordered words, etc.).
+the other, an abbreviation, a title prefix like "Captain", reordered words, singular vs. plural, or a \
+close synonym for the same category/profession/role -- e.g. gold "writers" matches a label \
+"Author/Writer", gold "professional tennis" matches a label "tennis", etc.).
 2. Also answer hit=true if the gold answer describes a RELATIONSHIP or CATEGORY rather than an \
 entity, and the fact's "relation" (not its label) expresses that same relationship/category -- e.g. \
 gold="brother" matches a fact whose relation is "is_older_brother_of" even though that fact's label \
@@ -152,6 +155,20 @@ class GraphHitJudge:
 
         return None
 
+    @staticmethod
+    def _transient_error_retry_count() -> int:
+        """Extra retries specifically for network/timeout exceptions raised
+        while calling the model (dropped connections, proxy hangs, hard
+        timeouts) -- separate from LLMPlanner._empty_response_retry_count,
+        which only covers the model responding with no text candidates.
+        Without this, a single transient network blip immediately falls back
+        to the degraded substring scorer instead of just retrying."""
+        raw = os.environ.get("ALETHEIA_GRAPH_JUDGE_ERROR_RETRIES", "2")
+        try:
+            return max(0, int(raw))
+        except ValueError:
+            return 2
+
     def judge(self, question: str, gold_answer: str, facts: list[dict[str, str]]) -> JudgeResult:
         """Judge whether any retrieved fact identifies the gold answer's entity/value."""
         start = time.time()
@@ -185,14 +202,15 @@ class GraphHitJudge:
             self.last_result = result
             return result
 
-        try:
-            parsed = None
-            raw_contents: list[str] = []
-            raw_content = ""
-            finish_reason = ""
-            max_attempts = 1 + LLMPlanner._empty_response_retry_count()
+        parsed = None
+        raw_contents: list[str] = []
+        raw_content = ""
+        finish_reason = ""
+        last_exception: Exception | None = None
+        max_attempts = 1 + LLMPlanner._empty_response_retry_count() + self._transient_error_retry_count()
 
-            for attempt in range(1, max_attempts + 1):
+        for attempt in range(1, max_attempts + 1):
+            try:
                 future = self._executor.submit(
                     completion,
                     model=self.model,
@@ -228,31 +246,39 @@ class GraphHitJudge:
                     if parsed is not None:
                         raw_content = candidate
                         break
+                last_exception = None
                 if parsed is not None:
                     break
                 if raw_contents or attempt == max_attempts:
                     break
                 logger.warning("GraphHitJudge: empty response, retrying attempt %d/%d", attempt + 1, max_attempts)
+            except Exception as e:
+                last_exception = e
+                if attempt == max_attempts:
+                    break
+                logger.warning(
+                    "GraphHitJudge: transient error (%s) on attempt %d/%d, retrying: %s",
+                    LLMPlanner.classify_error(str(e)), attempt, max_attempts, e,
+                )
 
-            if parsed:
-                result.hit = bool(parsed.get("hit", False))
-                result.matched_label = str(parsed.get("matched_label", "") or "")
-                result.reasoning = str(parsed.get("reasoning", "") or "")
-                result.model = self.model
-                result.latency_ms = (time.time() - start) * 1000
-            else:
-                result.error = LLMPlanner._parse_failure_message(raw_contents, finish_reason)
-                result.error_type = "runtime_invalid"
-                result.used_fallback = True
-                result.latency_ms = (time.time() - start) * 1000
-                logger.warning("GraphHitJudge: JSON parse failed, content[:200]=%r", raw_content[:200])
-
-        except Exception as e:
-            result.error = str(e)
+        if parsed:
+            result.hit = bool(parsed.get("hit", False))
+            result.matched_label = str(parsed.get("matched_label", "") or "")
+            result.reasoning = str(parsed.get("reasoning", "") or "")
+            result.model = self.model
+            result.latency_ms = (time.time() - start) * 1000
+        elif last_exception is not None:
+            result.error = str(last_exception)
             result.error_type = LLMPlanner.classify_error(result.error)
             result.used_fallback = True
             result.latency_ms = (time.time() - start) * 1000
-            logger.warning("GraphHitJudge failed: %s", e)
+            logger.warning("GraphHitJudge failed after retries: %s", last_exception)
+        else:
+            result.error = LLMPlanner._parse_failure_message(raw_contents, finish_reason)
+            result.error_type = "runtime_invalid"
+            result.used_fallback = True
+            result.latency_ms = (time.time() - start) * 1000
+            logger.warning("GraphHitJudge: JSON parse failed, content[:200]=%r", raw_content[:200])
 
         self.last_result = result
         return result
