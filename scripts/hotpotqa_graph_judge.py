@@ -10,7 +10,7 @@ actually retrieved from the graph traversal, does any fact identify the same
 entity as the gold answer (accounting for name variants/abbreviations), or
 merely a topically related one?
 
-Modeled directly on ``HotpotQAAnswerer``/``HotpotQARelationExtractor``: same
+Modeled directly on ``HotpotQAAnswerer``/``PassageRelationExtractor``: same
 call/retry/hard-timeout/error-classification shape, reusing
 ``LLMPlanner`` for model resolution rather than duplicating it.
 """
@@ -19,7 +19,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import re
 import time
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
@@ -105,7 +104,7 @@ class GraphHitJudge:
         self.timeout = timeout
         self.temperature = temperature
         self.last_result: JudgeResult | None = None
-        # Same hard-timeout rationale as HotpotQARelationExtractor: litellm's
+        # Same hard-timeout rationale as PassageRelationExtractor: litellm's
         # own `timeout=` kwarg doesn't reliably fire on a stuck proxy/SOCKS
         # CONNECT tunnel.
         self._executor = ThreadPoolExecutor(max_workers=4)
@@ -155,20 +154,6 @@ class GraphHitJudge:
 
         return None
 
-    @staticmethod
-    def _transient_error_retry_count() -> int:
-        """Extra retries specifically for network/timeout exceptions raised
-        while calling the model (dropped connections, proxy hangs, hard
-        timeouts) -- separate from LLMPlanner._empty_response_retry_count,
-        which only covers the model responding with no text candidates.
-        Without this, a single transient network blip immediately falls back
-        to the degraded substring scorer instead of just retrying."""
-        raw = os.environ.get("ALETHEIA_GRAPH_JUDGE_ERROR_RETRIES", "2")
-        try:
-            return max(0, int(raw))
-        except ValueError:
-            return 2
-
     def judge(self, question: str, gold_answer: str, facts: list[dict[str, str]]) -> JudgeResult:
         """Judge whether any retrieved fact identifies the gold answer's entity/value."""
         start = time.time()
@@ -207,7 +192,7 @@ class GraphHitJudge:
         raw_content = ""
         finish_reason = ""
         last_exception: Exception | None = None
-        max_attempts = 1 + LLMPlanner._empty_response_retry_count() + self._transient_error_retry_count()
+        max_attempts = 1 + LLMPlanner._empty_response_retry_count() + LLMPlanner._transient_error_retry_count()
 
         for attempt in range(1, max_attempts + 1):
             try:
@@ -225,6 +210,16 @@ class GraphHitJudge:
                 try:
                     raw_response = future.result(timeout=self.timeout + 15)
                 except FutureTimeoutError:
+                    # Python 3.11+ makes concurrent.futures.TimeoutError an
+                    # alias of the builtin TimeoutError, so this branch also
+                    # catches a TimeoutError raised BY completion() itself
+                    # (e.g. litellm's own timeout= firing normally) -- not
+                    # just our own wait timing out. future.done() tells them
+                    # apart: True means completion() already ran and raised
+                    # on its own (re-raise that original error as-is); False
+                    # means our wait genuinely elapsed with no response.
+                    if future.done():
+                        raise
                     future.cancel()
                     raise TimeoutError(
                         f"hard timeout: no response after {self.timeout + 15:.0f}s (proxy/connect hang)"
@@ -260,6 +255,7 @@ class GraphHitJudge:
                     "GraphHitJudge: transient error (%s) on attempt %d/%d, retrying: %s",
                     LLMPlanner.classify_error(str(e)), attempt, max_attempts, e,
                 )
+                time.sleep(LLMPlanner._retry_backoff_seconds())
 
         if parsed:
             result.hit = bool(parsed.get("hit", False))

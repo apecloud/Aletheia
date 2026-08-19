@@ -30,12 +30,22 @@ from nebula3.common.ttypes import Value  # noqa: E402
 from graph_db_client import NebulaGraphClient  # noqa: E402
 from hotpotqa_sample_eval import fallback_answer_matches  # noqa: E402
 from hotpotqa_graph_judge import GraphHitJudge  # noqa: E402
-from import_hotpotqa_nebula_tenant import DEFAULT_CASES, DEFAULT_SPACE, EDGE_TYPE, TAG_NAME  # noqa: E402
+from import_hotpotqa_nebula_tenant import DEFAULT_CASES, DEFAULT_SPACE  # noqa: E402
 from reasoning_engine import ReasoningEngine  # noqa: E402
 from llm_planner import LLMPlanner  # noqa: E402
 from hotpotqa_frozen_sample import DEFAULT_SAMPLE_PATH  # noqa: E402
 
 DEFAULT_RESULTS = ROOT / "reports" / "hotpotqa-nebula-e2e-results.json"
+# Stale since the strongly-typed multi-TAG/multi-EDGE-type model
+# (agents/graph_ontology_registry.py) replaced the single-TAG/single-EDGE
+# model these two constants assumed -- traverse()/fetch_label() below (this
+# file's own direct nGQL probes, not used by the live analyze()-based
+# benchmark, which only imports gold_candidates() from this module) no
+# longer match the real schema. Kept only so this module still imports
+# cleanly; update these two functions to query `OVER *`/`FETCH PROP ON *`
+# (see agents/graph_instance_repository.py) before relying on them again.
+TAG_NAME = "HotpotEntity"
+EDGE_TYPE = "RELATION"
 
 
 def _escape(value: str) -> str:
@@ -52,7 +62,7 @@ def traverse(client: NebulaGraphClient, center_node: str, *, depth: int) -> list
     """Multi-hop traversal from center_node, returning reached vertices' own
     labels.
 
-    Uses BIDIRECT: the extraction step (``HotpotQARelationExtractor``) picks
+    Uses BIDIRECT: the extraction step (``PassageRelationExtractor``) picks
     each triple's subject/object direction from whichever way the source
     sentence reads (e.g. "Jacksonville station serves the Silver Meteor"
     makes Jacksonville station the subject) -- a forward-only ``GO ... OVER

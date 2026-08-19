@@ -54,10 +54,11 @@ class TenantConfig:
     # graph_database doubles as the Nebula space name -- every tenant is
     # graph-native (the SQL retrieval engine was retired), so there's no
     # backend distinction left to encode here. relation_catalog_scope
-    # defaults to tenant_id when unset.
-    graph_tag_name: str = "HotpotEntity"
-    graph_edge_type: str = "RELATION"
-    graph_object_type: str = "entity"
+    # defaults to tenant_id when unset. Node/edge TYPES are no longer fixed
+    # per tenant (graph_tag_name/graph_edge_type/graph_object_type) -- they
+    # come from the tenant's approved ontology registry
+    # (agents/graph_ontology_registry.py) and each vertex/edge's real Nebula
+    # tag/edge-type name, not a single hardcoded name pair.
     graph_ip: str = field(default_factory=default_graph_ip)
     graph_port: int = field(default_factory=default_graph_port)
     graph_user: str = field(default_factory=default_graph_user)
@@ -97,9 +98,6 @@ class TenantRegistry:
                     metadata_db_url=item.get("metadata_db_url") or metadata_url,
                     source_db_url=item.get("source_db_url") or source_url,
                     status=item.get("status", "active"),
-                    graph_tag_name=item.get("graph_tag_name", "HotpotEntity"),
-                    graph_edge_type=item.get("graph_edge_type", "RELATION"),
-                    graph_object_type=item.get("graph_object_type", "entity"),
                     graph_ip=item.get("graph_ip") or default_graph_ip(),
                     graph_port=item.get("graph_port") or default_graph_port(),
                     graph_user=item.get("graph_user") or default_graph_user(),

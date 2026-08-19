@@ -47,6 +47,9 @@ from iterative_graph_enrichment_agent import (  # noqa: E402
 )
 from ontology_quality import concrete_object_quality  # noqa: E402
 from ontology_artifacts import ensure_artifact_schema, upsert_artifact  # noqa: E402
+from ontology_label_embeddings import (  # noqa: E402
+    find_nearest_label, label_embedding_count, sync_label_embeddings,
+)
 from tenant_registry import TenantRegistry  # noqa: E402
 
 
@@ -1340,9 +1343,6 @@ class InstanceRepository(_TenantScopedEngineCache):
                 return cached
             repo = GraphInstanceRepository(
                 space=tenant.graph_database,
-                tag_name=tenant.graph_tag_name,
-                edge_type=tenant.graph_edge_type,
-                object_type=tenant.graph_object_type,
                 nebula_ip=tenant.graph_ip,
                 nebula_port=tenant.graph_port,
                 nebula_user=tenant.graph_user,
@@ -2927,42 +2927,40 @@ class InstanceRepository(_TenantScopedEngineCache):
                         "reason": "explicit_center",
                     },
                 }
-        default_center = None
         if question:
-            lowered_question = question.lower()
-            for type_info in self.types(tenant).get("types") or []:
-                object_type_candidate = type_info.get("type")
-                if not object_type_candidate:
-                    continue
-                for node in self.search(tenant, object_type_candidate, "", limit=50).get("instances") or []:
-                    labels = [node.get("id"), node.get("label"), *(node.get("aliases") or [])]
-                    if any(str(label or "").strip().lower() in lowered_question for label in labels if len(str(label or "").strip()) >= 3):
-                        node_id = node.get("id") or ""
-                        if ":" in node_id:
-                            object_type, instance_id = node_id.split(":", 1)
-                            context = self.local_rag_context(
-                                tenant,
-                                object_type,
-                                instance_id,
-                                question=question,
-                                depth=depth,
-                                limit=limit,
-                            )
-                            if context:
-                                return {
-                                    **context,
-                                    "query_route": {
-                                        "route": "local",
-                                        "reason": "question_matched_approved_object",
-                                        "matched_node": node_id,
-                                    },
-                                }
-                if default_center is None:
-                    default_center = self.default_center(tenant)
+            nodes = self._ontology_concrete_object_nodes(tenant)
+            if nodes:
+                session = sessionmaker(bind=self.metadata_engine_for(tenant))()
+                try:
+                    # Self-healing: only re-embed when the node count drifts
+                    # from what's indexed (covers first-ever use and any
+                    # additions/removals) -- see ontology_label_embeddings.py.
+                    if label_embedding_count(session, tenant.tenant_id) != len(nodes):
+                        sync_label_embeddings(session, tenant.tenant_id, nodes)
+                    node_id = find_nearest_label(session, tenant.tenant_id, question)
+                finally:
+                    session.close()
+                if node_id and ":" in node_id:
+                    object_type, instance_id = node_id.split(":", 1)
+                    context = self.local_rag_context(
+                        tenant,
+                        object_type,
+                        instance_id,
+                        question=question,
+                        depth=depth,
+                        limit=limit,
+                    )
+                    if context:
+                        return {
+                            **context,
+                            "query_route": {
+                                "route": "local",
+                                "reason": "question_matched_approved_object_embedding",
+                                "matched_node": node_id,
+                            },
+                        }
         communities = self.graph_community_summaries(tenant, limit=max(limit, 80))
         route_reason = "global_question"
-        if not question and default_center:
-            route_reason = "no_question_defaulted_to_global_summary"
         return {
             **communities,
             "question": question,

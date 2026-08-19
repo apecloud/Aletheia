@@ -65,8 +65,16 @@ class ReasoningEngine:
         dict -- unlike a SQL row, it has no foreign-key columns to filter out
         (a graph vertex's relationships live as real edges, never as extra
         row columns), so no schema introspection is needed to know what to
-        skip."""
-        skip = {"id", "label"}
+        skip. "type" is also skipped -- it's the vertex's real Nebula TAG
+        name (surfaced by _fetch_entity for entity_config lookups/neighbor
+        bucketing), not a fact about the entity, and leaving it in falsely
+        makes a graph-native row's props list non-empty: that silently
+        starved _llm_derive_relational_answer's "no props -> fall back to
+        this center's own edges" heuristic of real facts for every
+        multi-center/comparison question (observed as a ~24-point graph-hit
+        regression -- 94.3% to 70.0% -- when this was fixed elsewhere but
+        missed here)."""
+        skip = {"id", "label", "type"}
         import re
         _date_re = re.compile(r"^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}")
         props = []
@@ -777,6 +785,100 @@ class ReasoningEngine:
                 queue.append((other, next_path))
         return None
 
+    @staticmethod
+    def _build_evidence_chains(center_instance_id, nodes, edges, max_chains=30):
+        """BFS from ``center_instance_id`` over its own already-gathered
+        neighborhood (``nodes``/``edges`` -- depth-limited by
+        ``_gather_center_data``'s own ``depth`` param, no extra graph calls
+        here), enumerating every distinct reachable node's path and
+        formatting each as an explicit "evidence chain" string, e.g.
+        ``"Ludwig van Beethoven -composed-> Violin Sonata No. 4
+        -dedicated_to-> Count Moritz von Fries"``. Borrowed from StepChain
+        GraphRAG's BFS Reasoning Flow (arXiv:2510.02827 Eq. 7-9), replacing
+        the previous flat "direct edge, or floating same-string endpoint
+        pair for anything deeper" fact representation, which relied on the
+        model noticing a shared label string across two disconnected facts
+        to chain them itself and had no representation at all past depth 2.
+        Reuses the same visited-set BFS shape already proven in
+        ``_find_path_between_centers``, just enumerating every reachable
+        node instead of stopping at one target. ``max_chains`` bounds
+        output size for centers with a large neighborhood -- BFS order
+        means the nodes it drops are the FARTHEST from the center, not an
+        arbitrary sample."""
+        nodes_by_id = {n.get("id"): n for n in nodes or []}
+        adjacency: dict[str, list[tuple[str, str, bool]]] = {}
+        for edge in edges or []:
+            source = edge.get("source")
+            target = edge.get("target")
+            if not source or not target:
+                continue
+            adjacency.setdefault(source, []).append((target, edge.get("label", ""), False))
+            adjacency.setdefault(target, []).append((source, edge.get("label", ""), True))
+
+        chains: list[list[tuple[str, str, bool]]] = []
+        visited = {center_instance_id}
+        queue = deque([(center_instance_id, [])])
+        while queue and len(chains) < max_chains:
+            node_id, path = queue.popleft()
+            for neighbor_id, relation, reversed_edge in adjacency.get(node_id, []):
+                if neighbor_id in visited:
+                    continue
+                visited.add(neighbor_id)
+                new_path = path + [(relation, neighbor_id, reversed_edge)]
+                chains.append(new_path)
+                queue.append((neighbor_id, new_path))
+                if len(chains) >= max_chains:
+                    break
+
+        center_label = nodes_by_id.get(center_instance_id, {}).get("label", center_instance_id)
+        chain_strings = []
+        for path in chains:
+            parts = [center_label]
+            for relation, node_id, reversed_edge in path:
+                label = nodes_by_id.get(node_id, {}).get("label") or node_id
+                parts.append(f" <-{relation}- " if reversed_edge else f" -{relation}-> ")
+                parts.append(label)
+            chain_strings.append("".join(parts))
+        return chain_strings
+
+    @staticmethod
+    def _build_centers_facts(centers_data):
+        """Shared by ``_llm_derive_relational_answer`` (single-shot
+        multi-center questions) and ``analyze_decomposed`` (one call per
+        sub-question) -- turns gathered center data into the
+        ``[{"center_node": str, "facts": [...]}]`` shape
+        ``LLMPlanner.derive_relational_answer`` expects, deliberately
+        EXCLUDING each center's own identity/label from what's sent, so the
+        model must derive the answer from the actual facts rather than
+        recognizing which name happens to match (closes the leakage bug
+        found in the HotpotQA Nebula benchmark -- see GraphHitJudge's Dain
+        Rauscher Wessels/Berenberg Bank case)."""
+        centers_facts = []
+        for data in centers_data:
+            facts = []
+            for prop in data.get("props") or []:
+                facts.append({"relation": prop.get("col", ""), "value": prop.get("value", "")})
+            if not facts:
+                # Graph-native entities (a single Nebula TAG with no
+                # per-vertex properties beyond id/label) carry their real
+                # facts as edges, not row columns -- fall back to explicit
+                # BFS evidence chains over this center's own already-
+                # gathered neighborhood (see _build_evidence_chains). Only
+                # engages when props is empty, so SQL tenants with real
+                # column data are unaffected.
+                instance_id = data.get("instance_id", "")
+                for chain in ReasoningEngine._build_evidence_chains(
+                    instance_id, data.get("nodes"), data.get("edges"),
+                ):
+                    facts.append({"relation": "evidence_chain", "value": chain})
+            centers_facts.append({
+                "center_node": data["center_node"],
+                # Deliberately no "label"/identity field here -- see
+                # docstring above.
+                "facts": facts,
+            })
+        return centers_facts
+
     def _llm_derive_relational_answer(self, question, centers_data):
         """When no direct graph path connects the named centers, derive an
         answer via one LLM call given each center's own relevant facts --
@@ -799,41 +901,7 @@ class ReasoningEngine:
                 "error": "llm_planner_unavailable",
             }
 
-        centers_facts = []
-        for data in centers_data:
-            facts = []
-            for prop in data.get("props") or []:
-                facts.append({"relation": prop.get("col", ""), "value": prop.get("value", "")})
-            if not facts:
-                # Graph-native entities (a single Nebula TAG with no
-                # per-vertex properties beyond id/label) carry their real
-                # facts as edges, not row columns -- fall back to this
-                # center's own 1-hop neighbor edges (already gathered by
-                # _gather_center_data via neighborhood()) rather than
-                # sending the LLM an empty fact list. Only engages when
-                # props is empty, so SQL tenants with real column data are
-                # unaffected.
-                instance_id = data.get("instance_id", "")
-                nodes_by_id = {n.get("id"): n for n in data.get("nodes") or []}
-                for edge in data.get("edges") or []:
-                    if edge.get("source") == instance_id:
-                        neighbor = nodes_by_id.get(edge.get("target"), {})
-                    elif edge.get("target") == instance_id:
-                        neighbor = nodes_by_id.get(edge.get("source"), {})
-                    else:
-                        continue
-                    if neighbor.get("label"):
-                        facts.append({"relation": edge.get("label", ""), "value": neighbor["label"]})
-            centers_facts.append({
-                "center_node": data["center_node"],
-                # Deliberately no "label"/identity field here -- the model
-                # must derive the answer from the facts, not from
-                # recognizing a name, closing the leakage bug found in the
-                # HotpotQA Nebula benchmark (see GraphHitJudge's Dain
-                # Rauscher Wessels/Berenberg Bank case).
-                "facts": facts,
-            })
-
+        centers_facts = self._build_centers_facts(centers_data)
         derivation = planner.derive_relational_answer(question, centers_facts)
         if derivation.used_fallback:
             return {
@@ -974,6 +1042,122 @@ class ReasoningEngine:
             question=question,
             path_plan=path_plan,
         )
+
+    def analyze_decomposed(self, tenant, question, sub_question_centers, depth=1, limit=200):
+        """Question-decomposition entry point -- borrowed from StepChain
+        GraphRAG (arXiv:2510.02827), whose own ablation study found
+        decomposition to be the single biggest lever on HotpotQA accuracy.
+        Entity linking (splitting ``question`` into sub-questions and
+        resolving each to graph ids) stays the CALLER's job, same division
+        of labor ``analyze()`` already has with its pre-resolved
+        ``center_node``/``additional_center_nodes`` params.
+
+        ``sub_question_centers``: ``[{"sub_question": str, "center_node":
+        str, "additional_center_nodes": [str, ...]}, ...]``. An entry whose
+        ``center_node`` is empty (that sub-question's entities never
+        resolved) is recorded with a ``None`` partial answer and skipped
+        for gathering -- not a hard failure; the final merge works with
+        whatever partial answers DID resolve.
+
+        For each entry with a resolved center, gathers facts per center
+        (reusing ``_gather_center_data``, exactly ``_analyze_multi_center``'s
+        own per-center loop when an entry names more than one), turns them
+        into a partial answer via ``LLMPlanner.derive_relational_answer``
+        keyed by that entry's OWN sub-question text (not the original
+        question) -- mirrors StepChain's Eq. 9's per-sub-question evidence
+        chain -> partial answer step. All partial answers are then combined
+        via ``LLMPlanner.merge_partial_answers`` (StepChain's Eq. 10-11
+        two-tier merge), re-grounded against the original ``question``.
+
+        Returns ``None`` if the LLM planner isn't available at all (nothing
+        useful can be produced); otherwise the same
+        title/profile_summary/key_facts/business_interpretation/
+        evidence_limits/next_questions/metrics shape ``_compose_relational``
+        already produces, so existing scoring code (keyed off
+        ``metrics.answer``/``metrics.centers``) doesn't need to change."""
+        planner = self._get_llm_planner()
+        if planner is None:
+            return None
+
+        entity_config = self._entity_config(tenant)
+        link_config = self._link_config(tenant)
+
+        sub_answers = []
+        all_centers_data = []
+        for entry in sub_question_centers:
+            sub_question = entry.get("sub_question") or question
+            center_node = entry.get("center_node") or ""
+            if not center_node:
+                sub_answers.append({"sub_question": sub_question, "answer": None, "reasoning": ""})
+                continue
+
+            nodes_to_gather = [n for n in dict.fromkeys(
+                [center_node] + list(entry.get("additional_center_nodes") or [])
+            ) if n]
+            centers_data = []
+            for node in nodes_to_gather:
+                object_type = node.split(":", 1)[0]
+                cfg = entity_config.get(object_type.lower())
+                if not cfg:
+                    continue
+                # Path plan scoped to THIS sub-question's own text/type --
+                # mirrors analyze()'s own path-planning setup, just done
+                # once per sub-question instead of once for the whole
+                # original question (each sub-question targets a different
+                # entity/relation shape, so a shared plan wouldn't fit all
+                # of them the way it fits centers of a single comparison).
+                desc_keys = [cfg.get("artifact", f"object:{object_type}")]
+                for lc in link_config:
+                    if lc["from"] == object_type.lower() or lc["to"] == object_type.lower():
+                        desc_keys.append(lc["link"])
+                descriptions_for_plan = self._artifact_descriptions(tenant, desc_keys)
+                path_plan = self._plan_question_paths(
+                    sub_question, object_type, entity_config, link_config, descriptions_for_plan,
+                )
+                data = self._gather_center_data(tenant, node, entity_config, link_config, path_plan, depth, limit)
+                if data is not None:
+                    centers_data.append(data)
+
+            if not centers_data:
+                sub_answers.append({"sub_question": sub_question, "answer": None, "reasoning": ""})
+                continue
+            all_centers_data.extend(centers_data)
+
+            centers_facts = self._build_centers_facts(centers_data)
+            derivation = planner.derive_relational_answer(sub_question, centers_facts)
+            if derivation.used_fallback or not derivation.answer:
+                sub_answers.append({"sub_question": sub_question, "answer": None, "reasoning": derivation.error or ""})
+            else:
+                sub_answers.append({
+                    "sub_question": sub_question, "answer": derivation.answer, "reasoning": derivation.reasoning,
+                })
+
+        if not all_centers_data:
+            return {
+                "title": "profile unavailable",
+                "profile_summary": "None of the decomposed sub-questions' entities were found in the graph.",
+                "key_facts": [],
+                "business_interpretation": ["Entity record missing for every named sub-question center."],
+                "evidence_limits": ["No sub-question resolved to a graph vertex."],
+                "next_questions": [],
+            }
+
+        merged = planner.merge_partial_answers(question, sub_answers)
+        # Reuses _compose_relational's existing "llm_reasoning" branch as-is
+        # (only checks resolution == "llm_reasoning" and a truthy answer) --
+        # the merge step IS an LLM-reasoning-over-facts derivation, just
+        # synthesized from per-sub-question partial answers instead of one
+        # single-shot call over all centers' facts together.
+        relation = {
+            "resolution": "llm_reasoning",
+            "path": None,
+            "answer": merged.answer if not (merged.used_fallback or not merged.answer) else None,
+            "supporting_center_nodes": [d["center_node"] for d in all_centers_data],
+            "supporting_labels": [d["label"] for d in all_centers_data],
+            "reasoning": merged.reasoning or merged.error,
+            "error": merged.error,
+        }
+        return self._compose_relational(all_centers_data, relation, question, None)
 
     # ------------------------------------------------------------------
     # Narrative builder

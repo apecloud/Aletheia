@@ -1,0 +1,1259 @@
+[
+  {
+    "qid": "5a70eee85542994082a3e3f0",
+    "question": "Which group of people in West Africa with significant populations in Ghana, Ivory Coast, Liberia and Sierra Leone use the Ida?",
+    "center_node": "5a70eee85542994082a3e3f0:yoruba_people",
+    "additional_center_nodes": [
+      "5a70eee85542994082a3e3f0:ida_sword"
+    ],
+    "answer": "The Yoruba",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 2,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a70f0e75542994082a3e408",
+    "question": "Which of these universities, Northwestern University or Johns Hopkins University, have a campus outside of the United States territories?",
+    "center_node": "5a70f0e75542994082a3e408:northwestern_university",
+    "additional_center_nodes": [
+      "5a70f0e75542994082a3e408:johns_hopkins_university"
+    ],
+    "answer": "with other campuses located in Chicago and Doha, Qatar",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 5,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a70f0a75542994082a3e403",
+    "question": "Which dialect spoken in the province of Scania calls Spettekaka, \"spiddekaga\"?",
+    "center_node": "5a70f0a75542994082a3e403:scanian_dialect",
+    "additional_center_nodes": [
+      "5a70f0a75542994082a3e403:spettekaka"
+    ],
+    "answer": "Scanian dialects",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 2,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a70f11a5542994082a3e40b",
+    "question": "Which dog breed, the Schapendoes or the Bull Terrier, has its origins in a greater number of other dog breeds?",
+    "center_node": "5a70f11a5542994082a3e40b:schapendoes",
+    "additional_center_nodes": [
+      "5a70f11a5542994082a3e40b:bull_terrier_miniature"
+    ],
+    "answer": "Bull Terrier",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 4,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a70f1685542994082a3e40f",
+    "question": "Which piece did Ludwig van Beethoven publish in 1801 that was dedicated to Count Moritz von Fries?",
+    "center_node": "5a70f1685542994082a3e40f:piano_sonata_no_27_beethoven",
+    "additional_center_nodes": [],
+    "answer": "Symphony No. 7",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 9,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a70f4695542994082a3e435",
+    "question": "Which canal was built between 1836 and 1847, Washington City Canal or Whitewater Canal?",
+    "center_node": "5a70f4695542994082a3e435:whitewater_canal",
+    "additional_center_nodes": [
+      "5a70f4695542994082a3e435:washington_city_canal"
+    ],
+    "answer": "The Whitewater Canal",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 6,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a70f39c5542994082a3e429",
+    "question": "What is the name of the independent candidate in Maine's 2010 gubernatorial race who finished ahead of Libby Mitchell?",
+    "center_node": "5a70f39c5542994082a3e429:eliot_cutler",
+    "additional_center_nodes": [
+      "5a70f39c5542994082a3e429:libby_mitchell",
+      "5a70f39c5542994082a3e429:maine_s_2010_gubernatorial_race"
+    ],
+    "answer": "Eliot Cutler",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 11,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a70f9335542994082a3e46a",
+    "question": "Which magazine is published more in a year, Essence or Alt for Damerne?",
+    "center_node": "5a70f9335542994082a3e46a:essence_magazine",
+    "additional_center_nodes": [
+      "5a70f9335542994082a3e46a:alt_for_damerne"
+    ],
+    "answer": "ALT for Damerne",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 2,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a70f4c45542994082a3e437",
+    "question": "Which Italian-American composer and librettist wrote the English language opera, Maria Golovin?",
+    "center_node": "5a70f4c45542994082a3e437:gian_carlo_menotti",
+    "additional_center_nodes": [
+      "5a70f4c45542994082a3e437:maria_golovin"
+    ],
+    "answer": "Gian Carlo Menotti",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 5,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a7100435542994082a3e4a3",
+    "question": "Are Finding Kraftland and Shikashika both frozen drinks?",
+    "center_node": "5a7100435542994082a3e4a3:finding_kraftland",
+    "additional_center_nodes": [
+      "5a7100435542994082a3e4a3:shikashika"
+    ],
+    "answer": "Shikashika is a shaved ice drink",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 3,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a70f6425542994082a3e44c",
+    "question": "Renamed in 2014, what was the vehicle offered as a prize to contestants on the first season of The Amazing Race Canada?",
+    "center_node": "5a70f6425542994082a3e44c:the_amazing_race_canada_1",
+    "additional_center_nodes": [
+      "5a70f6425542994082a3e44c:chevrolet_corvette_c7"
+    ],
+    "answer": "Chevrolet Corvette Stingrays",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 4,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a7103b35542994082a3e4c0",
+    "question": "Which mountain, Masherbrum or Khunyang Chhish, is a taller mountain?",
+    "center_node": "5a7103b35542994082a3e4c0:khunyang_chhish",
+    "additional_center_nodes": [
+      "5a7103b35542994082a3e4c0:masherbrum"
+    ],
+    "answer": "Khunyang Chhish",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 2,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a70ff335542994082a3e49c",
+    "question": "Which Indian actress who earned filmfare award for Best female debut in \"Refugee\" acted in K3G movie?",
+    "center_node": "5a70ff335542994082a3e49c:kareena_kapoor_filmography",
+    "additional_center_nodes": [
+      "5a70ff335542994082a3e49c:kabhi_khushi_kabhie_gham"
+    ],
+    "answer": "Kareena Kapoor Khan",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 5,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a7108fa5542994082a3e4ef",
+    "question": "Which battle, the Battle of Cold Harbor, or the Second Battle of Bull Run, was fought first?",
+    "center_node": "5a7108fa5542994082a3e4ef:second_battle_of_bull_run",
+    "additional_center_nodes": [
+      "5a7108fa5542994082a3e4ef:battle_of_cold_harbor"
+    ],
+    "answer": "Second Battle of Bull Run",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 2,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a71095e5542994082a3e4f3",
+    "question": "What is the name of Bruce Willis's character in Unbreakable?",
+    "center_node": "5a71095e5542994082a3e4f3:david_dunn_character",
+    "additional_center_nodes": [
+      "5a71095e5542994082a3e4f3:bruce_willis",
+      "5a71095e5542994082a3e4f3:unbreakable_film"
+    ],
+    "answer": "David Dunn",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 5,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a710a915542994082a3e504",
+    "question": "Which of these men, Scott Treleaven and Edmund Mortimer, is credited with working in both films and photography?",
+    "center_node": "5a710a915542994082a3e504:scott_treleaven",
+    "additional_center_nodes": [
+      "5a710a915542994082a3e504:edmund_mortimer_actor"
+    ],
+    "answer": "Scott Treleaven",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 9,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a7109e95542994082a3e4fa",
+    "question": "What town did Sean Robert Francis play in as part of the most successful club in the Republic of Ireland?",
+    "center_node": "5a7109e95542994082a3e4fa:sean_francis_footballer",
+    "additional_center_nodes": [
+      "5a7109e95542994082a3e4fa:shamrock_rovers"
+    ],
+    "answer": "Tallaght, South Dublin",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 11,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a71166d5542994082a3e576",
+    "question": "Which battle occurred first, the Battle of Manila or the Battle of Guam?",
+    "center_node": "5a71166d5542994082a3e576:battle_of_guam_1944",
+    "additional_center_nodes": [
+      "5a71166d5542994082a3e576:battle_of_manila_1574"
+    ],
+    "answer": "Battle of Guam",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 3,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a710a1e5542994082a3e4fd",
+    "question": "What is the genus of the viral disease that has symptoms such as fever, chills, loss of appetite, nausea, muscle pains, and headaches, and has a chance of causing liver damage?",
+    "center_node": "5a710a1e5542994082a3e4fd:yellow_fever",
+    "additional_center_nodes": [],
+    "answer": "Flavivirus",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 5,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a711cb45542994082a3e59f",
+    "question": "Who has won more Grand Slam women's doubles titles, Lisa Raymond or Liezel Huber?",
+    "center_node": "5a711cb45542994082a3e59f:lisa_raymond",
+    "additional_center_nodes": [
+      "5a711cb45542994082a3e59f:liezel_huber"
+    ],
+    "answer": "Liezel Huber",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 2,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a710bb15542994082a3e50d",
+    "question": "Which American professional poker player also starred in the 2015 movie \"Extraction\"?",
+    "center_node": "5a710bb15542994082a3e50d:dan_bilzerian",
+    "additional_center_nodes": [
+      "5a710bb15542994082a3e50d:extraction_film"
+    ],
+    "answer": "Dan Bilzerian",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 10,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a711ef85542994082a3e5ac",
+    "question": "Which hospital, the Psychiatric Institute of Washington or Howard University Hospital, is known for serving the African American community including former slaves?",
+    "center_node": "5a711ef85542994082a3e5ac:howard_university_hospital",
+    "additional_center_nodes": [
+      "5a711ef85542994082a3e5ac:psychiatric_institute_of_washington"
+    ],
+    "answer": "Howard University Hospital",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 6,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a710d155542994082a3e520",
+    "question": "Who was the defense counsel of a German woman who underwent Catholic exorcism rites during the year before her death?",
+    "center_node": "5a710d155542994082a3e520:erich_schmidt_leichner",
+    "additional_center_nodes": [
+      "5a710d155542994082a3e520:anneliese_michel"
+    ],
+    "answer": "Erich Schmidt-Leichner",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 8,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a7125165542994082a3e5d0",
+    "question": "Which composer was a French Romantic composer in the 1800's, Hector Berlioz or Gaetano Donizetti?",
+    "center_node": "5a7125165542994082a3e5d0:hector_berlioz",
+    "additional_center_nodes": [
+      "5a7125165542994082a3e5d0:gaetano_donizetti"
+    ],
+    "answer": "Louis-Hector Berlioz",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 9,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a71148b5542994082a3e567",
+    "question": "What was the population of the city where Penobscot Marine Museum is located?",
+    "center_node": "5a71148b5542994082a3e567:penobscot_marine_museum",
+    "additional_center_nodes": [],
+    "answer": "The population was 2,615",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 3,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a7128b05542994082a3e5f2",
+    "question": "Which film was released first, Laura's Star or Wonder Woman?",
+    "center_node": "5a7128b05542994082a3e5f2:laura_s_star",
+    "additional_center_nodes": [
+      "5a7128b05542994082a3e5f2:wonder_woman_2009_film"
+    ],
+    "answer": "Laura's Star",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 2,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a7115475542994082a3e56d",
+    "question": "In what movie did a Kenyan-Mexican actress, who graduated from Hampshire College, star in in 2015?",
+    "center_node": "5a7115475542994082a3e56d:lupita_nyong_o",
+    "additional_center_nodes": [],
+    "answer": "Star Wars: The Force Awakens",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 5,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a712fca5542994082a3e641",
+    "question": "Renáta Tomanová and Larisa Neiland are former professional athletes for what sport?",
+    "center_node": "5a712fca5542994082a3e641:ren_ta_tomanov",
+    "additional_center_nodes": [
+      "5a712fca5542994082a3e641:larisa_neiland"
+    ],
+    "answer": "professional tennis",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 4,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a7119095542994082a3e589",
+    "question": "Who is current vice captain of the English Test team, Jamie Atkinson or Ben Stokes?",
+    "center_node": "5a7119095542994082a3e589:ben_stokes",
+    "additional_center_nodes": [
+      "5a7119095542994082a3e589:jamie_atkinson"
+    ],
+    "answer": "Ben Stokes",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 6,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a713dcb5542994082a3e6d9",
+    "question": "What pursuit did both Gevork Minaskanian and George Stambolian have in common?",
+    "center_node": "5a713dcb5542994082a3e6d9:george_stambolian",
+    "additional_center_nodes": [
+      "5a713dcb5542994082a3e6d9:gevork_minaskanian"
+    ],
+    "answer": "American educator, writer,",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 6,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a7119f75542994082a3e58e",
+    "question": "When was the composer of \"Persian Surgery Dervishes\" born?",
+    "center_node": "5a7119f75542994082a3e58e:persian_surgery_dervishes",
+    "additional_center_nodes": [],
+    "answer": "June 24, 1935",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 2,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a713fb15542994082a3e6f0",
+    "question": "Did the board game San Marco or About Time come out first?",
+    "center_node": "5a713fb15542994082a3e6f0:san_marco_board_game",
+    "additional_center_nodes": [
+      "5a713fb15542994082a3e6f0:about_time_board_game"
+    ],
+    "answer": "San Marco",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 2,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a711bb55542994082a3e597",
+    "question": "Steven Covey, the father of Sean Covey, wrote what similar sounding title to The 7 Habits of Highly Effective Teens?",
+    "center_node": "5a711bb55542994082a3e597:the_8th_habit",
+    "additional_center_nodes": [],
+    "answer": "The 7 Habits of Highly Effective People",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 0,
+    "extraction_error": "hard timeout: no response after 45s (proxy/connect hang)"
+  },
+  {
+    "qid": "5a71443f5542994082a3e727",
+    "question": "Is Gasherbrum II or Nuptse closest to the tallest mountain in the world?",
+    "center_node": "5a71443f5542994082a3e727:nuptse",
+    "additional_center_nodes": [
+      "5a71443f5542994082a3e727:gasherbrum_ii"
+    ],
+    "answer": "It lies two kilometres WSW of Mount Everest.",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 3,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a711c535542994082a3e59b",
+    "question": "Albanians in Montenegro which make up 4.91 of the county's total population could be members of the Albanian Coalation Perspect which is a what?",
+    "center_node": "5a711c535542994082a3e59b:albanian_coalition_quot_perspective_quot",
+    "additional_center_nodes": [
+      "5a711c535542994082a3e59b:albanians_in_montenegro"
+    ],
+    "answer": "Albanian political party in Montenegro",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 2,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a7145d55542994082a3e73c",
+    "question": "Which person went into space at a later date, Sigmund Jähn or Christer Fuglesang?",
+    "center_node": "5a7145d55542994082a3e73c:christer_fuglesang",
+    "additional_center_nodes": [
+      "5a7145d55542994082a3e73c:sigmund_j_hn"
+    ],
+    "answer": "Christer Fuglesang",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 4,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a71214d5542994082a3e5b9",
+    "question": "What production company was founded by George Balanchine to create a live stage version of the 1942 film Casablanca?",
+    "center_node": "5a71214d5542994082a3e5b9:los_angeles_dance_theater",
+    "additional_center_nodes": [
+      "5a71214d5542994082a3e5b9:casablanca_film"
+    ],
+    "answer": "The Los Angeles Dance Theater",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 6,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a7148d25542994082a3e766",
+    "question": "Which of these artists is older, Warrel Dane or Roy Khan?",
+    "center_node": "5a7148d25542994082a3e766:warrel_dane",
+    "additional_center_nodes": [
+      "5a7148d25542994082a3e766:roy_khan"
+    ],
+    "answer": "Warrel Dane",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 2,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a71224f5542994082a3e5c1",
+    "question": "When was the actor born who starred in Nambia: The Struggle for Liberation and played Roger Murtaugh in the \"Lethal Weapon\" film series?",
+    "center_node": "5a71224f5542994082a3e5c1:danny_glover",
+    "additional_center_nodes": [
+      "5a71224f5542994082a3e5c1:lethal_weapon",
+      "5a71224f5542994082a3e5c1:namibia_the_struggle_for_liberation",
+      "5a71224f5542994082a3e5c1:roger_murtaugh"
+    ],
+    "answer": "July 22, 1946",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 11,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a714bb35542994082a3e78f",
+    "question": "Which composer was born later, Gaetano Donizetti or William Walton?",
+    "center_node": "5a714bb35542994082a3e78f:william_walton",
+    "additional_center_nodes": [
+      "5a7125165542994082a3e5d0:gaetano_donizetti"
+    ],
+    "answer": "William Turner Walton",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 2,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a71231a5542994082a3e5c4",
+    "question": "What edible, juicy fruit is grown on a deciduous tree called 'pesco' in Italian?",
+    "center_node": "5a71231a5542994082a3e5c4:pesco",
+    "additional_center_nodes": [],
+    "answer": "peach",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 5,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a714dea5542994082a3e7a9",
+    "question": "Which 2009 animated film is from Japan, Summer Wars or The Secret of Kells?",
+    "center_node": "5a714dea5542994082a3e7a9:summer_wars",
+    "additional_center_nodes": [
+      "5a714dea5542994082a3e7a9:the_secret_of_kells"
+    ],
+    "answer": "Summer Wars",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 8,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a7125b95542994082a3e5d5",
+    "question": "Which town has a greater population as of the 2010 census, Minden, Nevada or Gardnerville, Nevada?",
+    "center_node": "5a7125b95542994082a3e5d5:gardnerville_nevada",
+    "additional_center_nodes": [
+      "5a7125b95542994082a3e5d5:minden_nevada"
+    ],
+    "answer": "Gardnerville",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 2,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a7153d05542994082a3e7dc",
+    "question": "Which Istanbul mosque is unique for retaining a Baroque style of architecture, the Bayezid II Mosque or the Nusretiye Mosque?",
+    "center_node": "5a7153d05542994082a3e7dc:nusretiye_mosque",
+    "additional_center_nodes": [
+      "5a7153d05542994082a3e7dc:bayezid_ii_mosque"
+    ],
+    "answer": "Nusretiye Mosque",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 7,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a71278c5542994082a3e5e2",
+    "question": "What North Carolina native did Danja produce songs for?",
+    "center_node": "5a71278c5542994082a3e5e2:j_cole",
+    "additional_center_nodes": [
+      "5a71278c5542994082a3e5e2:danja_record_producer"
+    ],
+    "answer": "J. Cole",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 2,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a716f575542994082a3e82f",
+    "question": "Was it  Ishmael Reed or Joseph Campbell who said Follow your bliss?",
+    "center_node": "5a716f575542994082a3e82f:joseph_campbell",
+    "additional_center_nodes": [
+      "5a716f575542994082a3e82f:ishmael_reed"
+    ],
+    "answer": "Joseph John Campbell",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 17,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a7129685542994082a3e5fa",
+    "question": "Which \"Blackzilians\" fighter is currently competing in the Middleweight division of Ultimate Fighting Championship?",
+    "center_node": "5a7129685542994082a3e5fa:blackzilians",
+    "additional_center_nodes": [],
+    "answer": "Vitor Belfort",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 19,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a717d4c5542994082a3e854",
+    "question": "Who has written more than 300 papers, Semyon Aranovich Gershgorin or Pavel Alexandrov?",
+    "center_node": "5a717d4c5542994082a3e854:pavel_alexandrov",
+    "additional_center_nodes": [
+      "5a717d4c5542994082a3e854:semyon_aranovich_gershgorin"
+    ],
+    "answer": "Pavel Sergeyevich Alexandrov",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 2,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a71299e5542994082a3e5fe",
+    "question": "Drisheen is what type of product made in Ireland and other parts of Europe?",
+    "center_node": "5a71299e5542994082a3e5fe:drisheen",
+    "additional_center_nodes": [],
+    "answer": "Black pudding",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 11,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a7199725542994082a3e88f",
+    "question": "Which publication still relies on paper printing, Human Events or Texas Highways?",
+    "center_node": "5a7199725542994082a3e88f:human_events",
+    "additional_center_nodes": [
+      "5a7199725542994082a3e88f:texas_highways"
+    ],
+    "answer": "Texas Highways",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 7,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a712af15542994082a3e614",
+    "question": "Which show that premiered in May 2011 is hosted by someone with the birth name Richard Kirschner?",
+    "center_node": "5a712af15542994082a3e614:my_cat_from_hell",
+    "additional_center_nodes": [
+      "5a712af15542994082a3e614:jackson_galaxy"
+    ],
+    "answer": "My Cat from Hell",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 4,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a721e0e55429971e9dc928d",
+    "question": "which university was founded first Duke University or Tufts University?",
+    "center_node": "5a721e0e55429971e9dc928d:duke_university",
+    "additional_center_nodes": [
+      "5a721e0e55429971e9dc928d:tufts_university"
+    ],
+    "answer": "Duke University",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 2,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a712beb5542994082a3e61c",
+    "question": "What Golden Globe Award actor starred in the film Little Fugitive?",
+    "center_node": "5a712beb5542994082a3e61c:peter_dinklage",
+    "additional_center_nodes": [
+      "5a712beb5542994082a3e61c:little_fugitive_2006_film"
+    ],
+    "answer": "Peter Dinklage",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 2,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a72224755429971e9dc92be",
+    "question": "Which was founded first, Dain Rauscher Wessels or Berenberg Bank?",
+    "center_node": "5a72224755429971e9dc92be:berenberg_bank",
+    "additional_center_nodes": [
+      "5a72224755429971e9dc92be:dain_rauscher_wessels"
+    ],
+    "answer": "Dain Rauscher Wessels",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 2,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a712c4b5542994082a3e622",
+    "question": "What heritage site, known for a British explorer, is listed Seventeen Seventy Australia?",
+    "center_node": "5a712c4b5542994082a3e622:cook_s_landing_place_town_of__20f60aa935",
+    "additional_center_nodes": [],
+    "answer": "Captain Cook's Landing Place",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 9,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a7222b155429971e9dc92c4",
+    "question": "Which film, The Happiest Millionaire or Mars Needs Moms, was created first?",
+    "center_node": "5a7222b155429971e9dc92c4:the_happiest_millionaire",
+    "additional_center_nodes": [
+      "5a7222b155429971e9dc92c4:mars_needs_moms"
+    ],
+    "answer": "The Happiest Millionaire",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 2,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a712e895542994082a3e636",
+    "question": "C.J. Hunter was tested positive for which type of injected steroid before he competed in the 2000 Summer Olympic Games?",
+    "center_node": "5a712e895542994082a3e636:c_j_hunter",
+    "additional_center_nodes": [],
+    "answer": "anabolic–androgenic steroid (AAS)",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 3,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a724dc25542990c210a40df",
+    "question": "Which was released later, The Strongest Man in the World, or Roving Mars?",
+    "center_node": "5a724dc25542990c210a40df:the_strongest_man_in_the_world",
+    "additional_center_nodes": [
+      "5a724dc25542990c210a40df:roving_mars"
+    ],
+    "answer": "Roving Mars",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 4,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a7130365542994082a3e645",
+    "question": "What town did Moe Sedway have success in after Benjamin \"Bugsy\" Siegel's murder?",
+    "center_node": "5a7130365542994082a3e645:moe_sedway",
+    "additional_center_nodes": [
+      "5a7130365542994082a3e645:bugsy_siegel"
+    ],
+    "answer": "Las Vegas",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 11,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a72688c5542997f827839b2",
+    "question": "The Atik Valide Mosque and Valens Aqueduct are found in what country?",
+    "center_node": "5a72688c5542997f827839b2:atik_valide_mosque",
+    "additional_center_nodes": [
+      "5a72688c5542997f827839b2:valens_aqueduct"
+    ],
+    "answer": "Turkey",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 2,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a7131565542994082a3e64f",
+    "question": "Q: Which actor played a role in the comedy series \"30 Rock\" as well as the drama series \"Mad Men\"? A: Jon Hamm",
+    "center_node": "5a7131565542994082a3e64f:jon_hamm",
+    "additional_center_nodes": [],
+    "answer": "Jon Hamm",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 0,
+    "extraction_error": "hard timeout: no response after 45s (proxy/connect hang)"
+  },
+  {
+    "qid": "5a7269fa5542992359bc308d",
+    "question": "Which tennis player was born first, Kimberly Po or Leoš Friedl?",
+    "center_node": "5a7269fa5542992359bc308d:kimberly_po",
+    "additional_center_nodes": [
+      "5a7269fa5542992359bc308d:leo_friedl"
+    ],
+    "answer": "Leoš Friedl",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 2,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a7133565542994082a3e65c",
+    "question": "What Kentucky county has a population of 60,316 and features the Lake Louisvilla neighborhood?",
+    "center_node": "5a7133565542994082a3e65c:oldham_county_kentucky",
+    "additional_center_nodes": [
+      "5a7133565542994082a3e65c:lake_louisvilla_louisville"
+    ],
+    "answer": "Oldham County",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 2,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a726b0f5542997f827839be",
+    "question": "Who was born first, Samantha Cristoforetti or Jean-Loup Chrétien",
+    "center_node": "5a726b0f5542997f827839be:jean_loup_chr_tien",
+    "additional_center_nodes": [
+      "5a726b0f5542997f827839be:samantha_cristoforetti"
+    ],
+    "answer": "Jean-Loup Jacques Marie Chrétien",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 2,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a7133fa5542994082a3e660",
+    "question": "What is the relation between current manager of Chinese club Tianjin Quanjian and Paolo Cannavaro?",
+    "center_node": "5a7133fa5542994082a3e660:paolo_cannavaro",
+    "additional_center_nodes": [
+      "5a7133fa5542994082a3e660:paolo_cannavaro",
+      "5a7133fa5542994082a3e660:tianjin_quanjian_f_c"
+    ],
+    "answer": "brother",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 3,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a7280925542991f9a20c4a1",
+    "question": "Pokémon: Arceus and the Jewel of Life and Totally Spies! The Movie both released in what year?",
+    "center_node": "5a7280925542991f9a20c4a1:pok_mon_arceus_and_the_jewel_of_life",
+    "additional_center_nodes": [
+      "5a7280925542991f9a20c4a1:totally_spies_the_movie"
+    ],
+    "answer": "2009",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 2,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a7136e25542994082a3e67e",
+    "question": "What Hong Kong actor born in 1980 will star in \"Heart and Greed\"?",
+    "center_node": "5a7136e25542994082a3e67e:heart_and_greed",
+    "additional_center_nodes": [],
+    "answer": "Bosco Wong Chung-chak",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 7,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a728f745542991f9a20c4e6",
+    "question": "Which magazine was founded first, Diva or Elle?",
+    "center_node": "5a728f745542991f9a20c4e6:syracuse_triad",
+    "additional_center_nodes": [],
+    "answer": "Elle",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 0,
+    "extraction_error": "Failed to parse JSON from LLM response; finish_reason=stop"
+  },
+  {
+    "qid": "5a7137dc5542994082a3e68a",
+    "question": "Kevin Wayne Durant was named what ?(An Award initiated following 1952-53 NBA Season?",
+    "center_node": "5a7137dc5542994082a3e68a:kevin_durant",
+    "additional_center_nodes": [],
+    "answer": "The National Basketball Association's Rookie of the Year",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 9,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a72908f5542994cef4bc33b",
+    "question": "Which musician, Ciaran Gribbin or Brett Scallions, is a member of the post-grunge band Fuel?",
+    "center_node": "5a72908f5542994cef4bc33b:brett_scallions",
+    "additional_center_nodes": [
+      "5a72908f5542994cef4bc33b:ciaran_gribbin"
+    ],
+    "answer": "Brett Allen Scallions",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 8,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a71380c5542994082a3e68b",
+    "question": "What iron-hulled steamship designed by Theodore Timby was The Orleans County Monitor Newspaper named after?",
+    "center_node": "5a71380c5542994082a3e68b:orleans_county_monitor",
+    "additional_center_nodes": [
+      "5a71380c5542994082a3e68b:uss_monitor"
+    ],
+    "answer": "USS \"Monitor\"",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 3,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a7296815542991f9a20c515",
+    "question": "Who brewed the first espresso coffee in space, Patrick Baudry or Samantha Cristoforetti?",
+    "center_node": "5a726b0f5542997f827839be:samantha_cristoforetti",
+    "additional_center_nodes": [
+      "5a7296815542991f9a20c515:patrick_baudry"
+    ],
+    "answer": "Samantha Cristoforetti",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 3,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a713a5a5542994082a3e6a9",
+    "question": "What football club plays in the area between the old tool gates: Brook Bar and Trafford bar?",
+    "center_node": "5a713a5a5542994082a3e6a9:old_trafford_greater_manchester",
+    "additional_center_nodes": [],
+    "answer": "Manchester United",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 4,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a7299e75542991f9a20c524",
+    "question": "What movie was released at a later date, My Dog Tulip or Monsters vs. Aliens?",
+    "center_node": "5a7299e75542991f9a20c524:monsters_vs_aliens",
+    "additional_center_nodes": [
+      "5a7299e75542991f9a20c524:my_dog_tulip"
+    ],
+    "answer": "Monsters vs. Aliens",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 2,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a713b325542994082a3e6b5",
+    "question": "What was the capital of India when the Taj Mahal was commissioned?",
+    "center_node": "5a713b325542994082a3e6b5:taj_mahal",
+    "additional_center_nodes": [],
+    "answer": "Agra",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 5,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a729fa15542994cef4bc397",
+    "question": "Which movie came out first, \"Bambi\" or \"Underdog\"?",
+    "center_node": "5a729fa15542994cef4bc397:bambi",
+    "additional_center_nodes": [
+      "5a729fa15542994cef4bc397:underdog_film"
+    ],
+    "answer": "Bambi",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 2,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a713ea95542994082a3e6e4",
+    "question": "Alvaro Mexia had a diplomatic mission with which tribe of indigenous people?",
+    "center_node": "5a713ea95542994082a3e6e4:alvaro_mexia",
+    "additional_center_nodes": [],
+    "answer": "Apalachees",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 3,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a72a2935542991f9a20c546",
+    "question": "Is Velvetpark or Shape magazine written more for a lesbian and queer-identified female readership?",
+    "center_node": "5a72a2935542991f9a20c546:velvetpark",
+    "additional_center_nodes": [
+      "5a72a2935542991f9a20c546:shape_magazine"
+    ],
+    "answer": "Velvetpark",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 5,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a713f395542994082a3e6ea",
+    "question": "Where does the state legislature in which John Coffin Talbot served convene?",
+    "center_node": "5a713f395542994082a3e6ea:john_c_talbot",
+    "additional_center_nodes": [],
+    "answer": "the State House in Augusta",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 3,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a72abb95542992359bc3162",
+    "question": "Which film was not a 3D computer-animation Cars 3 or Smith!?",
+    "center_node": "5a72abb95542992359bc3162:smith",
+    "additional_center_nodes": [
+      "5a72abb95542992359bc3162:cars_3"
+    ],
+    "answer": "Smith!",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 12,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a713f3c5542994082a3e6eb",
+    "question": "Where does the train that runs from NYC and Miami station at in Florida?",
+    "center_node": "5a713f3c5542994082a3e6eb:silver_meteor",
+    "additional_center_nodes": [],
+    "answer": "Jacksonville station",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 10,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a72ac8a5542992359bc3164",
+    "question": "Which body of water required more intensive man made barriers the Dundee Canal or Lake Worth Lagoon?",
+    "center_node": "5a72ac8a5542992359bc3164:lake_worth_lagoon",
+    "additional_center_nodes": [
+      "5a72ac8a5542992359bc3164:dundee_canal"
+    ],
+    "answer": "The Dundee Canal",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 12,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a7140585542994082a3e6fa",
+    "question": "Seal Harris was born in what county?",
+    "center_node": "5a7140585542994082a3e6fa:seale_harris",
+    "additional_center_nodes": [],
+    "answer": "Polk County",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 2,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a72aec45542994cef4bc3d7",
+    "question": "Which author lived longer, Nelson Algren or Nathanael West?",
+    "center_node": "5a72aec45542994cef4bc3d7:nelson_algren",
+    "additional_center_nodes": [
+      "5a72aec45542994cef4bc3d7:nathanael_west"
+    ],
+    "answer": "Nelson Algren",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 4,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a71419f5542994082a3e70d",
+    "question": "Riema Juhani Karppinen won the silver medal at what event held outside of Munich, Germany?",
+    "center_node": "5a71419f5542994082a3e70d:reima_karppinen",
+    "additional_center_nodes": [
+      "5a71419f5542994082a3e70d:1981_world_rowing_championships"
+    ],
+    "answer": "1981 World Rowing Championships",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 11,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a72bbfa5542992359bc318d",
+    "question": "Which university was established first, University of Washington or Texas Christian University?",
+    "center_node": "5a72bbfa5542992359bc318d:university_of_washington",
+    "additional_center_nodes": [
+      "5a72bbfa5542992359bc318d:texas_christian_university"
+    ],
+    "answer": "University of Washington",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 2,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a7143625542994082a3e71e",
+    "question": "Who co-founded View Askew Productions and produced numerous movies starring Jason Lee?",
+    "center_node": "5a7143625542994082a3e71e:view_askew_productions",
+    "additional_center_nodes": [
+      "5a7143625542994082a3e71e:jason_lee",
+      "5a7143625542994082a3e71e:kevin_smith"
+    ],
+    "answer": "Kevin Smith",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 7,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a72bd0b5542992359bc318f",
+    "question": "Who achieved more academically, Andrea Martin or Mark Hoplamazian?",
+    "center_node": "5a72bd0b5542992359bc318f:mark_hoplamazian",
+    "additional_center_nodes": [
+      "5a72bd0b5542992359bc318f:andrea_martin"
+    ],
+    "answer": "Mark S. Hoplamazian",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 12,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a71446b5542994082a3e72a",
+    "question": "Who signed into law the act made to lower barriers to adoption?",
+    "center_node": "5a71446b5542994082a3e72a:adoption_and_safe_families_act_of_1997",
+    "additional_center_nodes": [],
+    "answer": "President Bill Clinton",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 4,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a72c9e85542991f9a20c595",
+    "question": "Gabriela Mistral and Alan Sillitoe were both in what profession?",
+    "center_node": "5a72c9e85542991f9a20c595:gabriela_mistral",
+    "additional_center_nodes": [
+      "5a72c9e85542991f9a20c595:alan_sillitoe"
+    ],
+    "answer": "writers",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 2,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a71474b5542994082a3e74f",
+    "question": "What was triggered by the resignation of Conservative MP Stephen Phillips on 4 November 2016 and was when Caroline Johnson became a Member of Parliament?",
+    "center_node": "5a71474b5542994082a3e74f:sleaford_and_north_hykeham_by_d049c7ed55",
+    "additional_center_nodes": [
+      "5a71474b5542994082a3e74f:caroline_johnson",
+      "5a71474b5542994082a3e74f:stephen_phillips_politician"
+    ],
+    "answer": "The Sleaford and North Hykeham by-election",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 6,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a7300b85542994cef4bc41a",
+    "question": "Gaia is a space observatory of the European Space Agency, what is Astrosat?",
+    "center_node": "5a7300b85542994cef4bc41a:astrosat",
+    "additional_center_nodes": [
+      "5a7300b85542994cef4bc41a:gaia_spacecraft"
+    ],
+    "answer": "India's first dedicated multi-wavelength space observatory.",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 4,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a7147fd5542994082a3e758",
+    "question": "When was the king that started coin production in Copenhagen born?",
+    "center_node": "5a7147fd5542994082a3e758:john_king_of_denmark",
+    "additional_center_nodes": [],
+    "answer": "2 February 1455",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 4,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a73090455429901807daf6e",
+    "question": "Vocelli Pizza and Noble Roman's serve which kind of food?",
+    "center_node": "5a73090455429901807daf6e:vocelli_pizza",
+    "additional_center_nodes": [
+      "5a73090455429901807daf6e:noble_roman_s"
+    ],
+    "answer": "Pizza",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 2,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a7148005542994082a3e759",
+    "question": "What tower house near Aberchirder, Aberdeenshire did David Gregory inherit?",
+    "center_node": "5a7148005542994082a3e759:david_gregory_physician",
+    "additional_center_nodes": [],
+    "answer": "Kinnairdy Castle",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 4,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a730a6b5542992359bc3210",
+    "question": "Who is older Craig Nicholls or Norman Blake ?",
+    "center_node": "5a730a6b5542992359bc3210:craig_nicholls",
+    "additional_center_nodes": [
+      "5a730a6b5542992359bc3210:norman_blake_scottish_musician"
+    ],
+    "answer": "Norman Blake",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 2,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a7148685542994082a3e761",
+    "question": "Paul Ziert recruited what two time gold medalist in gymnastics?",
+    "center_node": "5a7148685542994082a3e761:paul_ziert",
+    "additional_center_nodes": [],
+    "answer": "Bart Conner",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 3,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a7319bc5542992359bc3235",
+    "question": "Who lived longer, Leonid Khachiyan or Nikolai Lobachevsky?",
+    "center_node": "5a7319bc5542992359bc3235:leonid_khachiyan",
+    "additional_center_nodes": [
+      "5a7319bc5542992359bc3235:nikolai_lobachevsky"
+    ],
+    "answer": "Nikolai Ivanovich Lobachevsky",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 4,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a7149595542994082a3e76f",
+    "question": "Who starred in Love and other drugs and The Simpsons?",
+    "center_node": "5a7149595542994082a3e76f:hank_azaria",
+    "additional_center_nodes": [
+      "5a7149595542994082a3e76f:love_amp_other_drugs"
+    ],
+    "answer": "Henry Albert \"Hank\" Azaria",
+    "type": "bridge",
+    "level": "hard",
+    "triple_count": 2,
+    "extraction_error": ""
+  },
+  {
+    "qid": "5a731c205542994cef4bc45d",
+    "question": "A business such as Eatza Pizza or Pizza Fusion, which have more then 10 locations are considered to be what?",
+    "center_node": "5a731c205542994cef4bc45d:eatza_pizza",
+    "additional_center_nodes": [
+      "5a731c205542994cef4bc45d:pizza_fusion"
+    ],
+    "answer": "restaurant chain",
+    "type": "comparison",
+    "level": "hard",
+    "triple_count": 2,
+    "extraction_error": ""
+  }
+]

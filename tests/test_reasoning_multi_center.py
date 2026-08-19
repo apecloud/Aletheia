@@ -90,9 +90,99 @@ class FindPathBetweenCentersTest(unittest.TestCase):
         self.assertEqual(path, [])
 
 
+class BuildEvidenceChainsTest(unittest.TestCase):
+    """_build_evidence_chains: BFS-based explicit path chains -- borrowed
+    from StepChain GraphRAG's BFS Reasoning Flow (arXiv:2510.02827),
+    replacing the previous flat "direct edge, or floating same-string pair
+    past depth 1" fact representation."""
+
+    def test_one_hop_chain(self):
+        nodes = [{"id": "beethoven", "label": "Ludwig van Beethoven"}, {"id": "sonata", "label": "Violin Sonata No. 4"}]
+        edges = [{"source": "beethoven", "target": "sonata", "label": "composed"}]
+        chains = ReasoningEngine._build_evidence_chains("beethoven", nodes, edges)
+        self.assertEqual(chains, ["Ludwig van Beethoven -composed-> Violin Sonata No. 4"])
+
+    def test_two_hop_chain_is_explicit_not_floating(self):
+        """The exact gap this replaces: a depth-2 fact ("dedicated_to") used
+        to float disconnected from the center, relying on the model to
+        notice a matching label string. Now it's one continuous chain."""
+        nodes = [
+            {"id": "beethoven", "label": "Ludwig van Beethoven"},
+            {"id": "sonata", "label": "Violin Sonata No. 4"},
+            {"id": "fries", "label": "Count Moritz von Fries"},
+        ]
+        edges = [
+            {"source": "beethoven", "target": "sonata", "label": "composed"},
+            {"source": "sonata", "target": "fries", "label": "dedicated_to"},
+        ]
+        chains = ReasoningEngine._build_evidence_chains("beethoven", nodes, edges)
+        self.assertIn(
+            "Ludwig van Beethoven -composed-> Violin Sonata No. 4 -dedicated_to-> Count Moritz von Fries",
+            chains,
+        )
+
+    def test_reverse_edge_uses_reverse_arrow(self):
+        nodes = [{"id": "a", "label": "A"}, {"id": "b", "label": "B"}]
+        edges = [{"source": "b", "target": "a", "label": "acquired"}]
+        chains = ReasoningEngine._build_evidence_chains("a", nodes, edges)
+        self.assertEqual(chains, ["A <-acquired- B"])
+
+    def test_no_edges_returns_no_chains(self):
+        chains = ReasoningEngine._build_evidence_chains("a", [{"id": "a", "label": "A"}], [])
+        self.assertEqual(chains, [])
+
+    def test_max_chains_bounds_output(self):
+        nodes = [{"id": "center", "label": "Center"}] + [{"id": f"n{i}", "label": f"N{i}"} for i in range(10)]
+        edges = [{"source": "center", "target": f"n{i}", "label": "rel"} for i in range(10)]
+        chains = ReasoningEngine._build_evidence_chains("center", nodes, edges, max_chains=3)
+        self.assertEqual(len(chains), 3)
+
+    def test_cycle_does_not_infinite_loop(self):
+        nodes = [{"id": "a", "label": "A"}, {"id": "b", "label": "B"}]
+        edges = [
+            {"source": "a", "target": "b", "label": "r1"},
+            {"source": "b", "target": "a", "label": "r2"},
+        ]
+        chains = ReasoningEngine._build_evidence_chains("a", nodes, edges)
+        self.assertEqual(chains, ["A -r1-> B"])
+
+
 class LLMDeriveRelationalAnswerTest(unittest.TestCase):
     def setUp(self):
         self.engine = ReasoningEngine(FakeRepo())
+
+    def test_graph_native_center_builds_evidence_chain_facts(self):
+        """A graph-native entity (no props, real facts live in edges) now
+        gets explicit BFS evidence-chain facts, not the old direct/floating
+        representation -- see _build_evidence_chains."""
+        captured = {}
+
+        class FakePlanner:
+            def derive_relational_answer(self, question, centers_facts):
+                captured["centers_facts"] = centers_facts
+                return RelationalDerivation(answer="Violin Sonata No. 4", supporting_center_nodes=["work:beethoven"])
+
+        nodes = [
+            {"id": "beethoven", "label": "Ludwig van Beethoven"},
+            {"id": "sonata", "label": "Violin Sonata No. 4"},
+            {"id": "fries", "label": "Count Moritz von Fries"},
+        ]
+        edges = [
+            {"source": "beethoven", "target": "sonata", "label": "composed"},
+            {"source": "sonata", "target": "fries", "label": "dedicated_to"},
+        ]
+        data = _center_data("work:beethoven", "Ludwig van Beethoven", nodes=nodes, edges=edges)
+        data["instance_id"] = "beethoven"
+
+        with patch.object(self.engine, "_get_llm_planner", return_value=FakePlanner()):
+            self.engine._llm_derive_relational_answer("q?", [data])
+
+        facts = captured["centers_facts"][0]["facts"]
+        self.assertTrue(all(f["relation"] == "evidence_chain" for f in facts))
+        self.assertIn(
+            "Ludwig van Beethoven -composed-> Violin Sonata No. 4 -dedicated_to-> Count Moritz von Fries",
+            [f["value"] for f in facts],
+        )
 
     def test_no_llm_planner_degrades_gracefully(self):
         with patch.object(self.engine, "_get_llm_planner", return_value=None):

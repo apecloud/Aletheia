@@ -28,6 +28,7 @@ import re
 import logging
 import os
 import time
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -112,6 +113,69 @@ class PlannerMapping:
 
 
 @dataclass
+class QuestionEntityMentions:
+    """Result of identifying which real-world entity/entities a bare
+    question refers to -- no passages, no known graph vertices given, just
+    the question text. Unlike closed-world extraction (which validates a
+    name against a given candidate list), this asks the model to use its
+    own general knowledge to resolve INDIRECT/DESCRIPTIVE references (e.g.
+    "which group of people in West Africa with populations in Ghana, Ivory
+    Coast... uses the Ida?" -> "Yoruba people", never named in the question
+    itself). The caller resolves each returned name against the actual
+    graph (e.g. via agents/ontology_label_embeddings.find_nearest_label)
+    -- a hallucinated name simply fails that lookup, so this doesn't need
+    its own closed-world validation the way passage extraction does."""
+    mentions: list[str] = field(default_factory=list)
+    latency_ms: float = 0.0
+    model: str = ""
+    used_fallback: bool = False
+    error: str = ""
+    error_type: str = ""
+
+
+@dataclass
+class EntityCandidateVerification:
+    """Result of asking the model to pick which (if any) retrieved
+    candidate a guessed entity mention actually refers to. A guessed
+    mention name (from ``extract_question_entity_mentions``) doesn't always
+    match the graph's exact label spelling -- this closes that gap by
+    retrieving several nearest candidates (not trusting a single nearest-
+    neighbor argmin) and letting the model confirm/pick among them, the
+    same "disambiguate against a given candidate list" pattern already
+    proven for closed-world passage extraction, just with the candidate
+    list built from vector search instead of given passage titles."""
+    chosen_index: int | None = None
+    latency_ms: float = 0.0
+    model: str = ""
+    used_fallback: bool = False
+    error: str = ""
+    error_type: str = ""
+
+
+@dataclass
+class EntityDescriptionResult:
+    """Result of summarizing an entity's evidence sentences (already
+    extracted during passage extraction, no new reading) into a short
+    description -- borrowed from GraphRAG's own construction pipeline,
+    which embeds a description of everything the corpus says about an
+    entity rather than just its bare label, giving query-time entity
+    linking (``extract_question_entity_mentions`` +
+    ``verify_entity_candidate``) much more to match against than a
+    same-looking name alone. Used only to build a query-time-linking
+    embedding index (``agents/ontology_label_embeddings.py``'s
+    "description" field) -- never fed into construction-time entity
+    dedup (``agents/graph_entity_resolver.py``), which needs the
+    stability of a bare type+label match, not context that varies by
+    which passage happened to mention the entity."""
+    description: str = ""
+    latency_ms: float = 0.0
+    model: str = ""
+    used_fallback: bool = False
+    error: str = ""
+    error_type: str = ""
+
+
+@dataclass
 class RelationalDerivation:
     """Result of deriving an answer from several centers' own facts (used
     when no direct graph path connects them). Not tied to any question
@@ -125,6 +189,40 @@ class RelationalDerivation:
     of the given centers depending on what the question actually needs."""
     answer: str = ""
     supporting_center_nodes: list[str] = field(default_factory=list)
+    reasoning: str = ""
+    latency_ms: float = 0.0
+    model: str = ""
+    used_fallback: bool = False
+    error: str = ""
+    error_type: str = ""
+
+
+@dataclass
+class QuestionDecomposition:
+    """Result of splitting a question into independent logical sub-
+    questions, each answerable by starting from ONE named entity and
+    following its own relation(s) -- borrowed from StepChain GraphRAG
+    (arXiv:2510.02827), whose own ablation study found question
+    decomposition to be the single biggest lever on HotpotQA accuracy,
+    bigger than adding graph-based reasoning alone. An already-atomic
+    question (one clue, one hop) decomposes to a single-item list
+    containing itself unchanged -- the caller treats that as a no-op signal
+    to use the existing non-decomposed resolution path instead."""
+    sub_questions: list[str] = field(default_factory=list)
+    latency_ms: float = 0.0
+    model: str = ""
+    used_fallback: bool = False
+    error: str = ""
+    error_type: str = ""
+
+
+@dataclass
+class MergedAnswerResult:
+    """Result of synthesizing a final answer from each sub-question's own
+    partial answer (see QuestionDecomposition's docstring) -- mirrors
+    StepChain GraphRAG's two-tier merge (partial per-sub-question answers
+    -> a single LLM synthesis re-grounded against the original question)."""
+    answer: str = ""
     reasoning: str = ""
     latency_ms: float = 0.0
     model: str = ""
@@ -195,6 +293,14 @@ class LLMPlanner:
         # max_tokens to the provider. The planner should not impose a completion cap.
         self.max_tokens = None
         self.last_result: PlannerMapping | None = None
+        # litellm's own `timeout=` kwarg doesn't reliably fire on a stuck
+        # proxy/SOCKS CONNECT tunnel -- observed hanging indefinitely (0% CPU,
+        # ESTABLISHED connection to a local proxy that never responds) during
+        # a real benchmark run. Same hard-timeout pattern as
+        # GraphHitJudge/PassageRelationExtractor: run completion() in a
+        # worker thread and enforce our own wall-clock timeout via
+        # future.result().
+        self._executor = ThreadPoolExecutor(max_workers=4)
 
     @staticmethod
     def classify_error(error: str) -> str:
@@ -254,6 +360,38 @@ class LLMPlanner:
             return max(0, int(raw))
         except ValueError:
             return 1
+
+    @staticmethod
+    def _transient_error_retry_count() -> int:
+        """Extra retries for network/timeout exceptions raised while calling
+        the model (dropped connections, proxy hangs, hard timeouts) --
+        separate from ``_empty_response_retry_count``, which only covers the
+        model responding with no text candidates. Shared by every LLM call
+        site in this codebase (planner, relational-answer derivation,
+        extractor, judge) -- without this, a single transient network blip
+        immediately falls back to a degraded non-LLM path (keyword-only
+        matching, substring scoring, etc.) instead of just retrying. Real
+        observed cause: a local proxy shared by many unrelated processes on
+        the machine occasionally refuses new connections under load
+        (``[Errno 61] Connection refused``), not a remote rate limit."""
+        raw = os.environ.get("ALETHEIA_LLM_TRANSIENT_RETRIES", "2")
+        try:
+            return max(0, int(raw))
+        except ValueError:
+            return 2
+
+    @staticmethod
+    def _retry_backoff_seconds() -> float:
+        """Delay before retrying after a transient network error, so a
+        momentarily-congested shared proxy has time to drain -- observed:
+        every retry attempt failing with the identical "Connection refused"
+        error, back to back, with no delay between them, meaning an instant
+        retry mostly just re-hits the same congestion."""
+        raw = os.environ.get("ALETHEIA_LLM_RETRY_BACKOFF_SECONDS", "2.0")
+        try:
+            return max(0.0, float(raw))
+        except ValueError:
+            return 2.0
 
     @staticmethod
     def _default_model() -> str:
@@ -377,15 +515,17 @@ class LLMPlanner:
             "\"selected_capabilities\": [str], \"entity_mentions\": [str]}"
         )
 
-        try:
-            parsed = None
-            raw_contents = []
-            raw_content = ""
-            finish_reason = ""
-            max_attempts = 1 + self._empty_response_retry_count()
+        parsed = None
+        raw_contents = []
+        raw_content = ""
+        finish_reason = ""
+        last_exception: Exception | None = None
+        max_attempts = 1 + self._empty_response_retry_count() + self._transient_error_retry_count()
 
-            for attempt in range(1, max_attempts + 1):
-                raw_response = completion(
+        for attempt in range(1, max_attempts + 1):
+            try:
+                future = self._executor.submit(
+                    completion,
                     model=self.model,
                     messages=[
                         {"role": "system", "content": self.system_prompt + json_instruction},
@@ -395,6 +535,23 @@ class LLMPlanner:
                     temperature=self.temperature,
                     **self._completion_kwargs(),
                 )
+                try:
+                    raw_response = future.result(timeout=self.timeout + 15)
+                except FutureTimeoutError:
+                    # Python 3.11+ makes concurrent.futures.TimeoutError an
+                    # alias of the builtin TimeoutError, so this branch also
+                    # catches a TimeoutError raised BY completion() itself
+                    # (e.g. litellm's own timeout= firing normally) -- not
+                    # just our own wait timing out. future.done() tells them
+                    # apart: True means completion() already ran and raised
+                    # on its own (re-raise that original error as-is); False
+                    # means our wait genuinely elapsed with no response.
+                    if future.done():
+                        raise
+                    future.cancel()
+                    raise TimeoutError(
+                        f"hard timeout: no response after {self.timeout + 15:.0f}s (proxy/connect hang)"
+                    )
 
                 # Extract parseable final content. Some reasoning models expose
                 # non-final text in reasoning_content; parse it only as recovery.
@@ -408,6 +565,7 @@ class LLMPlanner:
                         finish_reason = raw_finish_reason
                     raw_contents = self._response_text_candidates(msg)
 
+                last_exception = None
                 raw_content = raw_contents[0] if raw_contents else ""
                 for candidate in raw_contents:
                     parsed = self._parse_json_response(candidate)
@@ -422,7 +580,17 @@ class LLMPlanner:
                     "LLM planner: empty response for question=%r, retrying attempt %d/%d",
                     question[:80], attempt + 1, max_attempts,
                 )
+            except Exception as e:
+                last_exception = e
+                if attempt == max_attempts:
+                    break
+                logger.warning(
+                    "LLM planner: transient error (%s) on attempt %d/%d, retrying: %s",
+                    self.classify_error(str(e)), attempt, max_attempts, e,
+                )
+                time.sleep(self._retry_backoff_seconds())
 
+        try:
             if parsed:
                 for candidate in parsed.get("selected_relations", []):
                     key = candidate.get("link_key", "")
@@ -455,6 +623,12 @@ class LLMPlanner:
                     "LLM planner: question=%r, matched %d relations, %.0fms",
                     question[:80], len(result.matched_link_keys), result.latency_ms
                 )
+            elif last_exception is not None:
+                result.error = str(last_exception)
+                result.error_type = self.classify_error(result.error)
+                result.used_fallback = True
+                result.latency_ms = (time.time() - start) * 1000
+                logger.warning("LLM planner failed after retries: %s", last_exception)
             else:
                 result.error = self._parse_failure_message(raw_contents, finish_reason)
                 result.error_type = "runtime_invalid"
@@ -689,15 +863,17 @@ Derive the answer to the question from these facts, and list which center_node(s
             self.last_result = result
             return result
 
-        try:
-            parsed = None
-            raw_contents: list[str] = []
-            raw_content = ""
-            finish_reason = ""
-            max_attempts = 1 + self._empty_response_retry_count()
+        parsed = None
+        raw_contents: list[str] = []
+        raw_content = ""
+        finish_reason = ""
+        last_exception: Exception | None = None
+        max_attempts = 1 + self._empty_response_retry_count() + self._transient_error_retry_count()
 
-            for attempt in range(1, max_attempts + 1):
-                raw_response = completion(
+        for attempt in range(1, max_attempts + 1):
+            try:
+                future = self._executor.submit(
+                    completion,
                     model=self.model,
                     messages=[
                         {"role": "system", "content": self.RELATIONAL_SYSTEM_PROMPT + json_instruction},
@@ -707,6 +883,23 @@ Derive the answer to the question from these facts, and list which center_node(s
                     temperature=self.temperature,
                     **self._completion_kwargs(),
                 )
+                try:
+                    raw_response = future.result(timeout=self.timeout + 15)
+                except FutureTimeoutError:
+                    # Python 3.11+ makes concurrent.futures.TimeoutError an
+                    # alias of the builtin TimeoutError, so this branch also
+                    # catches a TimeoutError raised BY completion() itself
+                    # (e.g. litellm's own timeout= firing normally) -- not
+                    # just our own wait timing out. future.done() tells them
+                    # apart: True means completion() already ran and raised
+                    # on its own (re-raise that original error as-is); False
+                    # means our wait genuinely elapsed with no response.
+                    if future.done():
+                        raise
+                    future.cancel()
+                    raise TimeoutError(
+                        f"hard timeout: no response after {self.timeout + 15:.0f}s (proxy/connect hang)"
+                    )
 
                 raw_contents = []
                 finish_reason = ""
@@ -718,6 +911,7 @@ Derive the answer to the question from these facts, and list which center_node(s
                         finish_reason = raw_finish_reason
                     raw_contents = self._response_text_candidates(msg)
 
+                last_exception = None
                 raw_content = raw_contents[0] if raw_contents else ""
                 for candidate in raw_contents:
                     parsed = self._parse_relational_json_response(candidate)
@@ -732,7 +926,17 @@ Derive the answer to the question from these facts, and list which center_node(s
                     "LLM planner: empty relational response, retrying attempt %d/%d",
                     attempt + 1, max_attempts,
                 )
+            except Exception as e:
+                last_exception = e
+                if attempt == max_attempts:
+                    break
+                logger.warning(
+                    "LLM planner: relational transient error (%s) on attempt %d/%d, retrying: %s",
+                    self.classify_error(str(e)), attempt, max_attempts, e,
+                )
+                time.sleep(self._retry_backoff_seconds())
 
+        try:
             if parsed:
                 result.answer = str(parsed["answer"])
                 supporting = parsed.get("supporting_center_nodes", [])
@@ -742,6 +946,12 @@ Derive the answer to the question from these facts, and list which center_node(s
                 result.reasoning = str(parsed.get("reasoning", "") or "")
                 result.model = self.model
                 result.latency_ms = (time.time() - start) * 1000
+            elif last_exception is not None:
+                result.error = str(last_exception)
+                result.error_type = self.classify_error(result.error)
+                result.used_fallback = True
+                result.latency_ms = (time.time() - start) * 1000
+                logger.warning("LLM planner relational derivation failed after retries: %s", last_exception)
             else:
                 result.error = self._parse_failure_message(raw_contents, finish_reason)
                 result.error_type = "runtime_invalid"
@@ -757,6 +967,965 @@ Derive the answer to the question from these facts, and list which center_node(s
             result.used_fallback = True
             result.latency_ms = (time.time() - start) * 1000
             logger.warning("LLM planner relational derivation failed: %s", e)
+
+        self.last_result = result
+        return result
+
+    # ------------------------------------------------------------------
+    # Question entity-mention extraction (no passages, no known graph) --
+    # the "entry point" step: given a bare question, which real-world
+    # entity/entities does it refer to? Resolving each name to an actual
+    # graph vertex is the CALLER's job (nearest-neighbor lookup against
+    # known labels) -- this only identifies candidate names.
+    # ------------------------------------------------------------------
+
+    ENTITY_MENTIONS_SYSTEM_PROMPT = """You identify which real-world entity or entities a question \
+refers to, using your own general knowledge -- you are not given any source text to read. Same \
+priority as identifying a graph traversal's starting point from a question: find the named subject \
+to start FROM, never the question's final answer.
+
+Rules:
+1. FIRST, look for entities the question NAMES DIRECTLY (a person's full name, a work's title, a \
+place's name, etc., e.g. "What time zone is Cleveland in?" -> "Cleveland"). This is the graph \
+traversal's starting point -- extract it even when answering the question actually requires \
+following one or more hops FROM it (e.g. "Which piece did Ludwig van Beethoven publish in 1801 that \
+was dedicated to Count Moritz von Fries?" -> "Ludwig van Beethoven", the named person to start from \
+-- NEVER try to guess the specific piece itself; that is the answer being asked for, reached by \
+searching from the named entity, not the entity to return here).
+2. ONLY when the question names NO entity at all -- describing its subject purely through defining \
+clues instead (an ethnic group's home regions, a disease's symptoms, a person's known works or \
+relationships, with no proper noun given for that subject) -- use your own knowledge to identify \
+which specific real-world entity the clues describe, and return ITS actual name rather than echoing \
+the descriptive phrase back. Do not use this rule when rule 1 already found a named entity, even if \
+the question's ultimate answer requires further reasoning beyond that entity.
+3. If the question names or describes TWO OR MORE distinct entities (a comparison, a relationship \
+between two specific things, "did X and Y both..."), return ALL of them, in the order the question \
+presents them.
+4. If you cannot confidently identify a real entity (the question is too vague, or you are not \
+sure of the answer), return an empty list rather than guessing at something you're unsure of.
+5. Return each entity as a short name/title only -- no descriptions, no extra words."""
+
+    ENTITY_MENTIONS_USER_TEMPLATE = """Question: {question}
+
+Identify the specific real-world entity or entities this question refers to."""
+
+    @staticmethod
+    def _parse_entity_mentions_response(content) -> dict | None:
+        if not isinstance(content, str):
+            return None
+
+        def valid(payload):
+            if not isinstance(payload, dict):
+                return None
+            if not isinstance(payload.get("entity_mentions"), list):
+                return None
+            return payload
+
+        try:
+            return valid(json.loads(content))
+        except (json.JSONDecodeError, TypeError):
+            pass
+        code_block_pattern = r"```(?:json)?\s*([\s\S]*?)```"
+        match = re.search(code_block_pattern, content)
+        if match:
+            try:
+                return valid(json.loads(match.group(1).strip()))
+            except (json.JSONDecodeError, TypeError):
+                pass
+        brace_pattern = r"\{[\s\S]*\}"
+        match = re.search(brace_pattern, content)
+        if match:
+            try:
+                return valid(json.loads(match.group(0)))
+            except (json.JSONDecodeError, TypeError):
+                pass
+        return None
+
+    def extract_question_entity_mentions(self, question: str) -> QuestionEntityMentions:
+        """Identify candidate entity name(s) a bare question refers to, for
+        resolving a graph search center without a precomputed one -- see
+        QuestionEntityMentions's docstring for why this differs from
+        closed-world passage extraction."""
+        start = time.time()
+        result = QuestionEntityMentions()
+
+        if not question or not question.strip():
+            result.error = "empty question"
+            self.last_result = result
+            return result
+
+        user_msg = self.ENTITY_MENTIONS_USER_TEMPLATE.format(question=question)
+        json_instruction = (
+            "\n\nRespond with ONLY a JSON object in this exact format "
+            "(no markdown, no extra text):\n"
+            '{"entity_mentions": [str]}'
+        )
+
+        try:
+            from litellm import completion
+        except ImportError:
+            result.error = "litellm not installed"
+            result.error_type = "runtime"
+            result.used_fallback = True
+            result.latency_ms = (time.time() - start) * 1000
+            self.last_result = result
+            return result
+
+        parsed = None
+        raw_contents: list[str] = []
+        raw_content = ""
+        finish_reason = ""
+        last_exception: Exception | None = None
+        max_attempts = 1 + self._empty_response_retry_count() + self._transient_error_retry_count()
+
+        for attempt in range(1, max_attempts + 1):
+            try:
+                future = self._executor.submit(
+                    completion,
+                    model=self.model,
+                    messages=[
+                        {"role": "system", "content": self.ENTITY_MENTIONS_SYSTEM_PROMPT + json_instruction},
+                        {"role": "user", "content": user_msg},
+                    ],
+                    timeout=self.timeout,
+                    temperature=self.temperature,
+                    **self._completion_kwargs(),
+                )
+                try:
+                    raw_response = future.result(timeout=self.timeout + 15)
+                except FutureTimeoutError:
+                    if future.done():
+                        raise
+                    future.cancel()
+                    raise TimeoutError(
+                        f"hard timeout: no response after {self.timeout + 15:.0f}s (proxy/connect hang)"
+                    )
+
+                raw_contents = []
+                finish_reason = ""
+                if raw_response and raw_response.choices:
+                    choice = raw_response.choices[0]
+                    msg = choice.message
+                    raw_finish_reason = getattr(choice, "finish_reason", "")
+                    if isinstance(raw_finish_reason, str):
+                        finish_reason = raw_finish_reason
+                    raw_contents = self._response_text_candidates(msg)
+
+                last_exception = None
+                raw_content = raw_contents[0] if raw_contents else ""
+                for candidate in raw_contents:
+                    parsed = self._parse_entity_mentions_response(candidate)
+                    if parsed is not None:
+                        raw_content = candidate
+                        break
+                if parsed is not None:
+                    break
+                if raw_contents or attempt == max_attempts:
+                    break
+                logger.warning(
+                    "LLM planner: empty entity-mentions response, retrying attempt %d/%d",
+                    attempt + 1, max_attempts,
+                )
+            except Exception as e:
+                last_exception = e
+                if attempt == max_attempts:
+                    break
+                logger.warning(
+                    "LLM planner: entity-mentions transient error (%s) on attempt %d/%d, retrying: %s",
+                    self.classify_error(str(e)), attempt, max_attempts, e,
+                )
+                time.sleep(self._retry_backoff_seconds())
+
+        try:
+            if parsed:
+                mentions = parsed.get("entity_mentions", [])
+                result.mentions = [str(m).strip() for m in mentions if str(m or "").strip()] \
+                    if isinstance(mentions, list) else []
+                result.model = self.model
+                result.latency_ms = (time.time() - start) * 1000
+            elif last_exception is not None:
+                result.error = str(last_exception)
+                result.error_type = self.classify_error(result.error)
+                result.used_fallback = True
+                result.latency_ms = (time.time() - start) * 1000
+                logger.warning("LLM planner entity-mentions extraction failed after retries: %s", last_exception)
+            else:
+                result.error = self._parse_failure_message(raw_contents, finish_reason)
+                result.error_type = "runtime_invalid"
+                result.used_fallback = True
+                result.latency_ms = (time.time() - start) * 1000
+                logger.warning(
+                    "LLM planner: entity-mentions JSON invalid/parse failed, content[:200]=%r", raw_content[:200]
+                )
+        except Exception as e:
+            result.error = str(e)
+            result.error_type = self.classify_error(result.error)
+            result.used_fallback = True
+            result.latency_ms = (time.time() - start) * 1000
+            logger.warning("LLM planner entity-mentions extraction failed: %s", e)
+
+        self.last_result = result
+        return result
+
+    # ------------------------------------------------------------------
+    # Entity candidate verification -- disambiguate a guessed mention
+    # against several retrieved graph candidates (see
+    # EntityCandidateVerification's docstring).
+    # ------------------------------------------------------------------
+
+    ENTITY_VERIFICATION_SYSTEM_PROMPT = """You are given a guessed entity name and a numbered list of \
+candidates retrieved from a knowledge graph by similarity search. Decide which candidate (if any) is \
+actually the SAME real-world entity as the guessed name.
+
+Rules:
+1. The guessed name and the correct candidate's label don't have to match exactly -- they might use a \
+different spelling, abbreviation, alternate title, or the candidate's type/label might disambiguate \
+which one of several similarly-named options is right.
+2. Pick the candidate that identifies the same real-world entity/value, not merely a topically related \
+one.
+3. If NONE of the candidates are actually the guessed entity, set "chosen_index" to null -- do not \
+pick the closest-sounding one just because something must be chosen."""
+
+    ENTITY_VERIFICATION_USER_TEMPLATE = """Guessed entity: {mention}
+
+Candidates (numbered from 0):
+{candidates}
+
+Which candidate index is the same real-world entity as the guessed entity? null if none are."""
+
+    @staticmethod
+    def _parse_entity_verification_response(content) -> dict | None:
+        if not isinstance(content, str):
+            return None
+
+        def valid(payload):
+            if not isinstance(payload, dict):
+                return None
+            if "chosen_index" not in payload:
+                return None
+            value = payload["chosen_index"]
+            if value is not None and not isinstance(value, int):
+                return None
+            return payload
+
+        try:
+            return valid(json.loads(content))
+        except (json.JSONDecodeError, TypeError):
+            pass
+        code_block_pattern = r"```(?:json)?\s*([\s\S]*?)```"
+        match = re.search(code_block_pattern, content)
+        if match:
+            try:
+                return valid(json.loads(match.group(1).strip()))
+            except (json.JSONDecodeError, TypeError):
+                pass
+        brace_pattern = r"\{[\s\S]*\}"
+        match = re.search(brace_pattern, content)
+        if match:
+            try:
+                return valid(json.loads(match.group(0)))
+            except (json.JSONDecodeError, TypeError):
+                pass
+        return None
+
+    def verify_entity_candidate(self, mention: str, candidates: list[str]) -> EntityCandidateVerification:
+        """Ask which (if any) of ``candidates`` (already-formatted label/
+        type strings, one per retrieved graph node) is the same real-world
+        entity as the guessed ``mention``. Returns ``chosen_index`` into
+        ``candidates``, or None if none match."""
+        start = time.time()
+        result = EntityCandidateVerification()
+
+        if not mention or not mention.strip() or not candidates:
+            result.error = "empty mention or candidates"
+            self.last_result = result
+            return result
+
+        candidates_text = "\n".join(f"[{i}] {c}" for i, c in enumerate(candidates))
+        user_msg = self.ENTITY_VERIFICATION_USER_TEMPLATE.format(mention=mention, candidates=candidates_text)
+        json_instruction = (
+            "\n\nRespond with ONLY a JSON object in this exact format "
+            "(no markdown, no extra text):\n"
+            '{"chosen_index": int_or_null}'
+        )
+
+        try:
+            from litellm import completion
+        except ImportError:
+            result.error = "litellm not installed"
+            result.error_type = "runtime"
+            result.used_fallback = True
+            result.latency_ms = (time.time() - start) * 1000
+            self.last_result = result
+            return result
+
+        parsed = None
+        raw_contents: list[str] = []
+        raw_content = ""
+        finish_reason = ""
+        last_exception: Exception | None = None
+        max_attempts = 1 + self._empty_response_retry_count() + self._transient_error_retry_count()
+
+        for attempt in range(1, max_attempts + 1):
+            try:
+                future = self._executor.submit(
+                    completion,
+                    model=self.model,
+                    messages=[
+                        {"role": "system", "content": self.ENTITY_VERIFICATION_SYSTEM_PROMPT + json_instruction},
+                        {"role": "user", "content": user_msg},
+                    ],
+                    timeout=self.timeout,
+                    temperature=self.temperature,
+                    **self._completion_kwargs(),
+                )
+                try:
+                    raw_response = future.result(timeout=self.timeout + 15)
+                except FutureTimeoutError:
+                    if future.done():
+                        raise
+                    future.cancel()
+                    raise TimeoutError(
+                        f"hard timeout: no response after {self.timeout + 15:.0f}s (proxy/connect hang)"
+                    )
+
+                raw_contents = []
+                finish_reason = ""
+                if raw_response and raw_response.choices:
+                    choice = raw_response.choices[0]
+                    msg = choice.message
+                    raw_finish_reason = getattr(choice, "finish_reason", "")
+                    if isinstance(raw_finish_reason, str):
+                        finish_reason = raw_finish_reason
+                    raw_contents = self._response_text_candidates(msg)
+
+                last_exception = None
+                raw_content = raw_contents[0] if raw_contents else ""
+                for candidate in raw_contents:
+                    parsed = self._parse_entity_verification_response(candidate)
+                    if parsed is not None:
+                        raw_content = candidate
+                        break
+                if parsed is not None:
+                    break
+                if raw_contents or attempt == max_attempts:
+                    break
+                logger.warning(
+                    "LLM planner: empty entity-verification response, retrying attempt %d/%d",
+                    attempt + 1, max_attempts,
+                )
+            except Exception as e:
+                last_exception = e
+                if attempt == max_attempts:
+                    break
+                logger.warning(
+                    "LLM planner: entity-verification transient error (%s) on attempt %d/%d, retrying: %s",
+                    self.classify_error(str(e)), attempt, max_attempts, e,
+                )
+                time.sleep(self._retry_backoff_seconds())
+
+        try:
+            if parsed:
+                chosen_index = parsed.get("chosen_index")
+                result.chosen_index = chosen_index if isinstance(chosen_index, int) and 0 <= chosen_index < len(candidates) else None
+                result.model = self.model
+                result.latency_ms = (time.time() - start) * 1000
+            elif last_exception is not None:
+                result.error = str(last_exception)
+                result.error_type = self.classify_error(result.error)
+                result.used_fallback = True
+                result.latency_ms = (time.time() - start) * 1000
+                logger.warning("LLM planner entity-verification failed after retries: %s", last_exception)
+            else:
+                result.error = self._parse_failure_message(raw_contents, finish_reason)
+                result.error_type = "runtime_invalid"
+                result.used_fallback = True
+                result.latency_ms = (time.time() - start) * 1000
+                logger.warning(
+                    "LLM planner: entity-verification JSON invalid/parse failed, content[:200]=%r", raw_content[:200]
+                )
+        except Exception as e:
+            result.error = str(e)
+            result.error_type = self.classify_error(result.error)
+            result.used_fallback = True
+            result.latency_ms = (time.time() - start) * 1000
+            logger.warning("LLM planner entity-verification failed: %s", e)
+
+        self.last_result = result
+        return result
+
+    # ------------------------------------------------------------------
+    # Entity description summarization -- borrowed from GraphRAG's own
+    # construction pipeline (see EntityDescriptionResult's docstring).
+    # ------------------------------------------------------------------
+
+    ENTITY_DESCRIPTION_SYSTEM_PROMPT = """You summarize what a knowledge-graph entity is, given its \
+name/type and a few evidence sentences it was extracted from. Write ONE short description (1-3 \
+sentences) that would let someone recognize this entity from its name alone -- not just restating \
+the name, but capturing what/who it is and its most identifying facts from the evidence.
+
+Rules:
+1. Base the description ONLY on the given evidence -- never invent facts not supported by it.
+2. If the evidence is thin or generic, write a shorter description rather than padding it with \
+speculation.
+3. Do not mention "the evidence" or "the sentences" -- write as a standalone description of the \
+entity itself."""
+
+    ENTITY_DESCRIPTION_USER_TEMPLATE = """Entity: {label} (type: {entity_type})
+
+Evidence:
+{evidence}
+
+Write a short description of this entity."""
+
+    @staticmethod
+    def _parse_entity_description_response(content) -> dict | None:
+        if not isinstance(content, str):
+            return None
+
+        def valid(payload):
+            if not isinstance(payload, dict):
+                return None
+            description = payload.get("description")
+            if not isinstance(description, str) or not description.strip():
+                return None
+            return payload
+
+        try:
+            return valid(json.loads(content))
+        except (json.JSONDecodeError, TypeError):
+            pass
+        code_block_pattern = r"```(?:json)?\s*([\s\S]*?)```"
+        match = re.search(code_block_pattern, content)
+        if match:
+            try:
+                return valid(json.loads(match.group(1).strip()))
+            except (json.JSONDecodeError, TypeError):
+                pass
+        brace_pattern = r"\{[\s\S]*\}"
+        match = re.search(brace_pattern, content)
+        if match:
+            try:
+                return valid(json.loads(match.group(0)))
+            except (json.JSONDecodeError, TypeError):
+                pass
+        return None
+
+    def summarize_entity_description(self, label: str, entity_type: str, evidence: list[str]) -> EntityDescriptionResult:
+        """Summarize ``evidence`` (already-extracted sentences this entity
+        appeared in, across every question/passage it was found in) into a
+        short description -- see ``EntityDescriptionResult``'s docstring
+        for why this exists and how it's used."""
+        start = time.time()
+        result = EntityDescriptionResult()
+
+        if not label or not label.strip():
+            result.error = "empty label"
+            self.last_result = result
+            return result
+
+        evidence_text = "\n".join(f"- {e}" for e in evidence if e and e.strip()) or "(no evidence given)"
+        user_msg = self.ENTITY_DESCRIPTION_USER_TEMPLATE.format(
+            label=label, entity_type=entity_type or "Entity", evidence=evidence_text,
+        )
+        json_instruction = (
+            "\n\nRespond with ONLY a JSON object in this exact format "
+            "(no markdown, no extra text):\n"
+            '{"description": str}'
+        )
+
+        try:
+            from litellm import completion
+        except ImportError:
+            result.error = "litellm not installed"
+            result.error_type = "runtime"
+            result.used_fallback = True
+            result.latency_ms = (time.time() - start) * 1000
+            self.last_result = result
+            return result
+
+        parsed = None
+        raw_contents: list[str] = []
+        raw_content = ""
+        finish_reason = ""
+        last_exception: Exception | None = None
+        max_attempts = 1 + self._empty_response_retry_count() + self._transient_error_retry_count()
+
+        for attempt in range(1, max_attempts + 1):
+            try:
+                future = self._executor.submit(
+                    completion,
+                    model=self.model,
+                    messages=[
+                        {"role": "system", "content": self.ENTITY_DESCRIPTION_SYSTEM_PROMPT + json_instruction},
+                        {"role": "user", "content": user_msg},
+                    ],
+                    timeout=self.timeout,
+                    temperature=self.temperature,
+                    **self._completion_kwargs(),
+                )
+                try:
+                    raw_response = future.result(timeout=self.timeout + 15)
+                except FutureTimeoutError:
+                    if future.done():
+                        raise
+                    future.cancel()
+                    raise TimeoutError(
+                        f"hard timeout: no response after {self.timeout + 15:.0f}s (proxy/connect hang)"
+                    )
+
+                raw_contents = []
+                finish_reason = ""
+                if raw_response and raw_response.choices:
+                    choice = raw_response.choices[0]
+                    msg = choice.message
+                    raw_finish_reason = getattr(choice, "finish_reason", "")
+                    if isinstance(raw_finish_reason, str):
+                        finish_reason = raw_finish_reason
+                    raw_contents = self._response_text_candidates(msg)
+
+                last_exception = None
+                raw_content = raw_contents[0] if raw_contents else ""
+                for candidate in raw_contents:
+                    parsed = self._parse_entity_description_response(candidate)
+                    if parsed is not None:
+                        raw_content = candidate
+                        break
+                if parsed is not None:
+                    break
+                if raw_contents or attempt == max_attempts:
+                    break
+                logger.warning(
+                    "LLM planner: empty entity-description response, retrying attempt %d/%d",
+                    attempt + 1, max_attempts,
+                )
+            except Exception as e:
+                last_exception = e
+                if attempt == max_attempts:
+                    break
+                logger.warning(
+                    "LLM planner: entity-description transient error (%s) on attempt %d/%d, retrying: %s",
+                    self.classify_error(str(e)), attempt, max_attempts, e,
+                )
+                time.sleep(self._retry_backoff_seconds())
+
+        try:
+            if parsed:
+                result.description = str(parsed.get("description", "")).strip()
+                result.model = self.model
+                result.latency_ms = (time.time() - start) * 1000
+            elif last_exception is not None:
+                result.error = str(last_exception)
+                result.error_type = self.classify_error(result.error)
+                result.used_fallback = True
+                result.latency_ms = (time.time() - start) * 1000
+                logger.warning("LLM planner entity-description failed after retries: %s", last_exception)
+            else:
+                result.error = self._parse_failure_message(raw_contents, finish_reason)
+                result.error_type = "runtime_invalid"
+                result.used_fallback = True
+                result.latency_ms = (time.time() - start) * 1000
+                logger.warning(
+                    "LLM planner: entity-description JSON invalid/parse failed, content[:200]=%r", raw_content[:200]
+                )
+        except Exception as e:
+            result.error = str(e)
+            result.error_type = self.classify_error(result.error)
+            result.used_fallback = True
+            result.latency_ms = (time.time() - start) * 1000
+            logger.warning("LLM planner entity-description failed: %s", e)
+
+        self.last_result = result
+        return result
+
+    # ------------------------------------------------------------------
+    # Question decomposition + partial-answer merge -- borrowed from
+    # StepChain GraphRAG (see QuestionDecomposition/MergedAnswerResult's
+    # docstrings for why).
+    # ------------------------------------------------------------------
+
+    DECOMPOSE_QUESTION_SYSTEM_PROMPT = """You split a question into independent logical sub-questions \
+for a graph-traversal QA system, using your own general knowledge -- you are not given any source \
+text to read.
+
+Rules:
+1. Each sub-question must be answerable by starting from ONE named entity and following its own \
+relation(s) -- e.g. "Which piece did Ludwig van Beethoven publish in 1801 that was dedicated to \
+Count Moritz von Fries?" splits into ["What did Ludwig van Beethoven publish in 1801?", "What work \
+was dedicated to Count Moritz von Fries?"] -- one sub-question per named clue, not per word.
+2. If the question is ALREADY atomic -- it names (or describes) only ONE entity, with a single \
+hop or chain of hops all starting from that same entity -- return a single-item list containing \
+the ORIGINAL question completely unchanged. Do not force a split that doesn't exist.
+3. A comparison question ("which was founded first, X or Y?", "did X and Y both...") splits into \
+one sub-question per named entity, each asking the same underlying question about just that one \
+entity (e.g. "When was X founded?" / "When was Y founded?").
+4. Never invent a sub-question about an entity the original question doesn't name or describe.
+5. Preserve enough of the original question's own wording in each sub-question that it stays \
+answerable on its own, without needing the other sub-questions for context."""
+
+    DECOMPOSE_QUESTION_USER_TEMPLATE = """Question: {question}
+
+Split this question into independent sub-questions (or return it unchanged as a single-item list \
+if it is already atomic)."""
+
+    @staticmethod
+    def _parse_decomposition_response(content) -> list | None:
+        if not isinstance(content, str):
+            return None
+
+        def valid(payload):
+            if not isinstance(payload, dict):
+                return None
+            sub_questions = payload.get("sub_questions")
+            if not isinstance(sub_questions, list) or not sub_questions:
+                return None
+            return sub_questions
+
+        try:
+            result = valid(json.loads(content))
+            if result is not None:
+                return result
+        except (json.JSONDecodeError, TypeError):
+            pass
+        code_block_pattern = r"```(?:json)?\s*([\s\S]*?)```"
+        match = re.search(code_block_pattern, content)
+        if match:
+            try:
+                result = valid(json.loads(match.group(1).strip()))
+                if result is not None:
+                    return result
+            except (json.JSONDecodeError, TypeError):
+                pass
+        brace_pattern = r"\{[\s\S]*\}"
+        match = re.search(brace_pattern, content)
+        if match:
+            try:
+                result = valid(json.loads(match.group(0)))
+                if result is not None:
+                    return result
+            except (json.JSONDecodeError, TypeError):
+                pass
+        return None
+
+    def decompose_question(self, question: str) -> QuestionDecomposition:
+        """Split ``question`` into independent sub-questions (see
+        QuestionDecomposition's docstring). An already-atomic question comes
+        back as a single-item list containing itself unchanged."""
+        start = time.time()
+        result = QuestionDecomposition()
+
+        if not question or not question.strip():
+            result.error = "empty question"
+            self.last_result = result
+            return result
+
+        user_msg = self.DECOMPOSE_QUESTION_USER_TEMPLATE.format(question=question)
+        json_instruction = (
+            "\n\nRespond with ONLY a JSON object in this exact format "
+            "(no markdown, no extra text):\n"
+            '{"sub_questions": [str]}'
+        )
+
+        try:
+            from litellm import completion
+        except ImportError:
+            result.error = "litellm not installed"
+            result.error_type = "runtime"
+            result.used_fallback = True
+            result.latency_ms = (time.time() - start) * 1000
+            self.last_result = result
+            return result
+
+        parsed = None
+        raw_contents: list[str] = []
+        raw_content = ""
+        finish_reason = ""
+        last_exception: Exception | None = None
+        max_attempts = 1 + self._empty_response_retry_count() + self._transient_error_retry_count()
+
+        for attempt in range(1, max_attempts + 1):
+            try:
+                future = self._executor.submit(
+                    completion,
+                    model=self.model,
+                    messages=[
+                        {"role": "system", "content": self.DECOMPOSE_QUESTION_SYSTEM_PROMPT + json_instruction},
+                        {"role": "user", "content": user_msg},
+                    ],
+                    timeout=self.timeout,
+                    temperature=self.temperature,
+                    **self._completion_kwargs(),
+                )
+                try:
+                    raw_response = future.result(timeout=self.timeout + 15)
+                except FutureTimeoutError:
+                    if future.done():
+                        raise
+                    future.cancel()
+                    raise TimeoutError(
+                        f"hard timeout: no response after {self.timeout + 15:.0f}s (proxy/connect hang)"
+                    )
+
+                raw_contents = []
+                finish_reason = ""
+                if raw_response and raw_response.choices:
+                    choice = raw_response.choices[0]
+                    msg = choice.message
+                    raw_finish_reason = getattr(choice, "finish_reason", "")
+                    if isinstance(raw_finish_reason, str):
+                        finish_reason = raw_finish_reason
+                    raw_contents = self._response_text_candidates(msg)
+
+                last_exception = None
+                raw_content = raw_contents[0] if raw_contents else ""
+                for candidate in raw_contents:
+                    parsed = self._parse_decomposition_response(candidate)
+                    if parsed is not None:
+                        raw_content = candidate
+                        break
+                if parsed is not None:
+                    break
+                if raw_contents or attempt == max_attempts:
+                    break
+                logger.warning(
+                    "LLM planner: empty decomposition response, retrying attempt %d/%d",
+                    attempt + 1, max_attempts,
+                )
+            except Exception as e:
+                last_exception = e
+                if attempt == max_attempts:
+                    break
+                logger.warning(
+                    "LLM planner: decomposition transient error (%s) on attempt %d/%d, retrying: %s",
+                    self.classify_error(str(e)), attempt, max_attempts, e,
+                )
+                time.sleep(self._retry_backoff_seconds())
+
+        try:
+            if parsed:
+                result.sub_questions = [str(q).strip() for q in parsed if str(q).strip()]
+                if not result.sub_questions:
+                    result.sub_questions = [question]
+                result.model = self.model
+                result.latency_ms = (time.time() - start) * 1000
+            elif last_exception is not None:
+                result.error = str(last_exception)
+                result.error_type = self.classify_error(result.error)
+                result.used_fallback = True
+                result.latency_ms = (time.time() - start) * 1000
+                logger.warning("LLM planner question decomposition failed after retries: %s", last_exception)
+            else:
+                result.error = self._parse_failure_message(raw_contents, finish_reason)
+                result.error_type = "runtime_invalid"
+                result.used_fallback = True
+                result.latency_ms = (time.time() - start) * 1000
+                logger.warning(
+                    "LLM planner: decomposition JSON invalid/parse failed, content[:200]=%r", raw_content[:200]
+                )
+        except Exception as e:
+            result.error = str(e)
+            result.error_type = self.classify_error(result.error)
+            result.used_fallback = True
+            result.latency_ms = (time.time() - start) * 1000
+            logger.warning("LLM planner question decomposition failed: %s", e)
+
+        self.last_result = result
+        return result
+
+    MERGE_PARTIAL_ANSWERS_SYSTEM_PROMPT = """You synthesize a final answer to a question from a set \
+of partial findings, each derived independently from one sub-question of that same original \
+question.
+
+Rules:
+1. Use the original question to decide what the final answer should actually address -- the \
+sub-questions were only a means of gathering evidence, not necessarily phrased the way the final \
+answer should be.
+2. When a sub-question has no partial answer (its entities were never found), work from whichever \
+partial answers ARE available rather than refusing to answer.
+3. If the partial answers conflict or don't fully add up to a confident final answer, give your \
+best answer from what's available and say so in your reasoning -- never leave "answer" empty.
+4. Never invent a fact not present in any of the given partial answers/reasoning."""
+
+    MERGE_PARTIAL_ANSWERS_USER_TEMPLATE = """Original question: {question}
+
+Partial findings from each sub-question:
+{sub_answers}
+
+Synthesize the final answer to the original question."""
+
+    @staticmethod
+    def _format_sub_answers(sub_answers: list[dict]) -> str:
+        lines = []
+        for entry in sub_answers:
+            lines.append(f'Sub-question: "{entry.get("sub_question", "")}"')
+            answer = entry.get("answer")
+            if answer:
+                lines.append(f"  Answer: {answer}")
+                reasoning = entry.get("reasoning") or ""
+                if reasoning:
+                    lines.append(f"  Reasoning: {reasoning}")
+            else:
+                lines.append("  Answer: (could not be determined)")
+        return "\n".join(lines)
+
+    @staticmethod
+    def _parse_merge_response(content) -> dict | None:
+        if not isinstance(content, str):
+            return None
+
+        def valid(payload):
+            if not isinstance(payload, dict):
+                return None
+            if not isinstance(payload.get("answer"), str) or not payload["answer"]:
+                return None
+            return payload
+
+        try:
+            return valid(json.loads(content))
+        except (json.JSONDecodeError, TypeError):
+            pass
+        code_block_pattern = r"```(?:json)?\s*([\s\S]*?)```"
+        match = re.search(code_block_pattern, content)
+        if match:
+            try:
+                return valid(json.loads(match.group(1).strip()))
+            except (json.JSONDecodeError, TypeError):
+                pass
+        brace_pattern = r"\{[\s\S]*\}"
+        match = re.search(brace_pattern, content)
+        if match:
+            try:
+                return valid(json.loads(match.group(0)))
+            except (json.JSONDecodeError, TypeError):
+                pass
+        return None
+
+    def merge_partial_answers(self, question: str, sub_answers: list[dict]) -> MergedAnswerResult:
+        """Synthesize a final answer from each sub-question's own partial
+        answer (see MergedAnswerResult's docstring). ``sub_answers`` is a
+        list of ``{"sub_question": str, "answer": str | None, "reasoning":
+        str}`` -- an entry with ``answer=None`` (that sub-question's
+        entities never resolved) is still included so the model knows a gap
+        exists, rather than silently omitted."""
+        start = time.time()
+        result = MergedAnswerResult()
+
+        if not question or not question.strip() or not sub_answers:
+            result.error = "empty question or sub_answers"
+            self.last_result = result
+            return result
+
+        user_msg = self.MERGE_PARTIAL_ANSWERS_USER_TEMPLATE.format(
+            question=question,
+            sub_answers=self._format_sub_answers(sub_answers),
+        )
+        json_instruction = (
+            "\n\nRespond with ONLY a JSON object in this exact format "
+            "(no markdown, no extra text):\n"
+            '{"answer": str, "reasoning": str}'
+        )
+
+        try:
+            from litellm import completion
+        except ImportError:
+            result.error = "litellm not installed"
+            result.error_type = "runtime"
+            result.used_fallback = True
+            result.latency_ms = (time.time() - start) * 1000
+            self.last_result = result
+            return result
+
+        parsed = None
+        raw_contents: list[str] = []
+        raw_content = ""
+        finish_reason = ""
+        last_exception: Exception | None = None
+        max_attempts = 1 + self._empty_response_retry_count() + self._transient_error_retry_count()
+
+        for attempt in range(1, max_attempts + 1):
+            try:
+                future = self._executor.submit(
+                    completion,
+                    model=self.model,
+                    messages=[
+                        {"role": "system", "content": self.MERGE_PARTIAL_ANSWERS_SYSTEM_PROMPT + json_instruction},
+                        {"role": "user", "content": user_msg},
+                    ],
+                    timeout=self.timeout,
+                    temperature=self.temperature,
+                    **self._completion_kwargs(),
+                )
+                try:
+                    raw_response = future.result(timeout=self.timeout + 15)
+                except FutureTimeoutError:
+                    if future.done():
+                        raise
+                    future.cancel()
+                    raise TimeoutError(
+                        f"hard timeout: no response after {self.timeout + 15:.0f}s (proxy/connect hang)"
+                    )
+
+                raw_contents = []
+                finish_reason = ""
+                if raw_response and raw_response.choices:
+                    choice = raw_response.choices[0]
+                    msg = choice.message
+                    raw_finish_reason = getattr(choice, "finish_reason", "")
+                    if isinstance(raw_finish_reason, str):
+                        finish_reason = raw_finish_reason
+                    raw_contents = self._response_text_candidates(msg)
+
+                last_exception = None
+                raw_content = raw_contents[0] if raw_contents else ""
+                for candidate in raw_contents:
+                    parsed = self._parse_merge_response(candidate)
+                    if parsed is not None:
+                        raw_content = candidate
+                        break
+                if parsed is not None:
+                    break
+                if raw_contents or attempt == max_attempts:
+                    break
+                logger.warning(
+                    "LLM planner: empty merge response, retrying attempt %d/%d",
+                    attempt + 1, max_attempts,
+                )
+            except Exception as e:
+                last_exception = e
+                if attempt == max_attempts:
+                    break
+                logger.warning(
+                    "LLM planner: merge transient error (%s) on attempt %d/%d, retrying: %s",
+                    self.classify_error(str(e)), attempt, max_attempts, e,
+                )
+                time.sleep(self._retry_backoff_seconds())
+
+        try:
+            if parsed:
+                result.answer = str(parsed["answer"])
+                result.reasoning = str(parsed.get("reasoning", "") or "")
+                result.model = self.model
+                result.latency_ms = (time.time() - start) * 1000
+            elif last_exception is not None:
+                result.error = str(last_exception)
+                result.error_type = self.classify_error(result.error)
+                result.used_fallback = True
+                result.latency_ms = (time.time() - start) * 1000
+                logger.warning("LLM planner merge failed after retries: %s", last_exception)
+            else:
+                result.error = self._parse_failure_message(raw_contents, finish_reason)
+                result.error_type = "runtime_invalid"
+                result.used_fallback = True
+                result.latency_ms = (time.time() - start) * 1000
+                logger.warning(
+                    "LLM planner: merge JSON invalid/parse failed, content[:200]=%r", raw_content[:200]
+                )
+        except Exception as e:
+            result.error = str(e)
+            result.error_type = self.classify_error(result.error)
+            result.used_fallback = True
+            result.latency_ms = (time.time() - start) * 1000
+            logger.warning("LLM planner merge failed: %s", e)
 
         self.last_result = result
         return result

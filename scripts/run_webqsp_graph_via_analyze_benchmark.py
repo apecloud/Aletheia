@@ -24,7 +24,6 @@ sys.path.append(str(ROOT / "scripts"))
 
 from reasoning_engine import ReasoningEngine  # noqa: E402
 from graph_instance_repository import GraphInstanceRepository  # noqa: E402
-from import_hotpotqa_nebula_tenant import EDGE_TYPE, TAG_NAME  # noqa: E402
 from import_webqsp_graph_tenant import DEFAULT_SPACE  # noqa: E402
 from tenant_registry import default_metadata_db_url  # noqa: E402
 
@@ -50,8 +49,20 @@ def _prefixed(object_type: str, vertex_id: str) -> str:
     return f"{object_type}:{vertex_id}"
 
 
+def _prefixed_with_real_type(repo: GraphInstanceRepository, fallback_object_type: str, vertex_id: str) -> str:
+    """entity_config is keyed by each vertex's REAL Nebula tag name (here,
+    "HotpotEntity" -- registered by register_flat_ontology_types), not the
+    generic "entity" default -- reasoning_engine._gather_center_data's
+    entity_config.get(object_type.lower()) silently returns None (skipping
+    the whole center) for any type name it doesn't recognize."""
+    vertex = repo._fetch_vertex(vertex_id)
+    real_type = vertex["types"][0] if vertex and vertex.get("types") else fallback_object_type
+    return _prefixed(real_type, vertex_id)
+
+
 def run_case(
-    engine: ReasoningEngine, tenant: str, object_type: str, case: dict[str, Any], *, depth: int, limit: int,
+    engine: ReasoningEngine, repo: GraphInstanceRepository, tenant: str, object_type: str,
+    case: dict[str, Any], *, depth: int, limit: int,
 ) -> dict[str, Any]:
     started = time.perf_counter()
     center_node = case.get("center_node")
@@ -62,9 +73,11 @@ def run_case(
             "latency_ms": 0.0, "error": "no center_node",
         }
     try:
-        additional = [_prefixed(object_type, n) for n in (case.get("additional_center_nodes") or [])]
+        additional = [
+            _prefixed_with_real_type(repo, object_type, n) for n in (case.get("additional_center_nodes") or [])
+        ]
         result = engine.analyze(
-            tenant, _prefixed(object_type, center_node), question=case["question"],
+            tenant, _prefixed_with_real_type(repo, object_type, center_node), question=case["question"],
             depth=depth, limit=limit, additional_center_nodes=additional or None,
         )
         latency_ms = round((time.perf_counter() - started) * 1000, 2)
@@ -123,7 +136,7 @@ def run_benchmark(
         cases = cases[:max_questions]
 
     repo = GraphInstanceRepository(
-        space=space, tag_name=TAG_NAME, edge_type=EDGE_TYPE, object_type=object_type,
+        space=space,
         nebula_ip=nebula_ip, nebula_port=nebula_port, nebula_user=nebula_user, nebula_password=nebula_password,
         relation_catalog_db_url=relation_catalog_db_url, relation_catalog_scope=relation_catalog_scope,
     )
@@ -133,7 +146,7 @@ def run_benchmark(
     try:
         total = len(cases)
         for idx, case in enumerate(cases, start=1):
-            result = run_case(engine, tenant_id, object_type, case, depth=depth, limit=limit)
+            result = run_case(engine, repo, tenant_id, object_type, case, depth=depth, limit=limit)
             results.append(result)
             if progress_every and (idx == 1 or idx % progress_every == 0 or idx == total):
                 print(

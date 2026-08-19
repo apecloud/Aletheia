@@ -43,9 +43,14 @@ sys.path.append(str(ROOT))
 sys.path.append(str(ROOT / "agents"))
 sys.path.append(str(ROOT / "scripts"))
 
+from sqlalchemy import create_engine  # noqa: E402
+from sqlalchemy.orm import sessionmaker  # noqa: E402
+
 from graph_db_client import NebulaGraphClient  # noqa: E402
+from graph_ontology_registry import get_edge_type, propose_edge_type, propose_node_type  # noqa: E402
 from hotpotqa_entity_ids import entity_id  # noqa: E402
-from import_hotpotqa_nebula_tenant import ensure_schema, _insert_with_schema_retry, TAG_NAME, EDGE_TYPE  # noqa: E402
+from import_hotpotqa_nebula_tenant import _insert_with_schema_retry  # noqa: E402
+from ontology_artifacts import ensure_artifact_schema  # noqa: E402
 from relation_catalog import RelationCatalog  # noqa: E402
 from tenant_registry import default_metadata_db_url  # noqa: E402
 
@@ -55,6 +60,39 @@ DEFAULT_PARQUET = ROOT / "benchmarks" / "webqsp" / "validation.parquet"
 DEFAULT_CASES = ROOT / "benchmarks" / "webqsp" / "webqsp_graph_cases.json"
 DEFAULT_REPORT = ROOT / "reports" / "webqsp-graph-import.json"
 EVIDENCE_MAX_LEN = 300
+# WebQSP stays on the pre-typed flat single-TAG/single-EDGE-type model for
+# now (agents/graph_ontology_registry.py's multi-TAG model is proven on
+# HotpotQA first, see project plan) -- but GraphInstanceRepository's
+# reasoning_entity_config/reasoning_link_config are now registry-driven for
+# every tenant, so this importer registers the one flat node type plus each
+# governed relation as a wildcard-domain/range edge type, so WebQSP keeps
+# working unchanged rather than silently getting an empty entity/link config.
+TAG_NAME = "HotpotEntity"
+EDGE_TYPE = "RELATION"
+
+
+def ensure_schema(client: NebulaGraphClient) -> None:
+    client.execute_query(f"CREATE TAG IF NOT EXISTS {TAG_NAME}(label string);")
+    client.execute_query(f"CREATE EDGE IF NOT EXISTS {EDGE_TYPE}(relation_label string, evidence string);")
+    time.sleep(11)
+
+
+def register_flat_ontology_types(session, tenant_id: str, relation_catalog: RelationCatalog | None) -> None:
+    propose_node_type(
+        session, tenant_id=tenant_id, name=TAG_NAME,
+        description="WebQSP's flat entity tag (pre-typed model).",
+        properties=[{"name": "label", "data_type": "string"}],
+        confidence=0.6, evidence=["webqsp_flat_model"], status="approved",
+    )
+    for name in (relation_catalog.entries if relation_catalog is not None else {}):
+        existing = get_edge_type(session, tenant_id, name)
+        if existing is not None:
+            continue
+        propose_edge_type(
+            session, tenant_id=tenant_id, name=name, domain=[TAG_NAME], range=[TAG_NAME],
+            description=(relation_catalog.entries.get(name) or {}).get("description", ""),
+            confidence=0.6, evidence=["webqsp_flat_model"], status="approved",
+        )
 
 
 def load_webqsp_graphs(parquet_path: Path, qids: set[str]) -> dict[str, list[tuple[str, str, str]]]:
@@ -77,7 +115,7 @@ def materialize_triples_to_graph(
     object)`` triples (no extraction needed -- the caller already has them),
     shape them into Nebula vertex/edge rows and benchmark cases. Reusable
     for any tenant whose source data is already triples (unlike HotpotQA,
-    which needs ``hotpotqa_kg_extraction`` first)."""
+    which needs ``passage_relation_extraction`` first)."""
     vertex_rows: dict[str, dict[str, Any]] = {}
     edge_rows: list[dict[str, Any]] = []
     seen_edges: set[tuple[str, str, str]] = set()
@@ -160,11 +198,18 @@ def import_webqsp_graph_tenant(
     qids = {q["qid"] for q in questions}
     graphs_by_qid = load_webqsp_graphs(parquet_path, qids)
 
+    metadata_db_url = relation_catalog_db_url or default_metadata_db_url()
     relation_catalog = RelationCatalog.load_from_postgres(
         relation_catalog_db_url, scope=relation_catalog_scope,
     ) if relation_catalog_db_url else None
 
     materialized = materialize_triples_to_graph(questions, graphs_by_qid, relation_catalog)
+
+    engine = create_engine(metadata_db_url)
+    ensure_artifact_schema(engine)
+    session = sessionmaker(bind=engine)()
+    register_flat_ontology_types(session, relation_catalog_scope, relation_catalog)
+    session.commit()
 
     if relation_catalog is not None:
         relation_catalog.save()

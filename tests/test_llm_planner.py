@@ -67,9 +67,22 @@ class TestLLMPlannerConstruction(unittest.TestCase):
         self.assertEqual(planner.model, "gpt-4o")
 
     def test_model_resolution_openrouter_env(self):
-        """Model resolves from ALETHEIA_OPENROUTER env vars."""
+        """Model resolves from ALETHEIA_OPENROUTER env vars.
+
+        Must also clear ALETHEIA_LLM_PLANNER_MODEL for the duration of this
+        test -- _default_model() checks it FIRST, ahead of the
+        ALETHEIA_RESEARCH_SEMANTIC_* vars this test sets, and litellm
+        auto-loads .env (which sets ALETHEIA_LLM_PLANNER_MODEL for this
+        project) as a side effect of its own internal machinery the first
+        time any test in this process does a real `from litellm import
+        completion` -- observed making this assertion fail depending on
+        test run order, even though this test never touches litellm
+        itself. Isolating this test's own env vars (not just the two it
+        sets) makes it correct regardless of what already ran before it.
+        """
         old_provider = os.environ.get("ALETHEIA_RESEARCH_SEMANTIC_LLM_PROVIDER")
         old_model = os.environ.get("ALETHEIA_RESEARCH_SEMANTIC_OPENROUTER_MODEL")
+        old_explicit = os.environ.pop("ALETHEIA_LLM_PLANNER_MODEL", None)
         try:
             os.environ["ALETHEIA_RESEARCH_SEMANTIC_LLM_PROVIDER"] = "openrouter"
             os.environ["ALETHEIA_RESEARCH_SEMANTIC_OPENROUTER_MODEL"] = "openai/gpt-oss-20b:free"
@@ -84,6 +97,8 @@ class TestLLMPlannerConstruction(unittest.TestCase):
                 os.environ["ALETHEIA_RESEARCH_SEMANTIC_OPENROUTER_MODEL"] = old_model
             elif "ALETHEIA_RESEARCH_SEMANTIC_OPENROUTER_MODEL" in os.environ:
                 del os.environ["ALETHEIA_RESEARCH_SEMANTIC_OPENROUTER_MODEL"]
+            if old_explicit is not None:
+                os.environ["ALETHEIA_LLM_PLANNER_MODEL"] = old_explicit
 
     def test_custom_prompts(self):
         """LLMPlanner accepts custom system prompt and user template."""
@@ -1393,3 +1408,242 @@ class TestMalformedJSONResponse(unittest.TestCase):
         self.assertIn("JSON", result.error)
         self.assertEqual(result.error_type, "runtime_invalid")
         self.assertEqual(result.matched_link_keys, set())
+
+
+class TestExtractQuestionEntityMentions(unittest.TestCase):
+    """extract_question_entity_mentions: bare-question entity identification
+    (no passages, no known graph -- see QuestionEntityMentions's docstring)."""
+
+    def test_mocked_call_returns_mentions(self):
+        planner = LLMPlanner(model="mock-model")
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock()]
+        mock_response.choices[0].message.content = json.dumps({
+            "entity_mentions": ["Northwestern University", "Johns Hopkins University"],
+        })
+        with patch("litellm.completion", return_value=mock_response):
+            result = planner.extract_question_entity_mentions(
+                "Which of these universities, Northwestern or Johns Hopkins, is older?"
+            )
+        self.assertEqual(result.mentions, ["Northwestern University", "Johns Hopkins University"])
+        self.assertFalse(result.used_fallback)
+
+    def test_empty_question_returns_error_not_crash(self):
+        planner = LLMPlanner(model="mock-model")
+        result = planner.extract_question_entity_mentions("")
+        self.assertEqual(result.mentions, [])
+        self.assertTrue(result.error)
+
+    def test_llm_error_triggers_fallback_empty_mentions(self):
+        planner = LLMPlanner(model="mock-model")
+        with patch("litellm.completion", side_effect=Exception("boom")):
+            result = planner.extract_question_entity_mentions("some question")
+        self.assertTrue(result.used_fallback)
+        self.assertEqual(result.mentions, [])
+
+
+class TestVerifyEntityCandidate(unittest.TestCase):
+    """verify_entity_candidate: disambiguate a guessed mention against
+    retrieved graph candidates (see EntityCandidateVerification's
+    docstring)."""
+
+    def test_mocked_call_returns_chosen_index(self):
+        planner = LLMPlanner(model="mock-model")
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock()]
+        mock_response.choices[0].message.content = json.dumps({"chosen_index": 2})
+        with patch("litellm.completion", return_value=mock_response):
+            result = planner.verify_entity_candidate(
+                "Masherbrum",
+                ["Person John Masher", "WorkOfArt Masherbrum (film)", "Location Masherbrum mountain range"],
+            )
+        self.assertEqual(result.chosen_index, 2)
+        self.assertFalse(result.used_fallback)
+
+    def test_chosen_index_null_means_no_match(self):
+        planner = LLMPlanner(model="mock-model")
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock()]
+        mock_response.choices[0].message.content = json.dumps({"chosen_index": None})
+        with patch("litellm.completion", return_value=mock_response):
+            result = planner.verify_entity_candidate("Unrelated Thing", ["Person Barack Obama"])
+        self.assertIsNone(result.chosen_index)
+        self.assertFalse(result.used_fallback)
+
+    def test_out_of_range_index_is_discarded(self):
+        """A malformed/out-of-range index must not be trusted as a real pick."""
+        planner = LLMPlanner(model="mock-model")
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock()]
+        mock_response.choices[0].message.content = json.dumps({"chosen_index": 99})
+        with patch("litellm.completion", return_value=mock_response):
+            result = planner.verify_entity_candidate("X", ["Person A", "Person B"])
+        self.assertIsNone(result.chosen_index)
+
+    def test_empty_candidates_returns_error_not_crash(self):
+        planner = LLMPlanner(model="mock-model")
+        result = planner.verify_entity_candidate("X", [])
+        self.assertIsNone(result.chosen_index)
+        self.assertTrue(result.error)
+
+
+class TestSummarizeEntityDescription(unittest.TestCase):
+    """summarize_entity_description: borrowed from GraphRAG's construction
+    pipeline -- see EntityDescriptionResult's docstring."""
+
+    def test_mocked_call_returns_description(self):
+        planner = LLMPlanner(model="mock-model")
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock()]
+        mock_response.choices[0].message.content = json.dumps(
+            {"description": "Ludwig van Beethoven was a composer who wrote Symphony No. 7."}
+        )
+        with patch("litellm.completion", return_value=mock_response):
+            result = planner.summarize_entity_description(
+                "Ludwig van Beethoven", "Person", ["Symphony No. 7 was composed by Ludwig van Beethoven."],
+            )
+        self.assertEqual(result.description, "Ludwig van Beethoven was a composer who wrote Symphony No. 7.")
+        self.assertFalse(result.used_fallback)
+
+    def test_empty_label_returns_error_not_crash(self):
+        planner = LLMPlanner(model="mock-model")
+        result = planner.summarize_entity_description("", "Person", [])
+        self.assertEqual(result.description, "")
+        self.assertTrue(result.error)
+
+    def test_llm_error_triggers_fallback_empty_description(self):
+        planner = LLMPlanner(model="mock-model")
+        with patch("litellm.completion", side_effect=Exception("boom")):
+            result = planner.summarize_entity_description("X", "Person", ["some evidence"])
+        self.assertTrue(result.used_fallback)
+        self.assertEqual(result.description, "")
+
+    def test_no_evidence_still_produces_a_request(self):
+        """Zero evidence isn't an error -- the caller (import script) skips
+        calling this at all for zero-evidence vertices, but the method
+        itself should still degrade gracefully if called anyway."""
+        planner = LLMPlanner(model="mock-model")
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock()]
+        mock_response.choices[0].message.content = json.dumps({"description": "An entity named X."})
+        with patch("litellm.completion", return_value=mock_response):
+            result = planner.summarize_entity_description("X", "Person", [])
+        self.assertEqual(result.description, "An entity named X.")
+
+
+class TestDecomposeQuestion(unittest.TestCase):
+    """decompose_question: borrowed from StepChain GraphRAG -- see
+    QuestionDecomposition's docstring."""
+
+    def test_mocked_call_returns_sub_questions(self):
+        planner = LLMPlanner(model="mock-model")
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock()]
+        mock_response.choices[0].message.content = json.dumps({
+            "sub_questions": [
+                "What did Ludwig van Beethoven publish in 1801?",
+                "What work was dedicated to Count Moritz von Fries?",
+            ],
+        })
+        with patch("litellm.completion", return_value=mock_response):
+            result = planner.decompose_question(
+                "Which piece did Ludwig van Beethoven publish in 1801 that was dedicated to Count Moritz von Fries?"
+            )
+        self.assertEqual(len(result.sub_questions), 2)
+        self.assertFalse(result.used_fallback)
+
+    def test_atomic_question_returns_single_item_list(self):
+        planner = LLMPlanner(model="mock-model")
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock()]
+        mock_response.choices[0].message.content = json.dumps({
+            "sub_questions": ["What time zone is Cleveland in?"],
+        })
+        with patch("litellm.completion", return_value=mock_response):
+            result = planner.decompose_question("What time zone is Cleveland in?")
+        self.assertEqual(result.sub_questions, ["What time zone is Cleveland in?"])
+
+    def test_empty_question_returns_error_not_crash(self):
+        planner = LLMPlanner(model="mock-model")
+        result = planner.decompose_question("")
+        self.assertEqual(result.sub_questions, [])
+        self.assertTrue(result.error)
+
+    def test_llm_error_triggers_fallback_empty_sub_questions(self):
+        planner = LLMPlanner(model="mock-model")
+        with patch("litellm.completion", side_effect=Exception("boom")):
+            result = planner.decompose_question("some question")
+        self.assertTrue(result.used_fallback)
+        self.assertEqual(result.sub_questions, [])
+
+    def test_empty_sub_questions_list_falls_back_to_original_question(self):
+        """A model returning an empty list (rather than [question]) still
+        degrades to treating the question as atomic, not to a hard no-op."""
+        planner = LLMPlanner(model="mock-model")
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock()]
+        mock_response.choices[0].message.content = json.dumps({"sub_questions": [""]})
+        with patch("litellm.completion", return_value=mock_response):
+            result = planner.decompose_question("some question")
+        self.assertEqual(result.sub_questions, ["some question"])
+
+
+class TestMergePartialAnswers(unittest.TestCase):
+    """merge_partial_answers: borrowed from StepChain GraphRAG -- see
+    MergedAnswerResult's docstring."""
+
+    def test_mocked_call_returns_merged_answer(self):
+        planner = LLMPlanner(model="mock-model")
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock()]
+        mock_response.choices[0].message.content = json.dumps({
+            "answer": "Violin Sonata No. 4",
+            "reasoning": "Both sub-questions point to the same work.",
+        })
+        with patch("litellm.completion", return_value=mock_response):
+            result = planner.merge_partial_answers(
+                "Which piece did Ludwig van Beethoven publish in 1801 that was dedicated to Count Moritz von Fries?",
+                [
+                    {"sub_question": "What did Beethoven publish in 1801?", "answer": "Violin Sonata No. 4", "reasoning": ""},
+                    {"sub_question": "What was dedicated to Fries?", "answer": "Violin Sonata No. 4", "reasoning": ""},
+                ],
+            )
+        self.assertEqual(result.answer, "Violin Sonata No. 4")
+        self.assertFalse(result.used_fallback)
+
+    def test_unresolved_sub_answer_is_included_not_dropped(self):
+        """A sub-answer with answer=None (that sub-question's entities never
+        resolved) still gets included in the prompt, not silently omitted --
+        verified via the formatted request content."""
+        planner = LLMPlanner(model="mock-model")
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock()]
+        mock_response.choices[0].message.content = json.dumps({"answer": "best guess", "reasoning": ""})
+        with patch("litellm.completion", return_value=mock_response) as mock_completion:
+            planner.merge_partial_answers(
+                "some question",
+                [
+                    {"sub_question": "resolved sub-question", "answer": "an answer", "reasoning": ""},
+                    {"sub_question": "unresolved sub-question", "answer": None, "reasoning": ""},
+                ],
+            )
+        user_message = mock_completion.call_args.kwargs["messages"][1]["content"]
+        self.assertIn("unresolved sub-question", user_message)
+        self.assertIn("could not be determined", user_message)
+
+    def test_empty_sub_answers_returns_error_not_crash(self):
+        planner = LLMPlanner(model="mock-model")
+        result = planner.merge_partial_answers("some question", [])
+        self.assertEqual(result.answer, "")
+        self.assertTrue(result.error)
+
+    def test_llm_error_triggers_fallback_empty_answer(self):
+        planner = LLMPlanner(model="mock-model")
+        with patch("litellm.completion", side_effect=Exception("boom")):
+            result = planner.merge_partial_answers("q", [{"sub_question": "q", "answer": "a", "reasoning": ""}])
+        self.assertTrue(result.used_fallback)
+        self.assertEqual(result.answer, "")
+
+
+if __name__ == "__main__":
+    unittest.main()
