@@ -8,7 +8,7 @@ path per question (the gold ``gold_relation_paths`` entries), inventing
 placeholder intermediate-hop node ids (``f"{qid}_hop{n}_{path_idx}"``) for
 multi-hop paths -- there are no distractor facts, no real Freebase entities
 beyond the gold chain, so retrieval can't fail in any way that matters. This
-is exactly why ``reports/webqsp-task83-sota-gate.md`` flags the existing
+is exactly why ``reports/tasks/task-000-099/webqsp-task83-sota-gate.md`` flags the existing
 86/100 internal score as "NOT COMPARABLE" to real SOTA.
 
 This importer instead reads each question's REAL local subgraph straight
@@ -49,7 +49,9 @@ from sqlalchemy.orm import sessionmaker  # noqa: E402
 from graph_db_client import NebulaGraphClient  # noqa: E402
 from graph_ontology_registry import get_edge_type, propose_edge_type, propose_node_type  # noqa: E402
 from hotpotqa_entity_ids import entity_id  # noqa: E402
-from import_hotpotqa_nebula_tenant import _insert_with_schema_retry  # noqa: E402
+from import_hotpotqa_nebula_tenant import (  # noqa: E402
+    DEFAULT_GOVERNANCE_MODE, GOVERNANCE_MODES, _governance_status, _insert_with_schema_retry,
+)
 from ontology_artifacts import ensure_artifact_schema  # noqa: E402
 from relation_catalog import RelationCatalog  # noqa: E402
 from tenant_registry import default_metadata_db_url  # noqa: E402
@@ -77,12 +79,21 @@ def ensure_schema(client: NebulaGraphClient) -> None:
     time.sleep(11)
 
 
-def register_flat_ontology_types(session, tenant_id: str, relation_catalog: RelationCatalog | None) -> None:
+def register_flat_ontology_types(
+    session, tenant_id: str, relation_catalog: RelationCatalog | None, *,
+    governance_mode: str = DEFAULT_GOVERNANCE_MODE,
+) -> None:
+    """Note: the Nebula TAG/EDGE DDL (``ensure_schema``) is always the fixed
+    ``HotpotEntity``/``RELATION`` pair regardless of governance_mode -- unlike
+    HotpotQA's per-type multi-TAG model, WebQSP's flat model has nothing that
+    needs to exist in Nebula before it can be written, so "review_required"
+    never blocks the import itself here."""
+    status = _governance_status(governance_mode)
     propose_node_type(
         session, tenant_id=tenant_id, name=TAG_NAME,
         description="WebQSP's flat entity tag (pre-typed model).",
         properties=[{"name": "label", "data_type": "string"}],
-        confidence=0.6, evidence=["webqsp_flat_model"], status="approved",
+        confidence=0.6, evidence=["webqsp_flat_model"], status=status,
     )
     for name in (relation_catalog.entries if relation_catalog is not None else {}):
         existing = get_edge_type(session, tenant_id, name)
@@ -91,7 +102,7 @@ def register_flat_ontology_types(session, tenant_id: str, relation_catalog: Rela
         propose_edge_type(
             session, tenant_id=tenant_id, name=name, domain=[TAG_NAME], range=[TAG_NAME],
             description=(relation_catalog.entries.get(name) or {}).get("description", ""),
-            confidence=0.6, evidence=["webqsp_flat_model"], status="approved",
+            confidence=0.6, evidence=["webqsp_flat_model"], status=status,
         )
 
 
@@ -188,6 +199,7 @@ def import_webqsp_graph_tenant(
     cases_json: Path,
     relation_catalog_db_url: str | None = None,
     relation_catalog_scope: str = "webqsp",
+    governance_mode: str = DEFAULT_GOVERNANCE_MODE,
 ) -> dict[str, Any]:
     questions = json.loads(questions_json.read_text(encoding="utf-8"))
     if max_questions:
@@ -208,7 +220,7 @@ def import_webqsp_graph_tenant(
     engine = create_engine(metadata_db_url)
     ensure_artifact_schema(engine)
     session = sessionmaker(bind=engine)()
-    register_flat_ontology_types(session, relation_catalog_scope, relation_catalog)
+    register_flat_ontology_types(session, relation_catalog_scope, relation_catalog, governance_mode=governance_mode)
     session.commit()
 
     if relation_catalog is not None:
@@ -228,6 +240,7 @@ def import_webqsp_graph_tenant(
 
     return {
         "space": space,
+        "governance_mode": governance_mode,
         "questions_json": str(questions_json),
         "cases_json": str(cases_json),
         "question_count": materialized["question_count"],
@@ -256,6 +269,16 @@ def build_parser() -> argparse.ArgumentParser:
         "--no-relation-catalog", action="store_true",
         help="Disable relation governance -- write each triple's raw Freebase predicate as-is (offline/testing only)",
     )
+    parser.add_argument(
+        "--governance-mode", choices=GOVERNANCE_MODES, default=DEFAULT_GOVERNANCE_MODE,
+        help=(
+            "Same meaning as import_hotpotqa_nebula_tenant.py's flag of the same name -- "
+            "'auto_approve' (default) preserves this script's original behavior exactly. "
+            "'review_required' writes the flat HotpotEntity type and each relation's edge "
+            "type as status=\"draft\" instead, gated on human approval before "
+            "reasoning_engine.py can query them."
+        ),
+    )
     return parser
 
 
@@ -274,11 +297,12 @@ def main(argv: list[str] | None = None) -> int:
         cases_json=args.cases_json,
         relation_catalog_db_url=None if args.no_relation_catalog else args.relation_catalog_db_url,
         relation_catalog_scope=args.relation_catalog_scope,
+        governance_mode=args.governance_mode,
     )
     report["elapsed_seconds"] = round(time.time() - started, 1)
     args.report_json.parent.mkdir(parents=True, exist_ok=True)
     args.report_json.write_text(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
-    print(f"space={report['space']}")
+    print(f"space={report['space']} governance_mode={report['governance_mode']}")
     print(f"questions={report['question_count']} skipped_no_graph={report['skipped_no_graph']}")
     print(f"vertex_count={report['vertex_count']} edge_count={report['edge_count']}")
     print(f"relation_catalog_size={report['relation_catalog_size']}")

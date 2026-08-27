@@ -984,7 +984,7 @@ function AgentRunsWorkspace({ tenantId, query, artifacts = [], graphElements = [
               <div style={{ display: "grid", gridTemplateColumns: "1fr 120px", gap: 10 }}>
                 <label>
                   <div className="eyebrow" style={{ marginBottom: 4 }}>{tWB(language, "Research topic", "检索主题")}</div>
-                  <input className="input" value={agentParams.researchTopic} onChange={e => updateAgentParam("researchTopic", e.target.value)} placeholder={tWB(language, "Only factual search terms, e.g. maritime chokepoint disruption risks", "只填写事实检索词，例如 maritime chokepoint disruption risks")} />
+                  <input className="input" value={agentParams.researchTopic} onChange={e => updateAgentParam("researchTopic", e.target.value)} placeholder={tWB(language, "Only factual search terms, e.g. an organization's founding date and headquarters location", "只填写事实检索词，例如某机构的成立日期和总部所在地")} />
                 </label>
                 <label>
                   <div className="eyebrow" style={{ marginBottom: 4 }}>{tWB(language, "Budget", "预算")}</div>

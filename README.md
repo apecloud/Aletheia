@@ -32,7 +32,7 @@ injecting Employee/Order demo objects.
 | `docker/` | Local MySQL, PostGIS, and Nebula Graph compose stack |
 | `docs/` | Business context documents consumed by agents |
 | `evals/` | Ontology evaluation helpers |
-| `reports/` | Generated implementation and validation reports |
+| `reports/` | Generated implementation and validation reports, bucketed under `tasks/task-<NNN>-<NNN>/` by task number, with non-task-numbered artifacts under `misc/` |
 | `scripts/` | Dataset import, bootstrap, and pipeline runner scripts |
 | `tests/` | Unit and integration-style regression tests |
 | `web/app/` | Frontend app for Workspace, Ontology, Graph, Reasoning, and Settings |

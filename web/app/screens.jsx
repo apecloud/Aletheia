@@ -1293,7 +1293,7 @@ function Quality({ data }) {
           </div>
           <div style={{ flex: 1, overflow: "auto" }}>
             {[
-              { tpl: "concentration-risk",  needs: "LinkType.ReportsTo",         status: "proposed" },
+              { tpl: "entity-mention-coverage", needs: "LinkType.Mentions",      status: "proposed" },
               { tpl: "customer-segmentation",needs: "ObjectType.Customer",       status: "proposed" },
               { tpl: "territorial-analysis", needs: "ObjectType.Region",         status: "rejected" },
               { tpl: "value-banded-orders",  needs: "Property.Order.value_band", status: "changes" },

@@ -29,12 +29,6 @@ const COUNTRY_NAMES_UI = {
 };
 
 const COMMON_RESULT_ZH_UI = {
-  "Bab el-Mandeb risk propagation identifies countries for immediate review": "Bab el-Mandeb 风险传播识别需立即复核的国家",
-  "Hazard-adjusted chokepoint risk should drive review priority": "咽喉点复核优先级应纳入风险因子调整",
-  "Single chokepoint dependency creates concentrated country exposure": "单一咽喉点依赖造成国家风险集中暴露",
-  "Single-chokepoint dependency can create concentrated country exposure": "单一咽喉点依赖可能造成国家暴露集中",
-  "Hazard severity should be joined to dependent trade value before ranking chokepoints": "咽喉点排序前应把风险严重度与依赖贸易额关联",
-  "Red Sea / Bab el-Mandeb escalation should prioritize dependent countries by systemic risk": "红海 / Bab el-Mandeb 升级风险应按系统性风险确定国家优先级",
   "Card-not-present transactions concentrate fraud risk": "非面对面交易集中欺诈风险",
   "Card-not-present transactions carry elevated fraud risk": "非面对面交易具有更高欺诈风险",
   "Verification mismatch transactions have elevated fraud rate": "验证不匹配交易欺诈率更高",
@@ -73,11 +67,6 @@ function displayLabelUI(text, language) {
     "canonical ontology write disabled": "正式本体写入已禁用",
   };
   if (exact[value]) return exact[value];
-  value = value.replace(/^Chokepoint enrichment · /, "咽喉点信息增益 · ");
-  value = value.replace(
-    "If Red Sea / Bab el-Mandeb risk rises, the first review queue should include China (CHN) ($15.1B at risk), India (IND) ($7.1B at risk), United States (USA) ($6.6B at risk). The graph path is hazard at Bab el-Mandeb -> chokepoint -> dependent country -> systemic risk metric -> analyst action.",
-    "如果 Red Sea / Bab el-Mandeb 风险上升，第一批复核队列应包括 China (CHN)（$15.1B 风险暴露）、India (IND)（$7.1B 风险暴露）和 United States (USA)（$6.6B 风险暴露）。图谱路径为 Bab el-Mandeb 风险因子 -> 咽喉点 -> 依赖国家 -> 系统性风险指标 -> 分析师行动。"
-  );
   if (/[:_]/.test(value)) return value;
   value = value.replace(/\bWeb enrichment\b/g, "网页信息增益");
   value = value.replace(/\bweb enrichment\b/g, "网页信息增益");

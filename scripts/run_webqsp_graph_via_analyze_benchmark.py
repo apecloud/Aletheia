@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Run WebQSP's graph-native tenant through the REAL ReasoningEngine.analyze()
 path, via GraphInstanceRepository -- a regression/sanity check against the
-retired SQL tenant's internal baseline (86/100, per reports/webqsp-task83-sota-gate.md),
+retired SQL tenant's internal baseline (86/100, per reports/tasks/task-000-099/webqsp-task83-sota-gate.md),
 NOT a SOTA claim (neither this nor that baseline has been run against the
 official held-out test split).
 """
