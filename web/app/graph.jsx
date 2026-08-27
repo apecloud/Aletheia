@@ -2,12 +2,13 @@
 
 const { useState: useStateGX, useRef: useRefGX, useEffect: useEffectGX, useMemo: useMemoGX } = React;
 
-const GRAPH_PRIMARY_PALETTE_GX = [
-  "var(--graph-blue)",
-  "var(--graph-red)",
-  "var(--graph-yellow)",
-  "var(--graph-green)",
-];
+// Deterministic per-type color (hash → hue) so the palette scales past a handful of
+// node types instead of cycling through a fixed 4-color list. hashSeedGX is defined
+// further down but hoisted, since both are plain top-level function declarations.
+function graphTypeColorGX(type) {
+  const hue = hashSeedGX(String(type || "unknown")) % 360;
+  return `hsl(${hue} 62% 58%)`;
+}
 
 const GRAPH_ROLE_COLORS_GX = {
   selected: "var(--graph-blue)",
@@ -25,6 +26,48 @@ const GRAPH_ROLE_COLORS_GX = {
   edgeDefault: "var(--graph-edge-default)",
 };
 
+let _cssVarCacheGX = null;
+function resolveCssVarGX(token) {
+  if (typeof token !== "string") return token;
+  const match = token.match(/^var\((--[a-zA-Z0-9-]+)\)$/);
+  if (!match) return token;
+  if (!_cssVarCacheGX) _cssVarCacheGX = {};
+  const name = match[1];
+  if (_cssVarCacheGX[name] !== undefined) return _cssVarCacheGX[name];
+  let value = token;
+  try {
+    value = getComputedStyle(document.documentElement).getPropertyValue(name).trim() || token;
+  } catch {}
+  _cssVarCacheGX[name] = value;
+  return value;
+}
+
+function resolveCssColorsGX(palette) {
+  const out = {};
+  Object.entries(palette).forEach(([key, value]) => { out[key] = resolveCssVarGX(value); });
+  return out;
+}
+
+let _roleColorsCYCache = null;
+function getRoleColorsCY() {
+  if (!_roleColorsCYCache) _roleColorsCYCache = resolveCssColorsGX(GRAPH_ROLE_COLORS_GX);
+  return _roleColorsCYCache;
+}
+
+let _themeTokensCYCache = null;
+function getThemeTokensCY() {
+  if (!_themeTokensCYCache) {
+    _themeTokensCYCache = {
+      bg1: resolveCssVarGX("var(--bg-1)"),
+      lineStrong: resolveCssVarGX("var(--line-strong)"),
+      muted: resolveCssVarGX("var(--muted)"),
+      faint: resolveCssVarGX("var(--faint)"),
+      fontMono: resolveCssVarGX("var(--font-mono)") || "monospace",
+    };
+  }
+  return _themeTokensCYCache;
+}
+
 function isZhGX(language) {
   return typeof isZhUI === "function" ? isZhUI(language) : String(language || "").startsWith("zh");
 }
@@ -38,12 +81,6 @@ function labelGX(value, language) {
 }
 
 function edgeKindLabelGX(value, language) {
-  if (String(value || "") === "risk propagation") {
-    return tGX(language, "risk propagation", "风险传播");
-  }
-  if (String(value || "") === "trade dependency") {
-    return tGX(language, "trade dependency", "贸易依赖");
-  }
   return labelGX(value, language);
 }
 
@@ -305,6 +342,90 @@ function graphEdgeRankGX(edge, selectedId = "") {
   return score;
 }
 
+// Unweighted BFS shortest path over the already-loaded subgraph — no backend round
+// trip needed since the client already holds the full node/edge set for the active
+// scope. Returns { nodeIds, edgeKeys } (both include source..target) or null.
+function findShortestPathGX(edges, sourceId, targetId) {
+  if (!sourceId || !targetId || sourceId === targetId) return null;
+  const adjacency = new Map();
+  edges.forEach(e => {
+    const edgeKey = graphEdgeKeyGX(e);
+    if (!adjacency.has(e.s)) adjacency.set(e.s, []);
+    if (!adjacency.has(e.t)) adjacency.set(e.t, []);
+    adjacency.get(e.s).push({ next: e.t, edgeKey });
+    adjacency.get(e.t).push({ next: e.s, edgeKey });
+  });
+  const visited = new Set([sourceId]);
+  const queue = [{ id: sourceId, nodeIds: [sourceId], edgeKeys: [] }];
+  let head = 0;
+  while (head < queue.length) {
+    const current = queue[head++];
+    if (current.id === targetId) return { nodeIds: current.nodeIds, edgeKeys: current.edgeKeys };
+    for (const { next, edgeKey } of adjacency.get(current.id) || []) {
+      if (visited.has(next)) continue;
+      visited.add(next);
+      queue.push({ id: next, nodeIds: [...current.nodeIds, next], edgeKeys: [...current.edgeKeys, edgeKey] });
+    }
+  }
+  return null;
+}
+
+// BFS hop-distance from sourceId over the already-loaded edge set, capped at
+// maxHops. Powers ego mode's "structural distance" view -- no embeddings
+// needed, just graph topology.
+function bfsHopDistancesGX(edges, sourceId, maxHops) {
+  const distances = new Map();
+  if (!sourceId) return distances;
+  const adjacency = new Map();
+  edges.forEach(e => {
+    if (!adjacency.has(e.s)) adjacency.set(e.s, []);
+    if (!adjacency.has(e.t)) adjacency.set(e.t, []);
+    adjacency.get(e.s).push(e.t);
+    adjacency.get(e.t).push(e.s);
+  });
+  distances.set(sourceId, 0);
+  const queue = [sourceId];
+  let head = 0;
+  while (head < queue.length) {
+    const current = queue[head++];
+    const hop = distances.get(current);
+    if (hop >= maxHops) continue;
+    for (const next of adjacency.get(current) || []) {
+      if (distances.has(next)) continue;
+      distances.set(next, hop + 1);
+      queue.push(next);
+    }
+  }
+  return distances;
+}
+
+function findGraphNodeMatchGX(query, nodes, language) {
+  const q = String(query || "").trim().toLowerCase();
+  if (!q) return null;
+  const exactId = nodes.find(n => String(n.id).toLowerCase() === q);
+  if (exactId) return exactId;
+  const exactLabel = nodes.find(n => String(labelGX(n.label, language) || "").toLowerCase() === q);
+  if (exactLabel) return exactLabel;
+  return nodes.find(n => String(n.id).toLowerCase().includes(q) || String(labelGX(n.label, language) || "").toLowerCase().includes(q)) || null;
+}
+
+function rankGraphNodeMatchesGX(query, nodes, language, limit = 8) {
+  const q = String(query || "").trim().toLowerCase();
+  if (!q) return [];
+  const scored = [];
+  nodes.forEach(n => {
+    const id = String(n.id).toLowerCase();
+    const label = String(labelGX(n.label, language) || "").toLowerCase();
+    let score = -1;
+    if (id === q || label === q) score = 3;
+    else if (id.startsWith(q) || label.startsWith(q)) score = 2;
+    else if (id.includes(q) || label.includes(q)) score = 1;
+    if (score >= 0) scored.push({ node: n, score });
+  });
+  scored.sort((a, b) => b.score - a.score || String(a.node.id).localeCompare(String(b.node.id)));
+  return scored.slice(0, limit).map(s => s.node);
+}
+
 function graphEdgeToneGX(edge) {
   if (edge?.flag || edge?._raw?.conflict) return GRAPH_ROLE_COLORS_GX.conflict;
   if (edge?._raw?.status === "proposed" || edge?._raw?.status === "draft") return GRAPH_ROLE_COLORS_GX.candidate;
@@ -327,47 +448,159 @@ function graphReviewStatusColorGX(status) {
   return GRAPH_ROLE_COLORS_GX.selected;
 }
 
-// radial layout for nodes that don't already have x/y
-function layoutRadial(nodes, edges, opts = {}) {
-  const W = opts.width || 1000, H = opts.height || 600;
-  const cx = W / 2, cy = H / 2;
-  const deg = {};
-  edges.forEach(e => {
-    deg[e.source || e.s] = (deg[e.source || e.s] || 0) + 1;
-    deg[e.target || e.t] = (deg[e.target || e.t] || 0) + 1;
-  });
-  const centerId = (nodes.find(n => n.center) ||
-                    nodes.slice().sort((a,b) => (deg[b.id]||0) - (deg[a.id]||0))[0] || {}).id;
-  const periph = nodes.filter(n => n.id !== centerId);
-  const placed = [];
-  nodes.forEach(n => {
-    if (n.id === centerId) placed.push({ ...n, x: cx, y: cy, r: 18, center: true });
-  });
-  const step = (Math.PI * 2) / Math.max(periph.length, 1);
-  periph.forEach((n, i) => {
-    const ring = 180;
-    const ang = step * i - Math.PI / 2;
-    placed.push({ ...n, x: cx + Math.cos(ang) * ring, y: cy + Math.sin(ang) * ring * 0.78, r: n.r || 11 });
-  });
-  return placed;
+function hashSeedGX(value) {
+  let h = 2166136261 >>> 0;
+  const s = String(value || "");
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return h >>> 0;
 }
 
-// normalize /api/graph/context response into the prototype's graph shape
+const GRAPH_LAYOUT_GOLDEN_ANGLE_GX = 137.50776405003785 * Math.PI / 180;
+const GRAPH_LAYOUT_CENTER_X_GX = 500;
+const GRAPH_LAYOUT_CENTER_Y_GX = 300;
+
+// Deterministic hash-seeded layout for nodes the backend doesn't position and the
+// user hasn't dragged: nodes are seeded by type into a golden-angle spiral (a
+// reasonable, non-overlapping starting scatter), then relaxed with a bounded
+// force simulation -- pairwise repulsion, spring attraction along real edges,
+// and a mild pull toward each node's same-type centroid -- so connected and
+// same-type nodes visually cluster instead of sitting on a flat ring. No
+// Math.random anywhere, so the same node set always converges to the same
+// layout (stable across reloads).
+function layoutGraphNodesGX(nodes, edges, centerId) {
+  const pending = nodes.filter(n => n.x == null || n.y == null || Number.isNaN(n.x) || Number.isNaN(n.y));
+  if (!pending.length) return nodes;
+  const pendingIds = new Set(pending.map(n => n.id));
+  const pos = new Map();
+  nodes.forEach(n => {
+    if (!pendingIds.has(n.id)) pos.set(n.id, { x: n.x, y: n.y });
+  });
+
+  // Seed: per-type cluster spread around a circle, golden-angle spiral within
+  // each cluster -- only needs to be a reasonable starting point, the force
+  // pass below does the real layout work.
+  const groups = new Map();
+  pending.forEach(n => {
+    const key = n.type || "unknown";
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(n);
+  });
+  const groupKeys = Array.from(groups.keys()).sort();
+  const clusterRadius = groupKeys.length > 1 ? 200 : 0;
+  groupKeys.forEach((key, gi) => {
+    const members = groups.get(key).slice().sort((a, b) => String(a.id).localeCompare(String(b.id)));
+    const clusterAngle = groupKeys.length > 1 ? (gi / groupKeys.length) * 2 * Math.PI : 0;
+    const clusterCx = GRAPH_LAYOUT_CENTER_X_GX + clusterRadius * Math.cos(clusterAngle);
+    const clusterCy = GRAPH_LAYOUT_CENTER_Y_GX + clusterRadius * Math.sin(clusterAngle);
+    members.forEach((n, i) => {
+      if (centerId && n.id === centerId) {
+        pos.set(n.id, { x: GRAPH_LAYOUT_CENTER_X_GX, y: GRAPH_LAYOUT_CENTER_Y_GX });
+        return;
+      }
+      const seed = hashSeedGX(n.id);
+      const jitter = ((seed % 1000) / 1000 - 0.5) * 6;
+      const angle = i * GRAPH_LAYOUT_GOLDEN_ANGLE_GX + (seed % 360) * (Math.PI / 180) * 0.02;
+      const radius = 22 * Math.sqrt(i + 1) + jitter;
+      pos.set(n.id, { x: clusterCx + radius * Math.cos(angle), y: clusterCy + radius * Math.sin(angle) });
+    });
+  });
+
+  // Force relaxation: classic Fruchterman-Reingold -- repulsion k^2/dist between
+  // every pair, attraction dist^2/k along real edges and (more weakly) toward
+  // each node's same-type centroid, both forces scaled off the same ideal
+  // distance k so they stay balanced regardless of node count (unlike ad hoc
+  // constants, which either explode or collapse the layout at different
+  // graph sizes). Per-iteration displacement is capped by a "temperature"
+  // that cools linearly to 0, the standard technique for convergence without
+  // oscillation. Bounded iteration count keeps this well under a frame budget
+  // even at a few hundred nodes; skipped entirely past a safety threshold to
+  // avoid an O(n^2) blowup on very large scopes.
+  const allIds = nodes.map(n => n.id);
+  const nodeType = new Map(nodes.map(n => [n.id, n.type || "unknown"]));
+  const layoutEdges = (edges || [])
+    .map(e => ({ s: e.s, t: e.t }))
+    .filter(e => pos.has(e.s) && pos.has(e.t) && e.s !== e.t);
+  const movableIds = allIds.filter(id => pendingIds.has(id) && id !== centerId);
+  const iterations = allIds.length > 500 ? 0 : (allIds.length > 300 ? 60 : 150);
+  const area = Math.max(1000 * 600, allIds.length * 4500);
+  const k = Math.sqrt(area / Math.max(1, allIds.length));
+  const TYPE_PULL_FACTOR = 0.2;
+  const CENTER_PULL = 0.09;
+  let temperature = Math.sqrt(area) / 12;
+  const coolingStep = iterations ? temperature / iterations : 0;
+
+  for (let iter = 0; iter < iterations; iter++) {
+    const disp = new Map(allIds.map(id => [id, { x: 0, y: 0 }]));
+
+    for (let i = 0; i < allIds.length; i++) {
+      const a = allIds[i], pa = pos.get(a);
+      for (let j = i + 1; j < allIds.length; j++) {
+        const b = allIds[j], pb = pos.get(b);
+        let dx = pa.x - pb.x, dy = pa.y - pb.y;
+        let dist = Math.hypot(dx, dy);
+        if (dist < 0.01) { dx = 0.1; dy = 0.1; dist = 0.14; }
+        const force = (k * k) / dist;
+        const fx = (dx / dist) * force, fy = (dy / dist) * force;
+        const da = disp.get(a), db = disp.get(b);
+        da.x += fx; da.y += fy;
+        db.x -= fx; db.y -= fy;
+      }
+    }
+
+    layoutEdges.forEach(({ s, t }) => {
+      const ps = pos.get(s), pt = pos.get(t);
+      const dx = pt.x - ps.x, dy = pt.y - ps.y;
+      const dist = Math.max(0.1, Math.hypot(dx, dy));
+      const force = (dist * dist) / k;
+      const fx = (dx / dist) * force, fy = (dy / dist) * force;
+      disp.get(s).x += fx; disp.get(s).y += fy;
+      disp.get(t).x -= fx; disp.get(t).y -= fy;
+    });
+
+    const centroids = new Map();
+    allIds.forEach(id => {
+      const key = nodeType.get(id);
+      if (!centroids.has(key)) centroids.set(key, { x: 0, y: 0, n: 0 });
+      const c = centroids.get(key), p = pos.get(id);
+      c.x += p.x; c.y += p.y; c.n += 1;
+    });
+    centroids.forEach(c => { c.x /= c.n; c.y /= c.n; });
+    allIds.forEach(id => {
+      const c = centroids.get(nodeType.get(id));
+      const p = pos.get(id), d = disp.get(id);
+      const cdx = c.x - p.x, cdy = c.y - p.y;
+      const cdist = Math.max(0.1, Math.hypot(cdx, cdy));
+      const typeForce = ((cdist * cdist) / k) * TYPE_PULL_FACTOR;
+      d.x += (cdx / cdist) * typeForce + (GRAPH_LAYOUT_CENTER_X_GX - p.x) * CENTER_PULL;
+      d.y += (cdy / cdist) * typeForce + (GRAPH_LAYOUT_CENTER_Y_GX - p.y) * CENTER_PULL;
+    });
+
+    movableIds.forEach(id => {
+      const p = pos.get(id), d = disp.get(id);
+      const len = Math.max(0.01, Math.hypot(d.x, d.y));
+      const capped = Math.min(len, temperature);
+      p.x += (d.x / len) * capped;
+      p.y += (d.y / len) * capped;
+    });
+    temperature = Math.max(0, temperature - coolingStep);
+  }
+
+  return nodes.map(n => {
+    const p = pos.get(n.id);
+    return p ? { ...n, x: p.x, y: p.y } : n;
+  });
+}
+
+// normalize /api/graph/context response into the app's graph shape.
+// The backend never sends node x/y; layoutGraphNodesGX fills in a deterministic
+// position for any node the user hasn't manually dragged (see BigGraph).
 function normalizeGraph(raw, fallback, language) {
   if (!raw || !raw.nodes) return fallback;
   const rawNodes = raw.nodes || [];
   const rawEdges = raw.edges || [];
-  const nodes = rawNodes.map(n => ({
-    id: n.id, type: n.type,
-    label: n.type === "Country"
-      ? countryLabelGX(n.label || n.id, language)
-      : labelGX(n.label || (n.key_properties && (n.key_properties.name || n.key_properties.title)) || n.id, language),
-    x: n.x, y: n.y, r: n.r,
-    center: raw.center && raw.center.id === n.id,
-    flag: !!n.flag,
-    _raw: n,
-  }));
-  const needsLayout = nodes.some(n => n.x == null || n.y == null);
   const edges = rawEdges.map((e, edgeIndex) => ({
     _key: e.id || e.edge_key || e.key || `${e.source || e.s}->${e.target || e.t}:${e.link_key || e.label || e.kind || e.ontology_link || ""}:${e.source_pk || edgeIndex}`,
     s: e.source || e.s,
@@ -377,9 +610,29 @@ function normalizeGraph(raw, fallback, language) {
     muted: e.muted,
     _raw: e,
   }));
+  const degreeById = new Map();
+  edges.forEach(e => {
+    degreeById.set(e.s, (degreeById.get(e.s) || 0) + 1);
+    degreeById.set(e.t, (degreeById.get(e.t) || 0) + 1);
+  });
+  const nodes = rawNodes.map(n => {
+    const isCenter = !!(raw.center && raw.center.id === n.id);
+    const degree = degreeById.get(n.id) || 0;
+    return {
+      id: n.id, type: n.type,
+      label: n.type === "Country"
+        ? countryLabelGX(n.label || n.id, language)
+        : labelGX(n.label || (n.key_properties && (n.key_properties.name || n.key_properties.title)) || n.id, language),
+      x: n.x, y: n.y, r: n.r || (isCenter ? 18 : 11 + Math.min(7, Math.round(Math.sqrt(degree) * 2.2))),
+      degree,
+      center: isCenter,
+      flag: !!n.flag,
+      _raw: n,
+    };
+  });
   return {
     center: raw.center && raw.center.id,
-    nodes: needsLayout ? layoutRadial(nodes, edges) : nodes,
+    nodes: layoutGraphNodesGX(nodes, edges, raw.center && raw.center.id),
     edges,
   };
 }
@@ -615,9 +868,15 @@ function GraphExplorer({ data, tenant, language }) {
   const [edgeSearch, setEdgeSearch] = useStateGX("");
   const [edgeSort, setEdgeSort] = useStateGX("rank");
   const [showNearbyCandidates, setShowNearbyCandidates] = useStateGX(true);
+  const [pathTargetQuery, setPathTargetQuery] = useStateGX("");
+  const [pathTraceResult, setPathTraceResult] = useStateGX(null);
+  const [nodeSearchQuery, setNodeSearchQuery] = useStateGX("");
+  const [egoModeEnabled, setEgoModeEnabled] = useStateGX(false);
+  const [egoMaxHops, setEgoMaxHops] = useStateGX(2);
+  const [alwaysShowEdgeLabels, setAlwaysShowEdgeLabels] = useStateGX(false);
   const [nodePositions, setNodePositions] = useStateGX({});
-  const [edgeOffsets, setEdgeOffsets] = useStateGX({});
   const [hideUnrelated, setHideUnrelated] = useStateGX(false);
+  const cyApiRef = useRefGX(null);
   const [collapseOffTrailEdges, setCollapseOffTrailEdges] = useStateGX(true);
   const [pendingCenterFocus, setPendingCenterFocus] = useStateGX("");
   const [focusMessage, setFocusMessage] = useStateGX("");
@@ -640,8 +899,9 @@ function GraphExplorer({ data, tenant, language }) {
     setPendingCenterFocus("");
     setFocusMessage("");
     setNodePositions({});
-    setEdgeOffsets({});
     setHideUnrelated(false);
+    setPathTargetQuery("");
+    setPathTraceResult(null);
   }, [tenantId]);
   const graphWithPositions = useMemoGX(() => {
     const nodes = graph.nodes.map(node => {
@@ -668,13 +928,6 @@ function GraphExplorer({ data, tenant, language }) {
       return next.length === prev.length ? prev : next;
     });
     setSelectedEdgeKey(prev => !prev || edgeKeys.has(prev) ? prev : "");
-    setEdgeOffsets(prev => {
-      const next = {};
-      Object.entries(prev || {}).forEach(([key, value]) => {
-        if (edgeKeys.has(key)) next[key] = value;
-      });
-      return Object.keys(next).length === Object.keys(prev || {}).length ? prev : next;
-    });
   }, [graphWithPositions]);
   useEffectGX(() => {
     if (!selected && hideUnrelated) setHideUnrelated(false);
@@ -734,6 +987,14 @@ function GraphExplorer({ data, tenant, language }) {
   const connectedEdgesAll = selected
     ? graphWithPositions.edges.filter(e => e.s === selected.id || e.t === selected.id)
     : [];
+  const connectedEdgesInCount = selected ? connectedEdgesAll.filter(e => e.t === selected.id).length : 0;
+  const connectedEdgesOutCount = selected ? connectedEdgesAll.filter(e => e.s === selected.id).length : 0;
+  const connectedEdgeKindCounts = connectedEdgesAll.reduce((acc, e) => {
+    const key = e.kind || "edge";
+    acc[key] = (acc[key] || 0) + 1;
+    return acc;
+  }, {});
+  const topConnectedEdgeKind = Object.entries(connectedEdgeKindCounts).sort((a, b) => b[1] - a[1])[0] || null;
   const connectedEdgeLimit = 20;
   const connectedEdgesRanked = connectedEdgesAll.slice().sort((a, b) => {
     if (edgeSort === "kind") {
@@ -777,6 +1038,7 @@ function GraphExplorer({ data, tenant, language }) {
     if (!node) return;
     const previousId = selected?.id || "";
     setSelected(node);
+    setPathTraceResult(null);
     if (options.reset) {
       setTrailNodeIds(node.id ? [node.id] : []);
       setTrailEdgeKeys([]);
@@ -791,6 +1053,16 @@ function GraphExplorer({ data, tenant, language }) {
       ));
       if (edge) rememberTrailEdge(edge);
     }
+  };
+  const nodeSearchMatches = rankGraphNodeMatchesGX(nodeSearchQuery, graphWithPositions.nodes, language, 8);
+  const mostConnectedNodes = graphWithPositions.nodes
+    .filter(n => (n.degree || 0) > 0)
+    .slice()
+    .sort((a, b) => (b.degree || 0) - (a.degree || 0))
+    .slice(0, 5);
+  const selectNodeFromSearch = (node) => {
+    selectGraphNode(node, { reset: true });
+    setNodeSearchQuery("");
   };
   const selectConnectedEdge = (edge) => {
     if (!edge || !selected) return;
@@ -808,6 +1080,8 @@ function GraphExplorer({ data, tenant, language }) {
     setSelectedEdgeKey("");
     setSelected(null);
     setHideUnrelated(false);
+    setPathTargetQuery("");
+    setPathTraceResult(null);
   };
   const stepBackGraphTrail = () => {
     if (!trailNodeIds.length) return;
@@ -824,10 +1098,55 @@ function GraphExplorer({ data, tenant, language }) {
     if (!selected) return;
     setTrailNodeIds(prev => selected.id && !prev.includes(selected.id) ? [...prev, selected.id] : prev);
     setHideUnrelated(v => !v);
+    setEgoModeEnabled(false);
+  };
+  const toggleEgoMode = () => {
+    if (!selected) return;
+    setEgoModeEnabled(v => !v);
+    setHideUnrelated(false);
+  };
+  const egoHopDistances = useMemoGX(() => {
+    if (!egoModeEnabled || !selected) return null;
+    return bfsHopDistancesGX(graphWithPositions.edges, selected.id, egoMaxHops);
+  }, [egoModeEnabled, selected?.id, egoMaxHops, graphWithPositions.edges]);
+  const tracePathToTarget = () => {
+    if (!selected) return;
+    const query = pathTargetQuery.trim();
+    if (!query) return;
+    const target = findGraphNodeMatchGX(query, graphWithPositions.nodes, language);
+    if (!target || target.id === selected.id) {
+      setPathTraceResult({ found: false, query });
+      return;
+    }
+    const path = findShortestPathGX(graphWithPositions.edges, selected.id, target.id);
+    if (!path) {
+      setPathTraceResult({ found: false, query, target });
+      return;
+    }
+    setTrailNodeIds(path.nodeIds);
+    setTrailEdgeKeys(path.edgeKeys);
+    setSelectedEdgeKey(path.edgeKeys[path.edgeKeys.length - 1] || "");
+    setHideUnrelated(true);
+    setCollapseOffTrailEdges(true);
+    setShowNearbyCandidates(true);
+    setPathTraceResult({ found: true, query, target, nodeIds: path.nodeIds, edgeKeys: path.edgeKeys });
+  };
+  const clearPathTrace = () => {
+    setPathTargetQuery("");
+    setPathTraceResult(null);
   };
   const trailNodes = trailNodeIds.map(id => map[id]).filter(Boolean);
   const graphTypes = Array.from(new Set(graphWithPositions.nodes.map(n => n.type).filter(Boolean)));
-  const typeColors = Object.fromEntries(graphTypes.map((t, i) => [t, GRAPH_PRIMARY_PALETTE_GX[i % GRAPH_PRIMARY_PALETTE_GX.length]]));
+  const typeColors = Object.fromEntries(graphTypes.map(t => [t, graphTypeColorGX(t)]));
+  const typeNodeCounts = graphWithPositions.nodes.reduce((acc, n) => {
+    if (!n.type) return acc;
+    acc[n.type] = (acc[n.type] || 0) + 1;
+    return acc;
+  }, {});
+  const legendTypeLimit = 8;
+  const legendTypeEntries = Object.entries(typeColors).sort((a, b) => (typeNodeCounts[b[0]] || 0) - (typeNodeCounts[a[0]] || 0));
+  const legendTypeVisible = legendTypeEntries.slice(0, legendTypeLimit);
+  const legendTypeHiddenCount = Math.max(0, legendTypeEntries.length - legendTypeVisible.length);
   const edgeCounts = graphWithPositions.edges.reduce((acc, e) => {
     const key = e.kind || "edge";
     acc[key] = (acc[key] || 0) + 1;
@@ -873,23 +1192,30 @@ function GraphExplorer({ data, tenant, language }) {
   }, [pendingCenterFocus, graphQ.loading, graphQ.source, graphWithPositions.nodes.map(n => n.id).join("|")]);
 
   const updateNodePosition = (nodeId, point) => {
-    const x = Math.max(18, Math.min(982, point.x));
-    const y = Math.max(18, Math.min(582, point.y));
+    const { x, y } = point;
     setNodePositions(prev => ({ ...prev, [nodeId]: { x, y } }));
     setSelected(prev => {
       if (!prev || prev.id !== nodeId) return prev;
       return { ...prev, x, y };
     });
   };
-  const updateEdgeOffset = (edge, point) => {
-    const s = map[edge.s], t = map[edge.t];
-    if (!s || !t || !point) return;
-    const edgeKey = graphEdgeKeyGX(edge);
-    const midX = (s.x + t.x) / 2;
-    const midY = (s.y + t.y) / 2;
-    const dx = Math.max(-260, Math.min(260, point.x - midX));
-    const dy = Math.max(-180, Math.min(180, point.y - midY));
-    setEdgeOffsets(prev => ({ ...prev, [edgeKey]: { dx, dy } }));
+  const resetGraphLayoutGX = () => setNodePositions({});
+  const exportSelectedNodeJsonGX = () => {
+    if (!selected) return;
+    const payload = {
+      node: selectedNodeDetail || selected._raw || selected,
+      connectedEdges: connectedEdgesAll.map(e => ({ source: e.s, target: e.t, kind: e.kind })),
+      pathTrace: pathTraceResult && pathTraceResult.found ? pathTraceResult : null,
+    };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${String(selected.id).replace(/[^a-zA-Z0-9_.-]/g, "_")}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
   };
 
   return (
@@ -930,6 +1256,58 @@ function GraphExplorer({ data, tenant, language }) {
               </button>
             </div>
           </div>
+
+          <div style={{ padding: "var(--pad-3) var(--pad-4)", borderBottom: "1px solid var(--line)" }}>
+            <div className="eyebrow" style={{ marginBottom: 4 }}>{tGX(language, "Find node", "查找节点")}</div>
+            <input
+              className="input"
+              value={nodeSearchQuery}
+              onChange={e => setNodeSearchQuery(e.target.value)}
+              placeholder={tGX(language, "Search loaded nodes by id or label…", "按 ID 或标签搜索已加载节点…")}
+            />
+            {nodeSearchQuery.trim() && (
+              <div style={{ marginTop: 6, display: "flex", flexDirection: "column", gap: 4, maxHeight: 180, overflowY: "auto" }}>
+                {nodeSearchMatches.length === 0 && (
+                  <div style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--muted)" }}>
+                    {tGX(language, "No matches in the loaded graph.", "已加载的图中没有匹配项。")}
+                  </div>
+                )}
+                {nodeSearchMatches.map(node => (
+                  <button
+                    key={node.id}
+                    type="button"
+                    className="btn ghost"
+                    style={{ textAlign: "left", justifyContent: "flex-start" }}
+                    onClick={() => selectNodeFromSearch(node)}>
+                    <span style={{ color: "var(--accent)", marginRight: 6 }}>{node.type}</span>
+                    {labelGX(node.label || node.id, language)}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {mostConnectedNodes.length > 0 && (
+            <div style={{ padding: "var(--pad-3) var(--pad-4)", borderBottom: "1px solid var(--line)" }}>
+              <div className="eyebrow" style={{ marginBottom: 4 }}>{tGX(language, "Most connected", "连接最多")}</div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                {mostConnectedNodes.map(node => (
+                  <button
+                    key={node.id}
+                    type="button"
+                    className="btn ghost"
+                    style={{ textAlign: "left", justifyContent: "space-between", display: "flex" }}
+                    onClick={() => selectGraphNode(node, { reset: true })}>
+                    <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      <span style={{ color: "var(--accent)", marginRight: 6 }}>{node.type}</span>
+                      {labelGX(node.label || node.id, language)}
+                    </span>
+                    <span style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--muted)" }}>{node.degree}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
 
           {leftTab === "approved" && <>
           <div style={{ padding: "var(--pad-3) var(--pad-4)", borderBottom: "1px solid var(--line)", display: "flex", flexDirection: "column", gap: 10 }}>
@@ -1036,6 +1414,20 @@ function GraphExplorer({ data, tenant, language }) {
               <button className="btn ghost" style={{ flex: 1 }} disabled={trailNodes.length < 2} onClick={stepBackGraphTrail}>{tGX(language, "Back", "回退一步")}</button>
               <button className="btn ghost" style={{ flex: 1 }} disabled={!trailNodes.length} onClick={clearGraphTrail}>{tGX(language, "Clear trail", "清空路径")}</button>
             </div>
+            <button
+              className="btn ghost"
+              style={{ marginTop: 8, width: "100%" }}
+              disabled={!selected}
+              onClick={toggleEgoMode}>
+              {egoModeEnabled ? tGX(language, "Exit ego mode", "退出自我中心模式") : tGX(language, "Ego mode (hop distance)", "自我中心模式（跳数距离）")}
+            </button>
+            {egoModeEnabled && selected && (
+              <div style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 8 }}>
+                <span style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--muted)" }}>{tGX(language, "Hops", "跳数")}</span>
+                <input type="range" min={1} max={6} value={egoMaxHops} onChange={e => setEgoMaxHops(+e.target.value)} style={{ flex: 1 }} />
+                <span style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--accent)" }}>{egoMaxHops}</span>
+              </div>
+            )}
           </div>
 
           <div style={{ padding: "var(--pad-3) var(--pad-4)", borderBottom: "1px solid var(--line)" }}>
@@ -1135,9 +1527,12 @@ function GraphExplorer({ data, tenant, language }) {
               candidateEdgeLimit={connectedEdgeLimit}
               showNearbyCandidates={showNearbyCandidates}
               onNodePositionChange={updateNodePosition}
-              edgeOffsets={edgeOffsets}
-              onEdgeOffsetChange={updateEdgeOffset}
               onSelectEdge={rememberTrailEdge}
+              apiRef={cyApiRef}
+              egoModeEnabled={egoModeEnabled}
+              egoHopDistances={egoHopDistances}
+              egoMaxHops={egoMaxHops}
+              alwaysShowEdgeLabels={alwaysShowEdgeLabels}
               language={language}
             />
             )}
@@ -1157,12 +1552,16 @@ function GraphExplorer({ data, tenant, language }) {
 
             <div className="graph-overlay-tr">
               <div style={{ display: "flex", gap: 12, flexWrap: "wrap", justifyContent: "flex-end" }}>
-                {Object.entries(typeColors).map(([k, c]) => (
+                {legendTypeVisible.map(([k, c]) => (
                   <div key={k} style={{ display: "flex", alignItems: "center", gap: 6 }}>
                     <span style={{ width: 8, height: 8, background: c, borderRadius: "50%", display: "inline-block" }} />
                     <span>{k}</span>
+                    <span style={{ color: "var(--muted)" }}>{typeNodeCounts[k] || 0}</span>
                   </div>
                 ))}
+                {legendTypeHiddenCount > 0 && (
+                  <div style={{ color: "var(--muted)" }}>+{legendTypeHiddenCount} {tGX(language, "more types", "更多类型")}</div>
+                )}
               </div>
               <div style={{ display: "flex", gap: 10, flexWrap: "wrap", justifyContent: "flex-end", marginTop: 7, paddingTop: 7, borderTop: "1px solid var(--line-soft)" }}>
                 {[
@@ -1180,9 +1579,9 @@ function GraphExplorer({ data, tenant, language }) {
             </div>
 
             <div className="graph-overlay-bl">
-              <button className="icon-btn" title={tGX(language, "Zoom in", "放大")}>+</button>
-              <button className="icon-btn" title={tGX(language, "Zoom out", "缩小")}>−</button>
-              <button className="icon-btn" title={tGX(language, "Fit view", "适配视图")}>⌖</button>
+              <button className="icon-btn" title={tGX(language, "Zoom in", "放大")} onClick={() => cyApiRef.current?.zoomIn()}>+</button>
+              <button className="icon-btn" title={tGX(language, "Zoom out", "缩小")} onClick={() => cyApiRef.current?.zoomOut()}>−</button>
+              <button className="icon-btn" title={tGX(language, "Fit view", "适配视图")} onClick={() => cyApiRef.current?.fit()}>⌖</button>
               <button className="icon-btn" title={tGX(language, "Clear trail", "清空路径")} disabled={!selected && !trailNodes.length} onClick={clearGraphTrail}>◎</button>
               <button className="icon-btn" title={tGX(language, "Back one trail step", "路径回退一步")} disabled={trailNodes.length < 2} onClick={stepBackGraphTrail}>↶</button>
               <button
@@ -1199,8 +1598,18 @@ function GraphExplorer({ data, tenant, language }) {
                 onClick={() => setShowNearbyCandidates(value => !value)}>
                 {showNearbyCandidates ? "·" : "⋯"}
               </button>
-              <button className="icon-btn" title={tGX(language, "Expand", "展开")}>⊕</button>
-              <button className="icon-btn" title={tGX(language, "Collapse", "收起")}>⊖</button>
+              <button
+                className="icon-btn"
+                title={alwaysShowEdgeLabels ? tGX(language, "Hide edge labels by default", "默认隐藏边标签") : tGX(language, "Always show edge labels", "始终显示边标签")}
+                onClick={() => setAlwaysShowEdgeLabels(v => !v)}>
+                L
+              </button>
+              <button
+                className="icon-btn"
+                title={tGX(language, "Reset layout (clear dragged positions)", "重置布局（清除手动拖拽的位置）")}
+                onClick={resetGraphLayoutGX}>
+                ↺
+              </button>
             </div>
 
             <div className="graph-overlay-br" style={{ textTransform: "none", letterSpacing: 0, padding: 8 }}>
@@ -1233,6 +1642,9 @@ function GraphExplorer({ data, tenant, language }) {
             <div className="section-head">
               <span>{tGX(language, "Inspector", "检查器")}</span>
               <span className="ct">{selected.type}</span>
+              <button type="button" className="btn xs ghost" style={{ marginLeft: 8 }} onClick={exportSelectedNodeJsonGX}>
+                {tGX(language, "Export JSON", "导出 JSON")}
+              </button>
             </div>
             <div className="section-body">
               <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
@@ -1276,8 +1688,58 @@ function GraphExplorer({ data, tenant, language }) {
               />
               {selected.flag && (
                 <div style={{ marginTop: 12, padding: 10, border: "1px solid oklch(0.66 0.18 25 / 0.4)", background: "oklch(0.66 0.18 25 / 0.08)", color: "var(--rejected)", fontFamily: "var(--font-mono)", fontSize: 10, textTransform: "uppercase", letterSpacing: "0.08em" }}>
-                  Flagged · temporal overlap in ReportsTo
+                  {tGX(language, "Flagged · needs review", "已标记 · 需要复核")}
                 </div>
+              )}
+            </div>
+          </div>
+
+          <div className="section">
+            <div className="section-head">
+              <span>{tGX(language, "Trace path", "路径追踪")}</span>
+              {pathTraceResult?.found && <span className="ct">{pathTraceResult.nodeIds.length - 1} {tGX(language, "hops", "跳")}</span>}
+            </div>
+            <div className="section-body">
+              <div style={{ display: "flex", gap: 6 }}>
+                <input
+                  className="input"
+                  value={pathTargetQuery}
+                  onChange={e => setPathTargetQuery(e.target.value)}
+                  onKeyDown={e => { if (e.key === "Enter") tracePathToTarget(); }}
+                  placeholder={tGX(language, "Trace path to node id or label…", "追踪到节点 ID 或标签…")}
+                  style={{ flex: 1, minWidth: 0 }}
+                />
+                <button className="btn ghost" disabled={!pathTargetQuery.trim()} onClick={tracePathToTarget}>{tGX(language, "Trace", "追踪")}</button>
+              </div>
+              {pathTraceResult && !pathTraceResult.found && (
+                <div style={{ marginTop: 8, fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--changes)" }}>
+                  {!pathTraceResult.target
+                    ? tGX(language, `No node matches "${pathTraceResult.query}".`, `没有节点匹配 “${pathTraceResult.query}”。`)
+                    : tGX(language, `No path to ${labelGX(pathTraceResult.target.id, language)} within the loaded graph. Try increasing depth/limit and reloading.`, `在已加载的图内没有到 ${labelGX(pathTraceResult.target.id, language)} 的路径，可尝试增大深度/上限后重新加载。`)}
+                </div>
+              )}
+              {pathTraceResult?.found && (
+                <>
+                  <div style={{ marginTop: 10, display: "flex", flexWrap: "wrap", alignItems: "center", gap: 6 }}>
+                    {pathTraceResult.nodeIds.map((nodeId, index) => {
+                      const node = map[nodeId];
+                      const edge = index > 0 ? graphWithPositions.edges.find(e => graphEdgeKeyGX(e) === pathTraceResult.edgeKeys[index - 1]) : null;
+                      return (
+                        <React.Fragment key={`${nodeId}-${index}`}>
+                          {edge && (
+                            <span style={{ fontFamily: "var(--font-mono)", fontSize: 9, color: "var(--muted)", textTransform: "uppercase", letterSpacing: "0.06em" }}>
+                              → {edgeKindLabelGX(edge.kind, language)} →
+                            </span>
+                          )}
+                          <span className="pill" style={{ cursor: node ? "pointer" : "default" }} onClick={() => node && selectGraphNode(node)}>
+                            {labelGX(nodeId, language)}
+                          </span>
+                        </React.Fragment>
+                      );
+                    })}
+                  </div>
+                  <button className="btn ghost" style={{ marginTop: 8, width: "100%" }} onClick={clearPathTrace}>{tGX(language, "Clear path trace", "清除路径追踪")}</button>
+                </>
               )}
             </div>
           </div>
@@ -1291,6 +1753,12 @@ function GraphExplorer({ data, tenant, language }) {
                   : connectedEdgesAll.length}
               </span>
             </div>
+            {connectedEdgesAll.length > 0 && (
+              <div style={{ padding: "8px 14px", borderBottom: "1px solid var(--line-soft)", fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--muted)" }}>
+                {connectedEdgesInCount} {tGX(language, "in", "入")} · {connectedEdgesOutCount} {tGX(language, "out", "出")}
+                {topConnectedEdgeKind && ` · ${tGX(language, "top", "主要类型")}: ${edgeKindLabelGX(topConnectedEdgeKind[0], language)} (${topConnectedEdgeKind[1]})`}
+              </div>
+            )}
             <div style={{ padding: "10px 14px", borderBottom: "1px solid var(--line-soft)", display: "grid", gridTemplateColumns: "1fr 120px", gap: 8 }}>
               <input
                 className="input"
@@ -1349,7 +1817,7 @@ function GraphExplorer({ data, tenant, language }) {
               <div className="eyebrow" style={{ marginBottom: 4 }}>{tGX(language, "Question", "问题")}</div>
               <select className="select" style={{ marginBottom: 8 }}>
                 <option>{tGX(language, "Explain this node's role in the graph", "解释该节点在图谱中的作用")}</option>
-                <option>{tGX(language, "Find workload / concentration risk", "发现工作负载 / 集中风险")}</option>
+                <option>{tGX(language, "Find structurally similar nodes", "发现结构相似的节点")}</option>
                 <option>{tGX(language, "Explain why this edge exists", "解释这条边为什么存在")}</option>
                 <option>{tGX(language, "Find unusual neighbors in this scope", "发现该范围内异常邻居")}</option>
               </select>
@@ -1880,19 +2348,27 @@ function BigGraph({
   edgeOffsets = {},
   onEdgeOffsetChange,
   onSelectEdge,
+  apiRef,
+  egoModeEnabled = false,
+  egoHopDistances = null,
+  egoMaxHops = 2,
+  alwaysShowEdgeLabels = false,
   language,
 }) {
   const svgRef = useRefGX(null);
   const [dragging, setDragging] = useStateGX(null);
   const [draggingEdge, setDraggingEdge] = useStateGX(null);
+  const [panState, setPanState] = useStateGX(null);
+  const [viewState, setViewState] = useStateGX({ tx: 0, ty: 0, s: 1 });
   const [expandedEdgeGroupNodeIds, setExpandedEdgeGroupNodeIds] = useStateGX([]);
   const map = Object.fromEntries(data.nodes.map(n => [n.id, n]));
   const graphTypes = Array.from(new Set(data.nodes.map(n => n.type).filter(Boolean)));
-  const typeColors = Object.fromEntries(graphTypes.map((t, i) => [t, GRAPH_PRIMARY_PALETTE_GX[i % GRAPH_PRIMARY_PALETTE_GX.length]]));
+  const typeColors = Object.fromEntries(graphTypes.map(t => [t, graphTypeColorGX(t)]));
   const sel = selected ? selected.id : null;
   const trailIds = new Set(trailNodeIds || []);
   if (sel) trailIds.add(sel);
   const focusActive = !!sel || trailIds.size > 0;
+  const egoActive = !!(egoModeEnabled && egoHopDistances);
   const activeNeighborIds = new Set();
   const trailNeighborIds = new Set();
   const trailEdgeKeySet = new Set(trailEdgeKeys || []);
@@ -1978,13 +2454,97 @@ function BigGraph({
     ));
   };
 
+  // Returns the event position in the pre-transform node coordinate space
+  // (i.e. inverts the pan/zoom <g transform> below, not just the SVG viewBox scaling).
   const eventPoint = (event) => {
     const svg = svgRef.current;
     if (!svg) return null;
     const ctm = svg.getScreenCTM();
     if (!ctm) return null;
     const point = new DOMPoint(event.clientX, event.clientY).matrixTransform(ctm.inverse());
-    return { x: point.x, y: point.y };
+    return { x: (point.x - viewState.tx) / viewState.s, y: (point.y - viewState.ty) / viewState.s };
+  };
+  const zoomBy = (factor, pivot) => {
+    setViewState(vs => {
+      const nextS = Math.max(0.2, Math.min(6, vs.s * factor));
+      const ratio = nextS / vs.s;
+      const px = pivot ? pivot.x : GRAPH_LAYOUT_CENTER_X_GX;
+      const py = pivot ? pivot.y : GRAPH_LAYOUT_CENTER_Y_GX;
+      return { s: nextS, tx: px - ratio * (px - vs.tx), ty: py - ratio * (py - vs.ty) };
+    });
+  };
+  // Bounds the fit-to-view camera by a trimmed percentile range rather than raw
+  // min/max: a force layout can fling a handful of weakly-connected outliers far
+  // from the main mass, and framing on their exact extent would zoom the whole
+  // view out to near-invisibility for everyone else. Outliers stay reachable by
+  // panning; they just don't dictate the default zoom level.
+  const percentileBoundGX = (values) => {
+    if (values.length < 20) return { min: Math.min(...values), max: Math.max(...values) };
+    const sorted = values.slice().sort((a, b) => a - b);
+    return { min: sorted[Math.floor(sorted.length * 0.03)], max: sorted[Math.ceil(sorted.length * 0.97) - 1] };
+  };
+  const fitToNodes = (targets) => {
+    const nodesToFit = (targets && targets.length ? targets : data.nodes).filter(n => Number.isFinite(n.x) && Number.isFinite(n.y));
+    if (!nodesToFit.length) { setViewState({ tx: 0, ty: 0, s: 1 }); return; }
+    const xBound = percentileBoundGX(nodesToFit.map(n => n.x));
+    const yBound = percentileBoundGX(nodesToFit.map(n => n.y));
+    const minX = xBound.min - 40, maxX = xBound.max + 40;
+    const minY = yBound.min - 40, maxY = yBound.max + 40;
+    const w = Math.max(1, maxX - minX), h = Math.max(1, maxY - minY);
+    const nextS = Math.max(0.2, Math.min(6, Math.min(1000 / w, 600 / h)));
+    const cx = (minX + maxX) / 2, cy = (minY + maxY) / 2;
+    setViewState({ s: nextS, tx: GRAPH_LAYOUT_CENTER_X_GX - nextS * cx, ty: GRAPH_LAYOUT_CENTER_Y_GX - nextS * cy });
+  };
+  const nodeIdKeyGX = data.nodes.map(n => n.id).join("|");
+  useEffectGX(() => {
+    fitToNodes(data.nodes);
+  }, [nodeIdKeyGX]);
+  useEffectGX(() => {
+    if (!apiRef) return undefined;
+    apiRef.current = {
+      zoomIn: () => zoomBy(1.25),
+      zoomOut: () => zoomBy(0.8),
+      fit: () => fitToNodes(focusActive && hideUnrelated ? data.nodes.filter(n => visibleNodeIds.has(n.id)) : data.nodes),
+      resetView: () => setViewState({ tx: 0, ty: 0, s: 1 }),
+    };
+    return () => { apiRef.current = null; };
+  });
+  useEffectGX(() => {
+    const svg = svgRef.current;
+    if (!svg) return undefined;
+    const handleWheel = (event) => {
+      event.preventDefault();
+      const ctm = svg.getScreenCTM();
+      if (!ctm) return;
+      const point = new DOMPoint(event.clientX, event.clientY).matrixTransform(ctm.inverse());
+      zoomBy(Math.exp(-event.deltaY * 0.0015), point);
+    };
+    svg.addEventListener("wheel", handleWheel, { passive: false });
+    return () => svg.removeEventListener("wheel", handleWheel);
+  }, []);
+  const startPan = (event) => {
+    if (dragging || draggingEdge) return;
+    const svg = svgRef.current;
+    const ctm = svg && svg.getScreenCTM();
+    if (!ctm) return;
+    event.preventDefault();
+    setPanState({ pointerId: event.pointerId, lastClientX: event.clientX, lastClientY: event.clientY, scaleX: ctm.a || 1, scaleY: ctm.d || 1 });
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+  };
+  const movePan = (event) => {
+    setPanState(prev => {
+      if (!prev || prev.pointerId !== event.pointerId) return prev;
+      const dx = (event.clientX - prev.lastClientX) / prev.scaleX;
+      const dy = (event.clientY - prev.lastClientY) / prev.scaleY;
+      setViewState(vs => ({ ...vs, tx: vs.tx + dx, ty: vs.ty + dy }));
+      return { ...prev, lastClientX: event.clientX, lastClientY: event.clientY };
+    });
+  };
+  const endPan = (event) => {
+    if (panState && panState.pointerId === event.pointerId) {
+      event.currentTarget.releasePointerCapture?.(event.pointerId);
+      setPanState(null);
+    }
   };
   const startDrag = (event, node) => {
     event.preventDefault();
@@ -2058,6 +2618,16 @@ function BigGraph({
         </marker>
       </defs>
 
+      {/* background: catches pointer events for panning, sits behind the transformed content */}
+      <rect x="0" y="0" width="1000" height="600" fill="transparent"
+            style={{ cursor: panState ? "grabbing" : "grab" }}
+            onPointerDown={startPan}
+            onPointerMove={movePan}
+            onPointerUp={endPan}
+            onPointerCancel={endPan} />
+
+      <g transform={`translate(${viewState.tx} ${viewState.ty}) scale(${viewState.s})`}>
+
       {/* edges */}
       {data.edges.map((e, i) => {
         const geometry = edgeGeometry(e);
@@ -2071,9 +2641,10 @@ function BigGraph({
         if (focusActive && hideUnrelated && !inTrail && !inCandidate) return null;
         if (focusActive && hideUnrelated && (!visibleNodeIds.has(e.s) || !visibleNodeIds.has(e.t))) return null;
         if (focusActive && hideUnrelated && collapseOffTrailEdges && !inTrail && !inVisibleOffTrail) return null;
-        const dimmed = focusActive && !involved && !inTrail && !inCandidate && !(activeNeighborIds.has(e.s) || activeNeighborIds.has(e.t));
+        if (egoActive && (!egoHopDistances.has(e.s) || !egoHopDistances.has(e.t))) return null;
+        const dimmed = egoActive ? false : (focusActive && !involved && !inTrail && !inCandidate && !(activeNeighborIds.has(e.s) || activeNeighborIds.has(e.t)));
         const emphasized = involved || inTrail || isSelectedEdge;
-        const showEdgeLabel = emphasized || inVisibleOffTrail;
+        const showEdgeLabel = alwaysShowEdgeLabels || emphasized || inVisibleOffTrail || egoActive;
         const semanticEdgeColor = graphEdgeToneGX(e);
         const edgeColor = e.flag ? GRAPH_ROLE_COLORS_GX.conflict : (emphasized ? GRAPH_ROLE_COLORS_GX.selected : inCandidate ? GRAPH_ROLE_COLORS_GX.candidate : e.muted ? "var(--faint)" : semanticEdgeColor);
         const labelColor = e.flag ? GRAPH_ROLE_COLORS_GX.conflict : (emphasized ? GRAPH_ROLE_COLORS_GX.selected : inCandidate ? GRAPH_ROLE_COLORS_GX.candidate : semanticEdgeColor);
@@ -2157,9 +2728,12 @@ function BigGraph({
         const isTrailNeighbor = trailNeighborIds.has(n.id);
         if (focusActive && hideUnrelated && !visibleNodeIds.has(n.id)) return null;
         const isHover = n.id === hoverId;
-        const dimmed = focusActive && !isSel && !isTrail && !isActiveNeighbor && !isTrailNeighbor;
-        const showLabel = isSel || isTrail || isHover || (hideUnrelated && isTrailNeighbor);
+        const egoHop = egoActive ? egoHopDistances.get(n.id) : undefined;
+        const dimmed = egoActive ? egoHop === undefined : (focusActive && !isSel && !isTrail && !isActiveNeighbor && !isTrailNeighbor);
+        const egoOpacity = egoActive && egoHop !== undefined ? Math.max(0.35, 1 - (egoHop / (egoMaxHops + 1)) * 0.65) : null;
+        const showLabel = isSel || isTrail || isHover || (hideUnrelated && isTrailNeighbor) || (egoActive && egoHop !== undefined);
         const stroke = n.flag ? GRAPH_ROLE_COLORS_GX.conflict : (isSel ? GRAPH_ROLE_COLORS_GX.selected : isTrail ? GRAPH_ROLE_COLORS_GX.approved : isActiveNeighbor ? GRAPH_ROLE_COLORS_GX.candidate : isTrailNeighbor ? GRAPH_ROLE_COLORS_GX.approved : (n.muted ? "var(--faint)" : typeColors[n.type] || "var(--text-dim)"));
+        const hasProvenance = !!(n._raw?.source_url || n._raw?.evidence_quote);
         return (
           <g key={i} onPointerDown={(event) => startDrag(event, n)}
                  onPointerMove={moveDrag}
@@ -2167,7 +2741,7 @@ function BigGraph({
                  onPointerCancel={endDrag}
                  onMouseEnter={() => setHoverId(n.id)}
                  onMouseLeave={() => setHoverId(null)}
-                 opacity={dimmed ? 0.24 : 1}
+                 opacity={egoOpacity !== null ? egoOpacity : (dimmed ? 0.24 : 1)}
                  style={{ cursor: dragging?.id === n.id ? "grabbing" : "grab", transition: "opacity 120ms ease" }}>
             {(isSel || isHover || isTrail) && (
               <circle cx={n.x} cy={n.y} r={n.r + 10} fill={isTrail && !isSel ? GRAPH_ROLE_COLORS_GX.approvedBg : GRAPH_ROLE_COLORS_GX.selectedBg} stroke={isTrail && !isSel ? GRAPH_ROLE_COLORS_GX.approvedLine : GRAPH_ROLE_COLORS_GX.selectedLine} strokeWidth="1" />
@@ -2176,6 +2750,10 @@ function BigGraph({
                     fill={isSel ? GRAPH_ROLE_COLORS_GX.selected : "var(--bg-2)"}
                     stroke={stroke} strokeWidth={isSel ? 2 : isTrail ? 1.8 : 1.4} />
             {isSel && <circle cx={n.x} cy={n.y} r={n.r - 7} fill="var(--bg-1)" />}
+            {hasProvenance && (
+              <circle cx={n.x + n.r * 0.72} cy={n.y - n.r * 0.72} r={2.6}
+                      fill="var(--accent)" stroke="var(--bg-1)" strokeWidth="0.8" />
+            )}
             {showLabel && (
               <>
                 <text x={n.x} y={n.y + n.r + 14}
@@ -2197,6 +2775,7 @@ function BigGraph({
           </g>
         );
       })}
+      </g>
     </svg>
   );
 }

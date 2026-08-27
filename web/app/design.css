@@ -275,6 +275,17 @@ a { color: inherit; text-decoration: none; }
   overflow: hidden;
 }
 
+/* MockBanner renders null (no DOM node) whenever the API is reachable --
+   the common case. Grid auto-placement fills rows by DOM order, so with
+   MockBanner absent, .body and .statusbar would slide up into the
+   "auto"/"1fr" rows meant for MockBanner/.body, leaving the real 1fr row
+   under-filled and the statusbar-h row empty at the very bottom. Pin each
+   persistent child to its row explicitly so the grid is stable whether or
+   not MockBanner mounts. */
+.app > .topbar    { grid-row: 1; }
+.app > .body      { grid-row: 3; }
+.app > .statusbar { grid-row: 4; }
+
 /* ----------- topbar ----------- */
 .topbar {
   display: grid;
@@ -1158,7 +1169,10 @@ a { color: inherit; text-decoration: none; }
    ==================================================== */
 .gx {
   display: grid;
-  grid-template-columns: 560px minmax(0, 1fr) var(--inspector-w);
+  /* Proportional 3-column split that prioritizes the canvas: side panels
+     scale with viewport width between a readable floor and a sensible cap,
+     the canvas (1fr) always absorbs whatever's left. */
+  grid-template-columns: minmax(320px, min(22%, 420px)) minmax(0, 1fr) minmax(280px, min(16%, 360px));
   flex: 1;
   min-height: 0;
 }
