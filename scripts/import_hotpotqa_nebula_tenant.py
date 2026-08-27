@@ -11,12 +11,17 @@ Strongly-typed multi-TAG/multi-EDGE-type model: each extracted entity is
 assigned a real Nebula TAG matching its LLM-classified type (e.g. "Person",
 "Location") and each relation becomes its own EDGE TYPE (instead of a single
 flat ``HotpotEntity`` tag / ``RELATION`` edge type with everything folded
-into string properties). New types are auto-registered into the tenant's
-approved ontology (``agents/graph_ontology_registry.py``) the first time
-they're seen -- same "no manual review gate" precedent already used by
-``RelationCatalog.normalize()`` for relation names, since this is a scripted
-batch import with no human in the loop. This importer still owns that
-auto-approve policy; the extractor itself only reads back the tenant's
+into string properties). New types are registered into the tenant's
+ontology (``agents/graph_ontology_registry.py``) the first time they're
+seen, with the review posture controlled by ``--governance-mode``:
+"auto_approve" (default -- preserves the original "no manual review gate"
+precedent already used by ``RelationCatalog.normalize()`` for relation
+names, since a scripted benchmark import has no human in the loop) writes
+every new type straight to ``status="approved"``; "review_required" (opt-in,
+for a real business tenant) writes ``status="draft"`` instead, and the type
+only becomes visible to ``reasoning_engine.py`` once a human approves it
+through the existing ``/api/artifacts`` review workflow -- see
+``GOVERNANCE_MODES``. The extractor itself only reads back the tenant's
 already-approved node types (fetched once, before extraction starts) and
 passes them into each prompt so independent, stateless per-question calls
 stay consistent (reusing "Person" rather than drifting to "Human" on a
@@ -53,7 +58,7 @@ sys.path.append(str(ROOT / "scripts"))
 from sqlalchemy import create_engine  # noqa: E402
 from sqlalchemy.orm import sessionmaker  # noqa: E402
 
-from graph_db_client import NebulaGraphClient  # noqa: E402
+from graph_db_client import NebulaGraphClient, insert_with_schema_retry as _insert_with_schema_retry  # noqa: E402
 from graph_entity_resolver import SOURCE_SPACE_DESCRIPTION, resolve_or_mint_vertex_id  # noqa: E402
 from graph_ontology_registry import (  # noqa: E402
     get_approved_node_types, get_edge_type, get_node_type, propose_edge_type, propose_node_type,
@@ -63,6 +68,7 @@ from hotpotqa_entity_ids import entity_id  # noqa: E402
 from hotpotqa_frozen_sample import DEFAULT_SAMPLE_PATH, load_hotpotqa_cases  # noqa: E402
 from iterative_graph_enrichment_agent import SmallMultilingualEmbeddingAdapter, _cosine_distance  # noqa: E402
 from llm_planner import LLMPlanner  # noqa: E402
+from node_type_catalog import NodeTypeCatalog  # noqa: E402
 from passage_relation_extraction import PassageRelationExtractor  # noqa: E402
 from ontology_artifacts import ensure_artifact_schema  # noqa: E402
 from ontology_label_embeddings import sync_label_embeddings  # noqa: E402
@@ -105,22 +111,70 @@ MAX_EVIDENCE_PER_VERTEX = 8
 # from genuine distinct facts with margin on both sides.
 LITERAL_NEAR_DUPLICATE_MAX_DISTANCE = 0.15
 
+# Governance mode for newly-registered node/edge types (see module docstring's
+# "auto-approve" note, and the ontology-review-pipeline plan this implements).
+# "auto_approve" preserves the original scripted-batch-import behavior with
+# zero change (every benchmark tenant/test defaults here). "review_required"
+# is a purely opt-in mode for a real business tenant: new types land as
+# status="draft" and only become queryable via reasoning_engine.py once a
+# human approves them through the existing generic /api/artifacts review
+# workflow (server/aletheia_server.py's ReviewRepository) -- no new review
+# system, this just stops force-approving.
+GOVERNANCE_MODES = ("auto_approve", "review_required")
+DEFAULT_GOVERNANCE_MODE = "auto_approve"
 
-def _register_node_type_if_new(session, tenant_id: str, name: str, seen: set[str]) -> None:
-    if name in seen:
-        return
-    seen.add(name)
-    if get_node_type(session, tenant_id, name) is not None:
-        return
+
+def _governance_status(governance_mode: str) -> str:
+    if governance_mode not in GOVERNANCE_MODES:
+        raise ValueError(f"governance_mode must be one of {GOVERNANCE_MODES}, got {governance_mode!r}")
+    return "approved" if governance_mode == "auto_approve" else "draft"
+
+
+def _register_node_type_if_new(
+    session, tenant_id: str, name: str, seen: set[str], *,
+    governance_mode: str = DEFAULT_GOVERNANCE_MODE,
+    node_type_catalog: "NodeTypeCatalog | None" = None,
+    evidence: str = "",
+    approved_node_types: list[str] | None = None,
+) -> str:
+    """Returns the canonical type name to actually use for this vertex --
+    ``name`` unchanged if no ``node_type_catalog`` was given or nothing
+    matched, otherwise the existing canonical type ``name`` was mapped onto
+    (see ``node_type_catalog.NodeTypeCatalog.normalize``'s "Human" -> "Person"
+    example). Registers the canonical name into the ontology registry the
+    first time it's seen this run -- including a ``subclass_of`` hint when
+    ``node_type_catalog`` suggested one (see ``NodeTypeCatalog.normalize``'s
+    ``approved_node_types`` param), which is what
+    ``agents/graph_instance_repository.py``'s ``reasoning_entity_config``
+    later walks to let a not-yet-approved subtype inherit reasoning-
+    eligibility from an already-approved ancestor."""
+    if node_type_catalog is not None:
+        canonical_name = node_type_catalog.normalize(
+            name, evidence=evidence, approved_node_types=approved_node_types,
+        )
+        suggested_parent = node_type_catalog.entries.get(canonical_name, {}).get("suggested_parent")
+    else:
+        canonical_name = name
+        suggested_parent = None
+    if canonical_name in seen:
+        return canonical_name
+    seen.add(canonical_name)
+    if get_node_type(session, tenant_id, canonical_name) is not None:
+        return canonical_name
     propose_node_type(
-        session, tenant_id=tenant_id, name=name,
-        description=f"Auto-registered from HotpotQA extraction (type: {name}).",
+        session, tenant_id=tenant_id, name=canonical_name,
+        description=f"Auto-registered from HotpotQA extraction (type: {canonical_name}).",
         properties=[{"name": "label", "data_type": "string"}],
-        confidence=0.7, evidence=["hotpotqa_extraction"], status="approved",
+        confidence=0.7, evidence=["hotpotqa_extraction"], status=_governance_status(governance_mode),
+        subclass_of=[suggested_parent] if suggested_parent else None,
     )
+    return canonical_name
 
 
-def _register_or_extend_edge_type(session, tenant_id: str, name: str, domain_type: str, range_type: str) -> None:
+def _register_or_extend_edge_type(
+    session, tenant_id: str, name: str, domain_type: str, range_type: str, *,
+    governance_mode: str = DEFAULT_GOVERNANCE_MODE,
+) -> None:
     existing = get_edge_type(session, tenant_id, name)
     domain = sorted(set((existing or {}).get("domain") or []) | {domain_type})
     range_ = sorted(set((existing or {}).get("range") or []) | {range_type})
@@ -128,7 +182,7 @@ def _register_or_extend_edge_type(session, tenant_id: str, name: str, domain_typ
         session, tenant_id=tenant_id, name=name, domain=domain, range=range_,
         description=f"Auto-registered from HotpotQA extraction (relation: {name}).",
         properties=[{"name": "evidence", "data_type": "string"}],
-        confidence=0.7, evidence=["hotpotqa_extraction"], status="approved",
+        confidence=0.7, evidence=["hotpotqa_extraction"], status=_governance_status(governance_mode),
     )
 
 
@@ -287,6 +341,8 @@ def materialize_hotpotqa_questions(
     build_description_embeddings: bool = True,
     llm_planner: LLMPlanner | None = None,
     include_mentioned_entities: bool = True,
+    governance_mode: str = DEFAULT_GOVERNANCE_MODE,
+    node_type_catalog: NodeTypeCatalog | None = None,
 ) -> dict[str, Any]:
     """Extract each question's local graph, resolve/dedup entity identities
     across questions, and shape the result into per-type Nebula vertex/edge
@@ -307,18 +363,28 @@ def materialize_hotpotqa_questions(
     output_cases: list[dict[str, Any]] = []
     extraction_errors = 0
 
-    def ensure_vertex(qid: str, title_or_value: str, entity_type: str, is_literal: bool = False) -> str:
-        _register_node_type_if_new(session, tenant_id, entity_type, seen_node_types)
+    def ensure_vertex(
+        qid: str, title_or_value: str, entity_type: str, is_literal: bool = False, type_evidence: str = "",
+    ) -> str:
+        # canonical_type may differ from entity_type (e.g. "Human" -> "Person")
+        # when node_type_catalog maps it onto an already-approved type -- every
+        # downstream use (identity key, Nebula TAG bucket) must use the
+        # canonical name consistently, never the raw extractor-produced one.
+        canonical_type = _register_node_type_if_new(
+            session, tenant_id, entity_type, seen_node_types, governance_mode=governance_mode,
+            node_type_catalog=node_type_catalog, evidence=type_evidence,
+            approved_node_types=approved_node_types,
+        )
         vid, _method = resolve_or_mint_vertex_id(
             session,
             tenant_id=tenant_id,
             candidate_label=title_or_value,
-            candidate_type=entity_type,
+            candidate_type=canonical_type,
             evidence_qid=qid,
             mint_id=lambda: entity_id(qid, title_or_value),
             is_literal=is_literal,
         )
-        vertex_rows_by_type.setdefault(entity_type, {}).setdefault(vid, {"id": vid, "label": str(title_or_value)})
+        vertex_rows_by_type.setdefault(canonical_type, {}).setdefault(vid, {"id": vid, "label": str(title_or_value)})
         return vid
 
     def add_evidence(vid: str, evidence: str) -> None:
@@ -345,9 +411,13 @@ def materialize_hotpotqa_questions(
 
         title_types: dict[str, str] = {}
         for triple in graph.triples:
-            from_id = ensure_vertex(qid, triple.from_title, triple.from_type or DEFAULT_ENTITY_TYPE)
+            from_id = ensure_vertex(
+                qid, triple.from_title, triple.from_type or DEFAULT_ENTITY_TYPE, type_evidence=triple.evidence,
+            )
             to_type = triple.to_type or (GENERIC_LITERAL_TYPE if triple.is_literal else DEFAULT_ENTITY_TYPE)
-            to_id = ensure_vertex(qid, triple.to_value, to_type, is_literal=triple.is_literal)
+            to_id = ensure_vertex(
+                qid, triple.to_value, to_type, is_literal=triple.is_literal, type_evidence=triple.evidence,
+            )
             title_types[triple.from_title] = triple.from_type or DEFAULT_ENTITY_TYPE
             if not triple.is_literal:
                 title_types[triple.to_value] = to_type
@@ -360,7 +430,10 @@ def materialize_hotpotqa_questions(
                 relation_catalog.normalize(triple.relation, evidence=triple.evidence)
                 if relation_catalog is not None else triple.relation
             )
-            _register_or_extend_edge_type(session, tenant_id, relation_name, triple.from_type or DEFAULT_ENTITY_TYPE, to_type)
+            _register_or_extend_edge_type(
+                session, tenant_id, relation_name, triple.from_type or DEFAULT_ENTITY_TYPE, to_type,
+                governance_mode=governance_mode,
+            )
 
             edge_key = (from_id, to_id, relation_name)
             if edge_key not in seen_edges:
@@ -389,7 +462,9 @@ def materialize_hotpotqa_questions(
         # _CANDIDATE_RETRIEVAL_K comment).
         if include_mentioned_entities:
             for entity in graph.mentioned_entities:
-                vid = ensure_vertex(qid, entity.name, entity.entity_type or DEFAULT_ENTITY_TYPE)
+                vid = ensure_vertex(
+                    qid, entity.name, entity.entity_type or DEFAULT_ENTITY_TYPE, type_evidence=entity.description,
+                )
                 add_evidence(vid, entity.description)
 
         topic_title = graph.topic_title or (case["context"][0][0] if case["context"] else "")
@@ -468,17 +543,6 @@ def materialize_hotpotqa_questions(
     }
 
 
-def _insert_with_schema_retry(insert_call, *, retries: int = 3, retry_sleep: float = 5.0) -> None:
-    """Retry an insert_vertices/insert_edges call if graphd's schema cache
-    hasn't caught up yet ("No schema found" right after CREATE TAG/EDGE)."""
-    for attempt in range(retries + 1):
-        try:
-            insert_call()
-            return
-        except Exception as exc:
-            if "No schema found" not in str(exc) or attempt == retries:
-                raise
-            time.sleep(retry_sleep)
 
 
 def import_hotpotqa_nebula_tenant(
@@ -495,10 +559,12 @@ def import_hotpotqa_nebula_tenant(
     relation_catalog_scope: str = "hotpotqa",
     tenant_id: str | None = None,
     disable_relation_catalog: bool = False,
+    disable_node_type_catalog: bool = False,
     extraction_concurrency: int = 1,
     build_description_embeddings: bool = True,
     max_gleanings: int = 1,
     include_mentioned_entities: bool = True,
+    governance_mode: str = DEFAULT_GOVERNANCE_MODE,
 ) -> dict[str, Any]:
     cases = load_hotpotqa_cases(input_path)
     if max_questions:
@@ -518,6 +584,13 @@ def import_hotpotqa_nebula_tenant(
     relation_catalog = None if disable_relation_catalog else RelationCatalog.load_from_postgres(
         metadata_db_url, scope=relation_catalog_scope,
     )
+    # Node *type* governance (the "ontology mapping" pipeline stage) --
+    # same two-tier matching as RelationCatalog, applied to entity types
+    # ("Human" -> "Person") instead of relation names. Same scope as
+    # relation_catalog so both governance catalogs stay tenant-aligned.
+    node_type_catalog = None if disable_node_type_catalog else NodeTypeCatalog.load_from_postgres(
+        metadata_db_url, scope=relation_catalog_scope,
+    )
 
     materialized = materialize_hotpotqa_questions(
         session, cases,
@@ -525,10 +598,14 @@ def import_hotpotqa_nebula_tenant(
         relation_catalog, tenant_id=tenant_id, extraction_concurrency=extraction_concurrency,
         build_description_embeddings=build_description_embeddings,
         include_mentioned_entities=include_mentioned_entities,
+        governance_mode=governance_mode,
+        node_type_catalog=node_type_catalog,
     )
 
     if relation_catalog is not None:
         relation_catalog.save()
+    if node_type_catalog is not None:
+        node_type_catalog.save()
 
     client = NebulaGraphClient(ip=nebula_ip, port=nebula_port, user=nebula_user, password=nebula_password, space=space)
     client.connect()
@@ -536,7 +613,7 @@ def import_hotpotqa_nebula_tenant(
         client.execute_query(
             f"CREATE SPACE IF NOT EXISTS {space} (partition_num=1, replica_factor=1, vid_type=FIXED_STRING(128));"
         )
-        sync_tenant_schema(session, client, tenant_id)
+        sync_tenant_schema(session, client, tenant_id, include_draft=governance_mode == "review_required")
         for node_type, rows in materialized["vertex_rows_by_type"].items():
             _insert_with_schema_retry(lambda t=node_type, r=rows: client.insert_vertices(t, r))
         for edge_type, rows in materialized["edge_rows_by_type"].items():
@@ -552,6 +629,7 @@ def import_hotpotqa_nebula_tenant(
     return {
         "space": space,
         "tenant_id": tenant_id,
+        "governance_mode": governance_mode,
         "input_path": str(input_path),
         "cases_json": str(cases_json),
         "question_count": materialized["question_count"],
@@ -561,6 +639,7 @@ def import_hotpotqa_nebula_tenant(
         "node_type_count": len(materialized["vertex_rows_by_type"]),
         "edge_type_count": len(materialized["edge_rows_by_type"]),
         "relation_catalog_size": len(relation_catalog.entries) if relation_catalog is not None else None,
+        "node_type_catalog_size": len(node_type_catalog.entries) if node_type_catalog is not None else None,
         "description_embedding_count": materialized["description_embedding_count"],
     }
 
@@ -585,6 +664,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--no-relation-catalog", action="store_true",
         help="Disable relation-name governance -- write the extractor's raw relation names as-is (offline/testing only)",
+    )
+    parser.add_argument(
+        "--no-node-type-catalog", action="store_true",
+        help=(
+            "Disable node-type ontology mapping -- register each extracted type verbatim with no "
+            "dedup against already-approved types (offline/testing only)"
+        ),
     )
     parser.add_argument(
         "--extraction-concurrency", type=int, default=1,
@@ -623,6 +709,19 @@ def build_parser() -> argparse.ArgumentParser:
             "higher-scoring pre-mentioned_entities checkpoint config."
         ),
     )
+    parser.add_argument(
+        "--governance-mode", choices=GOVERNANCE_MODES, default=DEFAULT_GOVERNANCE_MODE,
+        help=(
+            "'auto_approve' (default) preserves this script's original behavior exactly -- "
+            "every new node/edge type is immediately status=\"approved\" and queryable by "
+            "reasoning_engine.py. 'review_required' is opt-in: new types land as status="
+            "\"draft\" and only become queryable once a human approves them through the "
+            "existing /api/artifacts review workflow (server/aletheia_server.py's "
+            "ReviewRepository) -- Nebula TAG/EDGE DDL is still created for draft types too "
+            "(see sync_tenant_schema's include_draft) so the import itself never fails, only "
+            "reasoning-time visibility is gated."
+        ),
+    )
     return parser
 
 
@@ -641,18 +740,21 @@ def main(argv: list[str] | None = None) -> int:
         relation_catalog_scope=args.relation_catalog_scope,
         tenant_id=args.tenant_id,
         disable_relation_catalog=args.no_relation_catalog,
+        disable_node_type_catalog=args.no_node_type_catalog,
         extraction_concurrency=args.extraction_concurrency,
         build_description_embeddings=not args.skip_description_embeddings,
         max_gleanings=args.max_gleanings,
         include_mentioned_entities=not args.skip_mentioned_entities,
+        governance_mode=args.governance_mode,
     )
     args.report_json.parent.mkdir(parents=True, exist_ok=True)
     args.report_json.write_text(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
-    print(f"space={report['space']} tenant_id={report['tenant_id']}")
+    print(f"space={report['space']} tenant_id={report['tenant_id']} governance_mode={report['governance_mode']}")
     print(f"questions={report['question_count']} extraction_errors={report['extraction_errors']}")
     print(f"vertex_count={report['vertex_count']} ({report['node_type_count']} node types)")
     print(f"edge_count={report['edge_count']} ({report['edge_type_count']} edge types)")
     print(f"relation_catalog_size={report['relation_catalog_size']}")
+    print(f"node_type_catalog_size={report['node_type_catalog_size']}")
     print(f"description_embedding_count={report['description_embedding_count']}")
     print(f"cases_json={report['cases_json']}")
     print(f"report_json={args.report_json}")

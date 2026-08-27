@@ -45,7 +45,7 @@ def _safe_identifier(name: str) -> str:
 
 def _property_clause(properties: list[dict[str, str]]) -> str:
     if not properties:
-        return ""
+        return "()"
     parts = []
     for prop in properties:
         prop_name = _safe_identifier(prop["name"])
@@ -54,14 +54,31 @@ def _property_clause(properties: list[dict[str, str]]) -> str:
     return "(" + ", ".join(parts) + ")"
 
 
-def sync_tenant_schema(session, nebula_client, tenant_id: str, *, propagation_sleep_seconds: float = 11.0) -> dict:
+def sync_tenant_schema(
+    session, nebula_client, tenant_id: str, *, propagation_sleep_seconds: float = 11.0,
+    include_draft: bool = False,
+) -> dict:
     """Create (idempotently) one Nebula TAG per approved node type and one
     EDGE TYPE per approved edge type for this tenant. Returns a summary dict.
     Sleeps once at the end (not per-statement) to let Nebula's meta service
     propagate the new schema before the caller starts inserting data --
-    mirrors the sleep already used by the old single-tag ensure_schema()."""
-    node_types = registry.get_approved_node_types(session, tenant_id)
-    edge_types = registry.get_approved_edge_types(session, tenant_id)
+    mirrors the sleep already used by the old single-tag ensure_schema().
+
+    ``include_draft=True`` also creates TAG/EDGE TYPEs for not-yet-approved
+    types -- for a "review_required" governance tenant, whose import writes
+    data under types that may still be pending human review. Nebula schema
+    existence is a write-path concern; whether ``reasoning_engine.py`` can
+    SEE that data is a separate, query-time check against approved status
+    only (``agents/graph_instance_repository.py``'s ``reasoning_entity_config``/
+    ``reasoning_link_config``) -- this flag never affects that gate."""
+    node_types = (
+        registry.get_all_node_types(session, tenant_id) if include_draft
+        else registry.get_approved_node_types(session, tenant_id)
+    )
+    edge_types = (
+        registry.get_all_edge_types(session, tenant_id) if include_draft
+        else registry.get_approved_edge_types(session, tenant_id)
+    )
 
     created_tags = []
     for node_type in node_types:

@@ -110,28 +110,27 @@ class TenantRegistry:
             return cls(tenants, config.get("default_tenant") or os.environ.get("ALETHEIA_TENANT"))
 
         # No config/tenants.json and no ALETHEIA_TENANTS_FILE/_JSON override --
-        # fall back to the two graph-native tenants built this session
-        # (scripts/import_hotpotqa_nebula_tenant.py, scripts/import_webqsp_graph_tenant.py)
-        # rather than the retired SQL-backed Northwind demo tenants.
+        # fall back to the graph-native HotpotQA tenant built this session
+        # (scripts/import_hotpotqa_nebula_tenant.py) rather than the retired
+        # SQL-backed Northwind demo tenants. The WebQSP graph-native fallback
+        # tenant was removed (along with its Nebula space and Postgres data)
+        # on user request -- re-add via scripts/import_webqsp_graph_tenant.py
+        # if that pipeline is revived.
+        # graph_database/relation_catalog_scope point at the *_typed space +
+        # scope -- the ontology-governed, benchmark-verified data (832
+        # approved artifacts, 103 typed Tags) -- not the older untyped
+        # hotpotqa_kg/"hotpotqa" scope, which has zero approved artifacts
+        # and therefore made every reasoning query resolve to nothing.
         hotpotqa_tenant = TenantConfig(
             tenant_id=os.environ.get("ALETHEIA_TENANT", "hotpotqa-graph-v1"),
             namespace="hotpotqa_graph_v1",
             display_name="HotpotQA (Nebula graph-native)",
-            graph_database=os.environ.get("ALETHEIA_GRAPH_SPACE", "hotpotqa_kg"),
+            graph_database=os.environ.get("ALETHEIA_GRAPH_SPACE", "hotpotqa_kg_typed"),
             metadata_db_url=metadata_url,
             source_db_url=source_url,
-            relation_catalog_scope="hotpotqa",
+            relation_catalog_scope="hotpotqa-graph-v1-typed",
         )
-        webqsp_tenant = TenantConfig(
-            tenant_id="webqsp-graph-v1",
-            namespace="webqsp_graph_v1",
-            display_name="WebQSP (Nebula graph-native)",
-            graph_database="webqsp_kg",
-            metadata_db_url=metadata_url,
-            source_db_url=source_url,
-            relation_catalog_scope="webqsp",
-        )
-        tenants = cls._merge_metadata_tenants([hotpotqa_tenant, webqsp_tenant], metadata_url, source_url, graph_database)
+        tenants = cls._merge_metadata_tenants([hotpotqa_tenant], metadata_url, source_url, graph_database)
         return cls(tenants, hotpotqa_tenant.tenant_id)
 
     @staticmethod

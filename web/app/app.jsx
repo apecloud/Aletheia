@@ -115,10 +115,22 @@ function App() {
 
   // Fetch tenants from real API — no mock fallback
   const tenantsQ = useApiData("tenants", []);
-  const tenants = (tenantsQ.data && tenantsQ.data.length) ? tenantsQ.data : [EMPTY_TENANT];
+  const tenantsLoaded = !!(tenantsQ.data && tenantsQ.data.length);
+  const tenants = tenantsLoaded ? tenantsQ.data : [EMPTY_TENANT];
   const resolvedTenant = tenants.find(t => t.id === tenantId);
+  // tenantId can come from a stale ?tenant= / localStorage["aletheia.tenant"]
+  // pointing at a tenant that no longer exists on this server (deleted, or
+  // left over from a different server instance's session). Once the real
+  // tenant list has loaded, an unresolved tenantId is never going to
+  // resolve -- fall back to a real tenant (tenants[0]) instead of
+  // fabricating a placeholder object that keeps every API call (work
+  // queue, reasoning tasks, ...) firing against a tenant_id the backend
+  // will just 400/404 on forever. The placeholder is still correct while
+  // the list hasn't loaded yet (?tenant=<id> for a tenant that DOES exist
+  // but whose fetch just hasn't resolved yet) -- only skip it once we know
+  // the real list and the id truly isn't in it.
   const tenant = resolvedTenant || (
-    tenantId && tenantId !== EMPTY_TENANT.id
+    !tenantsLoaded && tenantId && tenantId !== EMPTY_TENANT.id
       ? { id: tenantId, name: tenantId, namespace: tenantId, graph: tenantId }
       : tenants[0]
   );

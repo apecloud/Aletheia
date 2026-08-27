@@ -40,6 +40,9 @@ class GovernanceDelegationTest(unittest.TestCase):
         with patch(
             "graph_instance_repository.ontology_registry.get_approved_node_types",
             return_value=[{"name": "Person"}],
+        ), patch(
+            "graph_instance_repository.ontology_registry.get_all_node_types",
+            return_value=[{"name": "Person"}],
         ):
             config = repo.reasoning_entity_config(tenant)
         self.assertEqual(set(config.keys()), {"person"})
@@ -48,7 +51,9 @@ class GovernanceDelegationTest(unittest.TestCase):
         tenant = _graph_tenant("unused_space")
         repo = InstanceRepository(TenantRegistry([tenant]))
         self.assertNotIn(tenant.tenant_id, repo._graph_repos)
-        with patch("graph_instance_repository.ontology_registry.get_approved_node_types", return_value=[]):
+        with patch("graph_instance_repository.ontology_registry.get_approved_node_types", return_value=[]), patch(
+            "graph_instance_repository.ontology_registry.get_all_node_types", return_value=[],
+        ):
             repo.reasoning_entity_config(tenant)
         self.assertIn(tenant.tenant_id, repo._graph_repos)
 

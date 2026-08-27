@@ -39,18 +39,19 @@ from __future__ import annotations
 
 import json
 import logging
-import re
-import time
-from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 from llm_planner import LLMPlanner
+from type_catalog_matching import (
+    cheap_match as _shared_cheap_match,
+    normalize_key as _shared_normalize_key,
+    semantic_match_via_llm,
+)
 
 logger = logging.getLogger("RelationCatalog")
-
-MAX_CANDIDATES_IN_PROMPT = 60
 
 DEFAULT_SYSTEM_PROMPT = """You maintain a governed catalog of relation types for a knowledge graph.
 
@@ -72,17 +73,6 @@ Existing canonical relations:
 {candidates}
 
 Does the new relation match one of the existing canonical relations?"""
-
-
-def _format_candidates(entries: dict[str, dict]) -> str:
-    items = list(entries.items())[:MAX_CANDIDATES_IN_PROMPT]
-    if not items:
-        return "  (none yet)"
-    lines = []
-    for name, meta in items:
-        desc = meta.get("description", "")
-        lines.append(f'  - "{name}"' + (f": {desc}" if desc else ""))
-    return "\n".join(lines)
 
 
 @dataclass
@@ -199,20 +189,12 @@ class RelationCatalog:
 
     @staticmethod
     def _normalize_key(name: str) -> str:
-        return re.sub(r"[^a-z0-9]+", "_", (name or "").strip().lower()).strip("_")
+        return _shared_normalize_key(name)
 
     def _cheap_match(self, raw_name: str) -> str | None:
         """Exact match after casing/punctuation normalization, against
         canonical names or their known aliases. No LLM call."""
-        key = self._normalize_key(raw_name)
-        if not key:
-            return None
-        for canonical, meta in self.entries.items():
-            if key == self._normalize_key(canonical):
-                return canonical
-            if key in {self._normalize_key(a) for a in meta.get("aliases", [])}:
-                return canonical
-        return None
+        return _shared_cheap_match(raw_name, self.entries)
 
     def normalize(self, raw_name: str, evidence: str = "") -> str:
         """Return the canonical relation name to actually store for
@@ -267,82 +249,19 @@ class RelationCatalog:
             kwargs["reasoning"] = {"effort": "none", "exclude": True}
         return kwargs
 
-    @staticmethod
-    def _parse_response(content: Any) -> dict | None:
-        if not isinstance(content, str):
-            return None
-
-        def valid(payload: Any) -> dict | None:
-            if not isinstance(payload, dict) or not isinstance(payload.get("canonical_match"), str):
-                return None
-            return payload
-
-        try:
-            return valid(json.loads(content))
-        except (json.JSONDecodeError, TypeError):
-            pass
-        match = re.search(r"```(?:json)?\s*([\s\S]*?)```", content)
-        if match:
-            try:
-                return valid(json.loads(match.group(1).strip()))
-            except (json.JSONDecodeError, TypeError):
-                pass
-        match = re.search(r"\{[\s\S]*\}", content)
-        if match:
-            try:
-                return valid(json.loads(match.group(0)))
-            except (json.JSONDecodeError, TypeError):
-                pass
-        return None
-
     def _semantic_match(self, raw_name: str, evidence: str) -> str | None:
         """One LLM call: does raw_name mean the same thing as an existing
         canonical relation? Degrades to "no match" (register as new) on any
         failure -- a missed dedup just adds one catalog entry, it never
-        blocks ingestion."""
-        try:
-            from litellm import completion
-        except ImportError:
-            return None
-
-        user_msg = DEFAULT_USER_TEMPLATE.format(
-            raw_name=raw_name, evidence=evidence or "(none)", candidates=_format_candidates(self.entries),
+        blocks ingestion. Delegates to the shared two-tier matching
+        algorithm (``type_catalog_matching.py``) with this catalog's own
+        relation-specific prompt wording -- see that module's docstring."""
+        return semantic_match_via_llm(
+            raw_name, evidence, self.entries,
+            planner=self.planner, executor=self._executor, timeout=self.timeout,
+            system_prompt=DEFAULT_SYSTEM_PROMPT, user_template=DEFAULT_USER_TEMPLATE,
+            completion_kwargs=self._completion_kwargs(), logger=logger, label="RelationCatalog",
         )
-        json_instruction = (
-            '\n\nRespond with ONLY a JSON object in this exact format '
-            '(no markdown, no extra text):\n{"canonical_match": str}'
-        )
-        try:
-            future = self._executor.submit(
-                completion,
-                model=self.planner.model,
-                messages=[
-                    {"role": "system", "content": DEFAULT_SYSTEM_PROMPT + json_instruction},
-                    {"role": "user", "content": user_msg},
-                ],
-                timeout=self.timeout,
-                temperature=0.0,
-                **self._completion_kwargs(),
-            )
-            try:
-                raw_response = future.result(timeout=self.timeout + 15)
-            except FutureTimeoutError:
-                future.cancel()
-                logger.warning("RelationCatalog: hard timeout matching %r, treating as new", raw_name)
-                return None
-
-            if not raw_response or not raw_response.choices:
-                return None
-            candidates = LLMPlanner._response_text_candidates(raw_response.choices[0].message)
-            for candidate in candidates:
-                parsed = self._parse_response(candidate)
-                if parsed is not None:
-                    match = parsed.get("canonical_match", "").strip()
-                    return match if match in self.entries else None
-            return None
-        except Exception as exc:
-            logger.warning("RelationCatalog: match call failed for %r: %s", raw_name, exc)
-            return None
 
     def as_link_config(self) -> list[dict[str, str]]:
         """Backend-agnostic relation catalog view, shaped like the SQL

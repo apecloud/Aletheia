@@ -34,12 +34,16 @@ class GovernanceConfigTest(unittest.TestCase):
         with patch(
             "graph_instance_repository.ontology_registry.get_approved_node_types",
             return_value=[{"name": "Person"}, {"name": "Team"}],
+        ), patch(
+            "graph_instance_repository.ontology_registry.get_all_node_types",
+            return_value=[{"name": "Person"}, {"name": "Team"}],
         ):
             cfg = repo.reasoning_entity_config("any-tenant")
         self.assertEqual(set(cfg.keys()), {"person", "team"})
         self.assertEqual(cfg["person"]["artifact"], "object:Person")
         self.assertEqual(cfg["team"]["artifact"], "object:Team")
         self.assertEqual(cfg["person"]["type_name"], "Person")
+        self.assertNotIn("resolves_via", cfg["person"])
 
     def test_reasoning_link_config_uses_real_domain_and_range(self):
         # "from"/"to" are lowercased to match reasoning_engine.py's mixed

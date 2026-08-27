@@ -50,8 +50,27 @@ from ontology_artifacts import ensure_artifact_schema, upsert_artifact  # noqa: 
 from ontology_label_embeddings import (  # noqa: E402
     find_nearest_label, label_embedding_count, sync_label_embeddings,
 )
+from graph_db_client import NebulaGraphClient, insert_with_schema_retry  # noqa: E402
+from graph_schema_sync import sync_tenant_schema  # noqa: E402
+import graph_ontology_registry as ontology_registry  # noqa: E402
 from tenant_registry import TenantRegistry  # noqa: E402
 
+
+# Property names shared between _materialize_ontology_concept_type's TAG/EDGE
+# TYPE registration and _materialize_ontology_concept_vertex/_edge's actual
+# INSERT VERTEX/EDGE -- the TAG/EDGE schema must declare exactly the
+# properties the insert writes, or Nebula rejects the insert with "prop not
+# found". Single source of truth so the two can't drift apart.
+_ONTOLOGY_CONCEPT_VERTEX_PROPERTIES = [
+    {"name": "label", "data_type": "string"},
+    {"name": "description", "data_type": "string"},
+    {"name": "evidence_quote", "data_type": "string"},
+    {"name": "source_url", "data_type": "string"},
+]
+_ONTOLOGY_CONCEPT_EDGE_PROPERTIES = [
+    {"name": "evidence_quote", "data_type": "string"},
+    {"name": "source_url", "data_type": "string"},
+]
 
 DB_URL = os.environ.get(
     "ALETHEIA_PG_URL",
@@ -918,6 +937,51 @@ class _TenantScopedEngineCache:
                 self._metadata_engines[tenant.metadata_db_url] = engine
         return engine
 
+    def _sync_graph_native_schema(self, tenant) -> None:
+        """Approving a graph-native node/edge type (agents/graph_ontology_registry.py,
+        source_agent="GraphNativeTypeRegistrar" or "DeepResearchOntologyExpansion")
+        only flips its Postgres status -- the Nebula TAG/EDGE TYPE it needs
+        may not exist yet if approval happens well after the run that
+        proposed it (a "review_required" import already creates draft-status
+        DDL too, see graph_schema_sync.sync_tenant_schema's include_draft,
+        but that doesn't help a type approved by a LATER review session
+        against an already-finished import/run). Re-running sync here is a
+        plain CREATE ... IF NOT EXISTS, safe to call on every approval
+        regardless of whether the DDL already exists. Best-effort: a
+        transient Nebula outage must not make the approval itself fail -- the
+        Postgres status change already committed by the caller; the next
+        approval, or the tenant's own next import run, will retry this sync.
+        Shared across ReviewRepository (OntologyArtifact review) and
+        InstanceRepository (DeepResearchOntologyExpansion proposal review) --
+        both need the exact same "approve -> make sure the DDL exists" step.
+
+        ``propagation_sleep_seconds=0``: ``sync_tenant_schema``'s default
+        11s sleep exists so a caller that immediately starts INSERTing
+        vertices/edges right after (e.g. the import scripts) doesn't race
+        Nebula's meta service propagating the new schema. Nothing here
+        inserts data right after this call -- the review UI's HTTP request
+        would otherwise block for 11+ seconds per newly-created TAG/EDGE
+        TYPE for no benefit, measured directly at 26s wall-clock for a
+        single approve action that created one new TAG (verified against a
+        live Nebula cluster: the resulting TAG exists and is immediately
+        queryable well within that default sleep window regardless)."""
+        try:
+            client = NebulaGraphClient(
+                ip=tenant.graph_ip, port=tenant.graph_port, user=tenant.graph_user,
+                password=tenant.graph_password, space=tenant.graph_database,
+            )
+            client.connect()
+            try:
+                session = sessionmaker(bind=self.metadata_engine_for(tenant))()
+                try:
+                    sync_tenant_schema(session, client, tenant.tenant_id, propagation_sleep_seconds=0)
+                finally:
+                    session.close()
+            finally:
+                client.close()
+        except Exception as exc:
+            print(f"[{type(self).__name__}] Nebula schema sync failed for tenant {tenant.tenant_id}: {_safe_error_message(exc)}")
+
 
 class ReviewRepository(_TenantScopedEngineCache):
     def list_artifacts(self, tenant, filters):
@@ -1186,6 +1250,12 @@ class ReviewRepository(_TenantScopedEngineCache):
                 before_payload_json=before_payload_json,
                 after_payload_json=before_payload_json,
             )
+        if (
+            status == "approved"
+            and artifact["artifact_type"] in ("object", "link")
+            and artifact["source_agent"] == "GraphNativeTypeRegistrar"
+        ):
+            self._sync_graph_native_schema(tenant)
         return self.get_artifact(tenant, canonical_key)
 
     def comment(self, tenant, canonical_key, reviewer, reason):
@@ -1256,7 +1326,7 @@ class ReviewRepository(_TenantScopedEngineCache):
             text(
                 """
                 SELECT id, project_id, canonical_key, artifact_type, name, description, payload_json,
-                       status, version
+                       status, version, source_agent
                 FROM aletheia_ontology_artifacts
                 WHERE project_id = :tenant_id AND canonical_key = :canonical_key
                 FOR UPDATE
@@ -1353,20 +1423,45 @@ class InstanceRepository(_TenantScopedEngineCache):
             self._graph_repos[tenant.tenant_id] = repo
         return repo
 
+    def _graph_native_types(self, tenant):
+        """Approved graph-native types, in the same dict shape
+        `_ontology_concrete_object_types` produces, so `_merge_instance_types`
+        can combine both sources without knowing which pipeline produced
+        which entry."""
+        entity_config = self._graph_repo_for(tenant).reasoning_entity_config(tenant.tenant_id)
+        return [
+            {
+                "type": entry["type_name"],
+                "label": entry["type_name"],
+                "table": "approved graph-native types",
+                "ontology_artifact": entry.get("artifact"),
+                "artifact_status": "approved",
+                "approved": True,
+                "tenant_id": tenant.tenant_id,
+                "projection_source": "GraphNativeOntology",
+                "ontology_object_count": 0,
+            }
+            for entry in entity_config.values()
+            if entry.get("type_name")
+        ]
+
     def types(self, tenant, include_draft=False):
+        graph_native_types = self._graph_native_types(tenant)
         ontology_types = self._ontology_concrete_object_types(tenant, include_draft=include_draft)
-        merged = self._merge_instance_types([], ontology_types)
+        merged = self._merge_instance_types(graph_native_types, ontology_types)
         if merged:
             return {"tenant": tenant.public_dict(), "types": merged, "approved": True}
         return {
             "tenant": tenant.public_dict(),
             "types": [],
             "approved": False,
-            "reason": "No reviewed SchemaGraphModelingAgent projection. Import data and run schema-to-graph modeling first.",
+            "reason": "No approved types for this tenant, neither graph-native ontology nor SQL-schema projection.",
         }
 
     def search(self, tenant, object_type, query, limit=25, include_draft=False):
-        schema_search = None
+        graph_native_instances = (
+            self._graph_repo_for(tenant).search_instances(object_type, query, limit=limit) if object_type else []
+        )
         ontology_instances = self._ontology_concrete_object_search(
             tenant,
             object_type,
@@ -1374,10 +1469,10 @@ class InstanceRepository(_TenantScopedEngineCache):
             limit=limit,
             include_draft=include_draft,
         )
-        if schema_search is not None or ontology_instances:
+        if graph_native_instances or ontology_instances:
             instances = []
             seen = set()
-            for node in (schema_search or {}).get("instances") or []:
+            for node in graph_native_instances:
                 node_id = node.get("id")
                 if node_id and node_id not in seen:
                     seen.add(node_id)
@@ -1410,7 +1505,7 @@ class InstanceRepository(_TenantScopedEngineCache):
                 "artifact_status": "approved",
                 "tenant": tenant.public_dict(),
                 "projection_source": self._join_projection_sources(
-                    (schema_search or {}).get("projection_source"),
+                    "GraphNativeInstance" if graph_native_instances else None,
                     "OntologyConcreteObject" if ontology_instances else None,
                 ),
             }
@@ -1418,11 +1513,14 @@ class InstanceRepository(_TenantScopedEngineCache):
             "tenant": tenant.public_dict(),
             "instances": [],
             "approved": False,
-            "reason": f"No reviewed SchemaGraphModelingAgent projection for type {object_type}",
+            "reason": f"No approved instances of type {object_type}, neither graph-native nor SQL-schema projection.",
         }
 
     def default_center(self, tenant, include_draft=False):
-        """Return a tenant-local default graph center without domain fixtures."""
+        """Return a tenant-local default graph center without domain
+        fixtures. Source-agnostic: `types()`/`search()` already merge the
+        graph-native and SQL-schema projections, so this loop works
+        unchanged for either (or both) without knowing which one is live."""
         for type_info in self.types(tenant, include_draft=include_draft).get("types", []):
             object_type = type_info.get("type")
             if not object_type:
@@ -1431,13 +1529,27 @@ class InstanceRepository(_TenantScopedEngineCache):
             instances = result.get("instances") or []
             if not instances:
                 continue
-            node_id = instances[0].get("id") or ""
-            instance_id = node_id.split(":", 1)[1] if ":" in node_id else instances[0].get("source_pk", "").split("=", 1)[-1]
+            instance_id = instances[0].get("instance_id") or instances[0].get("source_pk", "").split("=", 1)[-1]
             if instance_id:
                 return {"type": object_type, "id": str(instance_id), "node": instances[0]}
         return None
 
     def detail(self, tenant, object_type, instance_id):
+        """Single-node lookup: try graph-native first (using `instance_id`
+        verbatim -- it's the raw Nebula VID, never split), then SQL-schema.
+        Unlike the list-shaped methods above, a first-non-null precedence is
+        correct here (not a merge) -- a single id can only belong to one
+        underlying storage, same as `neighborhood()`."""
+        vertex = self._graph_repo_for(tenant)._fetch_vertex(instance_id)
+        if vertex is not None:
+            return {
+                "id": vertex["id"],
+                "type": vertex["types"][0] if vertex["types"] else object_type,
+                "label": vertex["label"],
+                "aliases": [],
+                "key_properties": vertex["properties"],
+                "projection_source": "GraphNativeInstance",
+            }
         return self._ontology_concrete_object_detail(tenant, object_type, instance_id)
 
     def _join_projection_sources(self, *sources):
@@ -1730,6 +1842,12 @@ class InstanceRepository(_TenantScopedEngineCache):
         evidence_refs = _load_json(row["evidence_refs_json"], []) if row["evidence_refs_json"] else []
         return {
             "id": node_id,
+            # Bare identifier piece of `node_id` (`"{object_type}:{stable_id}"`),
+            # computed once here instead of guessed later by callers looking
+            # for a colon -- graph-native ids are raw Nebula VIDs that can
+            # contain colons of their own, so "split on colon" isn't a safe
+            # heuristic anywhere outside this SQL-schema-specific id scheme.
+            "instance_id": node_id.split(":", 1)[1] if ":" in node_id else node_id,
             "tenant_id": tenant.tenant_id,
             "namespace": tenant.namespace,
             "graph_database": tenant.graph_database,
@@ -2067,28 +2185,48 @@ class InstanceRepository(_TenantScopedEngineCache):
         return None
 
     def full_graph(self, tenant, object_type=None, instance_id=None, limit=200):
-        ontology_nodes = self._ontology_concrete_object_nodes(tenant, include_draft=False)
-        if not ontology_nodes:
-            return None
+        """Sampled cross-section across every approved type, from both
+        projections. Always asks both sources and merges -- never branches
+        on which pipeline the tenant happens to use (mirrors `neighborhood`
+        and reuses the same merge helper)."""
         requested_limit = int(limit)
         applied_limit = max(1, min(requested_limit, 300))
+        ontology_nodes = self._ontology_concrete_object_nodes(tenant, include_draft=False)
+
+        entity_config = self._graph_repo_for(tenant).reasoning_entity_config(tenant.tenant_id)
+        graph_native = (
+            self._graph_repo_for(tenant).full_graph(
+                entity_config, node_limit=applied_limit, edge_limit=applied_limit * 3,
+            )
+            if entity_config
+            else None
+        )
+        if not ontology_nodes and graph_native is None:
+            return None
+
         graph = {
             "approved": True,
             "tenant": tenant.public_dict(),
             "graph_database": tenant.graph_database,
             "depth": 0,
             "limit": applied_limit,
-            "limits": {"requested_limit": requested_limit, "applied_limit": applied_limit, "hard_limit": 300, "truncated": len(ontology_nodes) > applied_limit},
+            "limits": {
+                "requested_limit": requested_limit, "applied_limit": applied_limit,
+                "hard_limit": 300, "truncated": len(ontology_nodes) > applied_limit,
+            },
             "center": None,
-            "nodes": [],
-            "edges": [],
+            "nodes": list((graph_native or {}).get("nodes") or []),
+            "edges": list((graph_native or {}).get("edges") or []),
             "scope": {
                 "tenant_id": tenant.tenant_id,
                 "view": "all",
                 "node_limit": applied_limit,
                 "edge_limit": applied_limit * 3,
                 "approved_only": True,
-                "projection_source": "OntologyConcreteObject",
+                "projection_source": self._join_projection_sources(
+                    "GraphNativeSample" if graph_native else None,
+                    "OntologyConcreteObject" if ontology_nodes else None,
+                ),
             },
         }
         return self._merge_ontology_concrete_objects_into_graph(
@@ -2443,8 +2581,15 @@ class InstanceRepository(_TenantScopedEngineCache):
     def edge_detail(self, tenant, source, target):
         if ":" not in source or ":" not in target:
             return None
-        source_type, source_id = source.split(":", 1)
-        graph = self.neighborhood(tenant, source_type, source_id, depth=1, limit=1000)
+        # Graph-native tenants hand back the raw Nebula VID as source/target,
+        # which itself may embed a colon -- not a Type:Id pair. Try the source
+        # verbatim first; only fall back to splitting on the first colon for
+        # legacy SQL-schema tenants where ids really are Type:Id (mirrors the
+        # same fallback in the /api/graph/node/ route above).
+        graph = self.neighborhood(tenant, "", source, depth=1, limit=1000)
+        if not graph or not graph.get("approved"):
+            source_type, source_id = source.split(":", 1)
+            graph = self.neighborhood(tenant, source_type, source_id, depth=1, limit=1000)
         if not graph or not graph.get("approved"):
             return None
         nodes_by_id = {node.get("id"): node for node in graph.get("nodes", [])}
@@ -6421,6 +6566,14 @@ class InstanceRepository(_TenantScopedEngineCache):
                     ),
                     {"tenant_id": tenant.tenant_id, "element_key": element_key},
                 )
+        if after_status == "approved" and str(row["element_type"] or "").lower() == "ontology_concept":
+            if self._ontology_candidate_is_concrete_object(payload, payload.get("artifact_type")):
+                self._materialize_ontology_concept_vertex(tenant, row, payload)
+            elif (
+                str(payload.get("artifact_type") or "").lower() in {"link", "relation"}
+                or str(payload.get("ontology_part") or "").lower() == "relation"
+            ):
+                self._materialize_ontology_concept_edge(tenant, row, payload)
         element = {
             "element_key": row["element_key"],
             "element_type": row["element_type"],
@@ -6779,6 +6932,8 @@ class InstanceRepository(_TenantScopedEngineCache):
             status="approved",
         )
         session.flush()
+        if catalog_type in ("object", "link"):
+            self._materialize_ontology_concept_type(tenant, session, catalog_type, label, description, payload, source_refs, float(row["confidence"] or 0.0))
         graph_space_element_key = self._upsert_ontology_model_graph_projection(tenant, session, row, reviewed_payload, artifact, source_refs)
         return {
             "id": artifact.id,
@@ -6789,6 +6944,111 @@ class InstanceRepository(_TenantScopedEngineCache):
             "version": artifact.version,
             "graph_space_element_key": graph_space_element_key,
         }
+
+    def _materialize_ontology_concept_type(self, tenant, session, catalog_type, label, description, payload, source_refs, confidence):
+        """Register the approved class/relation concept as a real graph-native
+        node/edge TYPE (agents/graph_ontology_registry.py) and sync it to a
+        Nebula TAG/EDGE TYPE, so the concrete object/relation instances that
+        reference it (approved separately, see
+        `_materialize_ontology_concept_vertex`/`_edge`) have somewhere to
+        write to. Best-effort: DeepResearchOntologyExpansion approvals must
+        not fail because Nebula is briefly unreachable -- the Postgres
+        catalog write above already committed; this can retry on the next
+        approval."""
+        try:
+            if catalog_type == "object":
+                ontology_registry.propose_node_type(
+                    session,
+                    tenant_id=tenant.tenant_id,
+                    name=label,
+                    description=description,
+                    properties=_ONTOLOGY_CONCEPT_VERTEX_PROPERTIES,
+                    confidence=confidence,
+                    evidence=source_refs,
+                    status="approved",
+                )
+            else:
+                domain = [str(payload.get("source_object_type") or payload.get("domain") or "*")]
+                range_ = [str(payload.get("target_object_type") or payload.get("range") or "*")]
+                ontology_registry.propose_edge_type(
+                    session,
+                    tenant_id=tenant.tenant_id,
+                    name=label,
+                    domain=domain,
+                    range=range_,
+                    description=description,
+                    properties=_ONTOLOGY_CONCEPT_EDGE_PROPERTIES,
+                    confidence=confidence,
+                    evidence=source_refs,
+                    status="approved",
+                )
+            session.flush()
+        except Exception as exc:
+            print(f"[InstanceRepository] Failed to register graph-native type for {label!r}: {_safe_error_message(exc)}")
+            return
+        self._sync_graph_native_schema(tenant)
+
+    def _materialize_ontology_concept_vertex(self, tenant, row, payload):
+        """Approved concrete-object DeepResearchOntologyExpansion proposal ->
+        a real Nebula vertex. Reuses the exact same class/id computation the
+        virtual-graph read path (`_ontology_concrete_object_node`) already
+        uses, so the vertex id here matches `node["id"]`/`instance_id`
+        computed there -- the merge logic in `full_graph`/`types`/`search`
+        naturally dedupes the two once this succeeds, no separate cleanup
+        needed. Best-effort: failure (e.g. the TYPE hasn't synced to Nebula
+        yet) must not fail the approval -- the Postgres row already committed
+        and the virtual-graph read path still serves it either way."""
+        try:
+            class_catalog = self._ontology_class_catalog(tenant)
+            label = self._ontology_concrete_object_label(row, payload)
+            object_type = self._ontology_concrete_object_class(tenant, payload, label, class_catalog=class_catalog)
+            node_id = self._ontology_concrete_object_node_id(object_type, label, payload, row)
+            instance_id = node_id.split(":", 1)[1] if ":" in node_id else node_id
+            candidate = payload.get("ontology_candidate") if isinstance(payload.get("ontology_candidate"), dict) else {}
+            props = {
+                "label": label,
+                "description": str(payload.get("description") or candidate.get("description") or ""),
+                "evidence_quote": str(payload.get("evidence_quote") or ""),
+                "source_url": str(row["source_url"] or ""),
+            }
+            repo = self._graph_repo_for(tenant)
+            repo._ensure_connected()
+            insert_with_schema_retry(lambda: repo._client.insert_vertices(object_type, [{"id": instance_id, **props}]))
+        except Exception as exc:
+            print(f"[InstanceRepository] Failed to materialize vertex for element {row['element_key']!r}: {_safe_error_message(exc)}")
+
+    def _materialize_ontology_concept_edge(self, tenant, row, payload):
+        """Approved relation-instance DeepResearchOntologyExpansion proposal
+        -> a real Nebula edge. Computes source/target vertex ids the same
+        deterministic way `_materialize_ontology_concept_vertex` would for
+        those labels/types -- best-effort, same as the existing read-time
+        fuzzy label match `_ontology_relation_instance_edges` already does;
+        if the underlying object was dedup-merged into a different id via
+        its own `matched_node_key`, this can miss, same limitation the
+        virtual-graph projection already has today."""
+        try:
+            source_type = str(payload.get("source_object_type") or payload.get("source_type") or payload.get("domain") or "").strip()
+            target_type = str(payload.get("target_object_type") or payload.get("target_type") or payload.get("range") or "").strip()
+            source_label = str(payload.get("source_label") or "").strip()
+            target_label = str(payload.get("target_label") or "").strip()
+            if not source_type or not target_type or not source_label or not target_label:
+                return
+            source_node_id = self._ontology_concrete_object_node_id(source_type, source_label, {}, row)
+            target_node_id = self._ontology_concrete_object_node_id(target_type, target_label, {}, row)
+            source_instance_id = source_node_id.split(":", 1)[1] if ":" in source_node_id else source_node_id
+            target_instance_id = target_node_id.split(":", 1)[1] if ":" in target_node_id else target_node_id
+            relation = str(payload.get("relation") or payload.get("label") or row["name"] or "relation").strip()
+            props = {
+                "evidence_quote": str(payload.get("evidence_quote") or ""),
+                "source_url": str(row["source_url"] or ""),
+            }
+            repo = self._graph_repo_for(tenant)
+            repo._ensure_connected()
+            insert_with_schema_retry(
+                lambda: repo._client.insert_edges(relation, [{"source_id": source_instance_id, "target_id": target_instance_id, **props}])
+            )
+        except Exception as exc:
+            print(f"[InstanceRepository] Failed to materialize edge for element {row['element_key']!r}: {_safe_error_message(exc)}")
 
     def _auto_review_similarity_score(self, payload):
         payload = payload or {}
@@ -11877,11 +12137,20 @@ class AletheiaServerHandler(BaseHTTPRequestHandler):
             if ":" not in node_key:
                 self._send_error(HTTPStatus.BAD_REQUEST, "Expected node key in the form Type:Id")
                 return
-            object_type, instance_id = node_key.split(":", 1)
+            # Graph-native tenants hand back the raw Nebula VID as the node id, which
+            # itself may embed a colon (e.g. "<doc_hash>:<slug>") -- it is not a
+            # Type:Id pair. Try the key verbatim first; only fall back to splitting
+            # on the first colon for legacy SQL-schema tenants where ids really are
+            # Type:Id.
+            object_type, instance_id = "", node_key
             detail = self.instance_repository.detail(tenant, object_type, instance_id)
+            if detail is None:
+                object_type, instance_id = node_key.split(":", 1)
+                detail = self.instance_repository.detail(tenant, object_type, instance_id)
             if detail is None:
                 self._send_error(HTTPStatus.NOT_FOUND, "Graph node not found or not approved")
                 return
+            object_type = detail.get("type") or object_type
             graph = self.instance_repository.neighborhood(tenant, object_type, instance_id, depth=1, limit=300)
             by_relation = {}
             if graph and graph.get("approved"):

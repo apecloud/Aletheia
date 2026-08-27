@@ -148,6 +148,20 @@ def get_approved_edge_types(session, tenant_id: str) -> list[dict[str, Any]]:
     return _query_types(session, tenant_id=tenant_id, artifact_type=EDGE_ARTIFACT_TYPE, status="approved")
 
 
+def get_all_node_types(session, tenant_id: str) -> list[dict[str, Any]]:
+    """Every node type regardless of review status -- used by
+    ``graph_schema_sync.sync_tenant_schema(..., include_draft=True)`` so a
+    "review_required" tenant can still write data typed with a not-yet-
+    approved TAG (governance gates whether ``reasoning_engine.py`` can SEE
+    the data at query time, not whether it can be written)."""
+    return _query_types(session, tenant_id=tenant_id, artifact_type=NODE_ARTIFACT_TYPE, status=None)
+
+
+def get_all_edge_types(session, tenant_id: str) -> list[dict[str, Any]]:
+    """Edge-type counterpart of ``get_all_node_types``."""
+    return _query_types(session, tenant_id=tenant_id, artifact_type=EDGE_ARTIFACT_TYPE, status=None)
+
+
 def get_node_type(session, tenant_id: str, name: str) -> dict[str, Any] | None:
     import json
 
