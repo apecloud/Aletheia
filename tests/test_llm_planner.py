@@ -19,8 +19,8 @@ import unittest
 from dataclasses import dataclass, field
 from unittest.mock import MagicMock, patch
 
-from llm_planner import LLMPlanner, PlannerMapping, RelationCandidate
-from reasoning_engine import ReasoningEngine
+from aletheia.llms.planner import LLMPlanner, PlannerMapping, RelationCandidate
+from aletheia.reasoning.engine import ReasoningEngine
 
 
 class FakeRepo:

@@ -6,19 +6,14 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import sys
 from collections import Counter
-from pathlib import Path
 from urllib.parse import urlparse
 
-ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "agents"))
-
-from ontology_artifacts import (  # noqa: E402
+from aletheia.ontology.store import (  # noqa: E402
     IterativeGraphEnrichmentRun,
     ProposedGraphElement,
 )
-from iterative_graph_enrichment_agent import _is_generic_entity_label  # noqa: E402
+from aletheia.enrichment.iterative_enrichment import _is_generic_entity_label  # noqa: E402
 from sqlalchemy import create_engine  # noqa: E402
 from sqlalchemy.orm import sessionmaker  # noqa: E402
 

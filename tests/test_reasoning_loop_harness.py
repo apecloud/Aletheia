@@ -5,8 +5,8 @@ from datetime import datetime
 
 from sqlalchemy import create_engine, text
 
-from agents.ontology_artifacts import ensure_artifact_schema
-from agents.reasoning_loop_harness import evaluate_reasoning_loop, load_reasoning_loop_config
+from aletheia.ontology.store import ensure_artifact_schema
+from aletheia.reasoning.loop_harness import evaluate_reasoning_loop, load_reasoning_loop_config
 
 
 class ReasoningLoopHarnessTest(unittest.TestCase):

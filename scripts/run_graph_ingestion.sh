@@ -61,7 +61,7 @@ echo "Using Tenant: $TENANT"
 echo "-------------------------------------------------"
 echo "Executing Graph ETL Pipeline..."
 echo "-------------------------------------------------"
-python agents/graph_ingestion_agent.py --tenant "$TENANT" --model "$MODEL" --phase "$PHASE" $INCLUDE_UNAPPROVED_FLAG
+python -m aletheia.enrichment.ingestion --tenant "$TENANT" --model "$MODEL" --phase "$PHASE" $INCLUDE_UNAPPROVED_FLAG
 
 echo "================================================="
 echo "Done! The data is now available in Nebula Graph."

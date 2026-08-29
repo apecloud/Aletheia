@@ -16,7 +16,7 @@ from __future__ import annotations
 import unittest
 from unittest.mock import patch
 
-from graph_instance_repository import GraphInstanceRepository
+from aletheia.graph_store.instance_repository import GraphInstanceRepository
 
 # Animal -> Dog -> GuideDog: only Animal and Dog are approved. GuideDog is
 # still a draft (never independently reviewed).
@@ -36,9 +36,9 @@ class SubclassResolutionTest(unittest.TestCase):
     def test_grandchild_of_approved_type_resolves_via_nearest_approved_ancestor(self):
         repo = _repo()
         with patch(
-            "graph_instance_repository.ontology_registry.get_approved_node_types", return_value=_APPROVED,
+            "aletheia.graph_store.instance_repository.ontology_registry.get_approved_node_types", return_value=_APPROVED,
         ), patch(
-            "graph_instance_repository.ontology_registry.get_all_node_types", return_value=_HIERARCHY,
+            "aletheia.graph_store.instance_repository.ontology_registry.get_all_node_types", return_value=_HIERARCHY,
         ):
             cfg = repo.reasoning_entity_config("any-tenant")
 
@@ -50,9 +50,9 @@ class SubclassResolutionTest(unittest.TestCase):
     def test_directly_approved_type_has_no_resolves_via(self):
         repo = _repo()
         with patch(
-            "graph_instance_repository.ontology_registry.get_approved_node_types", return_value=_APPROVED,
+            "aletheia.graph_store.instance_repository.ontology_registry.get_approved_node_types", return_value=_APPROVED,
         ), patch(
-            "graph_instance_repository.ontology_registry.get_all_node_types", return_value=_HIERARCHY,
+            "aletheia.graph_store.instance_repository.ontology_registry.get_all_node_types", return_value=_HIERARCHY,
         ):
             cfg = repo.reasoning_entity_config("any-tenant")
 
@@ -69,10 +69,10 @@ class SubclassResolutionTest(unittest.TestCase):
             {"name": "Rock", "subclass_of": []},  # unrelated, never approved
         ]
         with patch(
-            "graph_instance_repository.ontology_registry.get_approved_node_types",
+            "aletheia.graph_store.instance_repository.ontology_registry.get_approved_node_types",
             return_value=[{"name": "Animal", "subclass_of": []}],
         ), patch(
-            "graph_instance_repository.ontology_registry.get_all_node_types", return_value=hierarchy,
+            "aletheia.graph_store.instance_repository.ontology_registry.get_all_node_types", return_value=hierarchy,
         ):
             cfg = repo.reasoning_entity_config("any-tenant")
 
@@ -88,9 +88,9 @@ class SubclassResolutionTest(unittest.TestCase):
             {"name": "B", "subclass_of": ["A"]},
         ]
         with patch(
-            "graph_instance_repository.ontology_registry.get_approved_node_types", return_value=[],
+            "aletheia.graph_store.instance_repository.ontology_registry.get_approved_node_types", return_value=[],
         ), patch(
-            "graph_instance_repository.ontology_registry.get_all_node_types", return_value=cyclic,
+            "aletheia.graph_store.instance_repository.ontology_registry.get_all_node_types", return_value=cyclic,
         ):
             cfg = repo.reasoning_entity_config("any-tenant")
 
@@ -102,10 +102,10 @@ class SubclassResolutionTest(unittest.TestCase):
         like an empty list, not raise."""
         repo = _repo()
         with patch(
-            "graph_instance_repository.ontology_registry.get_approved_node_types",
+            "aletheia.graph_store.instance_repository.ontology_registry.get_approved_node_types",
             return_value=[{"name": "Person"}],
         ), patch(
-            "graph_instance_repository.ontology_registry.get_all_node_types",
+            "aletheia.graph_store.instance_repository.ontology_registry.get_all_node_types",
             return_value=[{"name": "Person"}, {"name": "Organization"}],
         ):
             cfg = repo.reasoning_entity_config("any-tenant")

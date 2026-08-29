@@ -29,7 +29,7 @@ shouldn't need a live Postgres connection.
 
 Usage:
     from relation_catalog import RelationCatalog
-    from tenant_registry import default_metadata_db_url
+    from aletheia.core.tenant_registry import default_metadata_db_url
     catalog = RelationCatalog.load_from_postgres(default_metadata_db_url(), scope="hotpotqa")
     canonical = catalog.normalize("established_in", evidence="...founded in 1590...")
     catalog.save()
@@ -44,7 +44,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from llm_planner import LLMPlanner
+from aletheia.llms.planner import LLMPlanner
 from type_catalog_matching import (
     cheap_match as _shared_cheap_match,
     normalize_key as _shared_normalize_key,

@@ -13,9 +13,19 @@ Run: python -m unittest tests.test_relation_catalog
 from __future__ import annotations
 
 import json
+import sys
 import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
+
+# tests/__init__.py normally puts scripts/ on sys.path, but unittest
+# discover's file-based module loading doesn't reliably run it before an
+# early-imported module needs it -- see tests/__init__.py's docstring.
+# Self-contained fallback so relation_catalog resolves regardless of
+# discovery order.
+_ROOT = Path(__file__).resolve().parents[1]
+if str(_ROOT / "scripts") not in sys.path:
+    sys.path.append(str(_ROOT / "scripts"))
 
 from relation_catalog import RelationCatalog
 
@@ -171,7 +181,7 @@ class LivePostgresSmokeTest(unittest.TestCase):
         except ImportError:
             self.skipTest("sqlalchemy not installed")
 
-        from tenant_registry import default_metadata_db_url
+        from aletheia.core.tenant_registry import default_metadata_db_url
 
         db_url = default_metadata_db_url()
         try:

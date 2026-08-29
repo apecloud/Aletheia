@@ -1,6 +1,6 @@
 import unittest
 
-from agents.graph_search_loop_harness import evaluate_graph_search_loop, load_graph_search_loop_config
+from aletheia.enrichment.search_loop_harness import evaluate_graph_search_loop, load_graph_search_loop_config
 
 
 class Tenant:

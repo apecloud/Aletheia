@@ -1,7 +1,7 @@
 import unittest
 from unittest.mock import patch
 
-from server.aletheia_server import InstanceRepository, ReasoningRepository
+from aletheia.interfaces.api.server import InstanceRepository, ReasoningRepository
 
 
 class FakeReasoningTenant:
@@ -97,7 +97,7 @@ class DeepGraphReasoningTest(unittest.TestCase):
             },
         )
 
-        with patch("server.aletheia_server.ReasoningEngine", side_effect=AssertionError("engine must not run")):
+        with patch("aletheia.interfaces.api.server.ReasoningEngine", side_effect=AssertionError("engine must not run")):
             result = repo.run_scoped_graph_task(FakeReasoningTenant(), "task-no-projection")
 
         self.assertFalse(result["approved"])
@@ -120,7 +120,7 @@ class DeepGraphReasoningTest(unittest.TestCase):
             },
         )
 
-        with patch("server.aletheia_server.ReasoningEngine", side_effect=AssertionError("engine must not run")):
+        with patch("aletheia.interfaces.api.server.ReasoningEngine", side_effect=AssertionError("engine must not run")):
             events = list(repo.run_scoped_graph_task_streaming(FakeReasoningTenant(), "task-stream-no-projection"))
 
         response_events = [event for event in events if event["event"] == "llm_response_body"]
@@ -142,7 +142,7 @@ class DeepGraphReasoningTest(unittest.TestCase):
             },
         )
 
-        with patch("server.aletheia_server.ReasoningEngine", EmptyReasoningEngine):
+        with patch("aletheia.interfaces.api.server.ReasoningEngine", EmptyReasoningEngine):
             result = repo.run_scoped_graph_task(FakeReasoningTenant(), "task-demo")
 
         self.assertTrue(result["approved"])
@@ -161,7 +161,7 @@ class DeepGraphReasoningTest(unittest.TestCase):
             },
         )
 
-        with patch("server.aletheia_server.ReasoningEngine", StructuredReasoningEngine):
+        with patch("aletheia.interfaces.api.server.ReasoningEngine", StructuredReasoningEngine):
             result = repo.run_scoped_graph_task(FakeReasoningTenant(), "task-approved")
 
         self.assertTrue(result["approved"])

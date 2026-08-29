@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 
 from sqlalchemy import text
 
-from server.aletheia_server import (
+from aletheia.interfaces.api.server import (
     InstanceRepository,
     ReasoningRepository,
     _apply_edge_source_identity_presentation_guard,
@@ -14,9 +14,9 @@ from server.aletheia_server import (
     _is_current_graph_proposal,
     _knowledge_candidate_profile,
 )
-from agents.ontology_artifacts import ensure_artifact_schema, upsert_artifact
-from agents.iterative_graph_enrichment_agent import _graph_context_query_plan
-from tenant_registry import TenantConfig, TenantRegistry
+from aletheia.ontology.store import ensure_artifact_schema, upsert_artifact
+from aletheia.enrichment.iterative_enrichment import _graph_context_query_plan
+from aletheia.core.tenant_registry import TenantConfig, TenantRegistry
 
 
 class ContinuousEnrichmentFrontierTest(unittest.TestCase):

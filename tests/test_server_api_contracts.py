@@ -7,7 +7,7 @@ from urllib.error import HTTPError
 from urllib.parse import urlencode
 from urllib.request import ProxyHandler, Request, build_opener
 
-from server.aletheia_server import AletheiaServerHandler, LocalThreadingHTTPServer
+from aletheia.interfaces.api.server import AletheiaServerHandler, LocalThreadingHTTPServer
 
 
 @dataclass(frozen=True)

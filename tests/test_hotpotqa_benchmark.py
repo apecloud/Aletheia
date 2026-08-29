@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import os
 import statistics
+import sys
 import tempfile
 import time
 import unittest
@@ -21,6 +22,15 @@ from dataclasses import dataclass, field
 from hashlib import sha256
 from pathlib import Path
 from typing import Any
+
+# tests/__init__.py normally puts scripts/ on sys.path, but unittest
+# discover's file-based module loading doesn't reliably run it before this
+# (alphabetically early) module is imported -- see tests/__init__.py's
+# docstring. Self-contained fallback so hotpotqa_frozen_sample/
+# hotpotqa_sample_eval resolve regardless of discovery order.
+_ROOT = Path(__file__).resolve().parents[1]
+if str(_ROOT / "scripts") not in sys.path:
+    sys.path.append(str(_ROOT / "scripts"))
 
 from hotpotqa_frozen_sample import DEFAULT_SAMPLE_PATH, load_hotpotqa_cases
 from hotpotqa_sample_eval import evaluate_em, evaluate_f1

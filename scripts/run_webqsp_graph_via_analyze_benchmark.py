@@ -18,14 +18,12 @@ from pathlib import Path
 from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.append(str(ROOT))
-sys.path.append(str(ROOT / "agents"))
 sys.path.append(str(ROOT / "scripts"))
 
-from reasoning_engine import ReasoningEngine  # noqa: E402
-from graph_instance_repository import GraphInstanceRepository  # noqa: E402
+from aletheia.reasoning.engine import ReasoningEngine  # noqa: E402
+from aletheia.graph_store.instance_repository import GraphInstanceRepository  # noqa: E402
 from import_webqsp_graph_tenant import DEFAULT_SPACE  # noqa: E402
-from tenant_registry import default_metadata_db_url  # noqa: E402
+from aletheia.core.tenant_registry import default_metadata_db_url  # noqa: E402
 
 DEFAULT_TENANT_ID = "webqsp-graph-v1"
 DEFAULT_OBJECT_TYPE = "entity"

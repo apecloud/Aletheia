@@ -48,7 +48,7 @@ fi
 
 echo "Using Model: $MODEL"
 
-python agents/data_profiler_agent.py --model "$MODEL"
+python -m aletheia.ingest.data_profiler --model "$MODEL"
 
 echo "================================================="
 echo "Done! The semantic profiles have been updated in PostGIS."

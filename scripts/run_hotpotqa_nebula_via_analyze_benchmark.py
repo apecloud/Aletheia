@@ -31,19 +31,17 @@ from pathlib import Path
 from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.append(str(ROOT))
-sys.path.append(str(ROOT / "agents"))
 sys.path.append(str(ROOT / "scripts"))
 
-from reasoning_engine import ReasoningEngine  # noqa: E402
-from graph_instance_repository import GraphInstanceRepository  # noqa: E402
+from aletheia.reasoning.engine import ReasoningEngine  # noqa: E402
+from aletheia.graph_store.instance_repository import GraphInstanceRepository  # noqa: E402
 from import_hotpotqa_nebula_tenant import DEFAULT_CASES, DEFAULT_SPACE  # noqa: E402
 from hotpotqa_graph_judge import GraphHitJudge  # noqa: E402
-from llm_planner import LLMPlanner  # noqa: E402
-from graph_entity_resolver import SOURCE_SPACE_DESCRIPTION  # noqa: E402
-from ontology_label_embeddings import find_nearest_labels  # noqa: E402
+from aletheia.llms.planner import LLMPlanner  # noqa: E402
+from aletheia.enrichment.entity_resolver import SOURCE_SPACE_DESCRIPTION  # noqa: E402
+from aletheia.ontology.label_embeddings import find_nearest_labels  # noqa: E402
 from run_hotpotqa_nebula_e2e_benchmark import gold_candidates  # noqa: E402
-from tenant_registry import default_metadata_db_url  # noqa: E402
+from aletheia.core.tenant_registry import default_metadata_db_url  # noqa: E402
 
 DEFAULT_TENANT_ID = "hotpotqa-graph-v1"
 DEFAULT_OBJECT_TYPE = "entity"

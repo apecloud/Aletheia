@@ -24,8 +24,8 @@ from __future__ import annotations
 import unittest
 from unittest.mock import patch
 
-from reasoning_engine import ReasoningEngine
-from llm_planner import RelationalDerivation, PlannerMapping
+from aletheia.reasoning.engine import ReasoningEngine
+from aletheia.llms.planner import RelationalDerivation, PlannerMapping
 
 
 class FakeRepo:

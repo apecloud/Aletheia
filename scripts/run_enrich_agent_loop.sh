@@ -28,7 +28,7 @@ fi
 while true; do
   printf "\n[%s] enrich_loop_start\n" "$(date -Iseconds)" >> "$LOG_PATH"
   RUN_OUTPUT="$(mktemp "${TMPDIR:-/tmp}/aletheia-enrich-run.XXXXXX")"
-  .venv/bin/python agents/iterative_graph_enrichment_agent.py \
+  .venv/bin/python -m aletheia.enrichment.iterative_enrichment \
     --tenant "$TENANT" \
     --objective "$OBJECTIVE" \
     --research-provider "${ALETHEIA_RESEARCH_PROVIDER:-gpt_researcher}" \

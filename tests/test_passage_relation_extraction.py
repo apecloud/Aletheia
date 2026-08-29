@@ -13,8 +13,19 @@ Run: python -m unittest tests.test_passage_relation_extraction
 from __future__ import annotations
 
 import json
+import sys
 import unittest
+from pathlib import Path
 from unittest.mock import MagicMock, patch
+
+# tests/__init__.py normally puts scripts/ on sys.path, but unittest
+# discover's file-based module loading doesn't reliably run it before an
+# early-imported module needs it -- see tests/__init__.py's docstring.
+# Self-contained fallback so passage_relation_extraction resolves
+# regardless of discovery order.
+_ROOT = Path(__file__).resolve().parents[1]
+if str(_ROOT / "scripts") not in sys.path:
+    sys.path.append(str(_ROOT / "scripts"))
 
 from passage_relation_extraction import PassageRelationExtractor
 

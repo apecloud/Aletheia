@@ -31,7 +31,7 @@ echo "Using Model: $MODEL"
 echo "-------------------------------------------------"
 echo "Semantic Consistency Agent (Evaluating Ontology)..."
 echo "-------------------------------------------------"
-python agents/semantic_consistency_agent.py --model "$MODEL"
+python -m aletheia.modeling.semantic_consistency --model "$MODEL"
 
 echo "================================================="
 echo "Done! The semantic consistency report has been generated."

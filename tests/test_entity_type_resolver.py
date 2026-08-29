@@ -1,6 +1,6 @@
 import unittest
 
-from reasoning_engine import ReasoningEngine
+from aletheia.reasoning.engine import ReasoningEngine
 
 
 class FakeRepo:

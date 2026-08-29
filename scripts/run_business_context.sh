@@ -35,7 +35,7 @@ echo "Looking for external documentation in: ./docs"
 echo "-------------------------------------------------"
 echo "Business Context Agent (Aligning terminology)..."
 echo "-------------------------------------------------"
-python agents/business_context_agent.py --model "$MODEL" --docs-dir "$PROJECT_ROOT/docs"
+python -m aletheia.modeling.business_context --model "$MODEL" --docs-dir "$PROJECT_ROOT/docs"
 
 echo "================================================="
 echo "Done! The technical tables have been updated with business terminology."

@@ -1,8 +1,8 @@
 import unittest
 from unittest.mock import patch
 
-from reasoning_engine import ReasoningEngine
-from llm_planner import PlannerMapping
+from aletheia.reasoning.engine import ReasoningEngine
+from aletheia.llms.planner import PlannerMapping
 
 
 class FakeRepo:

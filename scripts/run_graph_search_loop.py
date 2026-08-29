@@ -1,16 +1,10 @@
 #!/usr/bin/env python3
 import argparse
 import json
-import os
-import sys
 
-ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-if ROOT not in sys.path:
-    sys.path.insert(0, ROOT)
-
-from agents.graph_search_loop_harness import evaluate_graph_search_loop, load_graph_search_loop_config
-from server.aletheia_server import InstanceRepository
-from tenant_registry import TenantRegistry
+from aletheia.enrichment.search_loop_harness import evaluate_graph_search_loop, load_graph_search_loop_config
+from aletheia.interfaces.api.server import InstanceRepository
+from aletheia.core.tenant_registry import TenantRegistry
 
 
 def main():

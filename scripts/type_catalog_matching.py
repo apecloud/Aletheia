@@ -17,8 +17,10 @@ from __future__ import annotations
 import json
 import logging
 import re
-from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any
+
+from aletheia.llms.hard_timeout import call_with_hard_timeout
 
 MAX_CANDIDATES_IN_PROMPT = 60
 
@@ -110,27 +112,25 @@ def semantic_match_via_llm(
         raw_name=raw_name, evidence=evidence or "(none)", candidates=format_candidates(entries),
     )
     try:
-        future = executor.submit(
-            completion,
-            model=planner.model,
-            messages=[
-                {"role": "system", "content": system_prompt + JSON_INSTRUCTION},
-                {"role": "user", "content": user_msg},
-            ],
-            timeout=timeout,
-            temperature=0.0,
-            **completion_kwargs,
-        )
         try:
-            raw_response = future.result(timeout=timeout + 15)
-        except FutureTimeoutError:
-            future.cancel()
+            raw_response = call_with_hard_timeout(
+                executor, completion,
+                model=planner.model,
+                messages=[
+                    {"role": "system", "content": system_prompt + JSON_INSTRUCTION},
+                    {"role": "user", "content": user_msg},
+                ],
+                timeout=timeout,
+                temperature=0.0,
+                **completion_kwargs,
+            )
+        except TimeoutError:
             logger.warning("%s: hard timeout matching %r, treating as new", label, raw_name)
             return None
 
         if not raw_response or not raw_response.choices:
             return None
-        from llm_planner import LLMPlanner
+        from aletheia.llms.planner import LLMPlanner
         candidates = LLMPlanner._response_text_candidates(raw_response.choices[0].message)
         for candidate in candidates:
             parsed = parse_canonical_match_response(candidate)

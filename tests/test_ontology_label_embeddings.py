@@ -18,11 +18,11 @@ import unittest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from ontology_artifacts import ensure_artifact_schema, GraphIdentityIndex
-from ontology_label_embeddings import (
+from aletheia.ontology.store import ensure_artifact_schema, GraphIdentityIndex
+from aletheia.ontology.label_embeddings import (
     SOURCE_SPACE, find_nearest_label, find_nearest_labels, label_embedding_count, sync_label_embeddings,
 )
-from tenant_registry import default_metadata_db_url
+from aletheia.core.tenant_registry import default_metadata_db_url
 
 
 class FakeEmbeddingAdapter:

@@ -51,29 +51,27 @@ from pathlib import Path
 from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.append(str(ROOT))
-sys.path.append(str(ROOT / "agents"))
 sys.path.append(str(ROOT / "scripts"))
 
 from sqlalchemy import create_engine  # noqa: E402
 from sqlalchemy.orm import sessionmaker  # noqa: E402
 
-from graph_db_client import NebulaGraphClient, insert_with_schema_retry as _insert_with_schema_retry  # noqa: E402
-from graph_entity_resolver import SOURCE_SPACE_DESCRIPTION, resolve_or_mint_vertex_id  # noqa: E402
-from graph_ontology_registry import (  # noqa: E402
+from aletheia.graph_store.nebula_client import NebulaGraphClient, insert_with_schema_retry as _insert_with_schema_retry  # noqa: E402
+from aletheia.enrichment.entity_resolver import SOURCE_SPACE_DESCRIPTION, resolve_or_mint_vertex_id  # noqa: E402
+from aletheia.ontology.registry import (  # noqa: E402
     get_approved_node_types, get_edge_type, get_node_type, propose_edge_type, propose_node_type,
 )
-from graph_schema_sync import sync_tenant_schema  # noqa: E402
+from aletheia.enrichment.schema_sync import sync_tenant_schema  # noqa: E402
 from hotpotqa_entity_ids import entity_id  # noqa: E402
 from hotpotqa_frozen_sample import DEFAULT_SAMPLE_PATH, load_hotpotqa_cases  # noqa: E402
-from iterative_graph_enrichment_agent import SmallMultilingualEmbeddingAdapter, _cosine_distance  # noqa: E402
-from llm_planner import LLMPlanner  # noqa: E402
-from node_type_catalog import NodeTypeCatalog  # noqa: E402
+from aletheia.enrichment.iterative_enrichment import SmallMultilingualEmbeddingAdapter, _cosine_distance  # noqa: E402
+from aletheia.llms.planner import LLMPlanner  # noqa: E402
+from aletheia.ontology.node_type_catalog import NodeTypeCatalog  # noqa: E402
 from passage_relation_extraction import PassageRelationExtractor  # noqa: E402
-from ontology_artifacts import ensure_artifact_schema  # noqa: E402
-from ontology_label_embeddings import sync_label_embeddings  # noqa: E402
+from aletheia.ontology.store import ensure_artifact_schema  # noqa: E402
+from aletheia.ontology.label_embeddings import sync_label_embeddings  # noqa: E402
 from relation_catalog import RelationCatalog  # noqa: E402
-from tenant_registry import default_metadata_db_url  # noqa: E402
+from aletheia.core.tenant_registry import default_metadata_db_url  # noqa: E402
 
 DEFAULT_SPACE = "hotpotqa_kg"
 DEFAULT_CASES = ROOT / "benchmarks" / "hotpotqa" / "hotpot_nebula_cases.json"

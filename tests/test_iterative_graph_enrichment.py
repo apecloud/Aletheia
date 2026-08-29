@@ -14,8 +14,8 @@ from unittest.mock import patch
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-import agents.iterative_graph_enrichment_agent as iterative_graph_enrichment_agent  # noqa: E402
-from agents.iterative_graph_enrichment_agent import (  # noqa: E402
+import aletheia.enrichment.iterative_enrichment as iterative_graph_enrichment_agent  # noqa: E402
+from aletheia.enrichment.iterative_enrichment import (  # noqa: E402
     GRAPH_EXTRACTION_PROMPT_VERSION,
     GraphDeepResearchBenchmark,
     GPTResearcherSearchProvider,
@@ -23,7 +23,7 @@ from agents.iterative_graph_enrichment_agent import (  # noqa: E402
     _configure_gpt_researcher_env,
     _graph_context_query_plan,
 )
-from agents.ontology_artifacts import (  # noqa: E402
+from aletheia.ontology.store import (  # noqa: E402
     GraphIdentityIndex,
     IterativeGraphEnrichmentRun,
     OntologyArtifact,

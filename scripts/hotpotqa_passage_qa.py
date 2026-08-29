@@ -20,10 +20,12 @@ import logging
 import os
 import re
 import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import Any
 
-from llm_planner import LLMPlanner
+from aletheia.llms.hard_timeout import call_with_hard_timeout
+from aletheia.llms.planner import LLMPlanner
 
 logger = logging.getLogger("HotpotQAAnswerer")
 
@@ -92,6 +94,10 @@ class HotpotQAAnswerer:
         self.timeout = timeout
         self.temperature = temperature
         self.last_result: AnswererResult | None = None
+        # Same hard-timeout rationale as LLMPlanner/GraphHitJudge/
+        # PassageRelationExtractor: litellm's own timeout= kwarg doesn't
+        # reliably fire on a stuck proxy/SOCKS CONNECT tunnel.
+        self._executor = ThreadPoolExecutor(max_workers=4)
 
     def _completion_kwargs(self) -> dict[str, Any]:
         kwargs: dict[str, Any] = {}
@@ -180,7 +186,8 @@ class HotpotQAAnswerer:
             max_attempts = 1 + LLMPlanner._empty_response_retry_count()
 
             for attempt in range(1, max_attempts + 1):
-                raw_response = completion(
+                raw_response = call_with_hard_timeout(
+                    self._executor, completion,
                     model=self.model,
                     messages=[
                         {"role": "system", "content": self.system_prompt + json_instruction},

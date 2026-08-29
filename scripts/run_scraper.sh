@@ -19,7 +19,7 @@ echo "========================================="
 
 # Example 1: Scrape Titanic passenger data (CSV)
 echo "[1/2] Scraping Titanic dataset (CSV)..."
-python agents/data_scraper_agent.py \
+python -m aletheia.ingest.data_scraper \
     --url "https://raw.githubusercontent.com/datasciencedojo/datasets/master/titanic.csv" \
     --table "titanic_passengers" \
     --type "csv"
@@ -28,7 +28,7 @@ echo ""
 
 # Example 2: Scrape generic user data (JSON)
 echo "[2/2] Scraping JSONPlaceholder users (JSON)..."
-python agents/data_scraper_agent.py \
+python -m aletheia.ingest.data_scraper \
     --url "https://jsonplaceholder.typicode.com/users" \
     --table "api_users" \
     --type "json"

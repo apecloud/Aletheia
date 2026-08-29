@@ -1,7 +1,7 @@
 import unittest
 
-from agents.web_enrichment_agent import SearchResult, _is_public_web_url
-from iterative_graph_enrichment_agent import GPTResearcherSearchProvider, _is_accepted_research_result_url
+from aletheia.core.text_cleaning import SearchResult, _is_public_web_url
+from aletheia.enrichment.iterative_enrichment import GPTResearcherSearchProvider, _is_accepted_research_result_url
 
 
 class FakeSourceLessResearcher:

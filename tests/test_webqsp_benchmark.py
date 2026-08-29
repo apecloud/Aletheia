@@ -24,7 +24,7 @@ from hashlib import sha256
 from pathlib import Path
 from typing import Any
 
-from reasoning_engine import ReasoningEngine
+from aletheia.reasoning.engine import ReasoningEngine
 
 
 # ---------------------------------------------------------------------------
@@ -453,7 +453,7 @@ class WebQSPBenchmarkRunner:
         error_type = getattr(current_result, "error_type", "") or ""
         if not error_type and error:
             try:
-                from llm_planner import LLMPlanner
+                from aletheia.llms.planner import LLMPlanner
                 error_type = LLMPlanner.classify_error(error)
             except Exception:
                 error_type = "runtime"

@@ -2,7 +2,7 @@ import unittest
 from dataclasses import dataclass, field
 from typing import Any
 
-from reasoning_engine import ReasoningEngine
+from aletheia.reasoning.engine import ReasoningEngine
 
 
 class FakeRepo:

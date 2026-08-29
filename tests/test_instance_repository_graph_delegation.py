@@ -16,8 +16,8 @@ from __future__ import annotations
 import unittest
 from unittest.mock import patch
 
-from tenant_registry import TenantConfig, TenantRegistry
-from server.aletheia_server import InstanceRepository
+from aletheia.core.tenant_registry import TenantConfig, TenantRegistry
+from aletheia.interfaces.api.server import InstanceRepository
 
 
 def _graph_tenant(space: str) -> TenantConfig:
@@ -38,10 +38,10 @@ class GovernanceDelegationTest(unittest.TestCase):
         tenant = _graph_tenant("unused_space")
         repo = InstanceRepository(TenantRegistry([tenant]))
         with patch(
-            "graph_instance_repository.ontology_registry.get_approved_node_types",
+            "aletheia.graph_store.instance_repository.ontology_registry.get_approved_node_types",
             return_value=[{"name": "Person"}],
         ), patch(
-            "graph_instance_repository.ontology_registry.get_all_node_types",
+            "aletheia.graph_store.instance_repository.ontology_registry.get_all_node_types",
             return_value=[{"name": "Person"}],
         ):
             config = repo.reasoning_entity_config(tenant)
@@ -51,8 +51,8 @@ class GovernanceDelegationTest(unittest.TestCase):
         tenant = _graph_tenant("unused_space")
         repo = InstanceRepository(TenantRegistry([tenant]))
         self.assertNotIn(tenant.tenant_id, repo._graph_repos)
-        with patch("graph_instance_repository.ontology_registry.get_approved_node_types", return_value=[]), patch(
-            "graph_instance_repository.ontology_registry.get_all_node_types", return_value=[],
+        with patch("aletheia.graph_store.instance_repository.ontology_registry.get_approved_node_types", return_value=[]), patch(
+            "aletheia.graph_store.instance_repository.ontology_registry.get_all_node_types", return_value=[],
         ):
             repo.reasoning_entity_config(tenant)
         self.assertIn(tenant.tenant_id, repo._graph_repos)
@@ -63,7 +63,7 @@ class LiveNebulaDelegationTest(unittest.TestCase):
 
     def test_fetch_entity_and_neighborhood_delegate_through_instance_repository(self):
         try:
-            from graph_db_client import NebulaGraphClient
+            from aletheia.graph_store.nebula_client import NebulaGraphClient
         except ImportError:
             self.skipTest("nebula3-python not installed")
 

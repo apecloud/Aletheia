@@ -22,7 +22,7 @@ from __future__ import annotations
 import unittest
 from unittest.mock import patch
 
-from graph_instance_repository import GraphInstanceRepository
+from aletheia.graph_store.instance_repository import GraphInstanceRepository
 
 
 class GovernanceConfigTest(unittest.TestCase):
@@ -32,10 +32,10 @@ class GovernanceConfigTest(unittest.TestCase):
         # real, case-preserved type name is kept in "artifact"/"type_name".
         repo = GraphInstanceRepository(space="unittest_space", relation_catalog_db_url="sqlite:///:memory:")
         with patch(
-            "graph_instance_repository.ontology_registry.get_approved_node_types",
+            "aletheia.graph_store.instance_repository.ontology_registry.get_approved_node_types",
             return_value=[{"name": "Person"}, {"name": "Team"}],
         ), patch(
-            "graph_instance_repository.ontology_registry.get_all_node_types",
+            "aletheia.graph_store.instance_repository.ontology_registry.get_all_node_types",
             return_value=[{"name": "Person"}, {"name": "Team"}],
         ):
             cfg = repo.reasoning_entity_config("any-tenant")
@@ -52,7 +52,7 @@ class GovernanceConfigTest(unittest.TestCase):
         # assuming "from"/"to" are already lowercase).
         repo = GraphInstanceRepository(space="unittest_space", relation_catalog_db_url="sqlite:///:memory:")
         with patch(
-            "graph_instance_repository.ontology_registry.get_approved_edge_types",
+            "aletheia.graph_store.instance_repository.ontology_registry.get_approved_edge_types",
             return_value=[{"name": "HEAD_COACH", "description": "coach of", "domain": ["Team"], "range": ["Person"]}],
         ):
             config = repo.reasoning_link_config("any-tenant")
@@ -98,7 +98,7 @@ class LiveNebulaSmokeTest(unittest.TestCase):
 
     def test_fetch_entity_and_neighborhood_round_trip_across_two_tags(self):
         try:
-            from graph_db_client import NebulaGraphClient
+            from aletheia.graph_store.nebula_client import NebulaGraphClient
         except ImportError:
             self.skipTest("nebula3-python not installed")
 

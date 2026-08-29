@@ -22,17 +22,15 @@ from pathlib import Path
 from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.append(str(ROOT))
-sys.path.append(str(ROOT / "agents"))
 sys.path.append(str(ROOT / "scripts"))
 
 from nebula3.common.ttypes import Value  # noqa: E402
-from graph_db_client import NebulaGraphClient  # noqa: E402
+from aletheia.graph_store.nebula_client import NebulaGraphClient  # noqa: E402
 from hotpotqa_sample_eval import fallback_answer_matches  # noqa: E402
 from hotpotqa_graph_judge import GraphHitJudge  # noqa: E402
 from import_hotpotqa_nebula_tenant import DEFAULT_CASES, DEFAULT_SPACE  # noqa: E402
-from reasoning_engine import ReasoningEngine  # noqa: E402
-from llm_planner import LLMPlanner  # noqa: E402
+from aletheia.reasoning.engine import ReasoningEngine  # noqa: E402
+from aletheia.llms.planner import LLMPlanner  # noqa: E402
 from hotpotqa_frozen_sample import DEFAULT_SAMPLE_PATH  # noqa: E402
 
 DEFAULT_RESULTS = ROOT / "reports" / "hotpotqa-nebula-e2e-results.json"

@@ -7,10 +7,10 @@ import sys
 import time
 from datetime import datetime
 
-from agents.enrichment_loop_harness import apply_repair_plan, evaluate_enrichment_loop, load_loop_config
-from agents.graph_search_loop_harness import evaluate_graph_search_loop, load_graph_search_loop_config
-from server.aletheia_server import InstanceRepository
-from tenant_registry import TenantRegistry
+from aletheia.enrichment.loop_harness import apply_repair_plan, evaluate_enrichment_loop, load_loop_config
+from aletheia.enrichment.search_loop_harness import evaluate_graph_search_loop, load_graph_search_loop_config
+from aletheia.interfaces.api.server import InstanceRepository
+from aletheia.core.tenant_registry import TenantRegistry
 from sqlalchemy import create_engine, text
 
 

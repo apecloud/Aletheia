@@ -21,37 +21,37 @@ echo "================================================="
 BASE_URL="https://raw.githubusercontent.com/graphql-compose/graphql-compose-examples/master/examples/northwind/data/csv"
 
 echo "[1/6] Loading Customers table..."
-python agents/data_scraper_agent.py \
+python -m aletheia.ingest.data_scraper \
     --url "$BASE_URL/customers.csv" \
     --table "customers" \
     --type "csv"
 
 echo "[2/6] Loading Employees table..."
-python agents/data_scraper_agent.py \
+python -m aletheia.ingest.data_scraper \
     --url "$BASE_URL/employees.csv" \
     --table "employees" \
     --type "csv"
 
 echo "[3/6] Loading Orders table (1:N with Customers and Employees)..."
-python agents/data_scraper_agent.py \
+python -m aletheia.ingest.data_scraper \
     --url "$BASE_URL/orders.csv" \
     --table "orders" \
     --type "csv"
 
 echo "[4/6] Loading Categories table..."
-python agents/data_scraper_agent.py \
+python -m aletheia.ingest.data_scraper \
     --url "$BASE_URL/categories.csv" \
     --table "categories" \
     --type "csv"
 
 echo "[5/6] Loading Products table (1:N with Categories)..."
-python agents/data_scraper_agent.py \
+python -m aletheia.ingest.data_scraper \
     --url "$BASE_URL/products.csv" \
     --table "products" \
     --type "csv"
 
 echo "[6/6] Loading Order_Details table (M:N mapping between Orders and Products)..."
-python agents/data_scraper_agent.py \
+python -m aletheia.ingest.data_scraper \
     --url "$BASE_URL/order_details.csv" \
     --table "order_details" \
     --type "csv"

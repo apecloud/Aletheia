@@ -1,6 +1,6 @@
 import unittest
 
-from agents.reasoning_finding_framework import (
+from aletheia.reasoning.finding_framework import (
     deep_graph_profile,
     entity_profile_aggregate_evidence,
     finding_canonical_boundary,

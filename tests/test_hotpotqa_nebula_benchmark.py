@@ -15,19 +15,31 @@ Run: python -m unittest tests.test_hotpotqa_nebula_benchmark
 
 from __future__ import annotations
 
+import sys
 import unittest
+from pathlib import Path
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
+# tests/__init__.py normally puts scripts/ on sys.path, but unittest
+# discover's file-based module loading doesn't reliably run it before this
+# (alphabetically early) module is imported -- see tests/__init__.py's
+# docstring. Self-contained fallback so passage_relation_extraction/
+# hotpotqa_entity_ids/import_hotpotqa_nebula_tenant/
+# run_hotpotqa_nebula_e2e_benchmark resolve regardless of discovery order.
+_ROOT = Path(__file__).resolve().parents[1]
+if str(_ROOT / "scripts") not in sys.path:
+    sys.path.append(str(_ROOT / "scripts"))
+
 from passage_relation_extraction import LocalGraph, MentionedEntity, Triple
-from graph_entity_resolver import SOURCE_SPACE_DESCRIPTION  # noqa: E402
+from aletheia.enrichment.entity_resolver import SOURCE_SPACE_DESCRIPTION  # noqa: E402
 from hotpotqa_entity_ids import entity_id
 from import_hotpotqa_nebula_tenant import materialize_hotpotqa_questions  # noqa: E402
-from llm_planner import EntityDescriptionResult  # noqa: E402
+from aletheia.llms.planner import EntityDescriptionResult  # noqa: E402
 from run_hotpotqa_nebula_e2e_benchmark import gather_facts, graph_hit  # noqa: E402
-from ontology_artifacts import ensure_artifact_schema, GraphIdentityIndex, OntologyArtifact  # noqa: E402
-from tenant_registry import default_metadata_db_url  # noqa: E402
+from aletheia.ontology.store import ensure_artifact_schema, GraphIdentityIndex, OntologyArtifact  # noqa: E402
+from aletheia.core.tenant_registry import default_metadata_db_url  # noqa: E402
 
 
 class FakeExtractor:
@@ -226,7 +238,7 @@ class MaterializationTest(unittest.TestCase):
         self.assertEqual(person_ids, {entity_id("q1", "Barry Switzer")})
 
     def test_node_and_edge_types_registered_in_ontology_registry(self):
-        import graph_ontology_registry as registry
+        import aletheia.ontology.registry as registry
 
         q1 = self._case("q1", "Q1?", "answer1")
         graph = LocalGraph(
@@ -623,7 +635,7 @@ class LiveNebulaSmokeTest(unittest.TestCase):
 
     def test_insert_and_traverse_round_trip(self):
         try:
-            from graph_db_client import NebulaGraphClient
+            from aletheia.graph_store.nebula_client import NebulaGraphClient
         except ImportError:
             self.skipTest("nebula3-python not installed")
 

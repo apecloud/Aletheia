@@ -21,7 +21,7 @@ echo "================================================="
 # docker-compose -f docker/docker-compose.yml up -d aletheia-postgis
 
 echo "Extracting metadata from MySQL and saving to PostGIS..."
-python agents/metadata_scraper_agent.py
+python -m aletheia.ingest.metadata_scraper
 
 echo "================================================="
 echo "Done! The metadata is now structured and safely stored in PostGIS."

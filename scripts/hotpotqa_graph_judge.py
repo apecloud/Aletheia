@@ -21,11 +21,12 @@ import json
 import logging
 import re
 import time
-from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import Any
 
-from llm_planner import LLMPlanner
+from aletheia.llms.hard_timeout import call_with_hard_timeout
+from aletheia.llms.planner import LLMPlanner
 
 logger = logging.getLogger("GraphHitJudge")
 
@@ -196,8 +197,8 @@ class GraphHitJudge:
 
         for attempt in range(1, max_attempts + 1):
             try:
-                future = self._executor.submit(
-                    completion,
+                raw_response = call_with_hard_timeout(
+                    self._executor, completion,
                     model=self.model,
                     messages=[
                         {"role": "system", "content": self.system_prompt + json_instruction},
@@ -207,23 +208,6 @@ class GraphHitJudge:
                     temperature=self.temperature,
                     **self._completion_kwargs(),
                 )
-                try:
-                    raw_response = future.result(timeout=self.timeout + 15)
-                except FutureTimeoutError:
-                    # Python 3.11+ makes concurrent.futures.TimeoutError an
-                    # alias of the builtin TimeoutError, so this branch also
-                    # catches a TimeoutError raised BY completion() itself
-                    # (e.g. litellm's own timeout= firing normally) -- not
-                    # just our own wait timing out. future.done() tells them
-                    # apart: True means completion() already ran and raised
-                    # on its own (re-raise that original error as-is); False
-                    # means our wait genuinely elapsed with no response.
-                    if future.done():
-                        raise
-                    future.cancel()
-                    raise TimeoutError(
-                        f"hard timeout: no response after {self.timeout + 15:.0f}s (proxy/connect hang)"
-                    )
 
                 raw_contents = []
                 finish_reason = ""

@@ -4,7 +4,7 @@ from types import SimpleNamespace
 from pydantic import ValidationError
 from sqlalchemy import create_engine, text
 
-from agents.schema_graph_modeling_agent import (
+from aletheia.modeling.schema_graph_modeling import (
     GraphEdgeTypeDraft,
     GraphModelDraft,
     GraphNodeTypeDraft,
@@ -12,7 +12,7 @@ from agents.schema_graph_modeling_agent import (
     SchemaGraphModelingAgent,
     SchemaTraceabilityValidationError,
 )
-from agents.ontology_artifacts import (
+from aletheia.ontology.store import (
     BusinessLink,
     BusinessObject,
     ObjectTableMapping,

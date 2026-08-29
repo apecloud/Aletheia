@@ -12,7 +12,7 @@ from unittest.mock import MagicMock, patch
 from dataclasses import dataclass, field
 from typing import Any
 
-from reasoning_engine import ReasoningEngine
+from aletheia.reasoning.engine import ReasoningEngine
 from tests.test_maritime_risk_benchmark import (
     MARITIME_ENTITY_CONFIG,
     MARITIME_LINK_CONFIG,

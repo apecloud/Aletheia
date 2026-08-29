@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "aletheia"
+version = "0.1.0"
+requires-python = ">=3.10"
+dependencies = [
+    "SQLAlchemy>=2.0.0",
+    "pymysql>=1.0.0",
+    "psycopg2-binary>=2.9.0",
+    "pandas>=2.0.0",
+    "openpyxl>=3.1.0",
+    "pydantic>=2.0.0",
+    "litellm>=1.0.0",
+    "instructor>=1.0.0",
+    "langextract>=1.5.0",
+    "sentence-transformers>=2.7.0",
+    "nebula3-python>=3.8.0",
+    "datasets>=2.14.0",
+    "huggingface_hub>=0.20.0",
+    "requests>=2.32.3",
+    "gpt-researcher>=0.10.0",
+    "ddgs>=9.0.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["aletheia*"]

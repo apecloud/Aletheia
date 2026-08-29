@@ -5,7 +5,7 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 
-from agents.ontology_artifacts import (
+from aletheia.ontology.store import (
     METADATA_SCHEMA_BASE_VERSION,
     METADATA_SCHEMA_TENANT_UNIQUENESS_VERSION,
     SchemaObjectCandidate,

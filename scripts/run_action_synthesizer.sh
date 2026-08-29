@@ -31,7 +31,7 @@ echo "Using Model: $MODEL"
 echo "-------------------------------------------------"
 echo "Action Synthesizer Agent (Mapping stored procedures and triggers)..."
 echo "-------------------------------------------------"
-python agents/action_synthesizer_agent.py --model "$MODEL"
+python -m aletheia.modeling.action_synthesizer --model "$MODEL"
 
 echo "================================================="
 echo "Done! The Business Actions have been extracted and mapped in PostGIS."

@@ -18,7 +18,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from node_type_catalog import NodeTypeCatalog
+from aletheia.ontology.node_type_catalog import NodeTypeCatalog
 
 
 def _match_response(canonical_match: str) -> MagicMock:
@@ -206,7 +206,7 @@ class LivePostgresSmokeTest(unittest.TestCase):
         except ImportError:
             self.skipTest("sqlalchemy not installed")
 
-        from tenant_registry import default_metadata_db_url
+        from aletheia.core.tenant_registry import default_metadata_db_url
 
         db_url = default_metadata_db_url()
         try:

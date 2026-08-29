@@ -5,8 +5,8 @@ from datetime import datetime, timedelta
 
 from sqlalchemy import create_engine, text
 
-from agents.enrichment_loop_harness import apply_repair_plan, evaluate_enrichment_loop, load_loop_config
-from agents.ontology_artifacts import ensure_artifact_schema
+from aletheia.enrichment.loop_harness import apply_repair_plan, evaluate_enrichment_loop, load_loop_config
+from aletheia.ontology.store import ensure_artifact_schema
 
 
 class EnrichmentLoopHarnessTest(unittest.TestCase):

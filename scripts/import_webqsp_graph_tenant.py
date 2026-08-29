@@ -39,22 +39,20 @@ from typing import Any
 import pandas as pd
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.append(str(ROOT))
-sys.path.append(str(ROOT / "agents"))
 sys.path.append(str(ROOT / "scripts"))
 
 from sqlalchemy import create_engine  # noqa: E402
 from sqlalchemy.orm import sessionmaker  # noqa: E402
 
-from graph_db_client import NebulaGraphClient  # noqa: E402
-from graph_ontology_registry import get_edge_type, propose_edge_type, propose_node_type  # noqa: E402
+from aletheia.graph_store.nebula_client import NebulaGraphClient  # noqa: E402
+from aletheia.ontology.registry import get_edge_type, propose_edge_type, propose_node_type  # noqa: E402
 from hotpotqa_entity_ids import entity_id  # noqa: E402
 from import_hotpotqa_nebula_tenant import (  # noqa: E402
     DEFAULT_GOVERNANCE_MODE, GOVERNANCE_MODES, _governance_status, _insert_with_schema_retry,
 )
-from ontology_artifacts import ensure_artifact_schema  # noqa: E402
+from aletheia.ontology.store import ensure_artifact_schema  # noqa: E402
 from relation_catalog import RelationCatalog  # noqa: E402
-from tenant_registry import default_metadata_db_url  # noqa: E402
+from aletheia.core.tenant_registry import default_metadata_db_url  # noqa: E402
 
 DEFAULT_SPACE = "webqsp_kg"
 DEFAULT_QUESTIONS_JSON = ROOT / "benchmarks" / "webqsp" / "webqsp_aletheia_benchmark.json"

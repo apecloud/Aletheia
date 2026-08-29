@@ -20,9 +20,9 @@ import unittest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from ontology_artifacts import ensure_artifact_schema, GraphIdentityIndex
-from graph_entity_resolver import resolve_or_mint_vertex_id
-from tenant_registry import default_metadata_db_url
+from aletheia.ontology.store import ensure_artifact_schema, GraphIdentityIndex
+from aletheia.enrichment.entity_resolver import resolve_or_mint_vertex_id
+from aletheia.core.tenant_registry import default_metadata_db_url
 
 
 class FakeEmbeddingAdapter:
