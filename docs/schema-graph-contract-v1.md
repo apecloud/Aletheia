@@ -2,7 +2,7 @@
 
 Aletheia's schema graph contract is the boundary between raw source database metadata, LLM-inferred draft ontology artifacts, and human review.
 
-The contract is implemented in `agents/schema_graph_modeling_agent.py`:
+The contract is implemented in `aletheia/modeling/schema_graph_modeling.py`:
 
 - `GraphNodeTypeDraft` defines draft ontology object/entity types.
 - `GraphEdgeTypeDraft` defines draft relation/link types.

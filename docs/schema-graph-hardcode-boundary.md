@@ -26,8 +26,8 @@ or descriptions from hardcoded domain terms alone.
 | `scripts/import_us_iran_war_dataset.py` `OBJECT_SPECS` / `LINK_SPECS` | Curated web-research snapshot fixture | Demo snapshot seed only |
 | `scripts/bootstrap_demo_environment.py` seed specs | Demo/test environment fixture | Local bootstrap and tests only |
 | `ObjectModelerAgent` / `LinkWeaverAgent` | Legacy adapters | May populate legacy compatibility rows, but artifact writes must flow through `SchemaGraphModelingAgent` |
-| `agents/iterative_graph_enrichment_agent.py` term hints | Extraction hints for proposed graph enrichment | May suggest draft/proposed facts from evidence; cannot approve ontology or formal graph data |
-| `reasoning_engine.py` `ENTITY_CONFIG` / `LINK_CONFIG` usage | Read-time legacy graph navigation | Must be replaced over time by approved schema-graph projection metadata |
+| `aletheia/enrichment/iterative_enrichment.py` term hints | Extraction hints for proposed graph enrichment | May suggest draft/proposed facts from evidence; cannot approve ontology or formal graph data |
+| `aletheia/reasoning/engine.py` `ENTITY_CONFIG` / `LINK_CONFIG` usage | Read-time legacy graph navigation | Must be replaced over time by approved schema-graph projection metadata |
 
 ## Migration Rules
 
@@ -52,7 +52,7 @@ or descriptions from hardcoded domain terms alone.
   break silently.
 - Move source profiling, metadata scraping, and business-context gathering into
   one schema/profile evidence package that feeds `SchemaGraphModelingAgent`.
-- Replace `reasoning_engine.py` static config navigation with approved
+- Replace `aletheia/reasoning/engine.py` static config navigation with approved
   SchemaGraphModelingAgent projection metadata.
 - Retire or move old demo-only scripts after their bootstrap/test coverage is
   replaced.

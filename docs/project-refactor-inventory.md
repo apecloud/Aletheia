@@ -1,5 +1,13 @@
 # Project Refactor Inventory
 
+**Superseded**: the flat `agents/`/`db/`/`llm/`/`server/` layout this
+inventory describes was replaced by the installable `aletheia` package
+(`core`/`ontology`/`graph_store`/`llms`/`enrichment`/`modeling`/`ingest`/
+`reasoning`/`interfaces`). File paths below are historical -- see
+`README.md`'s "What Is In This Repo" table for current locations. Kept
+for the "keep/merge/review" judgment calls, which are mostly still
+relevant at the new paths.
+
 This inventory supports Project Refactor Phase 1. It records the current root
 and `agents/` files, their observed references, and whether they should be kept,
 merged, or reviewed for later migration.

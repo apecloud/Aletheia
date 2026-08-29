@@ -26,7 +26,6 @@ injecting Employee/Order demo objects.
 
 | Path | Purpose |
 | --- | --- |
-| `agents/` | Import, ontology modeling, graph ingestion, web enrichment, and reasoning agents |
 | `config/` | Tenant configuration examples |
 | `datasets/` | Local sample datasets used by demos and smoke tests |
 | `docker/` | Local MySQL, PostGIS, and Nebula Graph compose stack |
@@ -38,8 +37,7 @@ injecting Employee/Order demo objects.
 | `web/app/` | Frontend app for Workspace, Ontology, Graph, Reasoning, and Settings |
 | `aletheia/` | Package: core, ontology, graph_store, llms, enrichment, modeling, ingest, reasoning, interfaces (api/cli) |
 | `aletheia/interfaces/api/server.py` | Local API server and metadata/review backend |
-| `review_workbench.py` | Compatibility launcher for legacy server commands; new entrypoint is `aletheia.interfaces.api.server` |
-| `query_artifacts.py`, `query_graph.py`, `query_metadata.py` | CLI inspection tools |
+| `aletheia/interfaces/cli/` | CLI inspection tools: `query_artifacts.py`, `query_graph.py`, `query_metadata.py`, `review_workbench.py` |
 
 ## Core Concepts
 
@@ -156,7 +154,7 @@ Open <http://127.0.0.1:8772>.
 The legacy launcher still works for old scripts:
 
 ```bash
-python review_workbench.py --host 127.0.0.1 --port 8772 --ensure-schema
+python -m aletheia.interfaces.cli.review_workbench --host 127.0.0.1 --port 8772 --ensure-schema
 ```
 
 Useful direct links:
@@ -173,7 +171,7 @@ Useful direct links:
 ### 7. Run backend validation
 
 ```bash
-python -m py_compile review_workbench.py aletheia/interfaces/api/server.py aletheia/enrichment/iterative_enrichment.py aletheia/core/text_cleaning.py
+python -m py_compile aletheia/interfaces/cli/review_workbench.py aletheia/interfaces/api/server.py aletheia/enrichment/iterative_enrichment.py aletheia/core/text_cleaning.py
 python -m unittest \
   tests/test_ontology_eval.py \
   tests/test_web_enrichment.py \
@@ -294,7 +292,7 @@ export ALETHEIA_GRAPH_SPACE="tenant_graph_space"
   split files. The split `requirements_*.txt` files are retained only for legacy
   agent-specific installs.
 - `ERR_CONNECTION_REFUSED`: ensure `aletheia.interfaces.api.server` or the
-  compatibility launcher `review_workbench.py` is running on the port you
+  compatibility launcher `aletheia.interfaces.cli.review_workbench` is running on the port you
   opened, usually `8772`.
 - Empty demo pages on a fresh DB: run `python scripts/bootstrap_demo_environment.py`
   and restart the server with `--ensure-schema`.
