@@ -1,0 +1,29 @@
+{
+  "default_tenant": "hotpotqa-graph-v1",
+  "tenants": [
+    {
+      "tenant_id": "hotpotqa-graph-v1",
+      "namespace": "hotpotqa_graph_v1",
+      "display_name": "HotpotQA (Nebula graph-native)",
+      "graph_database": "hotpotqa_kg",
+      "relation_catalog_scope": "hotpotqa",
+      "status": "active"
+    },
+    {
+      "tenant_id": "webqsp-graph-v1",
+      "namespace": "webqsp_graph_v1",
+      "display_name": "WebQSP (Nebula graph-native)",
+      "graph_database": "webqsp_kg",
+      "relation_catalog_scope": "webqsp",
+      "status": "active"
+    },
+    {
+      "tenant_id": "kubeblocks-github-v1",
+      "namespace": "kubeblocks_github_v1",
+      "display_name": "KubeBlocks GitHub Activity (pilot)",
+      "graph_database": "kubeblocks_kg",
+      "relation_catalog_scope": "kubeblocks-github-v1",
+      "status": "active"
+    }
+  ]
+}

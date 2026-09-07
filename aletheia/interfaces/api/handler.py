@@ -275,6 +275,19 @@ class AletheiaServerHandler(BaseHTTPRequestHandler):
             limit = int(query.get("limit", ["300"])[0])
             self._send_json(self.instance_repository.graph_community_summaries(tenant, limit=limit))
             return
+        if parsed.path == "/api/graph/leiden-communities":
+            query = parse_qs(parsed.query)
+            limit = int(query.get("limit", ["300"])[0])
+            resolution = float(query.get("resolution", ["1.0"])[0])
+            self._send_json(self.instance_repository.graph_leiden_communities(tenant, limit=limit, resolution=resolution))
+            return
+        if parsed.path == "/api/graph/centrality-ranking":
+            query = parse_qs(parsed.query)
+            limit = int(query.get("limit", ["300"])[0])
+            method = query.get("method", ["betweenness"])[0]
+            top_n = int(query.get("top_n", ["20"])[0])
+            self._send_json(self.instance_repository.graph_centrality_ranking(tenant, limit=limit, method=method, top_n=top_n))
+            return
         if parsed.path == "/api/graph/rag-query-context":
             query = parse_qs(parsed.query)
             depth = int(query.get("depth", ["1"])[0])

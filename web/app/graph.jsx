@@ -10,6 +10,14 @@ function graphTypeColorGX(type) {
   return `hsl(${hue} 62% 58%)`;
 }
 
+// Same idea as graphTypeColorGX but salted differently so community colors
+// don't happen to line up with type colors, and slightly higher saturation
+// so "you're in community mode" is visually distinct at a glance.
+function graphCommunityColorGX(communityId) {
+  const hue = hashSeedGX(`community:${communityId}`) % 360;
+  return `hsl(${hue} 72% 56%)`;
+}
+
 const GRAPH_ROLE_COLORS_GX = {
   selected: "var(--graph-blue)",
   selectedBg: "var(--graph-blue-bg)",
@@ -853,6 +861,14 @@ function GraphExplorer({ data, tenant, language }) {
     [tenantId, { limit }],
     { enabled: true, fallback: null }
   );
+  const [communityColorMode, setCommunityColorMode] = useStateGX(false);
+  const [communityResolution, setCommunityResolution] = useStateGX(1.0);
+  const leidenCommunitiesQ = useApiData(
+    "graphLeidenCommunities",
+    [tenantId, { limit, resolution: communityResolution }],
+    { enabled: communityColorMode, fallback: null }
+  );
+  const communityById = (leidenCommunitiesQ.data && leidenCommunitiesQ.data.communities) || {};
   const activeGraphQ = leftTab === "ontology" ? ontologyGraphQ : graphQ;
   const isStaleG = activeGraphQ.source === "live-stale";
   const isMockG  = activeGraphQ.source === "mock";
@@ -1147,6 +1163,17 @@ function GraphExplorer({ data, tenant, language }) {
   const legendTypeEntries = Object.entries(typeColors).sort((a, b) => (typeNodeCounts[b[0]] || 0) - (typeNodeCounts[a[0]] || 0));
   const legendTypeVisible = legendTypeEntries.slice(0, legendTypeLimit);
   const legendTypeHiddenCount = Math.max(0, legendTypeEntries.length - legendTypeVisible.length);
+  const communityNodeCounts = graphWithPositions.nodes.reduce((acc, n) => {
+    const communityId = communityById[n.id];
+    if (communityId === undefined) return acc;
+    acc[communityId] = (acc[communityId] || 0) + 1;
+    return acc;
+  }, {});
+  const legendCommunityEntries = Object.keys(communityNodeCounts)
+    .map(id => [id, graphCommunityColorGX(id)])
+    .sort((a, b) => communityNodeCounts[b[0]] - communityNodeCounts[a[0]]);
+  const legendCommunityVisible = legendCommunityEntries.slice(0, legendTypeLimit);
+  const legendCommunityHiddenCount = Math.max(0, legendCommunityEntries.length - legendCommunityVisible.length);
   const edgeCounts = graphWithPositions.edges.reduce((acc, e) => {
     const key = e.kind || "edge";
     acc[key] = (acc[key] || 0) + 1;
@@ -1431,6 +1458,36 @@ function GraphExplorer({ data, tenant, language }) {
           </div>
 
           <div style={{ padding: "var(--pad-3) var(--pad-4)", borderBottom: "1px solid var(--line)" }}>
+            <div className="eyebrow" style={{ marginBottom: 8 }}>{tGX(language, "Communities (Leiden)", "社区（Leiden）")}</div>
+            <button
+              className="btn ghost"
+              style={{ width: "100%" }}
+              onClick={() => setCommunityColorMode(v => !v)}>
+              {communityColorMode ? tGX(language, "Hide communities", "隐藏社区") : tGX(language, "Show communities", "显示社区")}
+            </button>
+            {communityColorMode && (
+              <div style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 8 }}>
+                <span style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--muted)" }}>{tGX(language, "Resolution", "分辨率")}</span>
+                <input
+                  type="number"
+                  className="input"
+                  style={{ flex: 1 }}
+                  min={0.1}
+                  max={5}
+                  step={0.1}
+                  value={communityResolution}
+                  onChange={e => setCommunityResolution(Math.max(0.1, +e.target.value || 1.0))}
+                />
+              </div>
+            )}
+            {communityColorMode && leidenCommunitiesQ.data && leidenCommunitiesQ.data.approved === false && (
+              <div style={{ marginTop: 6, fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--muted)" }}>
+                {tGX(language, "No approved graph to detect communities on.", "没有已批准图谱可用于社区识别。")}
+              </div>
+            )}
+          </div>
+
+          <div style={{ padding: "var(--pad-3) var(--pad-4)", borderBottom: "1px solid var(--line)" }}>
             <div className="eyebrow" style={{ marginBottom: 8 }}>{tGX(language, "Edge types", "边类型")}</div>
             <div className="chip-row">
               {Object.keys(edgeCounts).length === 0 && <Chip count={0}>{tGX(language, "none", "无")}</Chip>}
@@ -1533,6 +1590,8 @@ function GraphExplorer({ data, tenant, language }) {
               egoHopDistances={egoHopDistances}
               egoMaxHops={egoMaxHops}
               alwaysShowEdgeLabels={alwaysShowEdgeLabels}
+              communityColorMode={communityColorMode}
+              communityById={communityById}
               language={language}
             />
             )}
@@ -1551,18 +1610,41 @@ function GraphExplorer({ data, tenant, language }) {
             </div>
 
             <div className="graph-overlay-tr">
-              <div style={{ display: "flex", gap: 12, flexWrap: "wrap", justifyContent: "flex-end" }}>
-                {legendTypeVisible.map(([k, c]) => (
-                  <div key={k} style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                    <span style={{ width: 8, height: 8, background: c, borderRadius: "50%", display: "inline-block" }} />
-                    <span>{k}</span>
-                    <span style={{ color: "var(--muted)" }}>{typeNodeCounts[k] || 0}</span>
-                  </div>
-                ))}
-                {legendTypeHiddenCount > 0 && (
-                  <div style={{ color: "var(--muted)" }}>+{legendTypeHiddenCount} {tGX(language, "more types", "更多类型")}</div>
-                )}
-              </div>
+              {communityColorMode ? (
+                <div style={{ display: "flex", gap: 12, flexWrap: "wrap", justifyContent: "flex-end", alignItems: "center" }}>
+                  {leidenCommunitiesQ.loading && !leidenCommunitiesQ.data && (
+                    <div style={{ color: "var(--muted)" }}>{tGX(language, "Detecting communities…", "正在识别社区…")}</div>
+                  )}
+                  {legendCommunityVisible.map(([id, c]) => (
+                    <div key={id} style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                      <span style={{ width: 8, height: 8, background: c, borderRadius: "50%", display: "inline-block" }} />
+                      <span>{tGX(language, "community", "社区")} {id}</span>
+                      <span style={{ color: "var(--muted)" }}>{communityNodeCounts[id] || 0}</span>
+                    </div>
+                  ))}
+                  {legendCommunityHiddenCount > 0 && (
+                    <div style={{ color: "var(--muted)" }}>+{legendCommunityHiddenCount} {tGX(language, "more communities", "更多社区")}</div>
+                  )}
+                  {leidenCommunitiesQ.data && leidenCommunitiesQ.data.approved && (
+                    <div style={{ color: "var(--muted)" }}>
+                      {tGX(language, "modularity", "模块度")} {(leidenCommunitiesQ.data.modularity ?? 0).toFixed(3)}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div style={{ display: "flex", gap: 12, flexWrap: "wrap", justifyContent: "flex-end" }}>
+                  {legendTypeVisible.map(([k, c]) => (
+                    <div key={k} style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                      <span style={{ width: 8, height: 8, background: c, borderRadius: "50%", display: "inline-block" }} />
+                      <span>{k}</span>
+                      <span style={{ color: "var(--muted)" }}>{typeNodeCounts[k] || 0}</span>
+                    </div>
+                  ))}
+                  {legendTypeHiddenCount > 0 && (
+                    <div style={{ color: "var(--muted)" }}>+{legendTypeHiddenCount} {tGX(language, "more types", "更多类型")}</div>
+                  )}
+                </div>
+              )}
               <div style={{ display: "flex", gap: 10, flexWrap: "wrap", justifyContent: "flex-end", marginTop: 7, paddingTop: 7, borderTop: "1px solid var(--line-soft)" }}>
                 {[
                   [GRAPH_ROLE_COLORS_GX.selected, tGX(language, "selected", "选中")],
@@ -2353,6 +2435,8 @@ function BigGraph({
   egoHopDistances = null,
   egoMaxHops = 2,
   alwaysShowEdgeLabels = false,
+  communityColorMode = false,
+  communityById = {},
   language,
 }) {
   const svgRef = useRefGX(null);
@@ -2732,7 +2816,9 @@ function BigGraph({
         const dimmed = egoActive ? egoHop === undefined : (focusActive && !isSel && !isTrail && !isActiveNeighbor && !isTrailNeighbor);
         const egoOpacity = egoActive && egoHop !== undefined ? Math.max(0.35, 1 - (egoHop / (egoMaxHops + 1)) * 0.65) : null;
         const showLabel = isSel || isTrail || isHover || (hideUnrelated && isTrailNeighbor) || (egoActive && egoHop !== undefined);
-        const stroke = n.flag ? GRAPH_ROLE_COLORS_GX.conflict : (isSel ? GRAPH_ROLE_COLORS_GX.selected : isTrail ? GRAPH_ROLE_COLORS_GX.approved : isActiveNeighbor ? GRAPH_ROLE_COLORS_GX.candidate : isTrailNeighbor ? GRAPH_ROLE_COLORS_GX.approved : (n.muted ? "var(--faint)" : typeColors[n.type] || "var(--text-dim)"));
+        const nodeCommunityId = communityColorMode ? communityById[n.id] : undefined;
+        const baseColor = nodeCommunityId !== undefined ? graphCommunityColorGX(nodeCommunityId) : (typeColors[n.type] || "var(--text-dim)");
+        const stroke = n.flag ? GRAPH_ROLE_COLORS_GX.conflict : (isSel ? GRAPH_ROLE_COLORS_GX.selected : isTrail ? GRAPH_ROLE_COLORS_GX.approved : isActiveNeighbor ? GRAPH_ROLE_COLORS_GX.candidate : isTrailNeighbor ? GRAPH_ROLE_COLORS_GX.approved : (n.muted ? "var(--faint)" : baseColor));
         const hasProvenance = !!(n._raw?.source_url || n._raw?.evidence_quote);
         return (
           <g key={i} onPointerDown={(event) => startDrag(event, n)}

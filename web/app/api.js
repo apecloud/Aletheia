@@ -344,6 +344,14 @@
       return data;
     },
 
+    async graphLeidenCommunities(tenant, { limit = 300, resolution = 1.0 } = {}) {
+      const data = await fetchJson(withTenantQs("/api/graph/leiden-communities", tenant, {
+        limit: String(limit),
+        resolution: String(resolution),
+      }));
+      return data;
+    },
+
     async graphNodeDetail(tenant, nodeKey) {
       const data = await fetchJson(withTenantQs(`/api/graph/node/${encodeURIComponent(nodeKey)}`, tenant));
       return data.node || data;

@@ -9,6 +9,8 @@ import threading
 import time
 from datetime import datetime
 from urllib.parse import parse_qs, quote, unquote, urlparse
+import igraph as ig
+import leidenalg as la
 from sqlalchemy import bindparam, create_engine, text
 from sqlalchemy.orm import sessionmaker
 from aletheia.reasoning.engine import ReasoningEngine
@@ -1706,6 +1708,107 @@ class InstanceRepository(_TenantScopedEngineCache):
                 "node_count": len(nodes),
                 "edge_count": len(edges),
                 "covered_node_count": sum(item["node_count"] for item in communities),
+            },
+        }
+
+    def _build_igraph(self, tenant, limit):
+        """Shared preamble for graph_leiden_communities/graph_centrality_
+        ranking: pull the tenant's approved graph sample and build an
+        igraph.Graph from it. Returns (graph_dict, igraph_Graph, node_ids)
+        or (graph_dict, None, None) if the graph isn't approved."""
+        graph = self.full_graph(tenant, limit=limit) or {}
+        if not graph.get("approved"):
+            return graph, None, None
+        nodes = list(graph.get("nodes") or [])
+        edges = list(graph.get("edges") or [])
+        node_ids = [node.get("id") for node in nodes if node.get("id")]
+        node_id_set = set(node_ids)
+        edge_pairs = [
+            (edge.get("source"), edge.get("target"))
+            for edge in edges
+            if edge.get("source") in node_id_set and edge.get("target") in node_id_set
+            and edge.get("source") != edge.get("target")
+        ]
+        g = ig.Graph()
+        g.add_vertices(node_ids)
+        g.add_edges(edge_pairs)
+        return graph, g, node_ids
+
+    def graph_leiden_communities(self, tenant, *, limit=300, resolution=1.0):
+        """Modularity-based community detection over the tenant's approved
+        graph, via the Leiden algorithm (leidenalg, the reference
+        implementation by the algorithm's own authors) -- distinct from
+        ``graph_community_summaries`` above, which is plain connected-
+        component grouping for RAG context chunking, not a real clustering.
+        Fixed seed so the same graph always partitions the same way (same
+        determinism rationale as the frontend's force-directed layout)."""
+        graph, g, node_ids = self._build_igraph(tenant, limit)
+        if g is None:
+            return {
+                "tenant": tenant.public_dict(),
+                "approved": False,
+                "communities": {},
+                "community_count": 0,
+                "modularity": None,
+                "resolution": resolution,
+            }
+        partition = la.find_partition(
+            g, la.RBConfigurationVertexPartition, resolution_parameter=resolution, seed=42,
+        )
+        communities = dict(zip(node_ids, partition.membership))
+
+        return {
+            "tenant": tenant.public_dict(),
+            "approved": True,
+            "communities": communities,
+            "community_count": len(partition),
+            "modularity": partition.modularity,
+            "resolution": resolution,
+            "scope": {
+                "tenant_id": tenant.tenant_id,
+                "node_count": len(graph.get("nodes") or []),
+                "edge_count": len(graph.get("edges") or []),
+            },
+        }
+
+    def graph_centrality_ranking(self, tenant, *, limit=300, method="betweenness", top_n=20):
+        """Rank the tenant's approved-graph nodes by centrality (igraph, the
+        same library graph_leiden_communities already depends on -- no
+        second graph-algorithm library for overlapping purposes). Sibling
+        of graph_leiden_communities: "which nodes cluster together" vs
+        "which nodes are structurally most important/connective"."""
+        methods = ("betweenness", "pagerank", "degree")
+        if method not in methods:
+            raise ValueError(f"method must be one of {methods}, got {method!r}")
+        graph, g, node_ids = self._build_igraph(tenant, limit)
+        if g is None:
+            return {
+                "tenant": tenant.public_dict(),
+                "approved": False,
+                "method": method,
+                "ranking": [],
+            }
+        if method == "betweenness":
+            scores = g.betweenness(directed=False)
+        elif method == "pagerank":
+            scores = g.pagerank(directed=False)
+        else:
+            scores = g.degree()
+        ranking = sorted(
+            ({"id": node_id, "score": score} for node_id, score in zip(node_ids, scores)),
+            key=lambda entry: entry["score"],
+            reverse=True,
+        )[: max(0, int(top_n))]
+
+        return {
+            "tenant": tenant.public_dict(),
+            "approved": True,
+            "method": method,
+            "ranking": ranking,
+            "scope": {
+                "tenant_id": tenant.tenant_id,
+                "node_count": len(graph.get("nodes") or []),
+                "edge_count": len(graph.get("edges") or []),
             },
         }
 
