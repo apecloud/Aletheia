@@ -1196,6 +1196,39 @@ a { color: inherit; text-decoration: none; }
   .gx > .col:last-child { border-bottom: 0; }
 }
 
+/* ====================================================
+   REASONING SCREEN
+   ==================================================== */
+.rx {
+  display: grid;
+  /* Same proportional-column mechanism as .gx (GRAPH SCREEN above): panels
+     scale with viewport width between a readable floor and a sensible cap.
+     Reasoning's task list carries more text (questions, status pills) than
+     the graph's node list, so its floor/cap run a bit wider. */
+  grid-template-columns: minmax(360px, min(24%, 460px)) minmax(0, 1fr) minmax(300px, min(18%, 380px));
+  flex: 1;
+  min-height: 0;
+}
+.rx > .col {
+  display: flex; flex-direction: column;
+  min-width: 0; min-height: 0;
+  border-right: 1px solid var(--line);
+}
+.rx > .col:last-child { border-right: none; }
+
+@media (max-width: 1180px) {
+  .rx {
+    grid-template-columns: 1fr;
+    overflow: auto;
+  }
+  .rx > .col {
+    min-height: 420px;
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+  .rx > .col:last-child { border-bottom: 0; }
+}
+
 .side-tabs {
   display: grid;
   grid-template-columns: 1fr;

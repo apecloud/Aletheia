@@ -10,6 +10,7 @@ from aletheia.reasoning.finding_framework import (
     review_graph_scope_action,
     scoped_graph_finding,
     scope_limit_counter_evidence,
+    wants_zh_output,
 )
 
 
@@ -72,6 +73,60 @@ class ReasoningFindingFrameworkTest(unittest.TestCase):
         self.assertIn("trade flow", conclusion)
         self.assertNotIn("source rows", conclusion)
         self.assertNotIn("Strait of Hormuz, Strait of Hormuz", conclusion)
+
+    def test_plain_reasoning_conclusion_does_not_leak_english_engine_summary_when_zh(self):
+        # No ranked_paths/source_rows -- the common shape for graph-native
+        # tenants (no SQL-derived source_key_profile) -- is exactly the
+        # fallback branch that used to just return the English
+        # ReasoningEngine profile_summary verbatim regardless of language.
+        conclusion_zh = plain_reasoning_conclusion(
+            "For this pull request, how many reviewers were requested?",
+            "kb_pr_10246",
+            "kb_pr_10246 is present in the approved graph with 12 related entities.",
+            [],
+            [],
+            {"center": 12},
+            language="zh",
+        )
+        conclusion_en = plain_reasoning_conclusion(
+            "For this pull request, how many reviewers were requested?",
+            "kb_pr_10246",
+            "kb_pr_10246 is present in the approved graph with 12 related entities.",
+            [],
+            [],
+            {"center": 12},
+            language="en",
+        )
+
+        self.assertNotIn("is present in the approved graph", conclusion_zh)
+        self.assertIn("kb_pr_10246", conclusion_zh)
+        self.assertIn("12", conclusion_zh)
+        self.assertIn("is present in the approved graph", conclusion_en)
+
+    def test_wants_zh_output_prefers_explicit_language_over_question_sniffing(self):
+        self.assertTrue(wants_zh_output("zh", "English question"))
+        self.assertFalse(wants_zh_output("en", "中文问题"))
+        self.assertFalse(wants_zh_output(None, "English question"))
+        self.assertTrue(wants_zh_output(None, "中文问题"))
+        self.assertTrue(wants_zh_output("zh-CN", "English question"))
+
+    def test_plain_reasoning_conclusion_follows_explicit_language_not_question_text(self):
+        english_question = "What are the main relationship paths for Object A?"
+        ranked_paths = [{"label": "Red Sea"}, {"label": "Gulf of Aden"}]
+
+        title_zh = plain_reasoning_title(english_question, "Hormuz Crisis", ranked_paths, language="zh")
+        conclusion_zh = plain_reasoning_conclusion(
+            english_question, "Hormuz Crisis", "detail", ranked_paths, [], {}, language="zh",
+        )
+        title_en = plain_reasoning_title(english_question, "Hormuz Crisis", ranked_paths, language="en")
+        conclusion_en = plain_reasoning_conclusion(
+            english_question, "Hormuz Crisis", "detail", ranked_paths, [], {}, language="en",
+        )
+
+        self.assertIn("主要关联路径", title_zh)
+        self.assertIn("、".join(["Red Sea", "Gulf of Aden"]), conclusion_zh)
+        self.assertIn("main relationship paths", title_en)
+        self.assertIn(", ".join(["Red Sea", "Gulf of Aden"]), conclusion_en)
 
     def test_review_scope_helpers_keep_reasoning_draft_only(self):
         action = review_graph_scope_action({"metrics": {"label": "A"}}, {"answer": {"title": "A"}})

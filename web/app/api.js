@@ -493,6 +493,7 @@
         limit: b.limit,
       };
       if (b.nonce) scope.nonce = b.nonce;
+      if (b.language) scope.language = b.language;
       const wrapped = { question: b.question, scope };
       const data = await fetchJson(withTenantQs("/api/reasoning/questions", tenant), {
         method: "POST",

@@ -105,8 +105,21 @@ def display_label_from_question(question, fallback):
     return match.group(1) if match else fallback
 
 
-def plain_reasoning_title(question, label, ranked_paths, second_hop_paths=None):
-    wants_zh = bool(re.search(r"[\u4e00-\u9fff]", question or ""))
+def wants_zh_output(language, question=None):
+    """Whether reasoning-conclusion text should render in Chinese. Prefers
+    the explicit `language` the task was created with (the UI's own
+    language setting, e.g. task.scope.language) -- so the conclusion always
+    matches the setting the user is looking at -- and only falls back to
+    sniffing the question text for CJK characters when no explicit language
+    was recorded (older tasks created before this existed, or callers that
+    don't pass one, e.g. scripts)."""
+    if language:
+        return str(language).strip().lower().startswith("zh")
+    return bool(re.search(r"[\u4e00-\u9fff]", question or ""))
+
+
+def plain_reasoning_title(question, label, ranked_paths, second_hop_paths=None, language=None):
+    wants_zh = wants_zh_output(language, question)
     label = display_label_from_question(question, label)
     top_labels = _unique_labels(path.get("label") for path in (ranked_paths or []) if path.get("label"))[:3]
     if not top_labels:
@@ -118,8 +131,8 @@ def plain_reasoning_title(question, label, ranked_paths, second_hop_paths=None):
     return f"{label} main relationship paths: {', '.join(top_labels)}"
 
 
-def plain_reasoning_conclusion(question, label, detailed_conclusion, ranked_paths, second_hop_paths, graph_degree):
-    wants_zh = bool(re.search(r"[\u4e00-\u9fff]", question or ""))
+def plain_reasoning_conclusion(question, label, detailed_conclusion, ranked_paths, second_hop_paths, graph_degree, language=None):
+    wants_zh = wants_zh_output(language, question)
     label = display_label_from_question(question, label or "selected entity")
     top_labels = _unique_labels(path.get("label") for path in (ranked_paths or []) if path.get("label"))[:3]
     peer_keys = []
@@ -163,7 +176,18 @@ def plain_reasoning_conclusion(question, label, detailed_conclusion, ranked_path
         if wants_zh:
             return f"{label} 已具备形成业务风险判断的受控证据；应优先评估扰动对运营连续性、贸易敞口和替代路径的影响。"
         return f"{label} has enough controlled evidence for a business risk readout; prioritize review of operational continuity, trade exposure, and alternate-route impact."
-    return detailed_conclusion or (f"{label} 暂无足够的关联证据形成直白结论。" if wants_zh else f"{label} does not yet have enough related evidence for a clear conclusion.")
+    if wants_zh:
+        # detailed_conclusion (ReasoningEngine's profile_summary) is
+        # English-only prose we can't translate here without an LLM call --
+        # for the graph-native path (no SQL-derived ranked_paths/source_rows,
+        # so this is the common case for graph-native tenants), synthesize a
+        # Chinese sentence from the same degree count instead of leaking the
+        # English text through when the setting asks for Chinese.
+        degree_count = (graph_degree or {}).get("center") or (graph_degree or {}).get("visible_graph_center")
+        if degree_count:
+            return f"{label} 存在于已批准图谱中，关联 {degree_count} 个相关实体；当前证据尚不足以形成更细致的路径结论。"
+        return f"{label} 暂无足够的关联证据形成直白结论。"
+    return detailed_conclusion or f"{label} does not yet have enough related evidence for a clear conclusion."
 
 
 def _unique_labels(labels):

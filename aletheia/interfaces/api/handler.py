@@ -610,6 +610,18 @@ class AletheiaServerHandler(BaseHTTPRequestHandler):
                 return
             self._send_json(result)
             return
+        if parsed.path == "/api/reasoning/autopilot/playbooks/creditcardfraud/run":
+            try:
+                body = self._read_json()
+                result = self.reasoning_repository.run_creditcardfraud_playbook(tenant, body)
+            except ValueError as exc:
+                self._send_error(HTTPStatus.BAD_REQUEST, str(exc))
+                return
+            except Exception as exc:  # pragma: no cover - displayed to local operator
+                self._send_error(HTTPStatus.INTERNAL_SERVER_ERROR, str(exc))
+                return
+            self._send_json(result)
+            return
         if parsed.path.startswith("/api/reasoning/autopilot/sessions/") and parsed.path.endswith("/hypotheses"):
             session_key = unquote(parsed.path.removeprefix("/api/reasoning/autopilot/sessions/").removesuffix("/hypotheses").rstrip("/"))
             try:

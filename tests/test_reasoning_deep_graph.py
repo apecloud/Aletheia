@@ -34,6 +34,50 @@ class ApprovedGraphInstanceRepository(EmptyGraphInstanceRepository):
         }
 
 
+class ApprovedGraphWithRealEdgesInstanceRepository(EmptyGraphInstanceRepository):
+    """Node ids use the real bare-id convention (no "Type:" prefix) that
+    full_graph()/local_rag_context() actually return -- unlike
+    ApprovedGraphInstanceRepository above, whose "Object:entity-a" node id
+    happens to work only because it never has any edges to traverse."""
+
+    def full_graph(self, *args, **kwargs):
+        return {
+            "approved": True,
+            "nodes": [
+                {"id": "entity-a", "type": "Object", "label": "Entity A"},
+                {"id": "entity-b", "type": "Object", "label": "Entity B"},
+                {"id": "entity-c", "type": "Object", "label": "Entity C"},
+            ],
+            "edges": [
+                {"source": "entity-a", "target": "entity-b", "label": "touches"},
+                {"source": "entity-a", "target": "entity-c", "label": "touches"},
+            ],
+            "scope": {"projection_source": "SchemaGraphModelingAgent"},
+        }
+
+
+class GrowingWithDepthInstanceRepository(EmptyGraphInstanceRepository):
+    """Unlike the other fixtures in this file (depth-invariant), this one's
+    local_rag_context actually branches on the incoming depth kwarg, so it
+    can exercise the depth-escalation loop's real behavior: `edges_by_depth`
+    maps depth -> how many center-adjacent edges to return at that depth
+    (a star graph centered on "a", so every returned edge touches the
+    center and center_edges/related_edges tracks it exactly)."""
+
+    def __init__(self, edges_by_depth):
+        self._edges_by_depth = edges_by_depth
+
+    def local_rag_context(self, tenant, object_type, instance_id, question=None, depth=1, limit=200):
+        edge_count = self._edges_by_depth.get(depth, self._edges_by_depth[max(self._edges_by_depth)])
+        nodes = [{"id": instance_id, "type": object_type, "label": instance_id}]
+        edges = []
+        for i in range(edge_count):
+            target = f"n{i}"
+            nodes.append({"id": target, "type": object_type, "label": target})
+            edges.append({"source": instance_id, "target": target, "label": "touches"})
+        return {"approved": True, "nodes": nodes, "edges": edges, "scope": {"projection_source": "SchemaGraphModelingAgent"}}
+
+
 class EmptyReasoningEngine:
     def __init__(self, *args, **kwargs):
         pass
@@ -97,7 +141,7 @@ class DeepGraphReasoningTest(unittest.TestCase):
             },
         )
 
-        with patch("aletheia.interfaces.api.repositories.reasoning.ReasoningEngine", side_effect=AssertionError("engine must not run")):
+        with patch("aletheia.interfaces.api.repositories.reasoning.traversal.ReasoningEngine", side_effect=AssertionError("engine must not run")):
             result = repo.run_scoped_graph_task(FakeReasoningTenant(), "task-no-projection")
 
         self.assertFalse(result["approved"])
@@ -120,7 +164,7 @@ class DeepGraphReasoningTest(unittest.TestCase):
             },
         )
 
-        with patch("aletheia.interfaces.api.repositories.reasoning.ReasoningEngine", side_effect=AssertionError("engine must not run")):
+        with patch("aletheia.interfaces.api.repositories.reasoning.traversal.ReasoningEngine", side_effect=AssertionError("engine must not run")):
             events = list(repo.run_scoped_graph_task_streaming(FakeReasoningTenant(), "task-stream-no-projection"))
 
         response_events = [event for event in events if event["event"] == "llm_response_body"]
@@ -142,7 +186,7 @@ class DeepGraphReasoningTest(unittest.TestCase):
             },
         )
 
-        with patch("aletheia.interfaces.api.repositories.reasoning.ReasoningEngine", EmptyReasoningEngine):
+        with patch("aletheia.interfaces.api.repositories.reasoning.traversal.ReasoningEngine", EmptyReasoningEngine):
             result = repo.run_scoped_graph_task(FakeReasoningTenant(), "task-demo")
 
         self.assertTrue(result["approved"])
@@ -161,7 +205,7 @@ class DeepGraphReasoningTest(unittest.TestCase):
             },
         )
 
-        with patch("aletheia.interfaces.api.repositories.reasoning.ReasoningEngine", StructuredReasoningEngine):
+        with patch("aletheia.interfaces.api.repositories.reasoning.traversal.ReasoningEngine", StructuredReasoningEngine):
             result = repo.run_scoped_graph_task(FakeReasoningTenant(), "task-approved")
 
         self.assertTrue(result["approved"])
@@ -170,6 +214,22 @@ class DeepGraphReasoningTest(unittest.TestCase):
         self.assertFalse(captured["run"]["output"]["demo_mode"])
         self.assertIsNone(captured["run"]["output"]["degraded_reason"])
         self.assertIn("structured_response", captured["run"]["output"])
+
+    def test_scoped_graph_prompt_context_computes_real_degree_and_related_edges(self):
+        # Regression test: _scoped_graph_prompt_context's BFS/adjacency used
+        # to compare the "Type:Id"-prefixed center_node against bare vertex
+        # ids (edge.get("source")/edge.get("target") are never prefixed),
+        # so degree.center and related_edges were always 0/empty for every
+        # graph-native tenant regardless of how many real edges existed.
+        repo = object.__new__(ReasoningRepository)
+        repo.instance_repository = ApprovedGraphWithRealEdgesInstanceRepository()
+
+        ctx = repo._scoped_graph_prompt_context(FakeReasoningTenant(), "Object:entity-a", 1, 200, 200, demo_mode=False)
+
+        self.assertTrue(ctx["approved"])
+        self.assertEqual(ctx["degree"]["center"], 2)
+        self.assertEqual(len(ctx["related_edges"]), 2)
+        self.assertEqual({node["id"] for node in ctx["related_nodes"]}, {"entity-a", "entity-b", "entity-c"})
 
     def test_instance_repository_exposes_schema_reasoning_entity_adapters(self):
         self.assertTrue(callable(getattr(InstanceRepository, "_fetch_entity", None)))
@@ -264,6 +324,33 @@ class DeepGraphReasoningTest(unittest.TestCase):
         self.assertEqual([p["label"] for p in response["ranked_paths"][:2]], ["Path Alpha", "Path Beta"])
         self.assertIn("Path Alpha", response["answer"]["conclusion"])
         self.assertNotIn("source_path(s)", response["answer"]["conclusion"])
+
+    def test_reasoning_response_follows_scope_language_not_question_text(self):
+        repo = object.__new__(ReasoningRepository)
+        tenant = type("Tenant", (), {"tenant_id": "demo"})()
+        task = {"question": "What are the main relationship paths for Entity A?", "canonical_key": "task"}
+        scope = {"center_node": "Object:entity-a", "depth": 1, "node_limit": 200, "language": "zh"}
+        structured_answer = {
+            "title": "Entity A Business Profile",
+            "profile_summary": "Entity A Business Profile",
+            "metrics": {"label": "Entity A"},
+        }
+        graph_context = {
+            "degree": {"source_key_row_degree": 49},
+            "source_backed_related_nodes": [
+                {"id": "SourcePath:Path Alpha", "label": "Path Alpha"},
+                {"id": "SourcePath:Path Beta", "label": "Path Beta"},
+            ],
+            "source_backed_related_edges": [
+                {"target": "SourcePath:Path Alpha", "metric": "value", "metric_value": 1317, "row_count": 1, "source_table": "source"},
+                {"target": "SourcePath:Path Beta", "metric": "value", "metric_value": 936, "row_count": 1, "source_table": "source"},
+            ],
+        }
+
+        response = repo._reasoning_response_v1(tenant, task, scope, structured_answer, [], graph_context)
+
+        self.assertIn("主要关联路径", response["answer"]["title"])
+        self.assertIn("、".join(["Path Alpha", "Path Beta"]), response["answer"]["conclusion"])
 
     def test_reasoning_response_for_chokepoint_explains_business_meaning(self):
         repo = object.__new__(ReasoningRepository)
@@ -362,6 +449,96 @@ class DeepGraphReasoningTest(unittest.TestCase):
         self.assertTrue(response["conclusion_evaluation"]["checks"]["uses_edge_target_units"])
         self.assertTrue(response["conclusion_evaluation"]["checks"]["uses_attached_edge_or_source_metrics"])
         self.assertTrue(response["conclusion_evaluation"]["checks"]["uses_attached_findings_or_semantic_context"])
+
+
+class DepthEscalationTest(unittest.TestCase):
+    def _repo_with_task(self, instance_repository, scope):
+        repo = object.__new__(ReasoningRepository)
+        repo.instance_repository = instance_repository
+        repo._get_task_row = lambda tenant, task_key: {
+            "id": 1,
+            "canonical_key": task_key,
+            "question": "What does the scoped graph show?",
+            "status": "active",
+            "scope": scope,
+        }
+        repo.update_task_status = lambda *args, **kwargs: None
+        captured = {}
+
+        def record_run(tenant, task, query_plan, tool_calls, evidence_paths, output, eval_result, status, started):
+            captured["run"] = {"status": status, "output": output}
+            return captured["run"]
+
+        def record_finding(tenant, run, finding):
+            captured["finding"] = dict(finding, id=20)
+            return captured["finding"]
+
+        repo._record_run = record_run
+        repo._record_finding = record_finding
+        return repo, captured
+
+    def test_escalates_then_stops_once_sufficient(self):
+        # depth 1 -> 1 related edge (below the sufficiency bar of 3),
+        # depth 2 -> 4 related edges (above it) -- should escalate once
+        # then stop at depth 2, never reaching the depth-3 ceiling.
+        repo, captured = self._repo_with_task(
+            GrowingWithDepthInstanceRepository({1: 1, 2: 4, 3: 4}),
+            {
+                "center_node": "Object:a",
+                "depth": 3,
+                "evidence_paths": [{"kind": "graph_node", "node": "a"}],
+            },
+        )
+
+        with patch("aletheia.interfaces.api.repositories.reasoning.traversal.ReasoningEngine", EmptyReasoningEngine):
+            events = list(repo.run_scoped_graph_task_streaming(FakeReasoningTenant(), "task-escalate"))
+
+        attempts = [e["data"] for e in events if e["event"] == "depth_attempt"]
+        self.assertEqual([a["depth"] for a in attempts], [1, 2])
+        self.assertEqual([a["decision"] for a in attempts], ["escalating", "sufficient"])
+        self.assertEqual(attempts[0]["related_edge_count"], 1)
+        self.assertEqual(attempts[1]["related_edge_count"], 4)
+        self.assertEqual(captured["run"]["output"]["depth_exploration"]["final_depth"], 2)
+
+    def test_escalates_to_ceiling_when_still_insufficient(self):
+        # Strictly growing but always below the sufficiency bar of 3 --
+        # should escalate all the way to the depth-3 ceiling and stop there
+        # (not loop past the existing clamp).
+        repo, captured = self._repo_with_task(
+            GrowingWithDepthInstanceRepository({1: 0, 2: 1, 3: 2}),
+            {
+                "center_node": "Object:a",
+                "depth": 3,
+                "evidence_paths": [{"kind": "graph_node", "node": "a"}],
+            },
+        )
+
+        with patch("aletheia.interfaces.api.repositories.reasoning.traversal.ReasoningEngine", EmptyReasoningEngine):
+            events = list(repo.run_scoped_graph_task_streaming(FakeReasoningTenant(), "task-ceiling"))
+
+        attempts = [e["data"] for e in events if e["event"] == "depth_attempt"]
+        self.assertEqual([a["depth"] for a in attempts], [1, 2, 3])
+        self.assertEqual([a["decision"] for a in attempts], ["escalating", "escalating", "ceiling_reached"])
+        self.assertEqual(captured["run"]["output"]["depth_exploration"]["final_depth"], 3)
+
+    def test_stops_immediately_when_already_sufficient_at_depth_one(self):
+        repo, captured = self._repo_with_task(
+            GrowingWithDepthInstanceRepository({1: 5, 2: 5, 3: 5}),
+            {
+                "center_node": "Object:a",
+                "depth": 3,
+                "evidence_paths": [{"kind": "graph_node", "node": "a"}],
+            },
+        )
+
+        with patch("aletheia.interfaces.api.repositories.reasoning.traversal.ReasoningEngine", EmptyReasoningEngine):
+            events = list(repo.run_scoped_graph_task_streaming(FakeReasoningTenant(), "task-sufficient-immediately"))
+
+        attempts = [e["data"] for e in events if e["event"] == "depth_attempt"]
+        self.assertEqual(len(attempts), 1)
+        self.assertEqual(attempts[0]["depth"], 1)
+        self.assertEqual(attempts[0]["decision"], "sufficient")
+        self.assertEqual(captured["run"]["output"]["depth_exploration"]["final_depth"], 1)
 
 
 if __name__ == "__main__":

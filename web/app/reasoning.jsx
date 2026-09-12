@@ -242,7 +242,14 @@ function questionTextRX(value, language) {
     [/^What action should be created from (.+)'s risk signals\?$/, "应基于 $1 的风险信号创建什么行动？"],
     [/^Which (.+) should Autopilot investigate next\?$/, "Autopilot 接下来应调查哪些 $1？"],
     [/^Give a summary of (.+)$/, "总结 $1"],
+    [/^Give a complete summary of (.+)$/, "给出 $1 的完整总结"],
     [/^Which (.+)s have the highest activity\?$/, "哪些 $1 活跃度最高？"],
+    [/^(.+), compared to other (.+)$/, "$1，与其他 $2 相比"],
+    [/^What evidence supports "(.+)" for (.+)\?$/, "哪些证据支持“$1”（$2）？"],
+    [/^What are the key relationships for (.+)\?$/, "$1 的关键关联关系是什么？"],
+    [/^How does (.+) compare to other (.+)\?$/, "$1 与其他 $2 相比如何？"],
+    [/^Are there any anomalies or risks related to (.+)\?$/, "$1 是否存在异常或风险？"],
+    [/^Are there anomalies among (.+)\?$/, "$1 之间是否存在异常？"],
     [/^(.+) — (.+)$/, "$1 — $2"],
   ];
   for (const [pattern, replacement] of replacements) {
@@ -269,6 +276,7 @@ function evidenceKindLabelRX(kind, language) {
     hypothesis: "假设",
     conflict: "冲突",
     missing: "缺失",
+    datalog_derived: "推导（传递关系）",
   };
   if (!isZhRX(language)) return kind || "evidence";
   return labels[kind] || kind || "证据";
@@ -807,7 +815,7 @@ function Reasoning({ tenant, language }) {
   const approvedFindingsQ = useApiData(
     "reasoningFindings",
     [tenant ? tenant.id : "default", { ...registryFilters, limit: 24 }],
-    { fallback: { findings: [] } }
+    { fallback: { findings: [] }, enabled: activeTab !== "autopilot" }
   );
   const isStale = tasksQ.source === "live-stale";
   const isMock  = tasksQ.source === "mock";
@@ -950,7 +958,16 @@ function Reasoning({ tenant, language }) {
     } catch {}
   }, [tenant ? tenant.id : "default"]);
   useEffectRX(() => {
-    if (!tasks.length) { setSelectedKey(null); return; }
+    if (!tasks.length) {
+      // Don't clobber a URL-provided task selection while the real task
+      // list is still loading (tasks starts empty on every mount, before
+      // tasksQ's first real response) -- otherwise this wipes selectedKey
+      // to null before the pending key ever gets a chance to be checked
+      // against the real list, and the later pendingKeyRef guard below
+      // can't save it since selectedKey no longer equals pendingKeyRef.
+      if (!pendingKeyRef.current) setSelectedKey(null);
+      return;
+    }
     if (tasks.some(t => t.canonical_key === selectedKey)) {
       pendingKeyRef.current = null;
       return;
@@ -979,6 +996,7 @@ function Reasoning({ tenant, language }) {
     return fromList || null;
   }, [detailMatchesSelection, detailQ.data, fromList, selectedKey]);
   const finding = task && task.finding;
+  const responseV1 = reasoningResponseV1RX(finding);
   const evidence = (task && task.evidence_paths) || [];
   const isLoadingDetail = !!selectedKey && detailQ.loading && !detailMatchesSelection;
 
@@ -1095,6 +1113,7 @@ function Reasoning({ tenant, language }) {
           center_node: task.center_node,
           depth: task.depth || 1,
           limit: task.limit || 200,
+          language,
         };
 
         setAskMode(false);
@@ -1252,7 +1271,7 @@ function Reasoning({ tenant, language }) {
     setActionMsg(null);
     try {
       const res = await window.AL_API.submitQuestion(tenant.id, {
-        question: q, center_node: centerNode, depth, limit,
+        question: q, center_node: centerNode, depth, limit, language,
       });
       setActionMsg({ kind: "ok", msg: "Scoped question created · " + (res.canonical_key || res.id || "") });
       window.dispatchEvent(new CustomEvent("aletheia:retry"));
@@ -1336,8 +1355,17 @@ function Reasoning({ tenant, language }) {
 
   async function reviewAutopilotCandidate(candidate, status) {
     if (!candidate || !autopilotDetail?.session) return;
+    // autopilotReviewReason is a single shared textarea value across every
+    // candidate card -- if the currently-typed text belongs to a different
+    // candidate than the one being reviewed right now, it must NOT be
+    // submitted as this candidate's reason (a real cross-candidate leak,
+    // not just a stale-UI nuisance: it would attach the wrong note to the
+    // wrong candidate's review record).
+    const isSameTarget = autopilotReviewTargetKey === candidate.canonical_key;
+    const reason = isSameTarget ? autopilotReviewReason.trim() : "";
     setAutopilotReviewTargetKey(candidate.canonical_key);
-    if ((status === "rejected" || status === "needs_more_evidence") && !autopilotReviewReason.trim()) {
+    if (!isSameTarget) setAutopilotReviewReason("");
+    if ((status === "rejected" || status === "needs_more_evidence") && !reason) {
       setAutopilotReviewMissingKey(candidate.canonical_key);
       setActionMsg({ kind: "err", msg: "Add a candidate review note before rejecting or requesting more evidence." });
       return;
@@ -1348,7 +1376,7 @@ function Reasoning({ tenant, language }) {
       const res = await window.AL_API.reviewAutopilotCandidate(
         candidate.canonical_key,
         action,
-        { reason: autopilotReviewReason.trim(), reviewer: "M. Aoki" },
+        { reason, reviewer: "M. Aoki" },
         tenant ? tenant.id : "default",
       );
       setAutopilotReviewReason("");
@@ -1457,7 +1485,7 @@ function Reasoning({ tenant, language }) {
         </button>
       </div>
 
-      <div className="wb">
+      <div className="rx">
         {/* ============ LEFT — task list ============ */}
         <div className="col">
           <div style={{ padding: "var(--pad-3) var(--pad-4)", borderBottom: "1px solid var(--line)", background: "var(--bg-2)" }}>
@@ -1465,10 +1493,6 @@ function Reasoning({ tenant, language }) {
             <div style={{ marginTop: 4, fontSize: 13, color: "var(--text)" }}>
               {activeTab === "autopilot" ? tRX(language, "Autopilot sessions", "Autopilot 会话") : tRX(language, "Reasoning tasks", "推理任务")}
             </div>
-            <button className="btn primary" style={{ width: "100%", marginTop: 10 }}
-                    onClick={() => activeTab === "autopilot" ? startAutopilot() : setAskMode(true)}>
-              {activeTab === "autopilot" ? "▶ " + tRX(language, "Start Autopilot", "启动 Autopilot") : "+ " + tRX(language, "Ask a new question", "新建问题")}
-            </button>
           </div>
           <div style={{ flex: 1, overflow: "auto" }}>
             {activeTab === "autopilot" ? <ApiStatus q={autopilotSessionsQ} what={tRX(language, "autopilot sessions", "Autopilot 会话")} /> : <ApiStatus q={tasksQ} what={tRX(language, "reasoning tasks", "推理任务")} />}
@@ -1769,10 +1793,7 @@ function Reasoning({ tenant, language }) {
                     </div>
                   ) : finding ? (
                     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-                      {(() => {
-                        const responseV1 = reasoningResponseV1RX(finding);
-                        return responseV1 ? <ReasoningResponseV1View response={responseV1} finding={finding} language={language} /> : null;
-                      })()}
+                      {responseV1 ? <ReasoningResponseV1View response={responseV1} finding={finding} language={language} /> : null}
                       {backendRunning && (
                         <div style={{
                           display: "flex", alignItems: "center", gap: 10, padding: "10px 14px",
@@ -1789,7 +1810,7 @@ function Reasoning({ tenant, language }) {
                           </span>
                         </div>
                       )}
-                      {!reasoningResponseV1RX(finding) && (
+                      {!responseV1 && (
                         <>
                           <div style={{ fontSize: 15, color: "var(--text)", lineHeight: 1.55 }}>
                             {displayFindingConclusionRX(finding, language)}
@@ -1809,14 +1830,16 @@ function Reasoning({ tenant, language }) {
                           <div style={{ fontSize: 13, color: "var(--text-dim)" }}>{Array.isArray(finding.counter_evidence) ? resultListRX(finding.counter_evidence.map(e => e.summary || e), language).join(" · ") : resultTextRX(finding.counter_evidence, language)}</div>
                         </div>
                       )}
-                      <div style={{ paddingTop: 12, borderTop: "1px solid var(--line)", display: "flex", gap: 8, alignItems: "center" }}>
-                        <div className="eyebrow" style={{ color: "var(--changes)" }}>{tRX(language, "Canonical boundary", "正式边界")}</div>
-                        <div style={{ fontSize: 11, color: "var(--muted)" }}>
-                          {tRX(language,
-                            "Approving this finding cites it in the approved-finding layer; it does NOT modify canonical ontology or graph.",
-                            "批准该发现只会把它引用到已审核发现层；不会修改正式本体或图谱。")}
+                      {!responseV1 && (
+                        <div style={{ paddingTop: 12, borderTop: "1px solid var(--line)", display: "flex", gap: 8, alignItems: "center" }}>
+                          <div className="eyebrow" style={{ color: "var(--changes)" }}>{tRX(language, "Canonical boundary", "正式边界")}</div>
+                          <div style={{ fontSize: 11, color: "var(--muted)" }}>
+                            {tRX(language,
+                              "Approving this finding cites it in the approved-finding layer; it does NOT modify canonical ontology or graph.",
+                              "批准该发现只会把它引用到已审核发现层；不会修改正式本体或图谱。")}
+                          </div>
                         </div>
-                      </div>
+                      )}
                       {shouldRerun && (
                         <div style={{ paddingTop: 12, borderTop: "1px solid var(--line)", display: "flex", gap: 8, alignItems: "center" }}>
                           <button className="btn primary" onClick={runTask} disabled={running}
@@ -1828,7 +1851,14 @@ function Reasoning({ tenant, language }) {
                       )}
                       {liveTrace.length > 0 && (
                         <div style={{ paddingTop: 12, borderTop: "1px solid var(--line)" }}>
-                          <TraceLog events={liveTrace} />
+                          <details>
+                            <summary style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--muted)", cursor: "pointer" }}>
+                              {tRX(language, "Show request/response trace", "显示请求/响应跟踪")}
+                            </summary>
+                            <div style={{ marginTop: 12 }}>
+                              <TraceLog events={liveTrace} />
+                            </div>
+                          </details>
                         </div>
                       )}
                     </div>
@@ -1863,7 +1893,14 @@ function Reasoning({ tenant, language }) {
                       </div>
                       {liveTrace.length > 0 && (
                         <div style={{ paddingTop: 12, borderTop: "1px solid var(--line)" }}>
-                          <TraceLog events={liveTrace} />
+                          <details>
+                            <summary style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--muted)", cursor: "pointer" }}>
+                              {tRX(language, "Show request/response trace", "显示请求/响应跟踪")}
+                            </summary>
+                            <div style={{ marginTop: 12 }}>
+                              <TraceLog events={liveTrace} />
+                            </div>
+                          </details>
                         </div>
                       )}
                     </div>
@@ -1975,6 +2012,14 @@ function Reasoning({ tenant, language }) {
             />
           ) : (
           <React.Fragment>
+          {askMode ? (
+            <div className="section">
+              <div className="section-body" style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--muted)", lineHeight: 1.55 }}>
+                {tRX(language, "Composing a new question in the center panel.", "正在中间面板中撰写新问题。")}
+              </div>
+            </div>
+          ) : (
+          <React.Fragment>
           <div className="section">
             <div className="section-head"><span>{tRX(language, "Ask with scope", "按范围提问")}</span></div>
             <div className="section-body">
@@ -1987,13 +2032,16 @@ function Reasoning({ tenant, language }) {
                 <EntityPicker tenant={tenant} centerNode={centerNode} setCenterNode={setCenterNode} question={question} setQuestion={setQuestion} compact language={language} />
                 <div style={{ display: "flex", gap: 6 }}>
                   <div style={{ flex: 1 }}>
-                    <div className="eyebrow" style={{ marginBottom: 4 }}>{tRX(language, "Depth", "深度")}</div>
+                    <div className="eyebrow" style={{ marginBottom: 4 }}>{tRX(language, "Depth (max)", "深度（上限）")}</div>
                     <input className="input" type="number" min={1} max={3} value={depth} onChange={e => setDepth(+e.target.value)} />
                   </div>
                   <div style={{ flex: 1 }}>
                     <div className="eyebrow" style={{ marginBottom: 4 }}>{tRX(language, "Limit", "上限")}</div>
                     <input className="input" type="number" value={limit} onChange={e => setLimit(+e.target.value)} />
                   </div>
+                </div>
+                <div style={{ fontSize: 10, color: "var(--muted)", marginTop: -4 }}>
+                  {tRX(language, "Reasoning starts at depth 1 and escalates automatically if evidence is thin.", "推理从深度 1 开始，证据不足时会自动扩大范围。")}
                 </div>
                 <button className="btn primary" type="submit" disabled={submitting}>{submitting ? tRX(language, "Creating…", "创建中…") : "↗ " + tRX(language, "Create scoped question", "创建范围问题")}</button>
               </form>
@@ -2014,6 +2062,8 @@ function Reasoning({ tenant, language }) {
               }} disabled={!followup.trim() || !task}>{tRX(language, "Create follow-up", "创建追问")}</button>
             </div>
           </div>
+          </React.Fragment>
+          )}
 
           <OntologyBasisPanel task={task} tenant={tenant} language={language} />
 
@@ -2037,14 +2087,6 @@ function Reasoning({ tenant, language }) {
             </div>
           </div>
 
-          <div className="section">
-            <div className="section-head"><span>{tRX(language, "Quick actions", "快捷操作")}</span></div>
-            <div className="section-body" style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-              <button className="btn ghost" style={{ justifyContent: "flex-start" }}>↗ {tRX(language, "Open graph context", "打开图谱上下文")}</button>
-              <button className="btn ghost" style={{ justifyContent: "flex-start" }}>≡ {tRX(language, "Compare with prior run", "与上次运行对比")}</button>
-              <button className="btn ghost" style={{ justifyContent: "flex-start" }}>⤓ {tRX(language, "Export evidence pack", "导出证据包")}</button>
-            </div>
-          </div>
           </React.Fragment>
           )}
         </div>
@@ -2793,8 +2835,8 @@ function ApprovedFindingRegistry({ findings, query, tenant, filters, setFilters,
     }
   }
   return (
-    <div className="section">
-      <div className="section-head"><span>{tRX(language, "Approved Finding Registry", "已批准发现库")}</span><span className="ct">{list.length}</span></div>
+    <details className="section" open={!!highlightedFindingKey}>
+      <summary className="section-head" style={{ cursor: "pointer" }}><span>{tRX(language, "Approved Finding Registry", "已批准发现库")}</span><span className="ct">{list.length}</span></summary>
       <div className="section-body" style={{ display: "flex", flexDirection: "column", gap: 8 }}>
         <ApiStatus q={query} what={tRX(language, "approved findings", "已批准发现")} />
         <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 6 }}>
@@ -2917,7 +2959,7 @@ function ApprovedFindingRegistry({ findings, query, tenant, filters, setFilters,
             "关闭/重开行动只记录发现的使用事件；不会改变发现状态，也不会写入正式本体或图谱。")}
         </div>
       </div>
-    </div>
+    </details>
   );
 }
 
@@ -2948,6 +2990,8 @@ function TraceLog({ events }) {
     step:         "var(--accent)",
     evidence:     "var(--approved)",
     finding:      "var(--changes)",
+    datalog_facts: "var(--proposed)",
+    depth_attempt: "var(--accent)",
     run_complete: "var(--approved)",
     stream_error: "var(--rejected)",
     error:        "var(--rejected)",
@@ -2962,6 +3006,8 @@ function TraceLog({ events }) {
     step:         "STEP",
     evidence:     "EVIDENCE",
     finding:      "FINDING",
+    datalog_facts: "DATALOG",
+    depth_attempt: "DEPTH",
     run_complete: "DONE",
     stream_error: "STREAM ERR",
     error:        "ERROR",
@@ -3149,6 +3195,35 @@ function TraceEventBody({ name, data, stage }) {
         </span>
       );
     }
+    case "depth_attempt": {
+      const decisionText = {
+        escalating: "not enough evidence yet — escalating deeper",
+        sufficient: "sufficient evidence found — stopping",
+        no_additional_evidence: "no additional evidence at this depth — stopping",
+        ceiling_reached: "reached max depth — stopping",
+        blocked: "graph scope not approved — stopping",
+      }[data.decision] || data.decision;
+      return (
+        <span>
+          <strong style={{ color: "var(--text)", fontWeight: 500 }}>
+            Depth {data.depth}/{data.depth_ceiling}: {data.related_edge_count} related edge(s)
+          </strong>
+          <span style={{ color: "var(--muted)" }}> · {decisionText}</span>
+        </span>
+      );
+    }
+    case "datalog_facts": {
+      const nodes = data.derived_reachable_nodes || [];
+      return (
+        <span>
+          <strong style={{ color: "var(--text)", fontWeight: 500 }}>
+            Datalog: {data.derived_reachable_count || nodes.length} node(s) transitively reachable from {data.center_node}
+          </strong>
+          {nodes.length > 0 && <div style={{ color: "var(--muted)", marginTop: 2, fontFamily: "var(--font-mono)", fontSize: 11 }}>{nodes.slice(0, 12).join(", ")}{nodes.length > 12 ? "…" : ""}</div>}
+          {data.rule && <div style={{ color: "var(--dim)", marginTop: 2, fontFamily: "var(--font-mono)", fontSize: 10 }}>{data.rule}</div>}
+        </span>
+      );
+    }
     case "run_complete":
       return <strong style={{ color: "var(--approved)", fontWeight: 500 }}>Run complete · {data.findings_count || (data.findings && data.findings.length) || 0} finding(s)</strong>;
     case "stream_error":
@@ -3243,14 +3318,10 @@ function AskHero({ tenant, question, setQuestion, centerNode, setCenterNode, dep
     const q = e.target.value;
     setQuestion(q);
     const node = extractNode(q);
-    if (node) {
-      setCenterNode(node);
-      const [t] = node.split(":");
-      if (t && t !== pickedType) setPickedType(t);
-    }
+    if (node) setCenterNode(node);
   }
 
-  // --- entity type list ---
+  // --- entity type list (kept local: only needed for extractNode's regex) ---
   const [entityTypes, setEntityTypes] = React.useState([]);
   React.useEffect(() => {
     (async () => {
@@ -3261,135 +3332,17 @@ function AskHero({ tenant, question, setQuestion, centerNode, setCenterNode, dep
     })();
   }, [tenantId]);
 
-  // --- picked type (derived from centerNode or first available) ---
-  const currentType = centerNode && centerNode.includes(":") ? centerNode.split(":")[0] : "";
-  const [pickedType, setPickedType] = React.useState(currentType || "");
-  React.useEffect(() => {
-    if (!pickedType && entityTypes.length > 0) setPickedType(entityTypes[0]);
-  }, [entityTypes]);
-
-  // --- entity search ---
-  const [entityQuery, setEntityQuery] = React.useState("");
-  const [entities, setEntities] = React.useState([]);
-  const [entitiesLoading, setEntitiesLoading] = React.useState(false);
-  const [showDropdown, setShowDropdown] = React.useState(false);
-  const debounceRef = React.useRef(null);
-  const dropdownRef = React.useRef(null);
-
-  function fetchEntities(type, q) {
-    if (!type) return;
-    setEntitiesLoading(true);
-    const qs = new URLSearchParams({ tenant: tenantId, type, q: q || "", limit: "10" });
-    window.AL_API.fetchJson("/api/instances/search?" + qs.toString())
-      .then(data => { setEntities(data.instances || []); setEntitiesLoading(false); })
-      .catch(() => { setEntities([]); setEntitiesLoading(false); });
-  }
-
-  React.useEffect(() => {
-    if (pickedType) fetchEntities(pickedType, "");
-  }, [pickedType, tenantId]);
-
-  function onEntityQueryChange(e) {
-    const q = e.target.value;
-    setEntityQuery(q);
-    setShowDropdown(true);
-    clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(() => fetchEntities(pickedType, q), 250);
-  }
-
-  const prevLabelRef = React.useRef("");
-  const questionRef = React.useRef(question || "");
-  React.useEffect(() => { questionRef.current = question || ""; }, [question]);
-  React.useEffect(() => {
-    if (!entityTypes.length) {
-      if (pickedType) setPickedType("");
-      if (centerNode) {
-        setCenterNode("");
-        setEntityQuery("");
-      }
-      return;
-    }
-    const currentType = centerNode && centerNode.includes(":") ? centerNode.split(":")[0] : "";
-    const selectedType = pickedType || currentType;
-    const isValidType = selectedType && entityTypes.some(t => canonicalTypeFromListRX(selectedType, [t]) === t);
-    if (!isValidType) {
-      const nextType = entityTypes[0];
-      setPickedType(nextType);
-      if (centerNode) setCenterNode("");
-      setEntityQuery("");
-      setEntities([]);
-    } else if (currentType && currentType !== pickedType) {
-      setPickedType(currentType);
-      setEntityQuery("");
-      setEntities([]);
-    }
-  }, [entityTypes, pickedType, centerNode, setCenterNode, tenantId]);
-  React.useEffect(() => {
-    if (!prevLabelRef.current && centerNode && entities.length) {
-      const match = entities.find(e => e.id === centerNode);
-      if (match) prevLabelRef.current = match.label || match.id;
-    }
-  }, [centerNode, entities]);
-
-  function selectEntity(ent) {
-    const oldCenterNode = centerNode || "";
-    setCenterNode(ent.id);
-    const newLabel = ent.label || ent.id;
-    setEntityQuery(newLabel);
-    setShowDropdown(false);
-    let prev = prevLabelRef.current;
-    const q = questionRef.current.trim();
-    if (!q || q === tenantEmptyQuestionRX(tenantId)) {
-      setQuestion(questionTextRX(defaultQuestionForTenantRX(tenantId, pickedType, newLabel, ent.id), language));
-    } else if (prev && prev.length > 1 && q.includes(prev)) {
-      setQuestion(q.split(prev).join(newLabel));
-    } else {
-      // try matching entity labels from the list
-      let found = false;
-      for (const e of entities) {
-        if (e.id !== ent.id && e.label && e.label.length > 1 && q.includes(e.label)) {
-          setQuestion(q.split(e.label).join(newLabel));
-          found = true; break;
-        }
-      }
-      // try matching the old center node ID pattern (e.g. "#4" or "Employee:4")
-      if (!found && oldCenterNode) {
-        const oldId = oldCenterNode.includes(":") ? oldCenterNode.split(":")[1] : oldCenterNode;
-        const patterns = [oldCenterNode, `#${oldId}`, ` ${oldId} `];
-        for (const pat of patterns) {
-          if (q.includes(pat)) {
-            setQuestion(q.split(pat).join(newLabel));
-            found = true; break;
-          }
-        }
-      }
-    }
-    prevLabelRef.current = newLabel;
-  }
-
-  function onTypeChange(e) {
-    const t = e.target.value;
-    setPickedType(t);
-    setEntityQuery("");
-    setCenterNode("");
-  }
-
-  // close dropdown on outside click
-  React.useEffect(() => {
-    function handler(e) {
-      if (dropdownRef.current && !dropdownRef.current.contains(e.target)) setShowDropdown(false);
-    }
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, []);
+  // --- mirrors of EntityPicker's internal state, for the suggestions grid below ---
+  const [mirrorPickedType, setMirrorPickedType] = React.useState("");
+  const [mirrorEntities, setMirrorEntities] = React.useState([]);
 
   const suggestions = React.useMemo(() => {
-    const type = pickedType || "";
+    const type = mirrorPickedType || "";
     const hasEntity = centerNode && centerNode.includes(":");
-    const selectedEnt = hasEntity && entities.find(e => e.id === centerNode);
+    const selectedEnt = hasEntity && mirrorEntities.find(e => e.id === centerNode);
     const label = selectedEnt ? selectedEnt.label : (hasEntity ? centerNode : "");
-    return suggestedQuestionsForTenantRX({ tenantId, type, centerNode, label, question, entities });
-  }, [tenantId, pickedType, centerNode, entities, question]);
+    return suggestedQuestionsForTenantRX({ tenantId, type, centerNode, label, question, entities: mirrorEntities });
+  }, [tenantId, mirrorPickedType, centerNode, mirrorEntities, question]);
   return (
     <div style={{ flex: 1, overflow: "auto", padding: "var(--pad-5) var(--pad-6)", position: "relative" }}>
       {/* close button — top right of the canvas */}
@@ -3463,57 +3416,18 @@ function AskHero({ tenant, question, setQuestion, centerNode, setCenterNode, dep
             </div>
             <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr", borderTop: "1px solid var(--line)" }}>
               <div style={{ padding: "var(--pad-3) var(--pad-4)", borderRight: "1px solid var(--line)" }}>
-                <div className="eyebrow" style={{ marginBottom: 4 }}>{tRX(language, "Center node", "中心节点")}</div>
-                <div style={{ display: "flex", gap: 6 }} ref={dropdownRef}>
-                  <select className="input" value={pickedType} onChange={onTypeChange}
-                          style={{ width: 110, flexShrink: 0, cursor: "pointer" }}>
-                    {entityTypes.map(t => <option key={t} value={t}>{t}</option>)}
-                  </select>
-                  <div style={{ flex: 1, position: "relative" }}>
-                    <input className="input" style={{ width: "100%" }}
-                           value={entityQuery}
-                           onChange={onEntityQueryChange}
-                           onFocus={() => setShowDropdown(true)}
-                           placeholder={entitiesLoading ? tRX(language, "Loading…", "加载中…") : entityTypes.length ? (entities.length ? entities[0].label || entities[0].id : tRX(language, "Search…", "搜索…")) : tRX(language, "No tenant objects", "无租户对象")} />
-                    {showDropdown && entities.length > 0 && (
-                      <div style={{
-                        position: "absolute", top: "100%", left: 0, right: 0, zIndex: 20,
-                        maxHeight: 240, overflowY: "auto",
-                        background: "var(--bg-2)", border: "1px solid var(--line-strong)",
-                        boxShadow: "0 8px 24px rgba(0,0,0,0.35)",
-                      }}>
-                        {entities.map(ent => {
-                          const selected = centerNode === ent.id;
-                          return (
-                            <div key={ent.id}
-                                 onClick={() => selectEntity(ent)}
-                                 style={{
-                                   padding: "7px 10px", cursor: "pointer",
-                                   display: "flex", alignItems: "center", gap: 8,
-                                   background: selected ? "var(--bg-3)" : "transparent",
-                                   borderBottom: "1px solid var(--line)",
-                                 }}
-                                 onMouseEnter={e => e.currentTarget.style.background = "var(--bg-3)"}
-                                 onMouseLeave={e => { if (!selected) e.currentTarget.style.background = "transparent"; }}>
-                              <span style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--muted)", minWidth: 80 }}>{ent.id}</span>
-                              <span style={{ fontSize: 12, color: "var(--text)" }}>{ent.label}</span>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </div>
-                </div>
-                {centerNode && (
-                  <div style={{ marginTop: 4, fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--accent)", letterSpacing: "0.04em" }}>
-                    {centerNode}
-                  </div>
-                )}
+                <EntityPicker tenant={tenant} centerNode={centerNode} setCenterNode={setCenterNode}
+                              question={question} setQuestion={setQuestion} language={language}
+                              showSuggestions={false}
+                              onPickedTypeChange={setMirrorPickedType} onEntitiesChange={setMirrorEntities} />
               </div>
               <div style={{ padding: "var(--pad-3) var(--pad-4)", borderRight: "1px solid var(--line)" }}>
-                <div className="eyebrow" style={{ marginBottom: 4 }}>{tRX(language, "Depth", "深度")}</div>
+                <div className="eyebrow" style={{ marginBottom: 4 }}>{tRX(language, "Depth (max)", "深度（上限）")}</div>
                 <input className="input" type="number" min={1} max={3}
                        value={depth} onChange={e => setDepth(+e.target.value)} />
+                <div style={{ fontSize: 10, color: "var(--muted)", marginTop: 4, lineHeight: 1.4 }}>
+                  {tRX(language, "Starts at depth 1, escalates automatically if evidence is thin.", "从深度 1 开始，证据不足时自动扩大范围。")}
+                </div>
               </div>
               <div style={{ padding: "var(--pad-3) var(--pad-4)" }}>
                 <div className="eyebrow" style={{ marginBottom: 4 }}>{tRX(language, "Limit", "上限")}</div>
@@ -3572,15 +3486,7 @@ function AskHero({ tenant, question, setQuestion, centerNode, setCenterNode, dep
                       disabled={!s.node}
                       onClick={() => {
                         setQuestion(questionTextRX(s.q, language));
-                        if (s.node) {
-                          setCenterNode(s.node);
-                          const [t] = s.node.split(":");
-                          if (t) setPickedType(t);
-                          const ent = entities.find(e => e.id === s.node);
-                          const lbl = ent ? ent.label : "";
-                          setEntityQuery(lbl);
-                          if (lbl) prevLabelRef.current = lbl;
-                        }
+                        if (s.node) setCenterNode(s.node);
                       }}
                       style={{
                         textAlign: "left",
@@ -3623,7 +3529,7 @@ function AskHero({ tenant, question, setQuestion, centerNode, setCenterNode, dep
 
 /* ---------------- EntityPicker ----------------
    Reusable entity type + search picker. Used in both AskHero and sidebar "Ask with scope". */
-function EntityPicker({ tenant, centerNode, setCenterNode, question, setQuestion, compact, language }) {
+function EntityPicker({ tenant, centerNode, setCenterNode, question, setQuestion, compact, language, showSuggestions = true, onPickedTypeChange, onEntitiesChange }) {
   const tenantId = tenant ? tenant.id : "default";
 
   const [entityTypes, setEntityTypes] = React.useState([]);
@@ -3638,6 +3544,7 @@ function EntityPicker({ tenant, centerNode, setCenterNode, question, setQuestion
 
   const currentType = centerNode && centerNode.includes(":") ? centerNode.split(":")[0] : "";
   const [pickedType, setPickedType] = React.useState(currentType || "");
+  React.useEffect(() => { onPickedTypeChange && onPickedTypeChange(pickedType); }, [pickedType]);
   React.useEffect(() => {
     if (!entityTypes.length) {
       if (pickedType) setPickedType("");
@@ -3679,6 +3586,7 @@ function EntityPicker({ tenant, centerNode, setCenterNode, question, setQuestion
       .then(data => {
         setEntities(data.instances || []);
         setEntitiesLoading(false);
+        onEntitiesChange && onEntitiesChange(data.instances || []);
         if (!prevLabelRef.current && centerNode) {
           const match = (data.instances || []).find(e => e.id === centerNode);
           if (match) prevLabelRef.current = match.label || match.id;
@@ -3798,7 +3706,7 @@ function EntityPicker({ tenant, centerNode, setCenterNode, question, setQuestion
           {centerNode}
         </div>
       )}
-      {setQuestion && (() => {
+      {showSuggestions && setQuestion && (() => {
         const type = pickedType || "";
         const hasEntity = centerNode && centerNode.includes(":");
         const selectedEnt = hasEntity && entities.find(e => e.id === centerNode);

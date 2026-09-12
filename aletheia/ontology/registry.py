@@ -26,6 +26,7 @@ from aletheia.ontology.store import OntologyArtifact, canonical_key_for, upsert_
 SOURCE_AGENT = "GraphNativeTypeRegistrar"
 NODE_ARTIFACT_TYPE = "object"
 EDGE_ARTIFACT_TYPE = "link"
+ACTION_ARTIFACT_TYPE = "action"
 
 VALID_DATA_TYPES = {"string", "int64", "double", "bool", "timestamp"}
 
@@ -117,6 +118,58 @@ def propose_edge_type(
     )
 
 
+def propose_action(
+    session,
+    *,
+    tenant_id: str,
+    name: str,
+    applies_to: list[str],
+    trigger_event: str,
+    input_parameters: list[str] | None = None,
+    expected_effects: list[str] | None = None,
+    guardrails: list[str] | None = None,
+    description: str = "",
+    confidence: float = 0.8,
+    evidence: list[str] | None = None,
+    status: str = "draft",
+) -> OntologyArtifact:
+    """Register (or update) an operational action for this tenant's graph-
+    native ontology. Returns the OntologyArtifact row -- caller is
+    responsible for session.commit().
+
+    Field vocabulary deliberately matches the "action" ontology_part shape
+    already produced by aletheia/enrichment/iterative_enrichment.py's LLM
+    text-mining pipeline (trigger_event/applies_to/input_parameters/
+    expected_effects/guardrails) -- that's the shape web/app/screens.jsx's
+    DiscoveredOntologyReview.operationalRows already knows how to render, so
+    a graph-native-origin action (this function) and a text-mined one look
+    the same in the UI. Distinct from aletheia/modeling/action_synthesizer.py's
+    BusinessAction (SQL routine/trigger-derived, action_type/source_name/
+    is_safe/inputs_json/outputs_json) -- that shape only makes sense for a
+    SQL-schema tenant, not a graph-native one."""
+    payload = {
+        "name": name,
+        "applies_to": list(applies_to or []),
+        "trigger_event": trigger_event,
+        "input_parameters": list(input_parameters or []),
+        "expected_effects": list(expected_effects or []),
+        "guardrails": list(guardrails or []),
+    }
+    return upsert_artifact(
+        session,
+        artifact_type=ACTION_ARTIFACT_TYPE,
+        natural_key=name,
+        name=name,
+        description=description,
+        payload=payload,
+        source_refs=evidence or [],
+        source_agent=SOURCE_AGENT,
+        project_id=tenant_id,
+        confidence=confidence,
+        status=status,
+    )
+
+
 def _query_types(session, *, tenant_id: str, artifact_type: str, status: str | None) -> list[dict[str, Any]]:
     import json
 
@@ -159,6 +212,15 @@ def get_all_edge_types(session, tenant_id: str) -> list[dict[str, Any]]:
     return _query_types(session, tenant_id=tenant_id, artifact_type=EDGE_ARTIFACT_TYPE, status=None)
 
 
+def get_approved_actions(session, tenant_id: str) -> list[dict[str, Any]]:
+    return _query_types(session, tenant_id=tenant_id, artifact_type=ACTION_ARTIFACT_TYPE, status="approved")
+
+
+def get_all_actions(session, tenant_id: str) -> list[dict[str, Any]]:
+    """Action counterpart of ``get_all_node_types``."""
+    return _query_types(session, tenant_id=tenant_id, artifact_type=ACTION_ARTIFACT_TYPE, status=None)
+
+
 def get_node_type(session, tenant_id: str, name: str) -> dict[str, Any] | None:
     import json
 
@@ -176,6 +238,19 @@ def get_edge_type(session, tenant_id: str, name: str) -> dict[str, Any] | None:
     import json
 
     canonical_key = canonical_key_for(EDGE_ARTIFACT_TYPE, name)
+    artifact = session.query(OntologyArtifact).filter_by(project_id=tenant_id, canonical_key=canonical_key).first()
+    if artifact is None:
+        return None
+    payload = json.loads(artifact.payload_json or "{}")
+    payload["_canonical_key"] = artifact.canonical_key
+    payload["_status"] = artifact.status
+    return payload
+
+
+def get_action(session, tenant_id: str, name: str) -> dict[str, Any] | None:
+    import json
+
+    canonical_key = canonical_key_for(ACTION_ARTIFACT_TYPE, name)
     artifact = session.query(OntologyArtifact).filter_by(project_id=tenant_id, canonical_key=canonical_key).first()
     if artifact is None:
         return None
