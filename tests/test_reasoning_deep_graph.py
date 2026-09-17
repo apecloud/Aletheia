@@ -1,3 +1,4 @@
+import os
 import unittest
 from unittest.mock import patch
 
@@ -51,6 +52,36 @@ class ApprovedGraphWithRealEdgesInstanceRepository(EmptyGraphInstanceRepository)
             "edges": [
                 {"source": "entity-a", "target": "entity-b", "label": "touches"},
                 {"source": "entity-a", "target": "entity-c", "label": "touches"},
+            ],
+            "scope": {"projection_source": "SchemaGraphModelingAgent"},
+        }
+
+
+class PartiallySampledGraphInstanceRepository(EmptyGraphInstanceRepository):
+    """full_graph()'s sample of vids-per-type can legitimately miss a
+    specific neighbor of the center (it samples up to `node_limit /
+    num_types` vids per type, not every vid) -- local_rag_context()'s
+    neighborhood() then supplies the missing edge, but in its own
+    edge_summary() shape (key "relation", not "label"), exercising
+    _scoped_graph_prompt_context's merge-normalization."""
+
+    def full_graph(self, *args, **kwargs):
+        return {
+            "approved": True,
+            "nodes": [{"id": "entity-a", "type": "Object", "label": "Entity A"}],
+            "edges": [],
+            "scope": {"projection_source": "SchemaGraphModelingAgent"},
+        }
+
+    def local_rag_context(self, tenant, object_type, instance_id, question=None, depth=1, limit=200):
+        return {
+            "approved": True,
+            "nodes": [
+                {"id": "entity-a", "type": "Object", "label": "Entity A"},
+                {"id": "entity-c", "type": "Object", "label": "Entity C"},
+            ],
+            "edges": [
+                {"id": None, "source": "entity-a", "target": "entity-c", "relation": "TOUCHES"},
             ],
             "scope": {"projection_source": "SchemaGraphModelingAgent"},
         }
@@ -231,6 +262,23 @@ class DeepGraphReasoningTest(unittest.TestCase):
         self.assertEqual(len(ctx["related_edges"]), 2)
         self.assertEqual({node["id"] for node in ctx["related_nodes"]}, {"entity-a", "entity-b", "entity-c"})
 
+    def test_scoped_graph_prompt_context_normalizes_local_rag_context_edge_label(self):
+        # Regression test: local_rag_context()'s edges come back in its own
+        # edge_summary() shape (key "relation"), but compact_edge()/
+        # degree_by_link only ever read "label" -- without normalizing at
+        # the merge point, every edge contributed by local_rag_context
+        # (rather than full_graph's sample) silently lost its relation
+        # name and collapsed into a generic fallback bucket downstream.
+        repo = object.__new__(ReasoningRepository)
+        repo.instance_repository = PartiallySampledGraphInstanceRepository()
+
+        ctx = repo._scoped_graph_prompt_context(FakeReasoningTenant(), "Object:entity-a", 1, 200, 200, demo_mode=False)
+
+        touches_edges = [edge for edge in ctx["related_edges"] if edge.get("target") == "entity-c"]
+        self.assertTrue(touches_edges)
+        self.assertEqual(touches_edges[0]["label"], "TOUCHES")
+        self.assertEqual(ctx["degree"]["by_link"].get("TOUCHES"), 1)
+
     def test_instance_repository_exposes_schema_reasoning_entity_adapters(self):
         self.assertTrue(callable(getattr(InstanceRepository, "_fetch_entity", None)))
         self.assertTrue(callable(getattr(InstanceRepository, "_entity_node", None)))
@@ -325,6 +373,120 @@ class DeepGraphReasoningTest(unittest.TestCase):
         self.assertIn("Path Alpha", response["answer"]["conclusion"])
         self.assertNotIn("source_path(s)", response["answer"]["conclusion"])
 
+    def test_reasoning_response_names_real_relations_instead_of_bare_degree_count(self):
+        # Regression test for task 7075's "存在于已批准图谱中...证据不足" bug:
+        # with no SQL-derived ranked_paths/source_key_row_degree (the normal
+        # shape for a graph-native tenant) but real related_edges present,
+        # the conclusion/title should name the actual relation types and
+        # sample neighbors, not fall back to a bare degree count.
+        repo = object.__new__(ReasoningRepository)
+        tenant = type("Tenant", (), {"tenant_id": "demo"})()
+        task = {"question": "Summarize kb_commit_1", "canonical_key": "task"}
+        scope = {"center_node": "Commit:kb_commit_1", "depth": 1, "node_limit": 200}
+        structured_answer = {
+            "title": "kb_commit_1 Business Profile",
+            "profile_summary": "kb_commit_1 is present in the approved graph with 3 related entities.",
+            "metrics": {"label": "kb_commit_1"},
+        }
+        graph_context = {
+            "degree": {"center": 3},
+            "related_nodes": [
+                {"id": "kb_commit_1", "type": "Commit", "label": "kb_commit_1"},
+                {"id": "kb_commit_2", "type": "Commit", "label": "kb_commit_2"},
+                {"id": "kb_file_a", "type": "File", "label": "kb_file_a"},
+            ],
+            "related_edges": [
+                {"source": "kb_commit_1", "target": "kb_commit_2", "label": "PARENT_COMMIT"},
+                {"source": "kb_commit_1", "target": "kb_file_a", "label": "TOUCHES"},
+            ],
+        }
+
+        response = repo._reasoning_response_v1(tenant, task, scope, structured_answer, [], graph_context)
+
+        conclusion = response["answer"]["conclusion"]
+        title = response["answer"]["title"]
+        # No instance_repository is set on this bare repo (so
+        # _relation_descriptions can't fetch curated ontology descriptions
+        # and falls back to {}) -- the conclusion should still name the
+        # real relation labels and sample neighbors instead of a bare
+        # degree count, via the generic label/count/sample clause.
+        self.assertIn("PARENT_COMMIT", conclusion)
+        self.assertIn("TOUCHES", conclusion)
+        self.assertIn("kb_commit_2", conclusion)
+        self.assertIn("kb_file_a", conclusion)
+        self.assertNotIn("insufficient", conclusion.lower())
+        self.assertNotIn("does not yet have enough", conclusion)
+        self.assertIn("PARENT_COMMIT", title)
+        self.assertIn("TOUCHES", title)
+
+    def test_reasoning_response_narrates_relation_using_tenants_curated_ontology_description(self):
+        # What a relation NAME means (PARENT_COMMIT, TOUCHES, ...) is
+        # tenant/schema-specific business knowledge -- it must come from
+        # each tenant's own approved edge-type ontology description
+        # (reasoning_link_config), never from a relation-vocabulary table
+        # hardcoded in this shared repository code. Stub instance_repository
+        # here plays the role of a tenant that HAS curated a description.
+        class RelationDescribingInstanceRepository(ApprovedGraphWithRealEdgesInstanceRepository):
+            def reasoning_link_config(self, tenant_id):
+                return [{"link": "touches", "description": "custom description", "from": "object", "to": "object"}]
+
+        repo = object.__new__(ReasoningRepository)
+        repo.instance_repository = RelationDescribingInstanceRepository()
+        tenant = type("Tenant", (), {"tenant_id": "demo"})()
+        task = {"question": "Summarize entity-a", "canonical_key": "task"}
+        scope = {"center_node": "Object:entity-a", "depth": 1, "node_limit": 200}
+        structured_answer = {
+            "title": "entity-a Business Profile",
+            "profile_summary": "entity-a is present in the approved graph with 2 related entities.",
+            "metrics": {"label": "entity-a"},
+        }
+        graph_context = {
+            "degree": {"center": 2},
+            "related_nodes": [
+                {"id": "entity-a", "type": "Object", "label": "entity-a"},
+                {"id": "entity-b", "type": "Object", "label": "entity-b"},
+            ],
+            "related_edges": [
+                {"source": "entity-a", "target": "entity-b", "label": "touches"},
+            ],
+        }
+
+        response = repo._reasoning_response_v1(tenant, task, scope, structured_answer, [], graph_context)
+
+        conclusion = response["answer"]["conclusion"]
+        self.assertIn("custom description", conclusion)
+        self.assertIn("entity-b", conclusion)
+
+    def test_reasoning_response_falls_back_to_generic_relation_label_for_unknown_vocabulary(self):
+        # A relation with no curated ontology description should still get
+        # the label/count/sample phrasing, not silently produce no
+        # conclusion.
+        repo = object.__new__(ReasoningRepository)
+        tenant = type("Tenant", (), {"tenant_id": "demo"})()
+        task = {"question": "Summarize entity-a", "canonical_key": "task"}
+        scope = {"center_node": "Object:entity-a", "depth": 1, "node_limit": 200}
+        structured_answer = {
+            "title": "entity-a Business Profile",
+            "profile_summary": "entity-a is present in the approved graph with 2 related entities.",
+            "metrics": {"label": "entity-a"},
+        }
+        graph_context = {
+            "degree": {"center": 2},
+            "related_nodes": [
+                {"id": "entity-a", "type": "Object", "label": "entity-a"},
+                {"id": "entity-b", "type": "Object", "label": "entity-b"},
+            ],
+            "related_edges": [
+                {"source": "entity-a", "target": "entity-b", "label": "CUSTOM_RELATION"},
+            ],
+        }
+
+        response = repo._reasoning_response_v1(tenant, task, scope, structured_answer, [], graph_context)
+
+        conclusion = response["answer"]["conclusion"]
+        self.assertIn("CUSTOM_RELATION", conclusion)
+        self.assertIn("entity-b", conclusion)
+
     def test_reasoning_response_follows_scope_language_not_question_text(self):
         repo = object.__new__(ReasoningRepository)
         tenant = type("Tenant", (), {"tenant_id": "demo"})()
@@ -376,35 +538,38 @@ class DeepGraphReasoningTest(unittest.TestCase):
             },
         }
         graph_context = {
+            # related_nodes/related_edges use bare Nebula vertex ids (never
+            # "Type:Id" prefixed) -- matches the real shape compact_node/
+            # compact_edge produce, per _scoped_graph_prompt_context.
             "degree": {"source_key_row_degree": 397},
             "related_nodes": [
-                {"id": "MaritimeChokepoint:Strait of Hormuz", "label": "Strait of Hormuz", "type": "MaritimeChokepoint"},
-                {"id": "Country:ARE", "label": "ARE", "type": "Country"},
-                {"id": "Port:Jebel Ali", "label": "Jebel Ali", "type": "Port"},
+                {"id": "Strait of Hormuz", "label": "Strait of Hormuz", "type": "MaritimeChokepoint"},
+                {"id": "ARE", "label": "ARE", "type": "Country"},
+                {"id": "Jebel Ali", "label": "Jebel Ali", "type": "Port"},
             ],
             "related_edges": [
                 {
-                    "source": "MaritimeChokepoint:Strait of Hormuz",
-                    "target": "Country:ARE",
+                    "source": "Strait of Hormuz",
+                    "target": "ARE",
                     "label": "Country Chokepoint Dependency",
                     "properties": {"trade_at_risk_piracy_v": 1200.0, "v_canal": 9000.0},
                 },
                 {
-                    "source": "Country:ARE",
-                    "target": "Port:Jebel Ali",
+                    "source": "ARE",
+                    "target": "Jebel Ali",
                     "label": "uses_port",
                 },
             ],
             "retrieval_context": {
                 "nodes": [
-                    {"id": "MaritimeChokepoint:Strait of Hormuz", "label": "Strait of Hormuz", "type": "MaritimeChokepoint"},
-                    {"id": "Country:ARE", "label": "ARE", "type": "Country"},
+                    {"id": "Strait of Hormuz", "label": "Strait of Hormuz", "type": "MaritimeChokepoint"},
+                    {"id": "ARE", "label": "ARE", "type": "Country"},
                 ],
                 "edges": [
                     {
                         "id": "edge-1",
-                        "source": "MaritimeChokepoint:Strait of Hormuz",
-                        "target": "Country:ARE",
+                        "source": "Strait of Hormuz",
+                        "target": "ARE",
                         "relation": "Country Chokepoint Dependency",
                         "properties": {"trade_at_risk_piracy_v": 1200.0, "v_canal": 9000.0},
                     }
@@ -539,6 +704,154 @@ class DepthEscalationTest(unittest.TestCase):
         self.assertEqual(attempts[0]["depth"], 1)
         self.assertEqual(attempts[0]["decision"], "sufficient")
         self.assertEqual(captured["run"]["output"]["depth_exploration"]["final_depth"], 1)
+
+
+class RelationInsightSynthesisTest(unittest.TestCase):
+    """_synthesize_relation_insight / _get_insight_planner: an additive,
+    env-gated LLM call that supplies a real judgment on top of
+    _business_conclusion_from_traversal's deterministic template -- see
+    aletheia/llms/planner.py's InsightSynthesisResult docstring for why."""
+
+    def setUp(self):
+        self._prior_env = os.environ.get("ALETHEIA_LLM_INSIGHT_ENABLED")
+        os.environ.pop("ALETHEIA_LLM_INSIGHT_ENABLED", None)
+
+    def tearDown(self):
+        if self._prior_env is None:
+            os.environ.pop("ALETHEIA_LLM_INSIGHT_ENABLED", None)
+        else:
+            os.environ["ALETHEIA_LLM_INSIGHT_ENABLED"] = self._prior_env
+
+    def test_disabled_by_default_never_constructs_a_planner(self):
+        repo = object.__new__(ReasoningRepository)
+
+        with patch("aletheia.llms.planner.LLMPlanner.__init__", side_effect=AssertionError("must not construct an LLMPlanner when disabled")):
+            result = repo._synthesize_relation_insight(
+                FakeReasoningTenant(), "Entity A", "q", [{"relation": "TOUCHES", "edge_count": 1, "sample_labels": []}], None,
+            )
+        self.assertIsNone(result)
+
+    def test_enabled_with_injected_planner_feeds_answer_conclusion(self):
+        os.environ["ALETHEIA_LLM_INSIGHT_ENABLED"] = "1"
+        repo = object.__new__(ReasoningRepository)
+        repo.instance_repository = ApprovedGraphWithRealEdgesInstanceRepository()
+
+        class FakePlanner:
+            def synthesize_relation_insight(self, label, question, relation_summary, language=None, entity_facts=None, focus_dimensions=None):
+                return type("Result", (), {"insight": "This is a genuinely synthesized insight.", "used_fallback": False})()
+
+        repo._insight_planner = FakePlanner()
+        tenant = type("Tenant", (), {"tenant_id": "demo"})()
+        task = {"question": "Summarize entity-a", "canonical_key": "task"}
+        scope = {"center_node": "Object:entity-a", "depth": 1, "node_limit": 200}
+        structured_answer = {
+            "title": "entity-a Business Profile",
+            "profile_summary": "entity-a is present in the approved graph with 2 related entities.",
+            "metrics": {"label": "entity-a"},
+        }
+        graph_context = {
+            "degree": {"center": 2},
+            "related_nodes": [
+                {"id": "entity-a", "type": "Object", "label": "entity-a"},
+                {"id": "entity-b", "type": "Object", "label": "entity-b"},
+            ],
+            "related_edges": [
+                {"source": "entity-a", "target": "entity-b", "label": "CUSTOM_RELATION"},
+            ],
+        }
+
+        response = repo._reasoning_response_v1(tenant, task, scope, structured_answer, [], graph_context)
+
+        self.assertEqual(response["answer"]["conclusion"], "This is a genuinely synthesized insight.")
+        self.assertEqual(response["answer"]["plain_conclusion"], "This is a genuinely synthesized insight.")
+        # detailed_conclusion keeps the literal evidence trail even when an
+        # insight is used -- the LLM's judgment supplements, never hides it.
+        self.assertIn("CUSTOM_RELATION", response["answer"]["detailed_conclusion"])
+        self.assertTrue(response["answer"]["insight_synthesis"]["used"])
+
+    def test_reasoning_focus_dimensions_reach_the_planner_call(self):
+        # _reasoning_focus_dimensions reads this type's curated
+        # reasoning_focus (see propose_node_type) and _reasoning_response_v1
+        # must forward it into the insight-synthesis call -- this is what
+        # lets the LLM prioritize e.g. an Issue's urgency/response-time
+        # over generic observations.
+        os.environ["ALETHEIA_LLM_INSIGHT_ENABLED"] = "1"
+        repo = object.__new__(ReasoningRepository)
+
+        focus = [{"name": "urgency_and_response_time", "description": "...", "signals": ["state"]}]
+
+        class FocusCuratedInstanceRepository(ApprovedGraphWithRealEdgesInstanceRepository):
+            def reasoning_entity_config(self, tenant):
+                return {"object": {"artifact": "object:Object", "type_name": "Object", "reasoning_focus": focus}}
+
+        repo.instance_repository = FocusCuratedInstanceRepository()
+        captured = {}
+
+        class CapturingPlanner:
+            def synthesize_relation_insight(self, label, question, relation_summary, language=None, entity_facts=None, focus_dimensions=None):
+                captured["focus_dimensions"] = focus_dimensions
+                return type("Result", (), {"insight": "insight", "used_fallback": False})()
+
+        repo._insight_planner = CapturingPlanner()
+        tenant = type("Tenant", (), {"tenant_id": "demo"})()
+        task = {"question": "Summarize entity-a", "canonical_key": "task"}
+        scope = {"center_node": "Object:entity-a", "depth": 1, "node_limit": 200}
+        structured_answer = {"title": "entity-a Business Profile", "profile_summary": "...", "metrics": {"label": "entity-a"}}
+        graph_context = {
+            "degree": {"center": 2},
+            "related_nodes": [
+                {"id": "entity-a", "type": "Object", "label": "entity-a"},
+                {"id": "entity-b", "type": "Object", "label": "entity-b"},
+            ],
+            "related_edges": [{"source": "entity-a", "target": "entity-b", "label": "CUSTOM_RELATION"}],
+        }
+
+        repo._reasoning_response_v1(tenant, task, scope, structured_answer, [], graph_context)
+
+        self.assertEqual(captured["focus_dimensions"], focus)
+
+    def test_reasoning_focus_dimensions_defaults_to_empty_list(self):
+        # A tenant/type with nothing curated (the common case, e.g. every
+        # fixture in this file that doesn't define reasoning_entity_config)
+        # must get [] -- byte-identical to today's unsteered insight prompt.
+        repo = object.__new__(ReasoningRepository)
+        repo.instance_repository = ApprovedGraphWithRealEdgesInstanceRepository()
+        dims = repo._reasoning_focus_dimensions(FakeReasoningTenant(), "Object")
+        self.assertEqual(dims, [])
+
+    def test_enabled_but_planner_result_used_fallback_keeps_template_conclusion(self):
+        os.environ["ALETHEIA_LLM_INSIGHT_ENABLED"] = "1"
+        repo = object.__new__(ReasoningRepository)
+        repo.instance_repository = ApprovedGraphWithRealEdgesInstanceRepository()
+
+        class FailingPlanner:
+            def synthesize_relation_insight(self, label, question, relation_summary, language=None, entity_facts=None, focus_dimensions=None):
+                return type("Result", (), {"insight": "", "used_fallback": True})()
+
+        repo._insight_planner = FailingPlanner()
+        tenant = type("Tenant", (), {"tenant_id": "demo"})()
+        task = {"question": "Summarize entity-a", "canonical_key": "task"}
+        scope = {"center_node": "Object:entity-a", "depth": 1, "node_limit": 200}
+        structured_answer = {
+            "title": "entity-a Business Profile",
+            "profile_summary": "entity-a is present in the approved graph with 2 related entities.",
+            "metrics": {"label": "entity-a"},
+        }
+        graph_context = {
+            "degree": {"center": 2},
+            "related_nodes": [
+                {"id": "entity-a", "type": "Object", "label": "entity-a"},
+                {"id": "entity-b", "type": "Object", "label": "entity-b"},
+            ],
+            "related_edges": [
+                {"source": "entity-a", "target": "entity-b", "label": "CUSTOM_RELATION"},
+            ],
+        }
+
+        response = repo._reasoning_response_v1(tenant, task, scope, structured_answer, [], graph_context)
+
+        self.assertIn("CUSTOM_RELATION", response["answer"]["conclusion"])
+        self.assertFalse(response["answer"]["insight_synthesis"]["used"])
 
 
 if __name__ == "__main__":

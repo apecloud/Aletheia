@@ -7,6 +7,7 @@ from aletheia.reasoning.finding_framework import (
     paths_with_peer,
     plain_reasoning_conclusion,
     plain_reasoning_title,
+    resolve_output_language,
     review_graph_scope_action,
     scoped_graph_finding,
     scope_limit_counter_evidence,
@@ -73,6 +74,35 @@ class ReasoningFindingFrameworkTest(unittest.TestCase):
         self.assertIn("trade flow", conclusion)
         self.assertNotIn("source rows", conclusion)
         self.assertNotIn("Strait of Hormuz, Strait of Hormuz", conclusion)
+
+    def test_plain_reasoning_title_falls_back_to_relation_summary_when_no_ranked_paths(self):
+        # ranked_paths (SQL-derived) is always empty for graph-native
+        # tenants -- relation_summary (the actual relation types the center
+        # connects through) is the graph-native equivalent, and should get
+        # the same "main relationship paths" title treatment ranked_paths
+        # already gets, instead of falling straight to a generic title.
+        relation_summary = [
+            {"relation": "PARENT_COMMIT", "edge_count": 2, "sample_labels": ["c1", "c2"]},
+            {"relation": "TOUCHES", "edge_count": 4, "sample_labels": ["f1", "f2"]},
+        ]
+
+        title_en = plain_reasoning_title("Summarize kb_commit_1", "kb_commit_1", [], relation_summary=relation_summary, language="en")
+        title_zh = plain_reasoning_title("Summarize kb_commit_1", "kb_commit_1", [], relation_summary=relation_summary, language="zh")
+
+        self.assertIn("PARENT_COMMIT", title_en)
+        self.assertIn("TOUCHES", title_en)
+        self.assertIn("main relationship paths", title_en)
+        self.assertIn("PARENT_COMMIT", title_zh)
+        self.assertIn("主要关联路径", title_zh)
+
+    def test_plain_reasoning_title_prefers_ranked_paths_over_relation_summary(self):
+        ranked_paths = [{"label": "Path Alpha"}]
+        relation_summary = [{"relation": "PARENT_COMMIT", "edge_count": 2, "sample_labels": []}]
+
+        title = plain_reasoning_title("q", "Entity A", ranked_paths, relation_summary=relation_summary)
+
+        self.assertIn("Path Alpha", title)
+        self.assertNotIn("PARENT_COMMIT", title)
 
     def test_plain_reasoning_conclusion_does_not_leak_english_engine_summary_when_zh(self):
         # No ranked_paths/source_rows -- the common shape for graph-native
@@ -179,6 +209,60 @@ class ReasoningFindingFrameworkTest(unittest.TestCase):
         self.assertEqual(finding["canonical_key"], "finding:graph-scope:task:1:run-123")
         self.assertEqual(finding["recommended_action"]["execution_boundary"], "proposal_only")
         self.assertEqual(finding["counter_evidence"][0]["kind"], "scope_limit")
+
+
+class ResolveOutputLanguageTest(unittest.TestCase):
+    """resolve_output_language: general (language, question) -> ISO-639-1-ish
+    code resolver -- generalizes wants_zh_output's boolean zh/en check
+    without changing wants_zh_output's own behavior for its existing
+    callers (see the class below)."""
+
+    def test_explicit_code_passes_through_verbatim(self):
+        self.assertEqual(resolve_output_language("ja"), "ja")
+        self.assertEqual(resolve_output_language("fr"), "fr")
+        self.assertEqual(resolve_output_language("xx"), "xx")  # unrestricted -- not an allowlist
+
+    def test_explicit_code_normalizes_region_suffix(self):
+        self.assertEqual(resolve_output_language("zh-CN"), "zh")
+        self.assertEqual(resolve_output_language("zh_TW"), "zh")
+        self.assertEqual(resolve_output_language("en-US"), "en")
+
+    def test_sniffs_chinese_from_question_when_language_missing(self):
+        self.assertEqual(resolve_output_language(None, "总结 kb_issue_10041"), "zh")
+
+    def test_sniffs_japanese_from_question_not_misdetected_as_chinese(self):
+        # Kana-bearing text must resolve to "ja", not "zh", even though it
+        # also contains kanji (CJK Unified Ideographs) -- this is new
+        # capability wants_zh_output's old single-CJK-regex check couldn't
+        # distinguish at all.
+        self.assertEqual(resolve_output_language(None, "このコミットについて要約してください"), "ja")
+
+    def test_sniffs_korean_from_question(self):
+        self.assertEqual(resolve_output_language(None, "이 이슈를 요약해 주세요"), "ko")
+
+    def test_defaults_to_english_when_nothing_matches(self):
+        self.assertEqual(resolve_output_language(None, "summarize this issue"), "en")
+        self.assertEqual(resolve_output_language(None, None), "en")
+        self.assertEqual(resolve_output_language(None, ""), "en")
+
+    def test_custom_default_is_honored(self):
+        self.assertEqual(resolve_output_language(None, "summarize this issue", default="fr"), "fr")
+
+    def test_wants_zh_output_unchanged_for_existing_zh_en_callers(self):
+        # Backward-compatibility guard: wants_zh_output's ~30 existing
+        # callers (finding_framework.py's title/conclusion builders,
+        # traversal.py's business-conclusion template, planner.py) must see
+        # byte-identical behavior after this refactor.
+        self.assertTrue(wants_zh_output("zh"))
+        self.assertTrue(wants_zh_output("zh-CN"))
+        self.assertFalse(wants_zh_output("en"))
+        self.assertTrue(wants_zh_output(None, "总结 kb_issue_10041"))
+        self.assertFalse(wants_zh_output(None, "summarize this issue"))
+        self.assertFalse(wants_zh_output(None, None))
+        # A Japanese question with no explicit language must NOT be treated
+        # as Chinese just because it contains kanji -- confirms the new
+        # ja-before-zh detection ordering doesn't regress wants_zh_output.
+        self.assertFalse(wants_zh_output(None, "このコミットについて要約してください"))
 
 
 if __name__ == "__main__":

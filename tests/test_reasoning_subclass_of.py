@@ -112,6 +112,41 @@ class SubclassResolutionTest(unittest.TestCase):
 
         self.assertEqual(set(cfg.keys()), {"person"})
 
+    def test_reasoning_focus_forwarded_verbatim_from_node_type_payload(self):
+        """reasoning_focus (see propose_node_type) is tenant-curated
+        business-dimension metadata for this type -- reasoning_entity_config
+        must forward it unchanged so traversal.py's
+        _reasoning_focus_dimensions can read it, without this repo layer
+        needing to know what any dimension means."""
+        repo = _repo()
+        focus = [{"name": "urgency_and_response_time", "description": "...", "signals": ["state", "created_at"]}]
+        with patch(
+            "aletheia.graph_store.instance_repository.ontology_registry.get_approved_node_types",
+            return_value=[{"name": "Issue", "reasoning_focus": focus}],
+        ), patch(
+            "aletheia.graph_store.instance_repository.ontology_registry.get_all_node_types",
+            return_value=[{"name": "Issue", "reasoning_focus": focus}],
+        ):
+            cfg = repo.reasoning_entity_config("any-tenant")
+
+        self.assertEqual(cfg["issue"]["reasoning_focus"], focus)
+
+    def test_reasoning_focus_defaults_to_empty_list_when_not_curated(self):
+        """Every tenant/type that hasn't curated any reasoning_focus (the
+        common case today) must get [] -- byte-identical behavior for
+        every caller that doesn't know about this field yet."""
+        repo = _repo()
+        with patch(
+            "aletheia.graph_store.instance_repository.ontology_registry.get_approved_node_types",
+            return_value=[{"name": "Person"}],
+        ), patch(
+            "aletheia.graph_store.instance_repository.ontology_registry.get_all_node_types",
+            return_value=[{"name": "Person"}],
+        ):
+            cfg = repo.reasoning_entity_config("any-tenant")
+
+        self.assertEqual(cfg["person"]["reasoning_focus"], [])
+
 
 if __name__ == "__main__":
     unittest.main()

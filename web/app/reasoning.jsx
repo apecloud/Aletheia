@@ -225,7 +225,7 @@ function questionTextRX(value, language) {
   if (!isZhRX(language)) return text;
   const replacements = [
     [/^Select a transaction, account, card, or merchant to analyze fraud risk\.$/, "选择交易、账户、卡或商户来分析欺诈风险。"],
-    [/^Select a center node to ask a scoped question\.$/, "选择中心节点来提出范围问题。"],
+    [/^Select a center node to ask a scoped question\.$/, "选择中心节点来提出定点问题。"],
     [/^Explain the risk path for (.+)$/, "解释 $1 的风险路径"],
     [/^What evidence supports the risk propagation path for (.+)\?$/, "哪些证据支持 $1 的风险传播路径？"],
     [/^Which (.+) produce the strongest multi-hop risk chain\?$/, "哪些 $1 产生最强多跳风险链？"],
@@ -708,7 +708,8 @@ function suggestedQuestionsForTenantRX({ tenantId, type, centerNode, label, ques
     const base = [];
     for (const ent of samples) {
       const label = ent.label || ent.id;
-      base.push({ q: q ? `${q} — ${label}` : defaultQuestionForTenantRX(tenantId, type, label, ent.id), node: ent.id });
+      const node = (ent.type || type) + ":" + ent.id;
+      base.push({ q: q ? `${q} — ${label}` : defaultQuestionForTenantRX(tenantId, type, label, ent.id), node });
     }
     if (base.length) {
       base.push({ q: `Which ${plural} should Autopilot investigate next?`, node: base[0].node });
@@ -737,7 +738,7 @@ function suggestedQuestionsForTenantRX({ tenantId, type, centerNode, label, ques
   if (type) {
     const out = samples.map(ent => ({
       q: q ? `${q} — ${ent.label || ent.id}` : `Give a summary of ${ent.label || ent.id}`,
-      node: ent.id,
+      node: (ent.type || type) + ":" + ent.id,
     }));
     if (out.length) {
       out.push({ q: `Which ${plural} have the highest activity?`, node: out[0].node });
@@ -753,9 +754,9 @@ function Reasoning({ tenant, language }) {
     try { return new URLSearchParams(location.search); }
     catch { return new URLSearchParams(); }
   })();
-  const normalizeReasoningTab = tab => ["mine", "all", "graph", "autopilot"].includes(tab) ? tab : "mine";
+  const normalizeReasoningTab = tab => ["mine", "graph", "autopilot"].includes(tab) ? tab : "mine";
   const [selectedKey, setSelectedKey] = useStateRX(initialReasoningParams.get("task") || null);
-  const [activeTab, setActiveTab] = useStateRX(normalizeReasoningTab(initialReasoningParams.get("reasoning_tab")));  // mine | all | graph | autopilot
+  const [activeTab, setActiveTab] = useStateRX(normalizeReasoningTab(initialReasoningParams.get("reasoning_tab")));  // mine | graph | autopilot
   const [question, setQuestion] = useStateRX("");
   const [centerNode, setCenterNode] = useStateRX("");
   const [depth, setDepth] = useStateRX(1);
@@ -791,18 +792,6 @@ function Reasoning({ tenant, language }) {
   const [scopeTypes, setScopeTypes] = useStateRX([]);
   const [scopeBootstrapKey, setScopeBootstrapKey] = useStateRX("");
   const typeNames = scopeTypes.map(t => typeof t === "string" ? t : (t.type || t.label)).filter(Boolean);
-  const NODE_RE = typeNames.length
-    ? new RegExp("\\b(" + typeNames.map(escapeRegExpRX).join("|") + ")[:\\s#]+([\\w*.-]+)\\b", "i")
-    : /\b([A-Za-z][A-Za-z0-9_]*?)[:\s#]+([\w*.-]+)\b/i;
-  function onQuestionChangeWithExtract(e) {
-    const q = e.target.value;
-    setQuestion(q);
-    const m = q.match(NODE_RE);
-    if (m) {
-      const type = canonicalTypeFromListRX(m[1], typeNames) || m[1];
-      setCenterNode(type + ":" + m[2]);
-    }
-  }
   const [evidenceFilter, setEvidenceFilter] = useStateRX("all");
   const [localTasks, setLocalTasks] = useStateRX([]);  // mock-mode submitted tasks
   const [deletedTaskKeys, setDeletedTaskKeys] = useStateRX(new Set());
@@ -843,6 +832,13 @@ function Reasoning({ tenant, language }) {
         if (autopilotSelectedKey) url.searchParams.set("autopilot_session", autopilotSelectedKey);
         else url.searchParams.delete("autopilot_session");
         url.searchParams.delete("task");
+      } else if (askMode) {
+        // Composing a new question shows a blank AskHero, not the
+        // previously-selected task -- leaving the old task's key in the
+        // URL here was misleading (reload/share/back-nav while composing
+        // landed back on that stale task instead of a blank compose view).
+        url.searchParams.delete("task");
+        url.searchParams.delete("autopilot_session");
       } else {
         if (selectedKey) url.searchParams.set("task", selectedKey);
         else url.searchParams.delete("task");
@@ -850,7 +846,7 @@ function Reasoning({ tenant, language }) {
       }
       history.replaceState(null, "", url.toString());
     } catch {}
-  }, [tenant ? tenant.id : "default", activeTab, selectedKey, autopilotSelectedKey]);
+  }, [tenant ? tenant.id : "default", activeTab, selectedKey, autopilotSelectedKey, askMode]);
   useEffectRX(() => {
     const tid = tenant ? tenant.id : "default";
     setAutopilotObjective(autopilotObjectiveForTenantRX(tid, language));
@@ -881,7 +877,7 @@ function Reasoning({ tenant, language }) {
         const searchData = await window.AL_API.fetchJson("/api/instances/search?" + qs.toString());
         if (!alive) return;
         const first = (searchData.instances || [])[0];
-        const nextNode = first ? first.id : "";
+        const nextNode = first ? (first.type || firstType) + ":" + first.id : "";
         const nextLabel = first ? (first.label || first.id) : firstType;
         setCenterNode(nextNode);
         setQuestion(questionTextRX(defaultQuestionForTenantRX(tid, firstType, nextLabel, nextNode), language));
@@ -933,15 +929,13 @@ function Reasoning({ tenant, language }) {
 
   const tasks = useMemoRX(() => {
     switch (activeTab) {
-      case "mine":    return [...allTasks.filter(t => t.source === "manual")].sort(taskSortCmp);
       case "graph":   return [...allTasks.filter(t => t.source === "graph")].sort(taskSortCmp);
       case "autopilot": return [];
-      default:        return allTasks.filter(isActiveTask);
+      default:        return [...allTasks.filter(t => t.source === "manual")].sort(taskSortCmp);
     }
   }, [allTasks, activeTab]);
 
   const counts = {
-    all:     allTasks.filter(isActiveTask).length,
     mine:    allTasks.filter(t => t.source === "manual").length,
     graph:   allTasks.filter(t => t.source === "graph").length,
     autopilot: autopilotSessions.length,
@@ -1454,7 +1448,6 @@ function Reasoning({ tenant, language }) {
       <div className="subbar">
         <div className="tabs">
           <div className={"tab" + (activeTab === "mine"    ? " active" : "")} onClick={() => selectReasoningTab("mine")}>{tRX(language, "My Questions", "我的问题")} <span className="ct">{counts.mine}</span></div>
-          <div className={"tab" + (activeTab === "all"     ? " active" : "")} onClick={() => selectReasoningTab("all")}>{tRX(language, "Reasoning Process", "推理流程")} <span className="ct">{counts.all}</span></div>
           <div className={"tab" + (activeTab === "graph"   ? " active" : "")} onClick={() => selectReasoningTab("graph")}>{tRX(language, "From Graph", "来自图谱")} <span className="ct">{counts.graph}</span></div>
           <div className={"tab" + (activeTab === "autopilot" ? " active" : "")} onClick={() => selectReasoningTab("autopilot")}>{tRX(language, "Autopilot", "自动推理")} <span className="ct">{counts.autopilot}</span></div>
         </div>
@@ -1466,7 +1459,7 @@ function Reasoning({ tenant, language }) {
         <button className="tool" onClick={() => window.dispatchEvent(new CustomEvent("aletheia:retry"))}>⟲ {tRX(language, "Refresh", "刷新")}</button>
         {activeTab !== "autopilot" && shouldRerun && (
           <button className="tool" onClick={runTask} disabled={running || !task}
-                  title={tRX(language, "Create a new task with the same question and scope, and run it.", "创建同问题和范围的新任务并运行。")}>
+                  title={tRX(language, "Create a new task with the same question and scope, and run it.", "创建同问题和定点设置的新任务并运行。")}>
             {running ? tRX(language, "Rerunning…", "重新运行中…") : "↻ " + tRX(language, "Rerun (new task)", "重新运行（新任务）")}
           </button>
         )}
@@ -1530,9 +1523,9 @@ function Reasoning({ tenant, language }) {
                 <React.Fragment>
               {(tasksQ.source === "live" || tasksQ.source === "mock") && tasks.length === 0 && (
                 <div style={{ padding: 24, fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--muted)", textAlign: "center", lineHeight: 1.6 }}>
-                  {activeTab === "mine"    ? tRX(language, "No questions of yours yet. Click “+ Ask a new question” above to start.", "你还没有问题。点击上方“+ 新建问题”开始。") :
-                   activeTab === "graph"   ? tRX(language, "No graph-derived reasoning tasks here.", "这里暂无来自图谱的推理任务。") :
-                                             tRX(language, "No active reasoning tasks. Click “+ Ask a new question” above.", "暂无活跃推理任务。点击上方“+ 新建问题”。")}
+                  {activeTab === "graph"
+                    ? tRX(language, "No graph-derived reasoning tasks here.", "这里暂无来自图谱的推理任务。")
+                    : tRX(language, "No questions of yours yet. Click “+ Ask a new question” above to start.", "你还没有问题。点击上方“+ 新建问题”开始。")}
                 </div>
               )}
               {tasks.map(t => {
@@ -1657,9 +1650,9 @@ function Reasoning({ tenant, language }) {
           ) : !task ? (
             <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 14, color: "var(--muted)", fontFamily: "var(--font-mono)", fontSize: 12 }}>
               <div style={{ fontSize: 13, color: "var(--text-dim)" }}>
-                {activeTab === "mine"    ? tRX(language, "You haven't asked any questions yet.", "你还没有提出问题。") :
-                 activeTab === "graph"   ? tRX(language, "No graph-derived reasoning tasks in this scope.", "此范围内暂无来自图谱的推理任务。") :
-                                           tRX(language, "Select a reasoning task from the left, or ask a new question.", "从左侧选择推理任务，或新建问题。")}
+                {activeTab === "graph"
+                  ? tRX(language, "No graph-derived reasoning tasks in this scope.", "此范围内暂无来自图谱的推理任务。")
+                  : tRX(language, "You haven't asked any questions yet.", "你还没有提出问题。")}
               </div>
               <button className="btn primary" onClick={() => setAskMode(true)}>+ {tRX(language, "Ask a new question", "新建问题")}</button>
             </div>
@@ -1670,7 +1663,7 @@ function Reasoning({ tenant, language }) {
                   <span className="type">{tRX(language, "Reasoning Task", "推理任务")}</span>
                   <span className="sep">/</span>
                   <span>{task.canonical_key}</span>
-                  {task.center_node && <><span className="sep">·</span><span>{tRX(language, "scope", "范围")} {task.center_node} · d{task.depth || 1} · n{task.limit || 200}</span></>}
+                  {task.center_node && <><span className="sep">·</span><span>{tRX(language, "scope", "定点")} {task.center_node} · d{task.depth || 1} · n{task.limit || 200}</span></>}
                   <span style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center" }}>
                     {isLoadingDetail && (
                       <span className="pill" style={{ fontSize: 9 }}>
@@ -1733,7 +1726,7 @@ function Reasoning({ tenant, language }) {
                        count={showRunning ? (isTaskRunning ? `${tRX(language, "polling", "轮询")} · ${pollTick}` : tRX(language, "running…", "运行中…")) : isStaleActive ? tRX(language, "stale", "已陈旧") : finding ? statusTextRX(finding.status || "draft", language) : tRX(language, "no answer", "暂无答案")}
                        actions={shouldRerun ? (
                          <button className="btn xs" onClick={runTask} disabled={running}
-                                 title={tRX(language, "Create a new task with same question/scope", "创建同问题/范围的新任务")}>
+                                 title={tRX(language, "Create a new task with same question/scope", "创建同问题/定点设置的新任务")}>
                            {running ? tRX(language, "Rerunning…", "重新运行中…") : "↻ " + tRX(language, "Rerun (new task)", "重新运行（新任务）")}
                          </button>
                        ) : null}
@@ -1778,7 +1771,7 @@ function Reasoning({ tenant, language }) {
                         </span>
                       </div>
                       <div style={{ color: "var(--muted)", fontSize: 12, lineHeight: 1.55 }}>
-                        {tRX(language, "Running scoped reasoning over", "正在针对")} <span style={{ color: "var(--text)" }}>{task.center_node}</span> {tRX(language, "(depth", "执行范围推理（深度")} {task.depth || 1}, {tRX(language, "limit", "上限")} {task.limit || 200}).
+                        {tRX(language, "Running scoped reasoning over", "正在针对")} <span style={{ color: "var(--text)" }}>{task.center_node}</span> {tRX(language, "(depth", "执行定点推理（深度")} {task.depth || 1}, {tRX(language, "limit", "上限")} {task.limit || 200}).
                       </div>
                       <TraceLog events={liveTrace} />
                       <div style={{ display: "flex", gap: 8 }}>
@@ -1843,7 +1836,7 @@ function Reasoning({ tenant, language }) {
                       {shouldRerun && (
                         <div style={{ paddingTop: 12, borderTop: "1px solid var(--line)", display: "flex", gap: 8, alignItems: "center" }}>
                           <button className="btn primary" onClick={runTask} disabled={running}
-                                  title={tRX(language, "Create a new task with the same question and scope, and run it.", "创建同问题和范围的新任务并运行。")}>
+                                  title={tRX(language, "Create a new task with the same question and scope, and run it.", "创建同问题和定点设置的新任务并运行。")}>
                             {running ? tRX(language, "Rerunning…", "重新运行中…") : "↻ " + tRX(language, "Rerun (new task)", "重新运行（新任务）")}
                           </button>
                           {isClosed && <span style={{ fontSize: 11, color: "var(--muted)" }}>{tRX(language, "Task is closed — rerun creates a fresh task.", "任务已关闭，重新运行会创建新任务。")}</span>}
@@ -1881,7 +1874,7 @@ function Reasoning({ tenant, language }) {
                       <span style={{ color: "var(--dim)", fontFamily: "var(--font-mono)", fontSize: 12 }}>{backendRunning ? tRX(language, "No conclusion yet — task is still running.", "暂无结论，任务仍在运行。") : tRX(language, "No conclusion yet.", "暂无结论。")}</span>
                       {shouldRerun && (
                         <button className="btn primary" onClick={runTask} disabled={running}
-                                title={tRX(language, "Create a new task with the same question and scope, and run it.", "创建同问题和范围的新任务并运行。")}>
+                                title={tRX(language, "Create a new task with the same question and scope, and run it.", "创建同问题和定点设置的新任务并运行。")}>
                           {running ? tRX(language, "Rerunning…", "重新运行中…") : "↻ " + tRX(language, "Rerun (new task)", "重新运行（新任务）")}
                         </button>
                       )}
@@ -2012,44 +2005,9 @@ function Reasoning({ tenant, language }) {
             />
           ) : (
           <React.Fragment>
-          {askMode ? (
-            <div className="section">
-              <div className="section-body" style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--muted)", lineHeight: 1.55 }}>
-                {tRX(language, "Composing a new question in the center panel.", "正在中间面板中撰写新问题。")}
-              </div>
-            </div>
-          ) : (
-          <React.Fragment>
+          {!askMode && (
           <div className="section">
-            <div className="section-head"><span>{tRX(language, "Ask with scope", "按范围提问")}</span></div>
-            <div className="section-body">
-              <form onSubmit={submitQuestion} style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                <div>
-                  <div className="eyebrow" style={{ marginBottom: 4 }}>{tRX(language, "Question", "问题")}</div>
-                  <textarea className="textarea" rows={3} value={question} onChange={onQuestionChangeWithExtract}
-                            placeholder={(tenant && tenant.id) === "creditcardfraud" ? tRX(language, "Which transaction has elevated fraud risk?", "哪笔交易存在更高欺诈风险？") : tRX(language, "Why is Employee #4 workload unusual?", "为什么 Employee #4 的工作量异常？")} />
-                </div>
-                <EntityPicker tenant={tenant} centerNode={centerNode} setCenterNode={setCenterNode} question={question} setQuestion={setQuestion} compact language={language} />
-                <div style={{ display: "flex", gap: 6 }}>
-                  <div style={{ flex: 1 }}>
-                    <div className="eyebrow" style={{ marginBottom: 4 }}>{tRX(language, "Depth (max)", "深度（上限）")}</div>
-                    <input className="input" type="number" min={1} max={3} value={depth} onChange={e => setDepth(+e.target.value)} />
-                  </div>
-                  <div style={{ flex: 1 }}>
-                    <div className="eyebrow" style={{ marginBottom: 4 }}>{tRX(language, "Limit", "上限")}</div>
-                    <input className="input" type="number" value={limit} onChange={e => setLimit(+e.target.value)} />
-                  </div>
-                </div>
-                <div style={{ fontSize: 10, color: "var(--muted)", marginTop: -4 }}>
-                  {tRX(language, "Reasoning starts at depth 1 and escalates automatically if evidence is thin.", "推理从深度 1 开始，证据不足时会自动扩大范围。")}
-                </div>
-                <button className="btn primary" type="submit" disabled={submitting}>{submitting ? tRX(language, "Creating…", "创建中…") : "↗ " + tRX(language, "Create scoped question", "创建范围问题")}</button>
-              </form>
-            </div>
-          </div>
-
-          <div className="section">
-            <div className="section-head"><span>{tRX(language, "Follow-up in scope", "范围内追问")}</span></div>
+            <div className="section-head"><span>{tRX(language, "Follow-up in scope", "定点内追问")}</span></div>
             <div className="section-body">
               <textarea className="textarea" rows={3} value={followup} onChange={e => setFollowup(e.target.value)}
                         placeholder={tRX(language, "What evidence would change this conclusion?", "什么证据会改变这个结论？")} style={{ marginBottom: 8 }} />
@@ -2062,10 +2020,7 @@ function Reasoning({ tenant, language }) {
               }} disabled={!followup.trim() || !task}>{tRX(language, "Create follow-up", "创建追问")}</button>
             </div>
           </div>
-          </React.Fragment>
           )}
-
-          <OntologyBasisPanel task={task} tenant={tenant} language={language} />
 
           <ApprovedFindingRegistry
             findings={approvedFindingsRegistry}
@@ -2077,15 +2032,6 @@ function Reasoning({ tenant, language }) {
             highlightedFindingKey={highlightedFindingKey}
             language={language}
           />
-
-          <div className="section">
-            <div className="section-head"><span>{tRX(language, "Write boundary", "写入边界")}</span></div>
-            <div className="section-body">
-              <div style={{ fontSize: 11, color: "var(--muted)", lineHeight: 1.55 }}>
-                {tRX(language, "Reasoning agents can only write", "推理 agent 只能写入")} <span style={{ color: "var(--changes)" }}>{tRX(language, "draft", "草稿")}</span> {tRX(language, "findings and action proposals. Structural facts (links, properties, classifications) require a separate canonical write proposal and a stronger approval gate.", "发现和行动建议。结构性事实（链接、属性、分类）需要单独的正式写入提案和更强的审批关口。")}
-              </div>
-            </div>
-          </div>
 
           </React.Fragment>
           )}
@@ -2739,41 +2685,6 @@ function ontologyBasisLabel(key) {
   return labels[key] || key;
 }
 
-function OntologyBasisPanel({ task, tenant, language }) {
-  if (!task) return null;
-  const scope = task.scope || {};
-  const keys = new Set();
-  (scope.allowed_link_keys || []).forEach(k => keys.add(k));
-  (scope.allowed_node_types || []).forEach(t => keys.add("object:" + String(t).toLowerCase()));
-  ((task.evidence_paths || [])).forEach(e => {
-    const key = ontologyBasisKey(e, { src: e.source_ref || e.source || "" });
-    if (key) keys.add(key);
-  });
-  const list = [...keys].filter(Boolean);
-  if (!list.length) return null;
-  const tenantId = tenant ? tenant.id : "default";
-  return (
-    <div className="section">
-      <div className="section-head"><span>{tRX(language, "Ontology basis", "本体依据")}</span><span className="ct">{list.length}</span></div>
-      <div className="section-body" style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-        {list.map(key => (
-          <a key={key}
-             className="btn ghost"
-             href={`/?screen=ontology&tenant=${encodeURIComponent(tenantId)}&artifact=${encodeURIComponent(key)}`}
-             style={{ justifyContent: "space-between", gap: 10 }}
-             title={tRX(language, "Open full ontology governance details in Ontology.", "在 Ontology 中打开完整本体治理详情。")}>
-            <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{ontologyBasisLabel(key)}</span>
-            <span style={{ color: "var(--accent)", flexShrink: 0 }}>{tRX(language, "View in Ontology", "在 Ontology 中查看")}</span>
-          </a>
-        ))}
-        <div style={{ fontSize: 11, color: "var(--muted)", lineHeight: 1.55 }}>
-          {tRX(language, "Compact basis only. Detailed source mapping, approval audit, canonical state, and graph eligibility live in Ontology.", "这里只显示紧凑依据。详细源映射、审批审计、正式状态和图谱资格在 Ontology 中查看。")}
-        </div>
-      </div>
-    </div>
-  );
-}
-
 function ApprovedFindingRegistry({ findings, query, tenant, filters, setFilters, setActionMsg, highlightedFindingKey, language }) {
   const list = findings || [];
   const tenantId = tenant ? tenant.id : "default";
@@ -3388,10 +3299,10 @@ function AskHero({ tenant, question, setQuestion, centerNode, setCenterNode, dep
           </button>
         </div>
         <h1 style={{ fontSize: 28, fontWeight: 600, margin: "0 0 8px 0", lineHeight: 1.15 }}>
-          {isFraudTenant ? tRX(language, "Ask a fraud-scoped question.", "提出欺诈范围问题。") : tRX(language, "Ask a scoped question.", "提出范围问题。")}
+          {isFraudTenant ? tRX(language, "Ask a fraud-scoped question.", "提出欺诈相关的定点问题。") : tRX(language, "Ask a scoped question.", "提出定点问题。")}
         </h1>
         <p style={{ color: "var(--muted)", fontSize: 14, lineHeight: 1.55, margin: "0 0 24px 0", maxWidth: "60ch" }}>
-          {tRX(language, "The agent reasons only over the approved graph and live source objects for this tenant. A scoped question pins a center node, depth, and limit — and produces a", "Agent 只基于该租户的已批准图谱和 live source 对象推理。范围问题会固定中心节点、深度和上限，并生成可审核的")} <span style={{ color: "var(--changes)" }}>{tRX(language, "draft", "草稿")}</span> {tRX(language, "finding that you can review.", "发现。")}
+          {tRX(language, "The agent reasons only over the approved graph and live source objects for this tenant. A scoped question pins a center node, depth, and limit — and produces a", "Agent 只基于该租户的已批准图谱和 live source 对象推理。定点问题会固定中心节点、深度和上限，并生成可审核的")} <span style={{ color: "var(--changes)" }}>{tRX(language, "draft", "草稿")}</span> {tRX(language, "finding that you can review.", "发现。")}
         </p>
 
         <form onSubmit={onSubmit}>
@@ -3456,7 +3367,7 @@ function AskHero({ tenant, question, setQuestion, centerNode, setCenterNode, dep
 
           <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
             <button type="submit" className="btn primary" style={{ padding: "10px 18px", fontSize: 12 }} disabled={!question.trim() || submitting}>
-              {submitting ? tRX(language, "Creating…", "创建中…") : "↗ " + tRX(language, "Create scoped question", "创建范围问题")}
+              {submitting ? tRX(language, "Creating…", "创建中…") : "↗ " + tRX(language, "Create scoped question", "创建定点问题")}
             </button>
             <button type="button" className="btn ghost" onClick={onCancel}>{tRX(language, "Cancel", "取消")}</button>
           </div>
@@ -3516,7 +3427,7 @@ function AskHero({ tenant, question, setQuestion, centerNode, setCenterNode, dep
         <div style={{ marginTop: 32, padding: "14px 16px", border: "1px solid var(--line)", background: "var(--bg-2)" }}>
           <div className="eyebrow" style={{ marginBottom: 6 }}>{tRX(language, "How this works", "工作方式")}</div>
           <ol style={{ margin: 0, paddingLeft: 18, color: "var(--muted)", fontSize: 12, lineHeight: 1.7 }}>
-            <li>{tRX(language, "Create a scoped question — pinned to a center node, depth, and limit on the approved graph.", "创建范围问题：固定已批准图谱中的中心节点、深度和上限。")}</li>
+            <li>{tRX(language, "Create a scoped question — pinned to a center node, depth, and limit on the approved graph.", "创建定点问题：固定已批准图谱中的中心节点、深度和上限。")}</li>
             <li>{tRX(language, "Run reasoning. The agent produces a", "运行推理。Agent 会生成带证据链的")} <span style={{ color: "var(--changes)" }}>{tRX(language, "draft", "草稿")}</span> {tRX(language, "conclusion with an evidence chain.", "结论。")}</li>
             <li>{tRX(language, "Review the evidence and approve, request changes, or reject the finding.", "复核证据后批准、要求修改或拒绝发现。")}</li>
             <li>{tRX(language, "Approval cites the finding in the approved-finding layer — it does", "批准只会把发现引用到已批准发现层，")} <strong style={{ color: "var(--text)" }}>{tRX(language, "not", "不会")}</strong> {tRX(language, "modify the canonical ontology or graph.", "修改正式本体或图谱。")}</li>
@@ -3528,7 +3439,7 @@ function AskHero({ tenant, question, setQuestion, centerNode, setCenterNode, dep
 }
 
 /* ---------------- EntityPicker ----------------
-   Reusable entity type + search picker. Used in both AskHero and sidebar "Ask with scope". */
+   Reusable entity type + search picker. Used by AskHero. */
 function EntityPicker({ tenant, centerNode, setCenterNode, question, setQuestion, compact, language, showSuggestions = true, onPickedTypeChange, onEntitiesChange }) {
   const tenantId = tenant ? tenant.id : "default";
 
@@ -3588,7 +3499,8 @@ function EntityPicker({ tenant, centerNode, setCenterNode, question, setQuestion
         setEntitiesLoading(false);
         onEntitiesChange && onEntitiesChange(data.instances || []);
         if (!prevLabelRef.current && centerNode) {
-          const match = (data.instances || []).find(e => e.id === centerNode);
+          const bareId = centerNode.includes(":") ? centerNode.slice(centerNode.indexOf(":") + 1) : centerNode;
+          const match = (data.instances || []).find(e => e.id === bareId);
           if (match) prevLabelRef.current = match.label || match.id;
         }
       })
@@ -3609,7 +3521,7 @@ function EntityPicker({ tenant, centerNode, setCenterNode, question, setQuestion
 
   function selectEntity(ent) {
     const oldCenterNode = centerNode || "";
-    setCenterNode(ent.id);
+    setCenterNode((ent.type || pickedType) + ":" + ent.id);
     const newLabel = ent.label || ent.id;
     setEntityQuery(newLabel);
     setShowDropdown(false);
@@ -3680,7 +3592,7 @@ function EntityPicker({ tenant, centerNode, setCenterNode, question, setQuestion
               boxShadow: "0 8px 24px rgba(0,0,0,0.35)",
             }}>
               {entities.map(ent => {
-                const selected = centerNode === ent.id;
+                const selected = centerNode === (ent.type || pickedType) + ":" + ent.id;
                 return (
                   <div key={ent.id}
                        onClick={() => selectEntity(ent)}

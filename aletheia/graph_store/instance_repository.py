@@ -238,6 +238,12 @@ class GraphInstanceRepository:
             entry = {"artifact": f"object:{name}", "type_name": name}
             if via != name:
                 entry["resolves_via"] = via
+            # Tenant-curated reasoning focus (see propose_node_type's
+            # reasoning_focus param) -- what matters when reasoning about
+            # THIS type is business/schema-specific, so it's forwarded
+            # verbatim from the node type's own approved ontology payload,
+            # never named here.
+            entry["reasoning_focus"] = node_type.get("reasoning_focus") or []
             config[name.lower()] = entry
         return config
 
@@ -258,10 +264,11 @@ class GraphInstanceRepository:
         except Exception:
             return []
         needle = str(query or "").strip().lower()
+        vids = [_bytes_to_str(row.values[0].get_sVal()) for row in result.rows()]
+        fetched = self._fetch_vertices(vids)
         instances: list[dict[str, Any]] = []
-        for row in result.rows():
-            vid = _bytes_to_str(row.values[0].get_sVal())
-            vertex = self._fetch_vertex(vid)
+        for vid in vids:
+            vertex = fetched.get(vid)
             if vertex is None:
                 continue
             label = vertex["label"]
@@ -335,6 +342,38 @@ class GraphInstanceRepository:
             return None
         return _vertex_from_value(rows[0].values[0])
 
+    def _fetch_vertices(self, vids: list[str]) -> dict[str, dict[str, Any]]:
+        """Batch form of `_fetch_vertex` -- one `FETCH PROP ON * "v1","v2",...`
+        round trip for many vids instead of one round trip per vid. Callers
+        that previously fetched vertices one at a time in a loop (each a
+        separate network hop to Nebula) were spending the overwhelming
+        majority of neighborhood()/full_graph()'s wall-clock time on this
+        alone (measured: ~3ms/vertex sequential vs. a single query here).
+        Chunked so one call's query string/row count stays bounded even
+        when callers pass the full 300-vid node_limit ceiling. Missing/
+        unreachable vids are simply absent from the returned dict, same as
+        `_fetch_vertex` returning None for them."""
+        ordered_vids = [str(v) for v in dict.fromkeys(vids) if v]
+        if not ordered_vids:
+            return {}
+        out: dict[str, dict[str, Any]] = {}
+        chunk_size = 200
+        for start in range(0, len(ordered_vids), chunk_size):
+            chunk = ordered_vids[start:start + chunk_size]
+            try:
+                self._ensure_connected()
+                id_list = ", ".join(f'"{_escape(v)}"' for v in chunk)
+                result = self._client.execute_query(f'FETCH PROP ON * {id_list} YIELD vertex AS v;')
+            except Exception:
+                continue
+            for row in result.rows():
+                if not row.values:
+                    continue
+                vertex = _vertex_from_value(row.values[0])
+                if vertex and vertex.get("id"):
+                    out[vertex["id"]] = vertex
+        return out
+
     def _fetch_label(self, vid: str) -> str:
         vertex = self._fetch_vertex(vid)
         return vertex["label"] if vertex else ""
@@ -343,7 +382,18 @@ class GraphInstanceRepository:
         vertex = self._fetch_vertex(instance_id)
         if vertex is None:
             return None
+        # Spread the vertex's real properties (title, state, created_at,
+        # ...) in first so id/label/type (computed above, not raw Nebula
+        # properties) always win on any name collision. Without this, every
+        # caller downstream of this method -- ReasoningEngine._gather_
+        # center_data's `props` (via _format_properties, which reads
+        # anything in this dict beyond id/label/type), _compose's
+        # "{label} attributes" key_fact, _build_narrative's identity-prop
+        # lookup -- silently saw an empty property set for every
+        # graph-native entity, even though _fetch_vertex above already
+        # fetched the real properties from Nebula.
         return {
+            **vertex.get("properties", {}),
             "id": vertex["id"],
             "label": vertex["label"],
             "type": vertex["types"][0] if vertex["types"] else object_type,
@@ -399,12 +449,11 @@ class GraphInstanceRepository:
             if len(node_ids) >= limit:
                 break
 
-        nodes: list[dict[str, Any]] = []
-        for nid in node_ids:
-            if nid == instance_id:
-                nodes.append({"id": nid, "type": center_type, "label": center["label"]})
-                continue
-            neighbor = self._fetch_vertex(nid)
+        other_ids = [nid for nid in node_ids if nid != instance_id]
+        fetched = self._fetch_vertices(other_ids)
+        nodes: list[dict[str, Any]] = [{"id": instance_id, "type": center_type, "label": center["label"]}]
+        for nid in other_ids:
+            neighbor = fetched.get(nid)
             if neighbor is None:
                 nodes.append({"id": nid, "type": object_type, "label": ""})
             else:
@@ -466,9 +515,10 @@ class GraphInstanceRepository:
         if not vids:
             return None
 
+        fetched = self._fetch_vertices(vids)
         nodes: list[dict[str, Any]] = []
         for vid in vids:
-            vertex = self._fetch_vertex(vid)
+            vertex = fetched.get(vid)
             if vertex is None:
                 continue
             nodes.append({

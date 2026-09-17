@@ -1531,6 +1531,197 @@ class TestSummarizeEntityDescription(unittest.TestCase):
         self.assertEqual(result.description, "An entity named X.")
 
 
+class TestSynthesizeRelationInsight(unittest.TestCase):
+    """synthesize_relation_insight: turns a relation_summary list into a
+    genuine judgment -- see InsightSynthesisResult's docstring for why a
+    string template alone can't do this."""
+
+    SAMPLE_RELATION_SUMMARY = [
+        {"relation": "TOUCHES", "edge_count": 2, "sample_labels": ["file_a.go", "file_b.go"], "description": "This commit modifies this file."},
+        {"relation": "PARENT_COMMIT", "edge_count": 1, "sample_labels": ["commit_x"], "description": None},
+    ]
+
+    def test_mocked_call_returns_insight(self):
+        planner = LLMPlanner(model="mock-model")
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock()]
+        mock_response.choices[0].message.content = json.dumps(
+            {"insight": "This commit touches two files in the same package as its parent, suggesting an incremental follow-up change rather than a new feature."}
+        )
+        with patch("litellm.completion", return_value=mock_response):
+            result = planner.synthesize_relation_insight(
+                "kb_commit_1", "Summarize kb_commit_1", self.SAMPLE_RELATION_SUMMARY,
+            )
+        self.assertIn("incremental follow-up", result.insight)
+        self.assertFalse(result.used_fallback)
+
+    def test_empty_label_returns_error_not_crash(self):
+        planner = LLMPlanner(model="mock-model")
+        result = planner.synthesize_relation_insight("", "q", self.SAMPLE_RELATION_SUMMARY)
+        self.assertEqual(result.insight, "")
+        self.assertTrue(result.error)
+
+    def test_empty_relation_summary_returns_error_not_crash(self):
+        planner = LLMPlanner(model="mock-model")
+        result = planner.synthesize_relation_insight("kb_commit_1", "q", [])
+        self.assertEqual(result.insight, "")
+        self.assertTrue(result.error)
+
+    def test_llm_error_triggers_fallback_empty_insight(self):
+        planner = LLMPlanner(model="mock-model")
+        with patch("litellm.completion", side_effect=Exception("boom")):
+            result = planner.synthesize_relation_insight("kb_commit_1", "q", self.SAMPLE_RELATION_SUMMARY)
+        self.assertTrue(result.used_fallback)
+        self.assertEqual(result.insight, "")
+
+    def test_malformed_response_degrades_to_fallback_not_exception(self):
+        planner = LLMPlanner(model="mock-model")
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock()]
+        mock_response.choices[0].message.content = "not json at all"
+        mock_response.choices[0].finish_reason = "stop"
+        with patch("litellm.completion", return_value=mock_response):
+            result = planner.synthesize_relation_insight("kb_commit_1", "q", self.SAMPLE_RELATION_SUMMARY)
+        self.assertTrue(result.used_fallback)
+        self.assertEqual(result.insight, "")
+
+    def test_retries_on_transient_error_then_succeeds(self):
+        planner = LLMPlanner(model="mock-model")
+        valid_response = MagicMock()
+        valid_response.choices = [MagicMock()]
+        valid_response.choices[0].finish_reason = "stop"
+        valid_response.choices[0].message.content = json.dumps({"insight": "Notable follow-up commit."})
+        with patch("litellm.completion", side_effect=[Exception("transient"), valid_response]):
+            result = planner.synthesize_relation_insight("kb_commit_1", "q", self.SAMPLE_RELATION_SUMMARY)
+        self.assertEqual(result.insight, "Notable follow-up commit.")
+        self.assertFalse(result.used_fallback)
+
+    def test_writes_in_requested_language(self):
+        planner = LLMPlanner(model="mock-model")
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock()]
+        mock_response.choices[0].message.content = json.dumps({"insight": "看起来是增量修复。"})
+        with patch("litellm.completion", return_value=mock_response) as mock_completion:
+            result = planner.synthesize_relation_insight(
+                "kb_commit_1", "总结 kb_commit_1", self.SAMPLE_RELATION_SUMMARY, language="zh",
+            )
+        self.assertEqual(result.insight, "看起来是增量修复。")
+        system_content = mock_completion.call_args.kwargs["messages"][0]["content"]
+        self.assertIn("Chinese", system_content)
+
+    def test_writes_in_an_arbitrary_requested_language(self):
+        # resolve_output_language passes any explicit code through
+        # unrestricted -- confirms the prompt genuinely generalizes beyond
+        # zh/en, not just a hardcoded two-way switch.
+        planner = LLMPlanner(model="mock-model")
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock()]
+        mock_response.choices[0].message.content = json.dumps({"insight": "これは増分修正です。"})
+        with patch("litellm.completion", return_value=mock_response) as mock_completion:
+            result = planner.synthesize_relation_insight(
+                "kb_commit_1", "summarize kb_commit_1", self.SAMPLE_RELATION_SUMMARY, language="ja",
+            )
+        self.assertEqual(result.insight, "これは増分修正です。")
+        system_content = mock_completion.call_args.kwargs["messages"][0]["content"]
+        self.assertIn("Japanese", system_content)
+
+    def test_writes_in_a_language_outside_the_display_name_table(self):
+        # A code with no entry in LANGUAGE_DISPLAY_NAMES must still produce
+        # a coherent, non-crashing prompt via the ISO-code fallback string
+        # -- confirms the table is a convenience, not a restriction.
+        planner = LLMPlanner(model="mock-model")
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock()]
+        mock_response.choices[0].message.content = json.dumps({"insight": "insight in an unlisted language"})
+        with patch("litellm.completion", return_value=mock_response) as mock_completion:
+            result = planner.synthesize_relation_insight(
+                "kb_commit_1", "q", self.SAMPLE_RELATION_SUMMARY, language="sw",
+            )
+        self.assertEqual(result.insight, "insight in an unlisted language")
+        system_content = mock_completion.call_args.kwargs["messages"][0]["content"]
+        self.assertIn("'sw'", system_content)
+
+    def test_falls_back_to_sniffing_question_when_language_missing(self):
+        # Regression test: a task created with no scope.language (an older
+        # task, or a caller that forgot to pass one) must still get a
+        # Chinese-language insight for a Chinese question -- matching
+        # wants_zh_output's fallback, which the deterministic template
+        # conclusion already relies on. Before this fix, a missing
+        # `language` silently meant English regardless of the question,
+        # so the LLM insight (which wins over the template when present)
+        # didn't match the page's language while the template would have.
+        planner = LLMPlanner(model="mock-model")
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock()]
+        mock_response.choices[0].message.content = json.dumps({"insight": "这是一次增量修复。"})
+        with patch("litellm.completion", return_value=mock_response) as mock_completion:
+            result = planner.synthesize_relation_insight(
+                "kb_commit_1", "总结 kb_commit_1", self.SAMPLE_RELATION_SUMMARY, language=None,
+            )
+        self.assertEqual(result.insight, "这是一次增量修复。")
+        system_content = mock_completion.call_args.kwargs["messages"][0]["content"]
+        self.assertIn("Chinese", system_content)
+
+    def test_entity_facts_reach_the_prompt(self):
+        # Regression test: relation_summary only ever describes edges --
+        # an entity's own attributes (an Issue's title/state, not just its
+        # AUTHORED/BELONGS_TO edges) must be passed separately via
+        # entity_facts or the LLM has no way to know them, and (as observed
+        # live) declares "insufficient evidence" even when the entity has
+        # a real title/status sitting unused right next to it.
+        planner = LLMPlanner(model="mock-model")
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock()]
+        mock_response.choices[0].message.content = json.dumps({"insight": "This closed issue reports a redis shard cluster failure."})
+        entity_facts = [{"label": "kb_issue_10041 attributes", "value": "title: redis shard cluster can not use; state: closed"}]
+        with patch("litellm.completion", return_value=mock_response) as mock_completion:
+            result = planner.synthesize_relation_insight(
+                "kb_issue_10041", "总结 kb_issue_10041", self.SAMPLE_RELATION_SUMMARY, entity_facts=entity_facts,
+            )
+        self.assertEqual(result.insight, "This closed issue reports a redis shard cluster failure.")
+        user_content = mock_completion.call_args.kwargs["messages"][1]["content"]
+        self.assertIn("redis shard cluster can not use", user_content)
+        self.assertIn("state: closed", user_content)
+
+    def test_focus_dimensions_reach_the_prompt(self):
+        # Regression test: without focus_dimensions, the LLM has no signal
+        # for what a reviewer of THIS entity type actually cares about
+        # (an Issue's urgency vs. a PullRequest's review latency) -- the
+        # tenant-curated dimension name/description/signals must reach the
+        # prompt verbatim (see propose_node_type's reasoning_focus param).
+        planner = LLMPlanner(model="mock-model")
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock()]
+        mock_response.choices[0].message.content = json.dumps({"insight": "Closed in 5 days -- fast turnaround for a shard-cluster outage."})
+        focus_dimensions = [{
+            "name": "urgency_and_response_time",
+            "description": "How quickly was this issue triaged and closed?",
+            "signals": ["state", "created_at", "closed_at"],
+        }]
+        with patch("litellm.completion", return_value=mock_response) as mock_completion:
+            result = planner.synthesize_relation_insight(
+                "kb_issue_10041", "总结 kb_issue_10041", self.SAMPLE_RELATION_SUMMARY, focus_dimensions=focus_dimensions,
+            )
+        self.assertEqual(result.insight, "Closed in 5 days -- fast turnaround for a shard-cluster outage.")
+        user_content = mock_completion.call_args.kwargs["messages"][1]["content"]
+        self.assertIn("urgency_and_response_time", user_content)
+        self.assertIn("How quickly was this issue triaged and closed?", user_content)
+        self.assertIn("created_at", user_content)
+
+    def test_no_focus_dimensions_renders_placeholder_not_empty(self):
+        # A tenant/type with nothing curated (the common case today) must
+        # get the exact same prompt shape as before this param existed --
+        # confirms zero behavior change for every uncurated type/tenant.
+        planner = LLMPlanner(model="mock-model")
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock()]
+        mock_response.choices[0].message.content = json.dumps({"insight": "insight"})
+        with patch("litellm.completion", return_value=mock_response) as mock_completion:
+            planner.synthesize_relation_insight("kb_commit_1", "q", self.SAMPLE_RELATION_SUMMARY)
+        user_content = mock_completion.call_args.kwargs["messages"][1]["content"]
+        self.assertIn("(no focus dimensions given)", user_content)
+
+
 class TestDecomposeQuestion(unittest.TestCase):
     """decompose_question: borrowed from StepChain GraphRAG -- see
     QuestionDecomposition's docstring."""

@@ -105,6 +105,48 @@ def display_label_from_question(question, fallback):
     return match.group(1) if match else fallback
 
 
+# Ordered script-detection fallback for when no explicit `language` is
+# given -- checked in order, first match wins. Not an allowlist of
+# "supported" languages (resolve_output_language's explicit-`language`
+# branch accepts ANY code a caller supplies, unrestricted); this table only
+# covers the question-sniffing fallback path, so it only needs to be as
+# broad as "scripts we can tell apart unambiguously by Unicode block."
+# Hiragana/Katakana is checked before the CJK Unified Ideographs range so
+# Japanese text (which mixes kanji with kana) resolves to "ja", not "zh".
+_SCRIPT_DETECTION_RULES = (
+    (re.compile(r"[\u3040-\u309f\u30a0-\u30ff]"), "ja"),
+    (re.compile(r"[\u4e00-\u9fff]"), "zh"),
+    (re.compile(r"[\uac00-\ud7a3]"), "ko"),
+    (re.compile(r"[\u0400-\u04ff]"), "ru"),
+    (re.compile(r"[\u0600-\u06ff]"), "ar"),
+    (re.compile(r"[\u0900-\u097f]"), "hi"),
+)
+
+
+def resolve_output_language(language, question=None, default="en"):
+    """Normalize `language` (or, failing that, sniff `question`) into a
+    lowercase ISO-639-1-ish code -- e.g. "zh", "ja", "es" -- not a boolean.
+    Any explicit `language` the caller supplies is trusted and returned
+    verbatim (after stripping a region/script suffix like "-CN"/"_TW"),
+    with NO allowlist restricting it to a fixed set -- this is what makes
+    the mechanism general rather than hardcoded to a single language pair.
+    Falls back to `_SCRIPT_DETECTION_RULES` against `question` only when
+    `language` is empty (older tasks created before scope.language existed,
+    or callers that don't pass one, e.g. scripts), then to `default`."""
+    if language:
+        code = str(language).strip().lower()
+        for sep in ("-", "_"):
+            if sep in code:
+                code = code.split(sep, 1)[0]
+                break
+        return code or default
+    text = question or ""
+    for pattern, code in _SCRIPT_DETECTION_RULES:
+        if pattern.search(text):
+            return code
+    return default
+
+
 def wants_zh_output(language, question=None):
     """Whether reasoning-conclusion text should render in Chinese. Prefers
     the explicit `language` the task was created with (the UI's own
@@ -112,16 +154,26 @@ def wants_zh_output(language, question=None):
     matches the setting the user is looking at -- and only falls back to
     sniffing the question text for CJK characters when no explicit language
     was recorded (older tasks created before this existed, or callers that
-    don't pass one, e.g. scripts)."""
-    if language:
-        return str(language).strip().lower().startswith("zh")
-    return bool(re.search(r"[\u4e00-\u9fff]", question or ""))
+    don't pass one, e.g. scripts). Thin boolean wrapper around
+    resolve_output_language, kept for the ~30 existing call sites across
+    this module/traversal.py/planner.py that only ever need a zh/en
+    decision for their hand-authored bilingual template text -- see
+    resolve_output_language for the general, non-boolean resolver."""
+    return resolve_output_language(language, question) == "zh"
 
 
-def plain_reasoning_title(question, label, ranked_paths, second_hop_paths=None, language=None):
+def plain_reasoning_title(question, label, ranked_paths, second_hop_paths=None, language=None, relation_summary=None):
     wants_zh = wants_zh_output(language, question)
     label = display_label_from_question(question, label)
     top_labels = _unique_labels(path.get("label") for path in (ranked_paths or []) if path.get("label"))[:3]
+    if not top_labels and relation_summary:
+        # SQL-derived ranked_paths is always empty for graph-native tenants
+        # (source_key_profile is retired) -- relation_summary (the actual
+        # relation types the center is connected through, e.g.
+        # PARENT_COMMIT/TOUCHES) is its graph-native equivalent, so reuse
+        # the exact same "main relationship paths" phrasing below instead
+        # of falling straight to the generic "risk profile" title.
+        top_labels = _unique_labels(item.get("relation") for item in relation_summary if item.get("relation"))[:3]
     if not top_labels:
         return f"{label} 风险画像" if wants_zh else f"{label} risk profile"
     if len(top_labels) == 1 and top_labels[0].lower() == str(label).lower():

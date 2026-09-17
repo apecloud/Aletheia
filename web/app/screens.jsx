@@ -464,6 +464,9 @@ function Ontology({ data, tenant, language }) {
                     <Panel eyebrow={tXS(language, "Canonical schema", "正式 schema")} title={tXS(language, "Definition payload", "定义 payload")} count={`v${selected.version}`} style={{ marginBottom: 16 }}>
                       <JsonView data={selected.payload || {}} />
                     </Panel>
+                    {selected.type === "ObjectType" && (
+                      <ReasoningFocusPanel selected={selected} canonicalKey={canonicalKey} tenantId={tenantId} language={language} />
+                    )}
                     <Panel eyebrow={tXS(language, "Source schema", "来源 schema")} title={tXS(language, "Field properties and mapping", "字段属性与映射")} count={selected.sourceSchema?.schema_source || "schema"} style={{ marginBottom: 16 }}>
                       <FieldPropertiesTable schema={selected.sourceSchema || {}} />
                       <JsonView data={selected.sourceSchema || {}} />
@@ -849,6 +852,139 @@ function MiniMetric({ label, value, tone }) {
       <div style={{ fontFamily: "var(--font-mono)", fontSize: 9, color: "var(--dim)", textTransform: "uppercase", letterSpacing: "0.08em" }}>{label}</div>
       <div style={{ marginTop: 2, fontFamily: "var(--font-mono)", fontSize: 15, color: tone ? `var(--${tone})` : "var(--text)" }}>{value}</div>
     </div>
+  );
+}
+
+function ReasoningFocusPanel({ selected, canonicalKey, tenantId, language }) {
+  const rules = (selected.payload || {}).reasoning_focus || [];
+  const [draft, setDraft] = useStateXS(null);
+  const [msg, setMsg] = useStateXS(null);
+  const [saving, setSaving] = useStateXS(false);
+  const editing = draft !== null;
+
+  function startEdit() {
+    setMsg(null);
+    setDraft(rules.map(r => ({
+      name: r.name || "",
+      description: r.description || "",
+      signals: (r.signals || []).join(", "),
+    })));
+  }
+
+  function cancelEdit() {
+    setDraft(null);
+    setMsg(null);
+  }
+
+  function updateDraftRow(i, field, value) {
+    setDraft(prev => prev.map((row, idx) => idx === i ? { ...row, [field]: value } : row));
+  }
+
+  function removeDraftRow(i) {
+    setDraft(prev => prev.filter((_, idx) => idx !== i));
+  }
+
+  function addDraftRow() {
+    setDraft(prev => [...prev, { name: "", description: "", signals: "" }]);
+  }
+
+  const canSave = editing && draft.every(r => r.name.trim());
+
+  async function saveDraft() {
+    if (!canSave || saving) return;
+    setSaving(true);
+    setMsg(null);
+    const nextReasoningFocus = draft
+      .filter(r => r.name.trim())
+      .map(r => ({
+        name: r.name.trim(),
+        description: r.description.trim(),
+        signals: r.signals.split(",").map(s => s.trim()).filter(Boolean),
+      }));
+    const nextPayload = { ...(selected.payload || {}), reasoning_focus: nextReasoningFocus };
+    try {
+      await window.AL_API.reviewAction(
+        canonicalKey,
+        "edit",
+        { payload: nextPayload, reviewer: "M. Aoki", reason: "Update reasoning focus rules." },
+        tenantId,
+      );
+      setDraft(null);
+      setMsg({ kind: "ok", msg: tXS(language, "Reasoning focus rules saved.", "推理焦点规则已保存。") });
+      window.dispatchEvent(new CustomEvent("aletheia:retry"));
+    } catch (e) {
+      setMsg({ kind: "err", msg: e.message || String(e) });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Panel
+      eyebrow={tXS(language, "Business reasoning", "业务推理")}
+      title={tXS(language, "Reasoning focus", "推理焦点")}
+      count={editing ? draft.length : rules.length}
+      actions={editing ? (
+        <div style={{ display: "flex", gap: 8 }}>
+          <button className="btn ghost" onClick={cancelEdit} disabled={saving}>{tXS(language, "Cancel", "取消")}</button>
+          <button className="btn approve" onClick={saveDraft} disabled={!canSave || saving}>{saving ? tXS(language, "Saving…", "保存中…") : tXS(language, "Save", "保存")}</button>
+        </div>
+      ) : (
+        <button className="btn ghost" onClick={startEdit}>{tXS(language, "Edit rules", "编辑规则")}</button>
+      )}
+      style={{ marginBottom: 16 }}
+    >
+      {msg && (
+        <div style={{
+          marginBottom: 10, fontFamily: "var(--font-mono)", fontSize: 11,
+          color: msg.kind === "ok" ? "var(--approved)" : "var(--rejected)",
+        }}>
+          {msg.msg}
+        </div>
+      )}
+      {!editing && rules.length === 0 && (
+        <div style={{ color: "var(--muted)", fontSize: 12, fontFamily: "var(--font-mono)" }}>
+          {tXS(language, "No reasoning focus curated for this type yet.", "该类型尚未设置推理焦点规则。")}
+        </div>
+      )}
+      {!editing && rules.length > 0 && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          {rules.map((r, i) => (
+            <div key={i} style={{ border: "1px solid var(--line)", padding: 10 }}>
+              <div style={{ fontWeight: 600, marginBottom: 4 }}>{r.name}</div>
+              <div style={{ color: "var(--muted)", fontSize: 12, lineHeight: 1.5, marginBottom: 6 }}>{r.description}</div>
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                {(r.signals || []).map((s, si) => (
+                  <span key={si} className="pill" style={{ fontSize: 10 }}>{s}</span>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+      {editing && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          {draft.map((row, i) => (
+            <div key={i} style={{ border: "1px solid var(--line)", padding: 10, display: "flex", flexDirection: "column", gap: 6 }}>
+              <div>
+                <div className="eyebrow" style={{ marginBottom: 4 }}>{tXS(language, "Name", "名称")}</div>
+                <input className="input" value={row.name} onChange={e => updateDraftRow(i, "name", e.target.value)} />
+              </div>
+              <div>
+                <div className="eyebrow" style={{ marginBottom: 4 }}>{tXS(language, "Description", "描述")}</div>
+                <textarea className="textarea" rows={2} value={row.description} onChange={e => updateDraftRow(i, "description", e.target.value)} />
+              </div>
+              <div>
+                <div className="eyebrow" style={{ marginBottom: 4 }}>{tXS(language, "Signals (comma-separated)", "信号（逗号分隔）")}</div>
+                <input className="input" value={row.signals} onChange={e => updateDraftRow(i, "signals", e.target.value)} />
+              </div>
+              <button className="btn ghost" style={{ alignSelf: "flex-end" }} onClick={() => removeDraftRow(i)}>{tXS(language, "Remove", "移除")}</button>
+            </div>
+          ))}
+          <button className="btn" onClick={addDraftRow}>{"+ " + tXS(language, "Add rule", "新增规则")}</button>
+        </div>
+      )}
+    </Panel>
   );
 }
 

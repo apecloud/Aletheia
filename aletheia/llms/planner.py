@@ -33,8 +33,23 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from aletheia.llms.hard_timeout import call_with_hard_timeout
+from aletheia.reasoning.finding_framework import resolve_output_language
 
 logger = logging.getLogger("LLMPlanner")
+
+# Convenience display names for synthesize_relation_insight's prompt -- not
+# a restriction. resolve_output_language returns an unrestricted code (any
+# explicit `language` the caller passes goes straight through, uncoerced),
+# and any code outside this table still produces a working instruction via
+# the ISO-code fallback string in synthesize_relation_insight, so the LLM
+# can be asked to write in any language, not just the ones listed here.
+LANGUAGE_DISPLAY_NAMES = {
+    "en": "English", "zh": "Chinese", "ja": "Japanese", "ko": "Korean",
+    "es": "Spanish", "fr": "French", "de": "German", "pt": "Portuguese",
+    "ru": "Russian", "ar": "Arabic", "hi": "Hindi", "it": "Italian",
+    "nl": "Dutch", "tr": "Turkish", "vi": "Vietnamese", "th": "Thai",
+    "id": "Indonesian",
+}
 
 
 # ---------------------------------------------------------------------------
@@ -170,6 +185,24 @@ class EntityDescriptionResult:
     stability of a bare type+label match, not context that varies by
     which passage happened to mention the entity."""
     description: str = ""
+    latency_ms: float = 0.0
+    model: str = ""
+    used_fallback: bool = False
+    error: str = ""
+    error_type: str = ""
+
+
+@dataclass
+class InsightSynthesisResult:
+    """Result of synthesizing a genuine insight from an entity's real
+    relations (see LLMPlanner.synthesize_relation_insight), as opposed to
+    _business_conclusion_from_traversal's template, which can only narrate
+    which edges exist ("X is connected to Y via Z") -- deciding whether a
+    pattern of relations is notable requires actual interpretation, which
+    is this method's whole point. used_fallback=True (never an exception)
+    on any failure -- the caller always has the template conclusion as a
+    deterministic, zero-latency safety net."""
+    insight: str = ""
     latency_ms: float = 0.0
     model: str = ""
     used_fallback: bool = False
@@ -1475,6 +1508,290 @@ Write a short description of this entity."""
             result.used_fallback = True
             result.latency_ms = (time.time() - start) * 1000
             logger.warning("LLM planner entity-description failed: %s", e)
+
+        self.last_result = result
+        return result
+
+    # ------------------------------------------------------------------
+    # Relation insight synthesis -- turns a template-shaped list of real
+    # relations into an actual judgment, since a string template can only
+    # narrate which edges exist, never decide whether that pattern is
+    # notable (see InsightSynthesisResult's docstring).
+    # ------------------------------------------------------------------
+
+    RELATION_INSIGHT_SYSTEM_PROMPT = """You look at a knowledge-graph entity's real relations (each with \
+a relation type, a plain-language description of what that relation type means when one is available, \
+how many such edges exist, and a few sample connected entities) and write ONE OR TWO SENTENCES of \
+genuine insight about this entity -- not a restatement of the connections themselves.
+
+Rules:
+1. Do NOT write sentences of the form "X is connected to Y via RELATION" or "X has N RELATION edges" -- \
+that raw connection list is already shown to the reader elsewhere; your job is to say something ABOUT \
+it: what's notable, what a reviewer should pay attention to, or whether the pattern looks unusual for \
+this kind of entity.
+2. Base the insight ONLY on the given entity facts and relations -- never invent facts, metrics, or \
+context not present in the evidence.
+3. If the facts and relations are too thin or generic to support a specific judgment, say plainly that \
+there isn't enough evidence for a substantive insight yet -- do not manufacture a false sense of \
+significance.
+4. If business focus dimensions are given below, prioritize your insight around them over generic \
+observations -- they tell you what a reviewer of this specific kind of entity actually cares about. \
+Each dimension's "signals" name which of the given entity facts/relations to look at for it.
+5. Write in {language_name}."""
+
+    RELATION_INSIGHT_USER_TEMPLATE = """Entity: {label}
+{question_line}
+Entity facts:
+{entity_facts}
+
+Relations:
+{relations}
+
+Business focus dimensions for this kind of entity:
+{focus_dimensions}
+
+Write your insight now."""
+
+    @staticmethod
+    def _format_relation_summary(relation_summary: list[dict]) -> str:
+        lines = []
+        for item in relation_summary[:8]:
+            relation = item.get("relation") or "relation"
+            count = item.get("edge_count") or 0
+            samples = item.get("sample_labels") or []
+            description = item.get("description") or ""
+            line = f"  - {relation}: {count} edge(s)"
+            if samples:
+                line += f", e.g. {', '.join(str(s) for s in samples[:3])}"
+            if description:
+                line += f" -- {description}"
+            lines.append(line)
+        return "\n".join(lines) if lines else "  (no relations given)"
+
+    @staticmethod
+    def _format_entity_facts(entity_facts: list[dict]) -> str:
+        """Format the same {label, value} key_facts shape _compose already
+        builds (entity attributes, question-path-plan notes, etc.) --
+        generic passthrough, no field names hardcoded here, since which
+        facts exist is entirely schema/tenant-dependent."""
+        lines = []
+        for item in (entity_facts or [])[:10]:
+            label = item.get("label")
+            value = item.get("value")
+            if not label or value in (None, ""):
+                continue
+            lines.append(f"  - {label}: {value}")
+        return "\n".join(lines) if lines else "  (no entity facts given)"
+
+    @staticmethod
+    def _format_focus_dimensions(focus_dimensions: list[dict]) -> str:
+        """Format the tenant-curated {name, description, signals} shape
+        (see propose_node_type's reasoning_focus param) -- generic
+        passthrough, no dimension names hardcoded here, since which
+        dimensions matter is entirely business/tenant-dependent. Empty for
+        any tenant/type that hasn't curated any (the common case today),
+        in which case this call behaves exactly as it did before this
+        param existed."""
+        lines = []
+        for item in (focus_dimensions or [])[:8]:
+            name = item.get("name")
+            description = item.get("description") or ""
+            if not name:
+                continue
+            line = f"  - {name}"
+            if description:
+                line += f": {description}"
+            signals = item.get("signals") or []
+            if signals:
+                line += f" (signals: {', '.join(str(s) for s in signals[:6])})"
+            lines.append(line)
+        return "\n".join(lines) if lines else "  (no focus dimensions given)"
+
+    @staticmethod
+    def _parse_relation_insight_response(content) -> dict | None:
+        if not isinstance(content, str):
+            return None
+
+        def valid(payload):
+            if not isinstance(payload, dict):
+                return None
+            insight = payload.get("insight")
+            if not isinstance(insight, str) or not insight.strip():
+                return None
+            return payload
+
+        try:
+            return valid(json.loads(content))
+        except (json.JSONDecodeError, TypeError):
+            pass
+        code_block_pattern = r"```(?:json)?\s*([\s\S]*?)```"
+        match = re.search(code_block_pattern, content)
+        if match:
+            try:
+                return valid(json.loads(match.group(1).strip()))
+            except (json.JSONDecodeError, TypeError):
+                pass
+        brace_pattern = r"\{[\s\S]*\}"
+        match = re.search(brace_pattern, content)
+        if match:
+            try:
+                return valid(json.loads(match.group(0)))
+            except (json.JSONDecodeError, TypeError):
+                pass
+        return None
+
+    def synthesize_relation_insight(
+        self, label: str, question: str | None, relation_summary: list[dict],
+        language: str | None = None, entity_facts: list[dict] | None = None,
+        focus_dimensions: list[dict] | None = None,
+    ) -> InsightSynthesisResult:
+        """Synthesize one genuine insight sentence from `relation_summary`
+        (the same {relation, edge_count, sample_labels, description} shape
+        _business_conclusion_from_traversal already builds/reads),
+        `entity_facts` (the entity's own attributes/other facts, the same
+        {label, value} shape ReasoningEngine._compose's key_facts already
+        builds -- e.g. an Issue's title/state, not just its edges), and
+        `focus_dimensions` (this entity type's tenant-curated business
+        focus -- e.g. an Issue's urgency/response-time, a PullRequest's
+        review-latency/blast-radius -- see propose_node_type's
+        reasoning_focus param; empty for any type that hasn't curated any,
+        in which case this steers nothing and behaves as before) --
+        see InsightSynthesisResult's docstring for why this exists."""
+        start = time.time()
+        result = InsightSynthesisResult()
+
+        if not label or not label.strip():
+            result.error = "empty label"
+            self.last_result = result
+            return result
+        if not relation_summary:
+            result.error = "empty relation_summary"
+            self.last_result = result
+            return result
+
+        # Same resolution mechanism as every other conclusion-text surface
+        # in the reasoning pipeline (see resolve_output_language's
+        # docstring): prefer the explicit language the task was created
+        # with, but fall back to script-sniffing the question when it's
+        # missing -- without this fallback, a task created with no
+        # scope.language (e.g. an older task, or a caller that forgot to
+        # pass one) would silently get an English insight even for a
+        # non-English question, while the deterministic template
+        # conclusion (which already uses this same resolver) correctly
+        # rendered in the question's language -- exactly the "conclusion
+        # doesn't match the page's language" bug this guards. Unlike the
+        # template path (which can only ever choose between two
+        # hand-authored zh/en sentences), this LLM call can genuinely write
+        # in whatever language `language` names -- resolve_output_language
+        # passes any explicit code through unrestricted, so this isn't
+        # limited to a fixed language list.
+        resolved_code = resolve_output_language(language, question)
+        language_name = LANGUAGE_DISPLAY_NAMES.get(resolved_code) or f"the language identified by the ISO 639-1 code '{resolved_code}'"
+        question_line = f"Question being investigated: {question}\n" if question and question.strip() else ""
+        system_prompt = self.RELATION_INSIGHT_SYSTEM_PROMPT.format(language_name=language_name)
+        user_msg = self.RELATION_INSIGHT_USER_TEMPLATE.format(
+            label=label, question_line=question_line,
+            entity_facts=self._format_entity_facts(entity_facts or []),
+            relations=self._format_relation_summary(relation_summary),
+            focus_dimensions=self._format_focus_dimensions(focus_dimensions or []),
+        )
+        json_instruction = (
+            "\n\nRespond with ONLY a JSON object in this exact format "
+            "(no markdown, no extra text):\n"
+            '{"insight": str}'
+        )
+
+        try:
+            from litellm import completion
+        except ImportError:
+            result.error = "litellm not installed"
+            result.error_type = "runtime"
+            result.used_fallback = True
+            result.latency_ms = (time.time() - start) * 1000
+            self.last_result = result
+            return result
+
+        parsed = None
+        raw_contents: list[str] = []
+        raw_content = ""
+        finish_reason = ""
+        last_exception: Exception | None = None
+        max_attempts = 1 + self._empty_response_retry_count() + self._transient_error_retry_count()
+
+        for attempt in range(1, max_attempts + 1):
+            try:
+                raw_response = call_with_hard_timeout(
+                    self._executor, completion,
+                    model=self.model,
+                    messages=[
+                        {"role": "system", "content": system_prompt + json_instruction},
+                        {"role": "user", "content": user_msg},
+                    ],
+                    timeout=self.timeout,
+                    temperature=self.temperature,
+                    **self._completion_kwargs(),
+                )
+
+                raw_contents = []
+                finish_reason = ""
+                if raw_response and raw_response.choices:
+                    choice = raw_response.choices[0]
+                    msg = choice.message
+                    raw_finish_reason = getattr(choice, "finish_reason", "")
+                    if isinstance(raw_finish_reason, str):
+                        finish_reason = raw_finish_reason
+                    raw_contents = self._response_text_candidates(msg)
+
+                last_exception = None
+                raw_content = raw_contents[0] if raw_contents else ""
+                for candidate in raw_contents:
+                    parsed = self._parse_relation_insight_response(candidate)
+                    if parsed is not None:
+                        raw_content = candidate
+                        break
+                if parsed is not None:
+                    break
+                if raw_contents or attempt == max_attempts:
+                    break
+                logger.warning(
+                    "LLM planner: empty relation-insight response, retrying attempt %d/%d",
+                    attempt + 1, max_attempts,
+                )
+            except Exception as e:
+                last_exception = e
+                if attempt == max_attempts:
+                    break
+                logger.warning(
+                    "LLM planner: relation-insight transient error (%s) on attempt %d/%d, retrying: %s",
+                    self.classify_error(str(e)), attempt, max_attempts, e,
+                )
+                time.sleep(self._retry_backoff_seconds())
+
+        try:
+            if parsed:
+                result.insight = str(parsed.get("insight", "")).strip()
+                result.model = self.model
+                result.latency_ms = (time.time() - start) * 1000
+            elif last_exception is not None:
+                result.error = str(last_exception)
+                result.error_type = self.classify_error(result.error)
+                result.used_fallback = True
+                result.latency_ms = (time.time() - start) * 1000
+                logger.warning("LLM planner relation-insight failed after retries: %s", last_exception)
+            else:
+                result.error = self._parse_failure_message(raw_contents, finish_reason)
+                result.error_type = "runtime_invalid"
+                result.used_fallback = True
+                result.latency_ms = (time.time() - start) * 1000
+                logger.warning(
+                    "LLM planner: relation-insight JSON invalid/parse failed, content[:200]=%r", raw_content[:200]
+                )
+        except Exception as e:
+            result.error = str(e)
+            result.error_type = self.classify_error(result.error)
+            result.used_fallback = True
+            result.latency_ms = (time.time() - start) * 1000
+            logger.warning("LLM planner relation-insight failed: %s", e)
 
         self.last_result = result
         return result

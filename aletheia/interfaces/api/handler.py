@@ -1142,6 +1142,11 @@ def main():
     # make network calls -- for the actual server process, default it on so
     # it isn't silently off just because nobody remembered to export it.
     os.environ.setdefault("ALETHEIA_LLM_PLANNER_ENABLED", "1")
+    # Relation-insight synthesis (traversal.py's _synthesize_relation_insight)
+    # is a separate LLM call site from the planner above -- same opt-in-for-
+    # tests/default-on-for-server convention, kept as its own flag so an
+    # operator can disable one without the other.
+    os.environ.setdefault("ALETHEIA_LLM_INSIGHT_ENABLED", "1")
     os.environ["ALETHEIA_PG_URL"] = args.db_url
     os.environ["ALETHEIA_MYSQL_URL"] = args.source_db_url
     registry = TenantRegistry.load(args.tenants_file)

@@ -1201,11 +1201,9 @@ a { color: inherit; text-decoration: none; }
    ==================================================== */
 .rx {
   display: grid;
-  /* Same proportional-column mechanism as .gx (GRAPH SCREEN above): panels
-     scale with viewport width between a readable floor and a sensible cap.
-     Reasoning's task list carries more text (questions, status pills) than
-     the graph's node list, so its floor/cap run a bit wider. */
-  grid-template-columns: minmax(360px, min(24%, 460px)) minmax(0, 1fr) minmax(300px, min(18%, 380px));
+  /* Same proportional-column split as .gx (GRAPH SCREEN above), kept
+     identical on purpose so the two screens feel consistent. */
+  grid-template-columns: minmax(320px, min(22%, 420px)) minmax(0, 1fr) minmax(280px, min(16%, 360px));
   flex: 1;
   min-height: 0;
 }

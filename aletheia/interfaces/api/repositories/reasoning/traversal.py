@@ -19,6 +19,7 @@ collapse.
 """
 
 import json
+import os
 import time
 from urllib.parse import quote
 from aletheia.reasoning.datalog_reasoner import DatalogReasoner
@@ -97,6 +98,7 @@ class TraversalMixin:
         scope_depth = depth_ceiling
         blocked = False
         previous_related_count = -1
+        full_graph_cache = {}
         for current_depth in range(1, depth_ceiling + 1):
             graph_context = self._scoped_graph_prompt_context(
                 tenant,
@@ -105,6 +107,7 @@ class TraversalMixin:
                 scope_limit,
                 scope_edge_limit,
                 demo_mode=demo_mode,
+                full_graph_cache=full_graph_cache,
             )
             if current_depth == 1 and not self._approved_or_explicit_demo_graph_context(graph_context):
                 blocked = True
@@ -365,9 +368,15 @@ class TraversalMixin:
             })
 
         graph_degree = graph_context.get("degree") or {}
+        # related_nodes' ids are always bare Nebula vertex ids (see
+        # compact_node/_scoped_graph_prompt_context), never "Type:Id"
+        # prefixed -- match against the bare id or this lookup silently
+        # never fires on real graph-native data (same bug class as the
+        # center_id fix below).
+        center_id = str(scope.get("center_node") or "").split(":", 1)[-1]
         display_label = metrics.get("label") or scope.get("center_node")
         for node in graph_context.get("related_nodes") or []:
-            if node.get("id") == scope.get("center_node") and node.get("label"):
+            if node.get("id") == center_id and node.get("label"):
                 display_label = node.get("label")
                 break
         evidence_refs = []
@@ -380,6 +389,26 @@ class TraversalMixin:
                 "url": item.get("url"),
             })
         language = scope.get("language")
+        # BFS/DFS inside _joint_graph_traversal_analysis/_edge_target_reasoning_units
+        # match against edge source/target, which are always bare Nebula
+        # vertex ids -- pass the bare id (not the "Type:Id"-prefixed
+        # scope.center_node) or every traversal silently visits nothing
+        # (same bug class already fixed in _datalog_transitive_evidence).
+        traversal_analysis = self._joint_graph_traversal_analysis(
+            display_label,
+            center_id,
+            graph_context,
+            metrics,
+            ranked_paths,
+            second_hop_paths,
+        )
+        edge_target_reasoning = self._edge_target_reasoning_units(
+            display_label,
+            center_id,
+            graph_context,
+            metrics,
+            evidence_refs,
+        )
         plain_conclusion = self._plain_reasoning_conclusion(
             task.get("question"),
             display_label,
@@ -395,21 +424,7 @@ class TraversalMixin:
             ranked_paths,
             second_hop_paths,
             language=language,
-        )
-        traversal_analysis = self._joint_graph_traversal_analysis(
-            display_label,
-            scope.get("center_node"),
-            graph_context,
-            metrics,
-            ranked_paths,
-            second_hop_paths,
-        )
-        edge_target_reasoning = self._edge_target_reasoning_units(
-            display_label,
-            scope.get("center_node"),
-            graph_context,
-            metrics,
-            evidence_refs,
+            relation_summary=traversal_analysis.get("relation_summary"),
         )
         deep_conclusion = self._business_conclusion_from_traversal(
             display_label,
@@ -418,6 +433,7 @@ class TraversalMixin:
             plain_conclusion,
             edge_target_reasoning,
             language=language,
+            relation_descriptions=self._relation_descriptions(tenant),
         )
         conclusion_eval = self._evaluate_reasoning_conclusion(
             deep_conclusion,
@@ -426,16 +442,27 @@ class TraversalMixin:
             structured_answer,
             edge_target_reasoning,
         )
+        # Additive enhancement, not a replacement of the deterministic
+        # template above: deep_conclusion/plain_conclusion stay computed
+        # either way (zero-latency, never fails) and remain the
+        # detailed_conclusion evidence trail even when an insight is used.
+        center_object_type = str(scope.get("center_node") or "").split(":", 1)[0]
+        llm_insight = self._synthesize_relation_insight(
+            tenant, display_label, task.get("question"), traversal_analysis.get("relation_summary"), language,
+            entity_facts=structured_answer.get("key_facts"),
+            focus_dimensions=self._reasoning_focus_dimensions(tenant, center_object_type),
+        )
 
         return {
             "schema_version": "reasoning_response_v1",
             "answer": {
                 "title": plain_title or structured_answer.get("title") or task.get("question") or ("范围化图谱推理" if wants_zh_output(language) else "Scoped graph reasoning"),
-                "plain_conclusion": deep_conclusion.get("plain_conclusion") or plain_conclusion,
-                "conclusion": deep_conclusion.get("conclusion") or plain_conclusion,
+                "plain_conclusion": llm_insight or deep_conclusion.get("plain_conclusion") or plain_conclusion,
+                "conclusion": llm_insight or deep_conclusion.get("conclusion") or plain_conclusion,
                 "detailed_conclusion": deep_conclusion.get("detailed_conclusion") or structured_answer.get("profile_summary") or "",
                 "confidence": conclusion_eval.get("confidence", 0.78),
                 "status": "draft",
+                "insight_synthesis": {"attempted": bool(traversal_analysis.get("relation_summary")), "used": bool(llm_insight)},
             },
             "scope": {
                 "tenant_id": tenant.tenant_id,
@@ -489,6 +516,7 @@ class TraversalMixin:
         adjacency = {}
         relation_counts = {}
         relation_neighbor_types = {}
+        relation_sample_labels = {}
         for edge in edges:
             source = edge.get("source")
             target = edge.get("target")
@@ -496,6 +524,10 @@ class TraversalMixin:
                 continue
             relation = edge.get("label") or edge.get("link_key") or "relation"
             relation_counts[relation] = relation_counts.get(relation, 0) + 1
+            samples = relation_sample_labels.setdefault(relation, [])
+            if len(samples) < 3:
+                target_node = nodes_by_id.get(target) or {}
+                samples.append(target_node.get("label") or target)
             for node_id, other_id in ((source, target), (target, source)):
                 other_type = (nodes_by_id.get(other_id) or {}).get("type") or "unknown"
                 relation_neighbor_types.setdefault(relation, {})
@@ -603,6 +635,7 @@ class TraversalMixin:
                 "relation": relation,
                 "edge_count": count,
                 "neighbor_types": relation_neighbor_types.get(relation) or {},
+                "sample_labels": relation_sample_labels.get(relation) or [],
             }
             for relation, count in sorted(relation_counts.items(), key=lambda item: (-item[1], item[0]))[:8]
         ]
@@ -850,8 +883,97 @@ class TraversalMixin:
             },
         }
 
-    def _business_conclusion_from_traversal(self, label, metrics, traversal_analysis, fallback, edge_target_reasoning=None, language=None):
+    def _relation_descriptions(self, tenant):
+        """{relation_name: description} from this tenant's approved edge-
+        type ontology artifacts (reasoning_link_config's "description"
+        field -- see propose_edge_type). Relation semantics are tenant/
+        schema-specific business knowledge, so they're read from each
+        tenant's own reviewable ontology data here rather than hardcoded
+        for any particular tenant's vocabulary in this shared code -- a
+        tenant that hasn't curated descriptions yet just gets {} and every
+        caller already falls back to a generic label/count phrasing."""
+        try:
+            link_config = self.instance_repository.reasoning_link_config(tenant)
+        except Exception:
+            return {}
+        return {
+            lc.get("link"): lc.get("description")
+            for lc in (link_config or [])
+            if lc.get("link") and lc.get("description")
+        }
+
+    def _reasoning_focus_dimensions(self, tenant, object_type):
+        """Tenant-curated reasoning_focus list for `object_type`, from its
+        approved node-type ontology artifact (see propose_node_type). What
+        matters when reasoning about THIS kind of entity (an Issue's
+        urgency/response-time, a PullRequest's review-latency/blast-radius,
+        ...) is business/schema-specific, so it's read from each tenant's
+        own ontology data here, never named in this shared code -- same
+        pattern as _relation_descriptions, one level up (node types
+        instead of edge types). A tenant/type with nothing curated just
+        gets [], and every caller already degrades to today's generic
+        (unsteered) insight prompt."""
+        try:
+            entity_config = self.instance_repository.reasoning_entity_config(tenant)
+        except Exception:
+            return []
+        entry = (entity_config or {}).get(str(object_type or "").lower()) or {}
+        return entry.get("reasoning_focus") or []
+
+    def _get_insight_planner(self):
+        """Lazily initialize the relation-insight LLM planner. Only
+        activates via ALETHEIA_LLM_INSIGHT_ENABLED -- a separate flag from
+        ALETHEIA_LLM_PLANNER_ENABLED (relation selection) since this is a
+        distinct call site with its own cost/latency/failure profile; an
+        operator should be able to enable one without the other. Mirrors
+        ReasoningEngine._get_llm_planner's exact lazy/cached/never-raises
+        shape."""
+        if getattr(self, "_insight_planner", None) is not None:
+            return self._insight_planner
+        if not os.environ.get("ALETHEIA_LLM_INSIGHT_ENABLED", "").lower() in ("1", "true", "yes"):
+            return None
+        try:
+            from aletheia.llms.planner import LLMPlanner
+            self._insight_planner = LLMPlanner()
+        except Exception:
+            self._insight_planner = None
+        return self._insight_planner
+
+    def _synthesize_relation_insight(self, tenant, label, question, relation_summary, language, entity_facts=None, focus_dimensions=None):
+        """A genuine judgment about `relation_summary` (what's notable,
+        what a reviewer should prioritize) plus `entity_facts` (the
+        entity's own attributes -- e.g. an Issue's title/state, not just
+        its edges) and `focus_dimensions` (this entity type's tenant-
+        curated business focus, see _reasoning_focus_dimensions) via
+        LLMPlanner.synthesize_relation_insight -- see that method's
+        docstring for why _business_conclusion_from_traversal's template
+        alone can't produce this. Returns None (never raises) whenever
+        disabled, unavailable, or the call didn't produce a usable insight
+        -- callers always keep the template conclusion as a deterministic
+        fallback."""
+        if not relation_summary:
+            return None
+        planner = self._get_insight_planner()
+        if planner is None:
+            return None
+        try:
+            descriptions = self._relation_descriptions(tenant)
+            enriched = [
+                {**item, "description": descriptions.get(item.get("relation"))}
+                for item in relation_summary
+            ]
+            result = planner.synthesize_relation_insight(
+                label, question, enriched, language=language, entity_facts=entity_facts, focus_dimensions=focus_dimensions,
+            )
+        except Exception:
+            return None
+        if result.used_fallback or not result.insight:
+            return None
+        return result.insight
+
+    def _business_conclusion_from_traversal(self, label, metrics, traversal_analysis, fallback, edge_target_reasoning=None, language=None, relation_descriptions=None):
         wants_zh = wants_zh_output(language)
+        relation_descriptions = relation_descriptions or {}
         source_summary = traversal_analysis.get("source_metric_summary") or {}
         relation_summary = traversal_analysis.get("relation_summary") or []
         edge_target_reasoning = edge_target_reasoning or {}
@@ -918,6 +1040,51 @@ class TraversalMixin:
                     "alternate-route assumptions, and watchlist escalation before treating the finding as operational guidance."
                 )
             return {"plain_conclusion": plain, "conclusion": plain, "detailed_conclusion": detail}
+        if relation_summary:
+            # Graph-native evidence readout: name the actual relations
+            # (PARENT_COMMIT, TOUCHES, ...) and sample neighbors instead of
+            # a bare degree count -- supersedes the max_observed_depth>=2
+            # branch below in practice, since relation_summary is built
+            # from every related edge (not just depth-1 direct edges), so
+            # it's populated whenever there's any real connected evidence.
+            #
+            # What a relation NAME means is tenant/schema-specific business
+            # knowledge -- read from relation_descriptions (each tenant's
+            # own approved edge-type ontology descriptions, see
+            # _relation_descriptions), never hardcoded here for any
+            # particular tenant's vocabulary. A relation without a curated
+            # description just gets the generic label/count/sample clause.
+            top_relations = relation_summary[:4]
+            depth_note_zh = (
+                f"广度遍历覆盖 {breadth.get('visited_node_count', 0)} 个节点、"
+                f"{breadth.get('relation_type_count', 0)} 种关系类型。"
+            ) if breadth.get("layers") else ""
+            depth_note_en = (
+                f"Breadth traversal covers {breadth.get('visited_node_count', 0)} node(s) "
+                f"across {breadth.get('relation_type_count', 0)} relation type(s)."
+            ) if breadth.get("layers") else ""
+
+            def _clause(item, zh):
+                relation = item.get("relation") or ("relation" if not zh else "关联")
+                count = item.get("edge_count") or 0
+                samples = (item.get("sample_labels") or [])[:2]
+                sample_text = ("、".join(samples) if zh else ", ".join(samples)) or relation
+                description = relation_descriptions.get(item.get("relation"))
+                if description:
+                    return (
+                        f"通过 {relation}（{description}）关联到 {sample_text}" if zh
+                        else f"is connected to {sample_text} via {relation} ({description})"
+                    )
+                gloss = (f"（如 {sample_text}）" if (zh and samples) else (f" (e.g. {sample_text})" if samples else ""))
+                return f"通过 {relation}（{count} 个）{gloss}产生关联" if zh else f"is connected via {relation} ({count}){gloss}"
+
+            clauses_zh = [_clause(item, True) for item in top_relations]
+            clauses_en = [_clause(item, False) for item in top_relations]
+            if wants_zh:
+                plain = f"{label} {'，'.join(clauses_zh)}。证据来自已批准图谱的直接边。{depth_note_zh}"
+            else:
+                plain = f"{label} " + "; ".join(clauses_en) + f". Evidence comes from direct edges in the approved graph. {depth_note_en}"
+            return {"plain_conclusion": plain, "conclusion": plain, "detailed_conclusion": plain}
         if traversal_analysis.get("max_observed_depth", 0) >= 2:
             if wants_zh:
                 plain = (
@@ -974,8 +1141,8 @@ class TraversalMixin:
             ],
         }
 
-    def _plain_reasoning_title(self, question, label, ranked_paths, second_hop_paths, language=None):
-        return plain_reasoning_title(question, label, ranked_paths, second_hop_paths, language=language)
+    def _plain_reasoning_title(self, question, label, ranked_paths, second_hop_paths, language=None, relation_summary=None):
+        return plain_reasoning_title(question, label, ranked_paths, second_hop_paths, language=language, relation_summary=relation_summary)
 
     def _plain_reasoning_conclusion(self, question, label, detailed_conclusion, ranked_paths, second_hop_paths, graph_degree, language=None):
         return plain_reasoning_conclusion(question, label, detailed_conclusion, ranked_paths, second_hop_paths, graph_degree, language=language)
@@ -1087,7 +1254,7 @@ class TraversalMixin:
     def _missing_projection_reason(self):
         return "No reviewed SchemaGraphModelingAgent projection. Import data and run schema-to-graph modeling first."
 
-    def _scoped_graph_prompt_context(self, tenant, center_node, depth, node_limit, edge_limit, demo_mode=False):
+    def _scoped_graph_prompt_context(self, tenant, center_node, depth, node_limit, edge_limit, demo_mode=False, full_graph_cache=None):
         demo_mode = bool(demo_mode)
         if not center_node or ":" not in str(center_node):
             projection_source = "explicit_demo_mode" if demo_mode else "none"
@@ -1115,7 +1282,25 @@ class TraversalMixin:
             depth=depth,
             limit=fetch_limit,
         ) or {}
-        graph = self.instance_repository.full_graph(tenant, object_type, instance_id, limit=fetch_limit) or {}
+        # full_graph() samples across every approved type for the whole
+        # tenant -- unlike local_rag_context (which re-runs the depth-scoped
+        # BFS every escalation attempt on purpose), its result doesn't
+        # depend on depth at all, so re-running it per depth-escalation
+        # attempt was pure waste. Callers that loop over depth pass a
+        # shared dict here to fetch it once per run instead of once per
+        # attempt.
+        full_graph_cache_key = (tenant.tenant_id, object_type, instance_id, fetch_limit) if full_graph_cache is not None else None
+        if full_graph_cache_key is not None and full_graph_cache_key in full_graph_cache:
+            cached_graph = full_graph_cache[full_graph_cache_key]
+            # Below mutates `nodes`/`edges` in place (local_rag_context's
+            # merge step appends into them) -- copy the lists so that
+            # mutation doesn't corrupt the cached entry for the next
+            # depth-escalation attempt that reads it.
+            graph = {**cached_graph, "nodes": list(cached_graph.get("nodes") or []), "edges": list(cached_graph.get("edges") or [])}
+        else:
+            graph = self.instance_repository.full_graph(tenant, object_type, instance_id, limit=fetch_limit) or {}
+            if full_graph_cache_key is not None:
+                full_graph_cache[full_graph_cache_key] = graph
         approved = bool(local_rag_context.get("approved") or graph.get("approved"))
         projection_source = self._reasoning_projection_sources(local_rag_context, graph)
         if demo_mode and not approved:
@@ -1145,6 +1330,17 @@ class TraversalMixin:
             for edge in local_edges:
                 key = edge_key(edge)
                 if key not in edge_keys:
+                    # local_rag_context's edges come back in its own
+                    # edge_summary() shape (key "relation"), not the raw
+                    # graph-edge shape full_graph()/neighborhood() use (key
+                    # "label") -- compact_edge() and the degree_by_link/
+                    # relation_summary computations below only ever read
+                    # "label", so without this normalization every edge
+                    # contributed by local_rag_context (rather than
+                    # full_graph's sample) silently loses its relation name
+                    # and collapses into a generic fallback bucket.
+                    if not edge.get("label") and edge.get("relation"):
+                        edge = {**edge, "label": edge.get("relation")}
                     edges.append(edge)
                     edge_keys.add(key)
             if local_node_ids:

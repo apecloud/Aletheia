@@ -55,15 +55,30 @@ def propose_node_type(
     evidence: list[str] | None = None,
     subclass_of: list[str] | None = None,
     disjoint_with: list[str] | None = None,
+    reasoning_focus: list[dict[str, Any]] | None = None,
     status: str = "draft",
 ) -> OntologyArtifact:
     """Register (or update) a node type for this tenant. Returns the
-    OntologyArtifact row -- caller is responsible for session.commit()."""
+    OntologyArtifact row -- caller is responsible for session.commit().
+
+    ``reasoning_focus`` is an optional, tenant-curated list of
+    ``{"name", "description", "signals"}`` dicts naming the business
+    dimensions that matter when reasoning about instances of this type
+    (e.g. an Issue's urgency/response-time, a PullRequest's review-latency/
+    blast-radius). ``signals`` are just human-readable hints (property or
+    relation names, as they already appear in entity_facts/relation_summary)
+    for prompt-writing convenience -- not a formula language, and nothing
+    here parses or validates them. This is descriptive metadata only, read
+    generically downstream (see reasoning_entity_config, traversal.py's
+    _reasoning_focus_dimensions, and LLMPlanner.synthesize_relation_insight)
+    -- no business vocabulary is ever hardcoded in that shared code, same
+    as edge-type descriptions (propose_edge_type)."""
     payload = {
         "name": name,
         "properties": _normalize_properties(properties),
         "subclass_of": list(subclass_of or []),
         "disjoint_with": list(disjoint_with or []),
+        "reasoning_focus": list(reasoning_focus or []),
     }
     return upsert_artifact(
         session,
@@ -186,6 +201,11 @@ def _query_types(session, *, tenant_id: str, artifact_type: str, status: str | N
         payload["_canonical_key"] = artifact.canonical_key
         payload["_confidence"] = artifact.confidence
         payload["_status"] = artifact.status
+        # artifact.description lives on the row itself, not inside
+        # payload_json -- without this, every caller (reasoning_link_config,
+        # schema_sync, ...) silently gets "" regardless of what was passed
+        # to propose_edge_type/propose_node_type's description= argument.
+        payload.setdefault("description", artifact.description or "")
         results.append(payload)
     return results
 

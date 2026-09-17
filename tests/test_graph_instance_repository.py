@@ -91,6 +91,38 @@ class EntityNodeShapeTest(unittest.TestCase):
         self.assertEqual(node, {"id": "q1:aly_raisman", "label": "Aly Raisman", "type": "Person"})
 
 
+class FetchEntityPropertiesTest(unittest.TestCase):
+    """Regression test: _fetch_entity used to discard _fetch_vertex's real
+    properties (title, state, created_at, ...), returning only id/label/
+    type -- silently starving every downstream consumer (ReasoningEngine._
+    gather_center_data's `props`, _compose's "{label} attributes" key_fact,
+    the LLM insight synthesis's entity_facts) of the entity's own
+    attributes for every graph-native tenant."""
+
+    def test_fetch_entity_includes_real_vertex_properties(self):
+        repo = GraphInstanceRepository(space="unittest_space")
+        with patch.object(repo, "_fetch_vertex", return_value={
+            "id": "kb_issue_10041", "types": ["Issue"], "label": "kb_issue_10041",
+            "properties": {"title": "redis shard cluster can not use", "state": "closed", "number": "10041"},
+        }):
+            row = repo._fetch_entity("any-tenant", "Issue", "kb_issue_10041")
+        self.assertEqual(row["title"], "redis shard cluster can not use")
+        self.assertEqual(row["state"], "closed")
+        self.assertEqual(row["number"], "10041")
+        self.assertEqual(row["id"], "kb_issue_10041")
+        self.assertEqual(row["type"], "Issue")
+
+    def test_fetch_entity_id_label_type_win_over_any_colliding_property_name(self):
+        repo = GraphInstanceRepository(space="unittest_space")
+        with patch.object(repo, "_fetch_vertex", return_value={
+            "id": "v1", "types": ["Thing"], "label": "real label",
+            "properties": {"label": "stale label property", "id": "stale id property"},
+        }):
+            row = repo._fetch_entity("any-tenant", "Thing", "v1")
+        self.assertEqual(row["id"], "v1")
+        self.assertEqual(row["label"], "real label")
+
+
 class LiveNebulaSmokeTest(unittest.TestCase):
     """Skipped (not failed) if the local Nebula cluster isn't reachable --
     this repo's Nebula containers are optional local infra, not a CI
