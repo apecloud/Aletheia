@@ -384,6 +384,7 @@ def _compact_candidate_payload(payload):
         "ontology_part",
         "trigger_event",
         "trigger_or_condition",
+        "preconditions",
         "target_object_types",
         "affected_object_types",
         "expected_effects",

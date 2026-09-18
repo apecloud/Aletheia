@@ -46,132 +46,182 @@ ACTIONS: list[dict] = [
         "description": "Retrospective review-latency audit: a pull request had multiple reviewers requested and took a long time to close -- surface the pattern so future PRs with similar reviewer load get escalated earlier.",
         "applies_to": ["PullRequest", "User"],
         "trigger_event": "PullRequest has >=2 REVIEW_REQUESTED edges and the elapsed time from created_at to closed_at/merged_at exceeds a review-latency threshold.",
+        "preconditions": ["pull request has not already been escalated for the same review cycle"],
         "input_parameters": ["pr_number", "requested_reviewer_logins", "review_latency_hours"],
         "expected_effects": [
             "ping additional reviewer",
             "escalate to maintainer for faster turnaround on future PRs with similar reviewer load",
         ],
-        "guardrails": [
-            "advisory/retrospective only -- never reopens or modifies an already-closed PR",
-            "requires maintainer confirmation before escalating a still-open PR",
-        ],
+        "guardrails": {
+            "is_destructive": False,
+            "is_reversible": True,
+            "requires_human_approval": True,
+            "notes": [
+                "advisory/retrospective only -- never reopens or modifies an already-closed PR",
+                "requires maintainer confirmation before escalating a still-open PR",
+            ],
+        },
     },
     {
         "name": "FlagRegressionRiskForFile",
         "description": "File-level blast-radius risk: a new PR touches a file that Datalog-derived transitive-impact analysis shows is heavily shared across other commits/PRs -- flag it for extra review attention.",
         "applies_to": ["File", "PullRequest", "Commit"],
         "trigger_event": "A PullRequest's commits TOUCH a File that Datalog-derived transitive-impact analysis shows is connected to N other commits/PRs via shared file touches.",
+        "preconditions": ["File's transitive-impact count has already been computed and exceeds the configured threshold"],
         "input_parameters": ["file_path", "candidate_pr_number", "transitive_impact_count"],
         "expected_effects": [
             "attach a regression-risk label to the PR",
             "request review from users who previously authored commits touching this file",
         ],
-        "guardrails": [
-            "advisory only -- never blocks CI or merge automatically",
-            "risk flag must cite the specific transitively-connected commits as evidence",
-        ],
+        "guardrails": {
+            "is_destructive": False,
+            "is_reversible": True,
+            "requires_human_approval": False,
+            "notes": [
+                "advisory only -- never blocks CI or merge automatically",
+                "risk flag must cite the specific transitively-connected commits as evidence",
+            ],
+        },
     },
     {
         "name": "SuggestAssigneeForIssue",
         "description": "Contributor routing: suggest an assignee for a newly-labeled issue based on who has authored commits/PRs under the same label.",
         "applies_to": ["Issue", "User", "Label"],
         "trigger_event": "An Issue has state=open, has >=1 Label, and has no ASSIGNED_TO edge after a review window.",
+        "preconditions": ["issue has no existing ASSIGNED_TO edge"],
         "input_parameters": ["issue_number", "label_names"],
         "expected_effects": [
             "propose one or more candidate assignees ranked by prior authored PRs/commits under the same label",
             "notify candidate for confirmation",
         ],
-        "guardrails": [
-            "suggestion only -- a human must confirm the assignment",
-            "do not suggest a user already overloaded with open assigned issues",
-        ],
+        "guardrails": {
+            "is_destructive": False,
+            "is_reversible": True,
+            "requires_human_approval": True,
+            "notes": [
+                "suggestion only -- a human must confirm the assignment",
+                "do not suggest a user already overloaded with open assigned issues",
+            ],
+        },
     },
     {
         "name": "RequestIssueLinkForOrphanedPullRequest",
         "description": "Traceability gap: a merged pull request has no CLOSES edge to any issue -- request a linked issue or documented rationale.",
         "applies_to": ["PullRequest", "Issue"],
         "trigger_event": "A PullRequest has merged_at set but zero CLOSES edges to any Issue.",
+        "preconditions": ["pull request is already merged"],
         "input_parameters": ["pr_number"],
         "expected_effects": [
             "comment on the PR requesting a linked issue or rationale",
             "flag for maintainer traceability review",
         ],
-        "guardrails": [
-            "never reverts or blocks already-merged work",
-            "advisory/documentation-focused only",
-        ],
+        "guardrails": {
+            "is_destructive": False,
+            "is_reversible": True,
+            "requires_human_approval": False,
+            "notes": [
+                "never reverts or blocks already-merged work",
+                "advisory/documentation-focused only",
+            ],
+        },
     },
     {
         "name": "FlagMergeWithoutReviewGovernanceRisk",
         "description": "Governance gap: a pull request was merged with zero REVIEW_REQUESTED edges -- no review was ever formally requested before merge. Surface the pattern for retroactive audit and to decide whether review-before-merge should be required for the paths this PR touched.",
         "applies_to": ["PullRequest"],
         "trigger_event": "A PullRequest has merged_at set and zero REVIEW_REQUESTED edges.",
+        "preconditions": ["pull request is already merged"],
         "input_parameters": ["pr_number", "touched_file_paths"],
         "expected_effects": [
             "flag the PR for retroactive governance review",
             "recommend requiring review-before-merge for future changes to the same touched paths",
         ],
-        "guardrails": [
-            "advisory/retrospective only -- never reverts or blocks an already-merged PR",
-            "does not assert the change was wrong, only that it bypassed review",
-        ],
+        "guardrails": {
+            "is_destructive": False,
+            "is_reversible": True,
+            "requires_human_approval": False,
+            "notes": [
+                "advisory/retrospective only -- never reverts or blocks an already-merged PR",
+                "does not assert the change was wrong, only that it bypassed review",
+            ],
+        },
     },
     {
         "name": "FlagUndocumentedIssueClosure",
         "description": "Traceability gap, issue side: an issue was closed with no CLOSES edge from any pull request -- there is no recorded code fix explaining the resolution. Complements RequestIssueLinkForOrphanedPullRequest (the PR-side version of the same traceability concern).",
         "applies_to": ["Issue"],
         "trigger_event": "An Issue has state=closed and zero incoming CLOSES edges from any PullRequest.",
+        "preconditions": ["issue is already closed"],
         "input_parameters": ["issue_number"],
         "expected_effects": [
             "request a closing comment explaining the resolution (fixed elsewhere, duplicate, won't-fix, stale)",
             "flag for maintainer traceability audit",
         ],
-        "guardrails": [
-            "advisory only -- never reopens the issue",
-            "does not assume the closure was wrong, only that its rationale is undocumented",
-        ],
+        "guardrails": {
+            "is_destructive": False,
+            "is_reversible": True,
+            "requires_human_approval": False,
+            "notes": [
+                "advisory only -- never reopens the issue",
+                "does not assume the closure was wrong, only that its rationale is undocumented",
+            ],
+        },
     },
     {
         "name": "FlagFileOwnershipHotspot",
         "description": "Change-coupling risk: a file is touched by an unusually high number of distinct commits/authors -- a coordination hotspot where regressions are more likely and ownership is diffuse.",
         "applies_to": ["File", "Commit", "User"],
         "trigger_event": "A File's TOUCHES fan-in (distinct commits touching it) exceeds a churn threshold relative to other files in the repository.",
+        "preconditions": ["file's touching-commit/author counts have already been computed and exceed the configured churn threshold"],
         "input_parameters": ["file_path", "touching_commit_count", "distinct_author_count"],
         "expected_effects": [
             "suggest a dedicated owner/reviewer for future changes to this file",
             "recommend stronger test coverage for this file",
         ],
-        "guardrails": [
-            "advisory only -- never blocks a PR automatically",
-            "ownership suggestion must cite the actual prior-touching commits/authors as evidence",
-        ],
+        "guardrails": {
+            "is_destructive": False,
+            "is_reversible": True,
+            "requires_human_approval": False,
+            "notes": [
+                "advisory only -- never blocks a PR automatically",
+                "ownership suggestion must cite the actual prior-touching commits/authors as evidence",
+            ],
+        },
     },
     {
         "name": "TriageSeverityLabelBacklog",
         "description": "Backlog risk: a severity-implying label (e.g. a bug/priority label, as opposed to a purely organizational one) has a large or growing count of still-open issues/PRs -- may indicate an accumulating systemic problem needing triage attention.",
         "applies_to": ["Label", "Issue", "PullRequest"],
         "trigger_event": "A Label whose name implies severity/priority has a high count of LABELED_WITH edges to still-open issues/PRs.",
+        "preconditions": ["label is classified as severity/priority-implying, not purely organizational"],
         "input_parameters": ["label_name", "open_count", "total_count"],
         "expected_effects": [
             "surface the open backlog under this label to maintainers for triage prioritization",
         ],
-        "guardrails": [
-            "advisory only -- does not auto-change label assignments or issue state",
-        ],
+        "guardrails": {
+            "is_destructive": False,
+            "is_reversible": True,
+            "requires_human_approval": False,
+            "notes": ["advisory only -- does not auto-change label assignments or issue state"],
+        },
     },
     {
         "name": "FlagReviewerLoadConcentration",
         "description": "Bus-factor risk: one contributor's REVIEW_REQUESTED count is disproportionately higher than every other contributor's -- review capacity is concentrated in a single person.",
         "applies_to": ["User", "PullRequest"],
         "trigger_event": "A User's REVIEW_REQUESTED edge count is far above the next-highest contributor's, across the tenant's pull requests.",
+        "preconditions": ["reviewer's request count exceeds the next-highest contributor's by the configured margin"],
         "input_parameters": ["reviewer_login", "review_requested_count", "next_highest_count"],
         "expected_effects": [
             "suggest broadening the reviewer pool for future pull requests",
             "flag reviewer-concentration risk for maintainer awareness",
         ],
-        "guardrails": [
-            "advisory only -- never reassigns existing review requests",
-        ],
+        "guardrails": {
+            "is_destructive": False,
+            "is_reversible": True,
+            "requires_human_approval": False,
+            "notes": ["advisory only -- never reassigns existing review requests"],
+        },
     },
 ]
 
@@ -185,6 +235,7 @@ def register_actions(session, tenant_id: str) -> None:
             description=action["description"],
             applies_to=action["applies_to"],
             trigger_event=action["trigger_event"],
+            preconditions=action.get("preconditions", []),
             input_parameters=action["input_parameters"],
             expected_effects=action["expected_effects"],
             guardrails=action["guardrails"],

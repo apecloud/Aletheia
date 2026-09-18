@@ -44,6 +44,31 @@ def _normalize_properties(properties: list[dict[str, str]] | None) -> list[dict[
     return normalized
 
 
+def _normalize_guardrails(guardrails: dict[str, Any] | list[str] | None) -> dict[str, Any]:
+    """Normalize ``guardrails`` into the structured shape
+    ``{is_destructive, is_reversible, requires_human_approval, notes}``,
+    modeled on MCP tool annotations / Palantir Foundry action-type
+    validation flags -- booleans a reasoning/execution layer can branch on,
+    plus free-text ``notes`` for the human-readable caveats the old
+    ``list[str]`` shape carried. Accepts the legacy ``list[str]`` shape
+    (every existing caller, and the LLM pipeline pre-migration) and folds
+    it into ``notes`` with conservative defaults (not destructive, is
+    reversible, no forced approval) since free text can't be reliably
+    parsed into flags -- callers that know better should pass the dict
+    shape directly."""
+    if guardrails is None:
+        return {"is_destructive": False, "is_reversible": True, "requires_human_approval": False, "notes": []}
+    if isinstance(guardrails, dict):
+        return {
+            "is_destructive": bool(guardrails.get("is_destructive", False)),
+            "is_reversible": bool(guardrails.get("is_reversible", True)),
+            "requires_human_approval": bool(guardrails.get("requires_human_approval", False)),
+            "notes": [str(note) for note in (guardrails.get("notes") or []) if str(note).strip()],
+        }
+    notes = [str(note) for note in (guardrails or []) if str(note).strip()]
+    return {"is_destructive": False, "is_reversible": True, "requires_human_approval": False, "notes": notes}
+
+
 def propose_node_type(
     session,
     *,
@@ -140,9 +165,10 @@ def propose_action(
     name: str,
     applies_to: list[str],
     trigger_event: str,
+    preconditions: list[str] | None = None,
     input_parameters: list[str] | None = None,
     expected_effects: list[str] | None = None,
-    guardrails: list[str] | None = None,
+    guardrails: dict[str, Any] | list[str] | None = None,
     description: str = "",
     confidence: float = 0.8,
     evidence: list[str] | None = None,
@@ -154,21 +180,38 @@ def propose_action(
 
     Field vocabulary deliberately matches the "action" ontology_part shape
     already produced by aletheia/enrichment/iterative_enrichment.py's LLM
-    text-mining pipeline (trigger_event/applies_to/input_parameters/
-    expected_effects/guardrails) -- that's the shape web/app/screens.jsx's
-    DiscoveredOntologyReview.operationalRows already knows how to render, so
-    a graph-native-origin action (this function) and a text-mined one look
-    the same in the UI. Distinct from aletheia/modeling/action_synthesizer.py's
-    BusinessAction (SQL routine/trigger-derived, action_type/source_name/
-    is_safe/inputs_json/outputs_json) -- that shape only makes sense for a
-    SQL-schema tenant, not a graph-native one."""
+    text-mining pipeline (trigger_event/applies_to/preconditions/
+    input_parameters/expected_effects/guardrails) -- that's the shape
+    web/app/screens.jsx's DiscoveredOntologyReview.operationalRows already
+    knows how to render, so a graph-native-origin action (this function) and
+    a text-mined one look the same in the UI. Distinct from
+    aletheia/modeling/action_synthesizer.py's BusinessAction (SQL routine/
+    trigger-derived, action_type/source_name/is_safe/inputs_json/
+    outputs_json) -- that shape only makes sense for a SQL-schema tenant,
+    not a graph-native one.
+
+    ``trigger_event`` is the state change that makes the action *relevant*
+    (e.g. "a PullRequest was merged"); ``preconditions`` are additional
+    conditions that must hold for the action to actually be *valid* to take
+    at that moment (e.g. "no CLOSES edge exists yet") -- kept as a separate
+    field rather than folded into trigger_event's free text so a future
+    executor/reasoning layer can check them independently, mirroring how
+    PDDL-style action models and Palantir Foundry action-type Rules treat
+    "when to consider this action" and "is it still safe to run" as
+    distinct checks. ``guardrails`` is normalized via ``_normalize_guardrails``
+    into ``{is_destructive, is_reversible, requires_human_approval, notes}``
+    -- structured risk flags analogous to MCP tool annotations
+    (destructiveHint/idempotentHint) and Foundry's action validation
+    functions, rather than free text a caller would have to re-parse to
+    decide whether human approval is required."""
     payload = {
         "name": name,
         "applies_to": list(applies_to or []),
         "trigger_event": trigger_event,
+        "preconditions": list(preconditions or []),
         "input_parameters": list(input_parameters or []),
         "expected_effects": list(expected_effects or []),
-        "guardrails": list(guardrails or []),
+        "guardrails": _normalize_guardrails(guardrails),
     }
     return upsert_artifact(
         session,

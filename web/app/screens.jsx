@@ -665,6 +665,7 @@ function DiscoveredOntologyReview({
     ["property_of", payload.property_of],
     ["trigger_event", payload.trigger_event],
     ["trigger_or_condition", payload.trigger_or_condition],
+    ["preconditions", payload.preconditions],
     ["input_parameters", payload.input_parameters || payload.inputs],
     ["outputs", payload.outputs],
     ["expected_effects", payload.expected_effects],
@@ -811,7 +812,21 @@ function DiscoveredOntologyReview({
                   {operationalRows.map(([key, value]) => (
                     <React.Fragment key={key}>
                       <dt>{key}</dt>
-                      <dd style={{ overflowWrap: "anywhere", whiteSpace: "normal" }}>{typeof value === "object" ? JSON.stringify(value) : String(value)}</dd>
+                      <dd style={{ overflowWrap: "anywhere", whiteSpace: "normal" }}>
+                        {key === "guardrails" && value && typeof value === "object" && !Array.isArray(value) ? (
+                          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                              {value.is_destructive && <Pill kind="rejected">{tXS(language, "destructive", "破坏性")}</Pill>}
+                              {value.is_reversible === false && <Pill kind="changes">{tXS(language, "irreversible", "不可逆")}</Pill>}
+                              {value.requires_human_approval && <Pill kind="accent">{tXS(language, "needs approval", "需要审批")}</Pill>}
+                              {!value.is_destructive && value.is_reversible !== false && !value.requires_human_approval && (
+                                <span className="ct">{tXS(language, "no elevated risk flags", "无风险标记")}</span>
+                              )}
+                            </div>
+                            {(value.notes || []).map((note, idx) => <div key={idx}>{note}</div>)}
+                          </div>
+                        ) : typeof value === "object" ? JSON.stringify(value) : String(value)}
+                      </dd>
                     </React.Fragment>
                   ))}
                 </dl>

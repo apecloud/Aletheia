@@ -2295,10 +2295,16 @@ class IterativeGraphEnrichmentTest(unittest.TestCase):
                         "description": "Close a waterway in response to an operational disruption.",
                         "trigger_event": "Waterway Disruption Event",
                         "trigger_or_condition": "shipping disruption threshold crossed",
+                        "preconditions": ["waterway is not already closed"],
                         "target_object_types": ["Waterway"],
                         "input_parameters": ["closure_reason", "closure_start_time"],
                         "expected_effects": ["set operational_status to Closed"],
-                        "guardrails": ["requires authorized operator approval"],
+                        "guardrails": {
+                            "is_destructive": False,
+                            "is_reversible": True,
+                            "requires_human_approval": True,
+                            "notes": ["requires authorized operator approval"],
+                        },
                         "evidence_quote": "Authorities may close the canal when conflict disrupts safe transit.",
                         "confidence": 0.73,
                     },
@@ -2369,7 +2375,16 @@ class IterativeGraphEnrichmentTest(unittest.TestCase):
         action_payload = proposals["Close Waterway"]["payload"]
         self.assertEqual(action_payload["trigger_event"], "Waterway Disruption Event")
         self.assertEqual(action_payload["expected_effects"], ["set operational_status to Closed"])
-        self.assertEqual(action_payload["ontology_candidate"]["guardrails"], ["requires authorized operator approval"])
+        self.assertEqual(action_payload["ontology_candidate"]["preconditions"], ["waterway is not already closed"])
+        self.assertEqual(
+            action_payload["ontology_candidate"]["guardrails"],
+            {
+                "is_destructive": False,
+                "is_reversible": True,
+                "requires_human_approval": True,
+                "notes": ["requires authorized operator approval"],
+            },
+        )
         event_payload = proposals["Waterway Closure Event"]["payload"]
         self.assertEqual(event_payload["event_time"], "2026-06-01")
         self.assertEqual(event_payload["time_precision"], "exact_date")
