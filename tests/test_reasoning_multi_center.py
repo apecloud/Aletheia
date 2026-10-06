@@ -89,6 +89,48 @@ class FindPathBetweenCentersTest(unittest.TestCase):
         path = ReasoningEngine._find_path_between_centers("bank:a", "bank:a", [], [])
         self.assertEqual(path, [])
 
+    # Regression: graph-native (Nebula) tenants key nodes/edges by a bare
+    # instance id with no type prefix (see GraphInstanceRepository.
+    # neighborhood), while center_node/target_center_node are always
+    # "Type:id" strings. Comparing them directly against bare edge
+    # endpoints never matched, so path-finding silently fell through to
+    # the LLM fallback on every graph-native multi-center query even when
+    # a real graph path existed. These mirror the tests above exactly,
+    # just with bare-id nodes/edges instead of "Type:id"-prefixed ones.
+    def test_graph_native_bare_ids_direct_edge_is_found(self):
+        nodes = [{"id": "a"}, {"id": "b"}]
+        edges = [{"source": "a", "target": "b", "label": "acquired"}]
+        path = ReasoningEngine._find_path_between_centers("bank:a", "bank:b", nodes, edges)
+        self.assertEqual(path, [{"source": "a", "target": "b", "label": "acquired"}])
+
+    def test_graph_native_bare_ids_reverse_edge_is_found(self):
+        nodes = [{"id": "a"}, {"id": "b"}]
+        edges = [{"source": "b", "target": "a", "label": "acquired_by"}]
+        path = ReasoningEngine._find_path_between_centers("bank:a", "bank:b", nodes, edges)
+        self.assertIsNotNone(path)
+        self.assertEqual(path[0]["target"], "b")
+
+    def test_graph_native_bare_ids_multi_hop_path_is_found(self):
+        nodes = [{"id": "a"}, {"id": "mid"}, {"id": "b"}]
+        edges = [
+            {"source": "a", "target": "mid", "label": "r1"},
+            {"source": "mid", "target": "b", "label": "r2"},
+        ]
+        path = ReasoningEngine._find_path_between_centers("bank:a", "bank:b", nodes, edges)
+        self.assertEqual(len(path), 2)
+        self.assertEqual(path[-1]["target"], "b")
+
+    def test_graph_native_bare_ids_unreachable_returns_none(self):
+        nodes = [{"id": "a"}, {"id": "unrelated"}]
+        edges = [{"source": "a", "target": "unrelated", "label": "r1"}]
+        path = ReasoningEngine._find_path_between_centers("bank:a", "bank:b", nodes, edges)
+        self.assertIsNone(path)
+
+    def test_graph_native_bare_ids_same_center_returns_empty_path(self):
+        nodes = [{"id": "a"}]
+        path = ReasoningEngine._find_path_between_centers("bank:a", "bank:a", nodes, [])
+        self.assertEqual(path, [])
+
 
 class BuildEvidenceChainsTest(unittest.TestCase):
     """_build_evidence_chains: BFS-based explicit path chains -- borrowed
@@ -317,6 +359,38 @@ class AnalyzeMultiCenterOrchestrationTest(unittest.TestCase):
         self.assertEqual(result["metrics"]["answer"], "1590")
         self.assertEqual(result["metrics"]["supporting_center_nodes"], ["bank:a"])
         self.assertEqual(result["metrics"]["supporting_labels"], ["Bank A"])
+
+    def test_path_found_on_graph_native_tenant_with_bare_edge_ids(self):
+        """Regression: before the id-resolution fix, this exact shape (bare
+        instance ids in nodes/edges, "Type:id" center_node strings -- how
+        GraphInstanceRepository.neighborhood actually returns data) made
+        _find_path_between_centers always return None, so a real graph path
+        on a graph-native tenant silently fell through to the LLM fallback."""
+        data_a = _center_data(
+            "bank:a", "Bank A",
+            nodes=[{"id": "a"}, {"id": "b"}],
+            edges=[{"source": "a", "target": "b", "label": "acquired"}],
+        )
+        data_b = _center_data("bank:b", "Bank B")
+
+        llm_calls = []
+
+        class FakePlanner:
+            def derive_relational_answer(self, *args, **kwargs):
+                llm_calls.append(1)
+                return RelationalDerivation(answer="bank:a", supporting_center_nodes=["bank:a"])
+
+        with patch.object(self.engine, "_gather_center_data", side_effect=[data_a, data_b]), \
+             patch.object(self.engine, "_get_llm_planner", return_value=FakePlanner()):
+            plan = self.engine.QuestionPathPlan(question="q")
+            result = self.engine._analyze_multi_center(
+                tenant=object(), center_node="bank:a", additional_center_nodes=["bank:b"],
+                question="Which acquired which?", entity_config={}, link_config=[],
+                path_plan=plan, depth=2, limit=200,
+            )
+
+        self.assertEqual(result["metrics"]["resolution"], "path_found")
+        self.assertEqual(len(llm_calls), 0, "path_found must short-circuit before any LLM call")
 
     def test_missing_center_returns_unavailable_profile(self):
         with patch.object(self.engine, "_gather_center_data", side_effect=[None]):

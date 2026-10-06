@@ -758,7 +758,31 @@ class ReasoningEngine:
         edge dicts forming the shortest path, ``[]`` if the two centers are
         literally the same node, or ``None`` if unreachable within this
         neighborhood (which is already bounded by the caller's depth/limit).
+
+        ``center_node``/``target_center_node`` are always "Type:id" strings
+        (``_gather_center_data``'s input format), but ``nodes``/``edges``'
+        own id convention depends on the tenant's backing repo: ontology-
+        concrete-object tenants key nodes by that same "Type:id" string, while
+        graph-native (Nebula) tenants key them by a bare instance id with no
+        type prefix (see ``GraphInstanceRepository.neighborhood``). Resolving
+        both center references against ``nodes`` before BFS makes this work
+        under either convention -- previously this compared "Type:id"
+        strings directly against bare edge endpoints for graph-native
+        tenants, so adjacency lookups never matched and every multi-center
+        query on a graph-native tenant silently fell through to the LLM
+        fallback even when a real graph path existed.
         """
+        node_ids = {node.get("id") for node in nodes or []}
+
+        def _resolve(ref):
+            if not ref or ref in node_ids:
+                return ref
+            short_id = ref.split(":", 1)[1] if ":" in ref else ref
+            return short_id if short_id in node_ids else ref
+
+        center_node = _resolve(center_node)
+        target_center_node = _resolve(target_center_node)
+
         if center_node == target_center_node:
             return []
         adjacency = {}
