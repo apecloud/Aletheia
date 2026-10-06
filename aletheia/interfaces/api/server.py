@@ -23,6 +23,7 @@ from aletheia.interfaces.api.helpers import (  # noqa: F401
     _dedup_audit_from_payload,
     _is_current_graph_proposal,
     _knowledge_candidate_profile,
+    _ontology_type_reference_check,
 )
 from aletheia.interfaces.api.http_server import LocalThreadingHTTPServer  # noqa: F401
 from aletheia.interfaces.api.repositories.base import _TenantScopedEngineCache  # noqa: F401

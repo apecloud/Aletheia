@@ -370,6 +370,42 @@ def _knowledge_candidate_profile(element_type, payload):
     }
 
 
+def _ontology_type_reference_check(payload, known_names):
+    """Best-effort, advisory-only validation of the free-text type/label
+    references an action/event/policy candidate carries (``applies_to``/
+    ``target_object_types``/``affected_object_types``) against this
+    tenant's already-approved ontology artifact names.
+
+    ``known_names`` must be the union of approved node type, edge type,
+    AND action names (lowercased) -- not node types alone -- because a
+    policy's ``applies_to`` can legitimately name an action label rather
+    than an object type (e.g. a "Waterway Closure Approval Policy" whose
+    applies_to is ``["Close Waterway"]``), and these fields don't
+    distinguish which kind of name they hold. Returns ``None`` when the
+    payload has none of these fields (nothing to check). Never blocks
+    approval -- this only surfaces probably-hallucinated or not-yet-
+    approved references for the review UI; whether a referenced type is
+    merely still in draft (not actually unknown) is exactly the kind of
+    judgment call left to the human reviewer."""
+    if not isinstance(payload, dict):
+        return None
+    referenced = []
+    for field in ("applies_to", "target_object_types", "affected_object_types"):
+        values = payload.get(field)
+        if isinstance(values, list):
+            referenced.extend(str(value).strip() for value in values if str(value).strip())
+    if not referenced:
+        return None
+    seen = set()
+    checked = []
+    for name in referenced:
+        if name in seen:
+            continue
+        seen.add(name)
+        checked.append({"name": name, "known": name.lower() in known_names})
+    return {"checked": checked, "has_unknown": any(not entry["known"] for entry in checked)}
+
+
 def _compact_candidate_payload(payload):
     if not isinstance(payload, dict):
         return {}

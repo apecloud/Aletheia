@@ -758,6 +758,9 @@ function DiscoveredOntologyReview({
                       <span>{ontologyCandidateStatusXS(item.status, language)}</span>
                       <span>{item.run_key || "run unknown"}</span>
                       <span>{tXS(language, "conf", "置信度")} {Math.round((item.confidence || 0) * 100)}%</span>
+                      {item.type_reference_check?.has_unknown && (
+                        <span style={{ color: "var(--changes)" }}>{tXS(language, "unknown type ref", "未知类型引用")}</span>
+                      )}
                     </div>
                   </div>
                   <div className="ar-right">{kind}</div>
@@ -787,6 +790,12 @@ function DiscoveredOntologyReview({
               </div>
               <h1>{textXS(selected.name, language)}</h1>
               <p className="desc">{textXS(payload.description || payload.summary || payload.rationale, language) || tXS(language, "No description recorded.", "暂无描述。")}</p>
+              {selected.type_reference_check?.has_unknown && (
+                <div style={{ marginTop: 4, fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--changes)" }}>
+                  {tXS(language, "References not-yet-approved or unknown types: ", "引用了未批准或未知的类型：")}
+                  {selected.type_reference_check.checked.filter(entry => !entry.known).map(entry => entry.name).join(", ")}
+                </div>
+              )}
               <div className="row">
                 <div className="stat"><span className="label">{tXS(language, "Review surface", "审核入口")}</span><span className="val mono">ontology</span></div>
                 <div className="stat"><span className="label">{tXS(language, "Run", "运行")}</span><span className="val mono">{selected.run_key || "—"}</span></div>

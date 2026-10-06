@@ -37,7 +37,7 @@ from aletheia.ontology.label_embeddings import (
 )
 from aletheia.graph_store.nebula_client import NebulaGraphClient, insert_with_schema_retry
 import aletheia.ontology.registry as ontology_registry
-from aletheia.interfaces.api.helpers import CONTINUOUS_RUNNING_STALE_SECONDS, DEFAULT_LLM_MODEL, _ONTOLOGY_CONCEPT_EDGE_PROPERTIES, _ONTOLOGY_CONCEPT_VERTEX_PROPERTIES, _apply_edge_source_identity_presentation_guard, _apply_possible_duplicate_presentation_guard, _attach_proposal_match_summaries, _compact_candidate_payload, _dedup_audit_from_payload, _first_nonempty, _graph_edge_fact_key, _graph_identity_text, _is_current_graph_proposal, _json_dump, _jsonable, _knowledge_candidate_profile, _load_json, _proposal_match_keys_from_payload, _proposal_match_summary, _safe_error_message, _slug, _web_enrichment_query
+from aletheia.interfaces.api.helpers import CONTINUOUS_RUNNING_STALE_SECONDS, DEFAULT_LLM_MODEL, _ONTOLOGY_CONCEPT_EDGE_PROPERTIES, _ONTOLOGY_CONCEPT_VERTEX_PROPERTIES, _apply_edge_source_identity_presentation_guard, _apply_possible_duplicate_presentation_guard, _attach_proposal_match_summaries, _compact_candidate_payload, _dedup_audit_from_payload, _first_nonempty, _graph_edge_fact_key, _graph_identity_text, _is_current_graph_proposal, _json_dump, _jsonable, _knowledge_candidate_profile, _load_json, _ontology_type_reference_check, _proposal_match_keys_from_payload, _proposal_match_summary, _safe_error_message, _slug, _web_enrichment_query
 from aletheia.interfaces.api.repositories.base import _TenantScopedEngineCache
 
 
@@ -4912,8 +4912,32 @@ class InstanceRepository(_TenantScopedEngineCache):
             },
         }
 
+    def _known_ontology_names(self, tenant):
+        """Union of this tenant's already-approved node type, edge type, and
+        action names (lowercased) -- the known-reference set
+        ``_ontology_type_reference_check`` validates applies_to/
+        target_object_types/affected_object_types against. A short-lived
+        read-only session, independent of any write transaction the caller
+        may be inside."""
+        session = sessionmaker(bind=self.metadata_engine_for(tenant))()
+        try:
+            names = set()
+            for getter in (
+                ontology_registry.get_approved_node_types,
+                ontology_registry.get_approved_edge_types,
+                ontology_registry.get_approved_actions,
+            ):
+                for artifact in getter(session, tenant.tenant_id):
+                    name = str(artifact.get("name") or "").strip().lower()
+                    if name:
+                        names.add(name)
+            return names
+        finally:
+            session.close()
+
     def proposed_graph_elements(self, tenant, run_key=None, limit=None, status_filter="pending", element_type=None, compact=False):
         limit = max(1, min(int(limit), 500)) if limit is not None else 250
+        known_ontology_names = self._known_ontology_names(tenant)
         where = "e.project_id = :tenant_id"
         params = {"tenant_id": tenant.tenant_id}
         params["limit"] = limit
@@ -5187,6 +5211,7 @@ class InstanceRepository(_TenantScopedEngineCache):
                     "run_key": run["run_key"],
                 }
                 element.update(_knowledge_candidate_profile(row["element_type"], payload))
+                element["type_reference_check"] = _ontology_type_reference_check(payload, known_ontology_names)
                 element = _apply_edge_source_identity_presentation_guard(element)
                 if not compact:
                     element = _apply_possible_duplicate_presentation_guard(element, identity_rows)
@@ -5347,6 +5372,7 @@ class InstanceRepository(_TenantScopedEngineCache):
             "created_at": _jsonable(row["created_at"]),
         }
         element.update(_knowledge_candidate_profile(row["element_type"], payload))
+        element["type_reference_check"] = _ontology_type_reference_check(payload, self._known_ontology_names(tenant))
         return {
             "tenant": tenant.public_dict(),
             "element": element,
